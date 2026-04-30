@@ -89,6 +89,34 @@ open examples/sample-deck.html
 
 ---
 
+## Per-run workspace (when an agent uses this skill)
+
+When the skill is invoked interactively (a Claude agent generating a
+deck for you), it MUST create a fresh per-run folder so source materials
+and deliverables stay separated:
+
+```bash
+bash assets/new-run.sh                 # → runs/<YYYYMMDD-HHMMSS>/{input,output}/
+bash assets/new-run.sh customer-pitch  # → runs/<ts>-customer-pitch/{input,output}/
+```
+
+```
+runs/
+└── 20260430-143022/        ← timestamped per invocation
+    ├── input/              ← you drop PDFs / images / briefs here
+    └── output/              ← agent writes the deck HTML + validate report here
+```
+
+The agent will announce the folder path at the start of each session.
+This is enforced by `SKILL.md` "WORKSPACE LAYOUT" — you don't have to
+do it manually. `runs/` is intentionally NOT in `.gitignore`; commit
+or delete per-run folders as you see fit.
+
+`build.sh` and `examples/` are out of scope for this rule — they
+exist for maintainers regenerating the reference sample deck.
+
+---
+
 ## 仓库结构
 
 ```

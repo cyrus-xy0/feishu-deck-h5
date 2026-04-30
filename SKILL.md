@@ -90,6 +90,65 @@ are non-persistent and equally broken for this skill's purpose.
 
 ---
 
+## WORKSPACE LAYOUT (mandatory) — per-run `runs/<timestamp>/` folder
+
+After PREFLIGHT passes, but **before generating any HTML**, the agent
+MUST create a fresh per-run workspace and announce it to the user.
+This is a non-negotiable convention so that:
+
+- multiple deck attempts in the same project don't overwrite each other
+- the user's source materials and the agent's outputs stay separated
+- every run is timestamped and easy to find / archive / git-commit later
+
+### Required structure
+
+```
+runs/
+└── YYYYMMDD-HHMMSS/        ← one folder per skill invocation, timestamp to the second
+    ├── input/              ← USER drops source files here (PDFs, images, briefs, refs, .thmx, etc.)
+    └── output/             ← AGENT writes the deck HTML, validate reports, intermediate artifacts here
+```
+
+### Required steps (run IN ORDER, after PREFLIGHT)
+
+**Step W-1.** Create the run folder:
+
+```bash
+bash assets/new-run.sh
+```
+
+The script prints the absolute path of the new run folder and exits 0.
+Capture the printed path; it is the working folder for everything below.
+
+**Step W-2.** Announce the path to the user **in the same response**.
+Use roughly this phrasing (translate to the user's language):
+
+> "已为本次任务创建工作目录：
+> `runs/<timestamp>/`
+> · 请把素材（图片、PDF、参考稿、文案等）放到 `input/`
+> · 我会把生成的 HTML deck 和验证报告写到 `output/`
+> 准备好后告诉我即可继续。"
+
+**Step W-3.** Wait for the user to drop files into `input/` (or to
+confirm there are no source files — text-only briefs are fine, the
+folder still exists for the deck to land in `output/`).
+
+**Step W-4.** All subsequent file writes for this invocation MUST go
+under `runs/<timestamp>/output/`. Never write the deck to
+`examples/`, the repo root, or any other location. `examples/` is
+reserved for the maintainers' reference sample.
+
+### When NOT to create a new run folder
+
+- The user explicitly says "edit the existing deck at `runs/.../output/X.html`"
+  — in that case, reuse that run folder, don't create a new one.
+- You are running `build.sh` to regenerate `examples/sample-deck.html`
+  as a maintainer of this skill (not as an end-user delivery). `build.sh`
+  is intentionally hardcoded to `examples/` and is out of scope for this
+  rule.
+
+---
+
 Generate a dark, cinematic Lark / 飞书 brand-aligned **HTML deck** at 1920×1080 in a single
 self-contained file that:
 

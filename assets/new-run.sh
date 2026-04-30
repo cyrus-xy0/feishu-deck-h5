@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# feishu-deck-h5 · per-run workspace creator
+#
+# Creates a fresh runs/<YYYYMMDD-HHMMSS>/{input,output} folder pair so the
+# user's source materials and the agent's generated deck stay separated.
+# Prints the absolute path of the new run folder on stdout (last line) so
+# the calling agent can capture it.
+#
+# Usage:
+#   bash assets/new-run.sh                # creates runs/<ts>/{input,output}
+#   bash assets/new-run.sh my-pitch       # creates runs/<ts>-my-pitch/{input,output}
+#
+# Exit codes:
+#   0  OK — folder created
+#   1  could not create folder (permission / no mount / etc.)
+#
+# This script is mandated by SKILL.md "WORKSPACE LAYOUT" — every skill
+# invocation creates one new run folder and writes the deck under output/.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+SLUG="${1:-}"
+TS="$(date +%Y%m%d-%H%M%S)"
+
+if [[ -n "$SLUG" ]]; then
+  # Sanitize slug: keep [a-zA-Z0-9._-], replace others with '-', collapse repeats.
+  SLUG="$(printf '%s' "$SLUG" | tr -c 'a-zA-Z0-9._-' '-' | tr -s '-' | sed 's/^-//; s/-$//')"
+  RUN_NAME="${TS}-${SLUG}"
+else
+  RUN_NAME="$TS"
+fi
+
+RUN_DIR="$SKILL_ROOT/runs/$RUN_NAME"
+
+# In the unlikely case of a same-second collision, append -2, -3, ...
+if [[ -e "$RUN_DIR" ]]; then
+  N=2
+  while [[ -e "${RUN_DIR}-${N}" ]]; do N=$((N+1)); done
+  RUN_DIR="${RUN_DIR}-${N}"
+fi
+
+if ! mkdir -p "$RUN_DIR/input" "$RUN_DIR/output"; then
+  echo "NEW-RUN FAIL · could not create $RUN_DIR" >&2
+  exit 1
+fi
+
+REL_DIR="${RUN_DIR#$SKILL_ROOT/}"
+
+echo "NEW RUN OK"
+echo "  run name : $RUN_NAME"
+echo "  input    : $REL_DIR/input/    ← user drops source files here"
+echo "  output   : $REL_DIR/output/   ← agent writes the deck here"
+echo "  abs path : $RUN_DIR"
+echo "$RUN_DIR"
+exit 0
