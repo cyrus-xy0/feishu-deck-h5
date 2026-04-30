@@ -1740,6 +1740,425 @@ body {
 }
 
 /* ============================================================================
+   RICHNESS PRIMITIVES (v1.3) — production-grade visual + interaction layer
+   ============================================================================
+   Every class below was promoted from the deck_v3_feishu reference build, the
+   highest-fidelity hand-built feishu deck the team has shipped. The design rule
+   the v3 author followed: *never strand a card on a flat dark canvas — give it
+   gradient depth, hover affordance, and a typographic anchor.* These primitives
+   make that achievable in markup-only edits to a deck, no per-deck CSS.
+   All declarations use --fs-* tokens; no new colors introduced. Every selector
+   nests under .slide so they can't leak into the host page or .deck-ui chrome.
+   ============================================================================ */
+
+/* Subtle dot-grid backdrop — pairs well with data-decor glows.
+   Add `<div class="grid-bg"></div>` as the first child of any .slide that
+   wants ambient texture. z-index: 0 so it sits beneath all content. */
+.slide .grid-bg {
+  position: absolute; inset: 0; pointer-events: none; z-index: 0; opacity: 0.16;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 80px 80px;
+  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+          mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+}
+
+/* Card hover lift — gentle interactive affordance in present mode.
+   Doesn't fire in scroll mode (touch) because the cursor doesn't track. */
+.slide .card {
+  transition:
+    transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    background 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.slide .card:hover {
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
+  border-color: color-mix(in srgb, var(--fs-blue) 40%, transparent);
+  transform: translateY(-4px);
+}
+
+/* Tile gradient enhancement — replaces flat tinted square with blue→violet
+   gradient + accent border. Uses the existing .tile selector so every card
+   that already has <div class="tile"> picks this up automatically. */
+.slide .card .tile {
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--fs-blue) 22%, transparent),
+      color-mix(in srgb, var(--fs-purple) 14%, transparent));
+  border-color: color-mix(in srgb, var(--fs-blue) 40%, transparent);
+  color: var(--fs-blue);
+}
+
+/* Card .num typographic anchor — promote to 36px 700 (was inheriting smaller).
+   Matches the v3 reference where number+icon header creates a strong eyebrow. */
+.slide .card .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.slide .card .num {
+  font: 700 36px/1 var(--fs-font-cjk);
+  color: var(--fs-text-50);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ----------------------------------------------------------------------------
+   .pullquote — single-line emphasis row, used to seal a slide's argument.
+   Place AFTER the body grid. Default left-bar is teal; .is-orange flips it.
+   ---------------------------------------------------------------------------- */
+.slide .pullquote {
+  margin-top: 24px;
+  padding: 14px 0 14px 28px;
+  border-left: 4px solid var(--fs-teal);
+  font: 600 28px/1.45 var(--fs-font-cjk);
+  color: var(--fs-text);
+  max-width: 1400px;
+}
+.slide .pullquote.is-orange { border-left-color: var(--fs-orange); }
+.slide .pullquote.is-blue   { border-left-color: var(--fs-blue);   }
+.slide .pullquote.is-violet { border-left-color: var(--fs-violet); }
+
+/* ----------------------------------------------------------------------------
+   .voice-card — customer-quote testimonial card. Drop into a content-3up grid
+   instead of .card when the cell is a verbatim customer voice.
+   ---------------------------------------------------------------------------- */
+.slide .voice-card {
+  position: relative;
+  background: linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+  border: 1px solid var(--fs-hairline);
+  border-radius: var(--fs-radius-card);
+  padding: 36px 32px;
+  display: flex; flex-direction: column; gap: 18px;
+  min-width: 0;
+}
+.slide .voice-card::before {
+  content: "\201C";
+  position: absolute; top: 6px; left: 24px;
+  font: 96px/1 Georgia, serif;
+  color: var(--fs-blue);
+  opacity: 0.45;
+}
+.slide .voice-card .q {
+  font: 500 24px/1.7 var(--fs-font-cjk);
+  color: var(--fs-text);
+  margin-top: 36px;
+}
+.slide .voice-card .who {
+  font: 500 18px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+  letter-spacing: 0.04em;
+  border-top: 1px dashed var(--fs-hairline);
+  padding-top: 16px;
+  margin-top: auto;
+}
+
+/* ----------------------------------------------------------------------------
+   .cta-box / .cta-btn — call-to-action strip, typically the LAST element on
+   slides where you want the user to act (CTA, deep dive, ROI commitment).
+   .is-teal variant for "promise / commitment" framing.
+   ---------------------------------------------------------------------------- */
+.slide .cta-box {
+  margin-top: 24px;
+  padding: 28px 36px;
+  border-radius: var(--fs-radius-card);
+  background: linear-gradient(120deg, rgba(60,127,255,0.16), rgba(51,214,192,0.08));
+  border: 1px solid color-mix(in srgb, var(--fs-blue) 35%, transparent);
+  display: flex; align-items: center; gap: 28px; justify-content: space-between;
+}
+.slide .cta-box.is-teal {
+  background: linear-gradient(120deg, rgba(51,214,192,0.18), rgba(60,127,255,0.08));
+  border-color: color-mix(in srgb, var(--fs-teal) 40%, transparent);
+}
+.slide .cta-box .l h3 {
+  font: 700 28px/1.3 var(--fs-font-cjk);
+  color: var(--fs-text);
+  margin-bottom: 8px;
+}
+.slide .cta-box .l p {
+  font: 500 20px/1.6 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+}
+.slide .cta-box .cta-btn {
+  flex-shrink: 0;
+  padding: 16px 32px;
+  border: 1px solid color-mix(in srgb, var(--fs-blue) 55%, transparent);
+  border-radius: var(--fs-radius-pill);
+  background: var(--fs-text);
+  color: var(--fs-bg);
+  font: 700 20px/1 var(--fs-font-cjk);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.slide .cta-box .cta-btn:hover { transform: scale(1.04); }
+
+/* ----------------------------------------------------------------------------
+   .kpi-strip — small metric-card row beneath body.
+   Set --strip-cols to override default 3-col layout.
+   ---------------------------------------------------------------------------- */
+.slide .kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(var(--strip-cols, 3), 1fr);
+  gap: 18px;
+  margin-top: 22px;
+}
+.slide .kpi-strip .kpi {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--fs-hairline);
+  border-radius: 14px;
+  padding: 22px;
+  text-align: center;
+}
+.slide .kpi-strip .kpi .v {
+  font: 800 36px/1.1 var(--fs-font-cjk);
+  color: var(--fs-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.slide .kpi-strip .kpi .v.is-teal   { color: var(--fs-teal);   }
+.slide .kpi-strip .kpi .v.is-blue   { color: var(--fs-blue);   }
+.slide .kpi-strip .kpi .v.is-orange { color: var(--fs-orange); }
+.slide .kpi-strip .kpi .l {
+  font: 500 18px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+  margin-top: 6px;
+}
+
+/* ----------------------------------------------------------------------------
+   .calc — interactive ROI / pricing calculator widget (sliders + result).
+   Use range inputs whose `value` attribute drives both display and aria.
+   ---------------------------------------------------------------------------- */
+.slide .calc {
+  background: linear-gradient(135deg, rgba(60,127,255,0.10), rgba(51,214,192,0.05));
+  border: 1px solid color-mix(in srgb, var(--fs-blue) 30%, transparent);
+  border-radius: var(--fs-radius-card);
+  padding: 36px 40px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.slide .calc-row {
+  display: grid;
+  grid-template-columns: 280px 1fr 160px;
+  align-items: center;
+  gap: 24px;
+  padding: 18px 0;
+  border-bottom: 1px dashed var(--fs-hairline);
+}
+.slide .calc-row:last-of-type { border-bottom: 0; }
+.slide .calc-row label {
+  font: 500 22px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+}
+.slide .calc-row input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 6px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 3px;
+  outline: none;
+}
+.slide .calc-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--fs-grad-keyline);
+  box-shadow: 0 0 0 4px rgba(60,127,255,0.30);   /* glow ring (allowed by R12) */
+}
+.slide .calc-row input[type="range"]::-moz-range-thumb {
+  width: 24px; height: 24px;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--fs-blue);
+  box-shadow: 0 0 0 4px rgba(60,127,255,0.30);
+}
+.slide .calc-row .v {
+  font: 700 22px/1 var(--fs-font-cjk);
+  color: var(--fs-teal);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.slide .calc-result {
+  margin-top: 14px;
+  padding: 28px 32px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(51,214,192,0.18), rgba(60,127,255,0.10));
+  border: 1px solid color-mix(in srgb, var(--fs-teal) 40%, transparent);
+  display: flex; justify-content: space-between; align-items: center; gap: 24px;
+}
+.slide .calc-result .lbl {
+  font: 500 22px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text);
+  letter-spacing: 0.04em;
+}
+.slide .calc-result .amount {
+  font: 800 64px/1 var(--fs-font-cjk);
+  background: var(--fs-grad-keyline);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.slide .calc-hint {
+  font: italic 500 18px/1.55 var(--fs-font-cjk);
+  color: var(--fs-text-50);
+  letter-spacing: 0.04em;
+}
+
+/* ----------------------------------------------------------------------------
+   .ui-row / .ui-alert / .ui-kpi — dashboard-mock primitives that go INSIDE a
+   .ui-window .ui-body. Re-creates spreadsheet-style data lines, alert banners,
+   and metric tiles without raster screenshots.
+   ---------------------------------------------------------------------------- */
+.slide .ui-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 12px;
+  font: 500 20px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+}
+.slide .ui-row .lbl { color: var(--fs-text-72); }
+.slide .ui-row .val {
+  font-weight: 700;
+  color: var(--fs-text);
+  font-variant-numeric: tabular-nums;
+}
+.slide .ui-row .val.up { color: var(--fs-teal);   }
+.slide .ui-row .val.dn { color: var(--fs-orange); }
+
+.slide .ui-alert {
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(254,127,0,0.12), rgba(254,127,0,0.02));
+  border: 1px solid color-mix(in srgb, var(--fs-orange) 35%, transparent);
+}
+.slide .ui-alert .t {
+  font: 700 16px/1 var(--fs-font-cjk);
+  letter-spacing: 0.18em;
+  color: var(--fs-orange);
+  margin-bottom: 8px;
+}
+.slide .ui-alert h5 {
+  font: 700 22px/1.3 var(--fs-font-cjk);
+  color: var(--fs-text);
+  margin-bottom: 6px;
+}
+.slide .ui-alert p {
+  font: 500 18px/1.55 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+}
+
+.slide .ui-kpi {
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(60,127,255,0.14), rgba(60,127,255,0.02));
+  border: 1px solid color-mix(in srgb, var(--fs-blue) 35%, transparent);
+}
+.slide .ui-kpi .t {
+  font: 700 16px/1 var(--fs-font-cjk);
+  letter-spacing: 0.18em;
+  color: var(--fs-blue);
+  margin-bottom: 8px;
+}
+.slide .ui-kpi .v {
+  font: 800 36px/1 var(--fs-font-cjk);
+  color: var(--fs-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.slide .ui-kpi .d {
+  font: 600 16px/1.4 var(--fs-font-cjk);
+  color: var(--fs-teal);
+  margin-top: 4px;
+}
+.slide .ui-kpi.is-teal {
+  background: linear-gradient(135deg, rgba(51,214,192,0.16), rgba(51,214,192,0.02));
+  border-color: color-mix(in srgb, var(--fs-teal) 40%, transparent);
+}
+.slide .ui-kpi.is-teal .t { color: var(--fs-teal); }
+
+/* ----------------------------------------------------------------------------
+   .ui-wave — animated audio waveform, for INPUT side of a transform widget.
+   10 bars driven by staggered keyframe so the wave undulates left→right.
+   ---------------------------------------------------------------------------- */
+.slide .ui-wave {
+  display: flex; align-items: flex-end; justify-content: center;
+  gap: 4px;
+  height: 80px;
+  margin: 18px 0;
+}
+.slide .ui-wave i {
+  width: 6px;
+  background: var(--fs-grad-keyline);
+  border-radius: 3px;
+  animation: fs-wave 1.4s ease-in-out infinite;
+}
+.slide .ui-wave i:nth-child(1)  { height: 25%; }
+.slide .ui-wave i:nth-child(2)  { height: 55%; animation-delay: 0.10s; }
+.slide .ui-wave i:nth-child(3)  { height: 85%; animation-delay: 0.20s; }
+.slide .ui-wave i:nth-child(4)  { height: 40%; animation-delay: 0.30s; }
+.slide .ui-wave i:nth-child(5)  { height: 70%; animation-delay: 0.40s; }
+.slide .ui-wave i:nth-child(6)  { height: 95%; animation-delay: 0.50s; }
+.slide .ui-wave i:nth-child(7)  { height: 50%; animation-delay: 0.60s; }
+.slide .ui-wave i:nth-child(8)  { height: 30%; animation-delay: 0.70s; }
+.slide .ui-wave i:nth-child(9)  { height: 75%; animation-delay: 0.80s; }
+.slide .ui-wave i:nth-child(10) { height: 45%; animation-delay: 0.90s; }
+@keyframes fs-wave {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1;   }
+}
+
+/* ----------------------------------------------------------------------------
+   .report-item — tagged finding row for the OUTPUT side of a transform widget.
+   Default = teal (做得好). .is-warn = orange (漏关键). .is-info = blue (建议).
+   ---------------------------------------------------------------------------- */
+.slide .report-item {
+  padding: 14px 18px;
+  background: rgba(255,255,255,0.04);
+  border-left: 3px solid var(--fs-teal);
+  border-radius: 8px;
+  font: 500 20px/1.55 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+  display: flex; align-items: flex-start; gap: 14px;
+}
+.slide .report-item .tag {
+  flex: none;
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(51,214,192,0.15);
+  color: var(--fs-teal);
+  font: 700 14px/1.3 var(--fs-font-cjk);
+  letter-spacing: 0.06em;
+}
+.slide .report-item.is-warn { border-left-color: var(--fs-orange); }
+.slide .report-item.is-warn .tag { background: rgba(254,127,0,0.15);  color: var(--fs-orange); }
+.slide .report-item.is-info { border-left-color: var(--fs-blue);   }
+.slide .report-item.is-info .tag { background: rgba(60,127,255,0.15); color: var(--fs-blue);   }
+.slide .report-item b { color: var(--fs-text); font-weight: 700; }
+
+/* ----------------------------------------------------------------------------
+   Process step arrow — chevron between cards.
+   The shipped flow already has spacing; this draws the connection.
+   Auto-hides on the last step and on data-variant="vertical".
+   ---------------------------------------------------------------------------- */
+.slide[data-layout="process"] .step {
+  position: relative;
+}
+.slide[data-layout="process"] .step::after {
+  content: "";
+  position: absolute;
+  right: -14px; top: 50%;
+  width: 24px; height: 24px;
+  background: var(--fs-blue);
+  clip-path: polygon(0 30%, 55% 30%, 55% 0, 100% 50%, 55% 100%, 55% 70%, 0 70%);
+  transform: translateY(-50%);
+  z-index: 2;
+  pointer-events: none;
+}
+.slide[data-layout="process"] .step:last-child::after,
+.slide[data-layout="process"][data-variant="vertical"] .step::after { display: none; }
+
+
+/* ============================================================================
    Print (export) hint
    ============================================================================ */
 @media print {

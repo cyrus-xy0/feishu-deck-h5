@@ -1797,6 +1797,148 @@ structure, 1+1 vs 1+1+N boundary tags.
 
 ---
 
+## Richness primitives (v1.3) — promoted from the deck_v3 reference
+
+The skill ships a second tier of helpers that exist specifically to STOP the
+agent from delivering an austere "skeleton" deck. They were promoted from the
+hand-built `deck_v3_feishu` reference build — the highest-fidelity feishu
+deck the team had shipped at the time. **Use them by default**, not "if you
+have time". A slide that cites a number without `.kpi-strip`, a closing without
+`.cta-box`, or a transform without `.ui-wave + .report-item` is a slide that
+under-delivers on what the skill is capable of.
+
+### When converting an external HTML deck (the failure mode this prevents)
+
+Every primitive below maps to a v3-pattern the agent CAN'T just drop. If the
+source deck has:
+
+| Source has | You MUST use |
+|---|---|
+| Italic blockquote sealing the argument | `.pullquote` (default teal · `.is-orange / .is-blue / .is-violet`) |
+| Customer testimonial cards with quotation glyphs | `.voice-card` (with `::before "「"`) |
+| "Next step" CTA strip with a button | `.cta-box` + `.cta-btn` (`.is-teal` for promise framing) |
+| Row of small KPI/metric mini-cards | `.kpi-strip` (set `--strip-cols`; tone via `.is-teal/.is-blue/.is-orange`) |
+| ROI calculator / interactive sliders | `.calc` + `.calc-row` + `.calc-result` |
+| Dashboard ROI rows / system list | `.ui-row` (`.val.up/.dn` for trend tone) |
+| Alert banner with title + body | `.ui-alert` (orange-tone, fixed) |
+| KPI tile with label + big number + delta | `.ui-kpi` (`.is-teal` for highlight variant) |
+| Audio waveform (recording / call) | `.ui-wave` with 10 `<i>` bars (animated) |
+| Tagged finding/insight rows (做得好 / 漏关键 / 建议) | `.report-item` (`.is-warn` orange · `.is-info` blue) |
+| Subtle ambient backdrop on content pages | `<div class="grid-bg"></div>` as first child of `.slide` |
+
+**Drop a primitive → you've stripped meaning the source author put there.**
+This is the lesson from v1 of the v3 conversion: validator-passing ≠ visually
+faithful. Compliance and richness are both required.
+
+### Card hover & tile gradient — already on by default
+
+Every `.card` now:
+- Lifts on hover (`translateY(-4px)` + brighter background) — adds presence
+  in present mode, no markup change required.
+- Has a **gradient blue→violet** `.tile` instead of a flat tinted square.
+- Shows `.num` at 36 px / 700 (was inheriting smaller defaults).
+- Shows `.cfoot` with dashed top border + accent arrow on the right.
+
+If you write `<div class="card"><div class="head"><div class="tile">…</div>
+<div class="num">01</div></div>…</div>`, you GET the v3 visual treatment for
+free. There is no `.is-rich` modifier — richness is the default.
+
+### Process step chevron — already on by default
+
+Every `.step` inside a `[data-layout="process"] .flow` auto-renders a blue
+chevron between cards. Last step and `data-variant="vertical"` auto-hide
+the chevron. No markup change.
+
+### Markup recipes (canonical)
+
+```html
+<!-- pullquote — caps a body grid with a thesis statement -->
+<p class="pullquote">不是让你再投一个大系统,而是先请几个不要工位的同事。</p>
+<p class="pullquote is-orange">不安抚,直接给解法。</p>
+
+<!-- voice-card — testimonial inside a content-3up grid -->
+<div class="voice-card">
+  <p class="q">以前每天 8 点打开微信群看 200 条问题,现在群里是空的。精英销售终于能把时间放在打单。</p>
+  <p class="who">某饮料品牌 · 华东大区销售经理</p>
+</div>
+
+<!-- cta-box — strong call-to-action tail strip -->
+<div class="cta-box">
+  <div class="l">
+    <h3>下一步 · 免费 90 分钟诊断工作坊</h3>
+    <p>解决方案架构师上门或线上,共同识别值得优先做的 1 个场景。</p>
+  </div>
+  <button class="cta-btn">启动诊断 →</button>
+</div>
+
+<!-- kpi-strip — 3-up metric row beneath body -->
+<div class="kpi-strip">
+  <div class="kpi"><div class="v is-teal">T+2 天</div><div class="l">费效比出数周期</div></div>
+  <div class="kpi"><div class="v is-teal">全量</div><div class="l">异常自动筛(原抽查 5%)</div></div>
+  <div class="kpi"><div class="v is-teal">3–5%</div><div class="l">预估可收回营销浪费</div></div>
+</div>
+
+<!-- calc — interactive ROI widget. needs ~12 lines of inline JS to wire up -->
+<div class="calc">
+  <div class="calc-row">
+    <label>业务员人数</label>
+    <input type="range" id="r1" min="100" max="5000" step="100" value="1000">
+    <span class="v" id="v1">1,000 人</span>
+  </div>
+  <!-- ...more rows... -->
+  <div class="calc-result">
+    <div class="lbl">预计年化释放销售时间价值</div>
+    <div class="amount" id="roi">6,300 万</div>
+  </div>
+  <p class="calc-hint">* 承诺的不是这个数字本身,而是每个变量的真实测量。</p>
+</div>
+
+<!-- ui-row + ui-alert + ui-kpi inside a ui-window -->
+<div class="ui-window">
+  <div class="ui-titlebar"><span class="ui-traffic-lights"><i></i></span><span>活动费效比 · 04-28</span></div>
+  <div class="ui-body">
+    <div class="ui-row"><span class="lbl">华东 · 大润发周末堆头</span><span class="val up">ROI 3.2x</span></div>
+    <div class="ui-row"><span class="lbl">华北 · 餐饮渠道返点</span><span class="val dn">ROI 0.6x</span></div>
+    <div class="ui-alert">
+      <div class="t">异常自动标红</div>
+      <h5>华北 · 12 家门店</h5>
+      <p>照片疑似同时段同角度,销量环比未提升。已抄送大区经理。</p>
+    </div>
+    <div class="ui-kpi is-teal">
+      <div class="t">本周自动核销</div>
+      <div class="v">1,284</div>
+      <div class="d">↑ 47% vs 人工 · 省 40 h/月</div>
+    </div>
+  </div>
+</div>
+
+<!-- ui-wave + report-item — audio→insights transform widget -->
+<div class="ui-window">
+  <div class="ui-titlebar"><span>INPUT · 一线拜访录音</span></div>
+  <div class="ui-body">
+    <div class="ui-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div>业务员小李 · 04-28 · 14:32 · 23 分钟</div>
+  </div>
+</div>
+<div class="ui-window">
+  <div class="ui-titlebar"><span>OUTPUT · 销冠视角复盘 · 5 分钟</span></div>
+  <div class="ui-body">
+    <div class="report-item"><span class="tag">做得好</span><div><b>主动倾听</b>,捕获备货过多的真实困境。</div></div>
+    <div class="report-item is-warn"><span class="tag">漏关键</span><div>未识别<b>"再看看"</b>背后的退货风险信号。</div></div>
+    <div class="report-item is-info"><span class="tag">销冠建议</span><div>立即提<b>调换新品 + 返点补贴</b>组合方案。</div></div>
+  </div>
+</div>
+
+<!-- grid-bg — first child of any .slide for ambient texture -->
+<div class="slide" data-layout="content-3up" data-decor="aurora">
+  <div class="grid-bg"></div>
+  <div class="wordmark">飞书</div>
+  ...
+</div>
+```
+
+---
+
 ## Performance budget (hard rules — enforced by `audit_perf`)
 
 A 13-slide deck should be lean. The skill ships with a perf budget enforced
