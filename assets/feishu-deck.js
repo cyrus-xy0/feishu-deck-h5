@@ -271,6 +271,15 @@
 
   function goTo(deck, frames, idx, updateHash) {
     if (idx < 0 || idx >= frames.length) return;
+    // After the first navigation, arm the reveal animation for subsequent
+    // slide changes. The CSS suppresses the staggered reveal on the very
+    // first slide load so initial paint isn't ~700 ms of stagger animation.
+    if (deck.hasAttribute('data-nav-armed')) {
+      // Already armed — normal flow, animations will run on slide change.
+    } else if (idx !== 0 || frames[idx].classList.contains('is-current')) {
+      // First non-zero nav OR re-asserting current: arm.
+      deck.setAttribute('data-nav-armed', '');
+    }
     for (let i = 0; i < frames.length; i++) {
       frames[i].classList.toggle('is-current', i === idx);
     }

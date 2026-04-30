@@ -124,9 +124,21 @@ body {
   aspect-ratio: auto; opacity: 0; pointer-events: none;
   transition: opacity .25s ease;
   background: #000;
-  /* No grid, no flex — we center via absolute pos on the .slide */
+  /* Off-screen frames don't render until they become current — saves
+     ~600 ms of initial paint on a 22-slide deck (was rendering all 22
+     radial-gradient decor layers up front). */
+  content-visibility: auto;
+  contain-intrinsic-size: 100vw 100vh;
 }
 .deck[data-mode="present"] .slide-frame.is-current {
+  opacity: 1; pointer-events: auto;
+  content-visibility: visible;
+}
+/* Pre-JS state: first frame visible immediately so users don't see a
+   black screen during the gap between CSS-applied (frame opacity:0) and
+   JS-loaded (frame .is-current). After JS init, the explicit .is-current
+   class takes over normally. */
+.deck[data-mode="present"] .slide-frame:first-child {
   opacity: 1; pointer-events: auto;
 }
 .deck[data-mode="present"] .slide-frame .slide {
@@ -1141,14 +1153,20 @@ body {
    ============================================================================ */
 @media (prefers-reduced-motion: no-preference) {
   .slide-frame.is-current .slide > * {
-    opacity: 0; transform: translate3d(0, 14px, 0);
-    animation: fs-reveal .45s ease forwards;
-    animation-delay: calc(0.06s * var(--child-i, 1));
+    opacity: 0; transform: translate3d(0, 10px, 0);
+    animation: fs-reveal 0.28s ease forwards;
+    animation-delay: calc(0.035s * var(--child-i, 1));
   }
   /* chrome (wordmark, footer) reveals immediately, no stagger */
   .slide-frame.is-current .slide .wordmark,
   .slide-frame.is-current .slide .footer {
     opacity: 1; transform: none; animation: none;
+  }
+  /* First load: skip the staggered reveal on the first slide so users see
+     content immediately. After the user navigates (idx changes), the
+     reveal animation kicks back in for subsequent slides. */
+  .deck:not([data-nav-armed]) .slide-frame:first-child .slide > * {
+    opacity: 1 !important; transform: none !important; animation: none !important;
   }
 }
 @keyframes fs-reveal {
