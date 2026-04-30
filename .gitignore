@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# macOS / OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts (regenerable from build.sh)
+examples/sample-deck-inline.html
+templates/slide-recipes.html
+
+# Local user uploads / scratch (not part of the skill)
+uploads/
+thumbs/
+thmx_unpacked/
+screenshots/
+*.thmx
+
+# Node (if you ever add tooling)
+node_modules/
+package-lock.json
+
+# Backup files
+*.bak
+*.orig
+*~

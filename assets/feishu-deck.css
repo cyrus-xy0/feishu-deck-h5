@@ -1,0 +1,1750 @@
+/* ============================================================================
+   feishu-deck-h5 · design system stylesheet
+   Source of truth for every slide. Do not invent tokens; use only these.
+   Canvas: 1920×1080. Scaled by JS via --fs-scale on each .slide-frame.
+   ============================================================================ */
+
+:root {
+  /* — Backgrounds — */
+  --fs-bg-0: #000000;
+  --fs-bg-1: #04060F;
+  --fs-bg-2: #0A1230;
+  --fs-bg-3: #1B1F3A;
+
+  /* — Brand accents (use ONE per slide) — */
+  --fs-blue:   #3C7FFF;   /* default */
+  --fs-cyan:   #24C3FF;   /* inline highlight only */
+  --fs-teal:   #33D6C0;
+  --fs-purple: #5C3FFB;
+  --fs-violet: #9F6FF1;
+  --fs-orange: #FE7F00;
+  --fs-accent: var(--fs-blue);
+
+  /* — Text — */
+  --fs-text:    #FFFFFF;
+  --fs-text-72: rgba(255,255,255,0.72);
+  --fs-text-65: rgba(255,255,255,0.65);
+  --fs-text-48: rgba(255,255,255,0.48);
+  --fs-text-40: rgba(255,255,255,0.40);
+  --fs-text-16: rgba(255,255,255,0.16);
+
+  /* — Lines — */
+  --fs-hairline: rgba(255,255,255,0.10);
+  --fs-divider:  rgba(255,255,255,0.20);
+
+  /* — Gradients — */
+  --fs-grad-hero:    radial-gradient(120% 100% at 0% 0%, #0F1A4A 0%, #060B22 38%, #000 78%);
+  --fs-grad-section: radial-gradient(140% 110% at 100% 0%, #1A2256 0%, #050817 50%, #000 100%);
+  --fs-grad-keyline: linear-gradient(90deg, #33D6C0 0%, #3C7FFF 50%, #5C3FFB 100%);
+  --fs-grad-glow-blue: radial-gradient(80% 60% at 50% 50%, rgba(60,127,255,0.22), transparent 60%);
+  --fs-grad-close:   radial-gradient(60% 50% at 92% 8%, rgba(159,111,241,0.28), transparent 60%),
+                     radial-gradient(60% 50% at 8% 92%, rgba(60,127,255,0.22), transparent 60%),
+                     #000;
+
+  /* — Type — */
+  --fs-font-cjk:   "方正兰亭黑Pro_GB18030","FZLanTingHeiPro_GB18030 Light","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --fs-font-latin: "Inter","Helvetica Neue","Arial",sans-serif;
+  --fs-font-mono:  "JetBrains Mono","SF Mono","Menlo",monospace;
+
+  /* — Geometry (1920 canvas) — */
+  --fs-pad-x: 96px;
+  --fs-pad-y: 64px;
+  --fs-radius-card: 16px;
+  --fs-radius-tile: 14px;
+  --fs-radius-pill: 999px;
+
+  /* — Brand assets (override these to inline as data: URIs) — */
+  --fs-asset-logo:        url("lark-logo.png");          /* color: petals + 飞书 */
+  --fs-asset-logo-mono:   url("lark-logo-mono-white.png");/* mono-white for dark pages */
+  --fs-asset-cover-bg:    url("lark-cover-bg.jpg");      /* 飞书 master flower background */
+  --fs-asset-section-bg:  url("lark-section-bg.jpg");    /* cool blue glow gradient */
+  --fs-asset-content-bg:  url("lark-content-bg.jpg");    /* subtle dark ambient gradient */
+  --fs-asset-slogan:      url("lark-slogan.png");        /* 先进团队 先用飞书 */
+
+  /* — Runtime scale (set by JS) — */
+  --fs-scale: 1;
+}
+
+/* ---------- Reset (scoped, non-destructive to host pages) ---------- */
+.deck, .deck * { box-sizing: border-box; }
+.deck h1, .deck h2, .deck h3, .deck h4, .deck p, .deck ul, .deck ol, .deck li,
+.deck figure, .deck blockquote { margin: 0; padding: 0; }
+.deck ul, .deck ol { list-style: none; }
+.deck img { display: block; max-width: 100%; }
+
+/* ---------- Page chrome ---------- */
+html, body { height: 100%; }
+body {
+  margin: 0; background: #000; color: var(--fs-text);
+  font-family: var(--fs-font-cjk); font-weight: 500;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ============================================================================
+   Deck modes
+   ============================================================================ */
+
+/* Wrapper that holds N slide-frames */
+.deck { position: relative; width: 100%; }
+
+/* The slide-frame is the responsive box. Internally it's pixel-perfect 1920×1080.
+   Perf: contain isolates layout/paint inside the frame; transitions become local
+   repaints instead of full-document. */
+.slide-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  contain: layout paint size;
+}
+.slide-frame .slide {
+  position: absolute; top: 0; left: 0;
+  width: 1920px; height: 1080px;
+  transform-origin: top left;
+  transform: scale(var(--fs-scale, 1)) translateZ(0);  /* GPU layer hint */
+  will-change: transform;
+}
+
+/* ---- Present mode (1 slide visible, fills viewport) ----
+   规范: in fullscreen the slide must letterbox (preserve 16:9), never stretch.
+   We position the slide absolutely, anchor its CENTER at the viewport center
+   via negative half-margins, then scale around its own center. This pattern
+   is immune to grid-cell auto-sizing edge cases and to overflow:hidden
+   clipping the pre-transform layout box.
+   Use both 100vh and 100dvh so iOS Safari doesn't crop with the URL bar. */
+.deck[data-mode="present"] {
+  position: fixed; inset: 0;
+  width: 100vw; height: 100vh; height: 100dvh;
+  background: #000; overflow: hidden;
+}
+.deck[data-mode="present"] .slide-frame {
+  position: absolute; inset: 0;
+  aspect-ratio: auto; opacity: 0; pointer-events: none;
+  transition: opacity .25s ease;
+  background: #000;
+  /* No grid, no flex — we center via absolute pos on the .slide */
+}
+.deck[data-mode="present"] .slide-frame.is-current {
+  opacity: 1; pointer-events: auto;
+}
+.deck[data-mode="present"] .slide-frame .slide {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 1920px; height: 1080px;
+  margin: -540px 0 0 -960px;        /* negative half-size: own center on parent center */
+  transform: scale(var(--fs-scale, 1)) translateZ(0);  /* GPU layer hint */
+  transform-origin: center center;  /* scale around the slide's center */
+  will-change: transform;
+}
+
+/* ---- Scroll mode (mobile / browse: vertical stack) ---- */
+.deck[data-mode="scroll"] {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 12px; max-width: 1280px; margin: 0 auto;
+}
+.deck[data-mode="scroll"] .slide-frame {
+  border: 1px solid var(--fs-hairline);
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+}
+
+/* ---- Deck UI overlay (progress bar, mode toggle, bottom controls) ---- */
+.deck-ui {
+  position: fixed; z-index: 50; pointer-events: none;
+  font-family: var(--fs-font-latin); color: var(--fs-text-48);
+  font-size: 14px; letter-spacing: 0.08em;
+}
+
+/* Top progress bar — present-mode only, brand keyline gradient */
+.deck-ui .deck-progress {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 3px; background: rgba(255,255,255,0.08);
+  pointer-events: none; z-index: 60;
+}
+.deck-ui .deck-progress .bar {
+  height: 100%; width: 0%;
+  background: var(--fs-grad-keyline);
+  transition: width 320ms cubic-bezier(.2,.7,.2,1);
+}
+
+/* Top-right mode toggle */
+.deck-ui .mode-toggle {
+  position: fixed; right: 24px; top: 20px; pointer-events: auto;
+  background: rgba(8,12,24,0.78); border: 1px solid var(--fs-hairline);
+  color: var(--fs-text-72); padding: 8px 16px; border-radius: 999px;
+  font: 500 14px/1 var(--fs-font-latin); letter-spacing: 0.06em; cursor: pointer;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  transition: color .15s ease, border-color .15s ease, opacity .35s ease;
+}
+.deck-ui .mode-toggle:hover { color: #fff; border-color: var(--fs-divider); }
+
+/* Bottom-center control bar — prev / page-no / next | fullscreen */
+.deck-ui .deck-controls {
+  position: fixed; left: 50%; bottom: 24px;
+  transform: translateX(-50%); pointer-events: auto;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(8, 12, 24, 0.85);     /* opaque enough to drop blur on idle */
+  border: 1px solid var(--fs-hairline);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  transition: opacity .35s ease;
+}
+.deck-ui .deck-controls .ctl {
+  width: 36px; height: 36px; padding: 0; border: 0;
+  background: transparent; cursor: pointer; border-radius: 999px;
+  color: var(--fs-text-72);
+  display: grid; place-items: center;
+  transition: color .12s ease, background .12s ease;
+}
+.deck-ui .deck-controls .ctl:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.deck-ui .deck-controls .ctl:disabled {
+  color: var(--fs-text-16); cursor: default; background: transparent;
+}
+.deck-ui .deck-controls .ctl-sep {
+  display: inline-block; width: 1px; height: 20px;
+  background: var(--fs-hairline); margin: 0 4px;
+}
+.deck-ui .deck-controls .indicator {
+  display: inline-flex; align-items: baseline;
+  min-width: 64px; justify-content: center;
+  font: 600 14px/1 var(--fs-font-latin); letter-spacing: 0.10em;
+  color: #fff;
+}
+.deck-ui .deck-controls .indicator .sep { color: var(--fs-text-40); margin: 0 2px; }
+.deck-ui .deck-controls .indicator .total { color: var(--fs-text-48); font-weight: 500; }
+.deck-ui .deck-controls .ctl.fs .i-exit { display: none; }
+
+/* Tiny corner hint — present mode only */
+.deck-ui .nav-hint {
+  position: fixed; left: 24px; bottom: 32px; pointer-events: none;
+  color: var(--fs-text-40); font: 500 12px/1 var(--fs-font-latin);
+  letter-spacing: 0.10em;
+}
+
+/* Hide chrome in scroll mode (also belt-and-suspenders to JS display: none) */
+.deck[data-mode="scroll"] ~ .deck-ui .deck-progress,
+.deck[data-mode="scroll"] ~ .deck-ui .deck-controls,
+.deck[data-mode="scroll"] ~ .deck-ui .nav-hint { display: none !important; }
+
+/* 规范: in 16:9 fullscreen there's no letterbox to hide chrome in — chrome
+   would permanently overlay slide content (e.g., the slide's own footer at
+   slide y=1032 is at viewport y=1032 when scale=1, right where the bottom
+   pill lives). Auto-fade after 2.5s idle and restore on any user input.
+   Note: pointer-events stays AUTO when faded so that hovering/moving onto
+   the chrome wakes it. The JS mousemove listener also wakes it; this is
+   belt-and-suspenders. Backdrop-filter is dropped to free GPU during fade. */
+.deck-ui .mode-toggle,
+.deck-ui .deck-controls,
+.deck-ui .nav-hint { transition: opacity .35s ease; }
+.deck-ui.is-idle .mode-toggle,
+.deck-ui.is-idle .deck-controls,
+.deck-ui.is-idle .nav-hint {
+  opacity: 0;
+  /* pointer-events stays auto so hover wakes chrome */
+}
+.deck-ui.is-idle .mode-toggle,
+.deck-ui.is-idle .deck-controls {
+  backdrop-filter: none; -webkit-backdrop-filter: none;  /* free GPU */
+}
+.deck-ui.is-idle .deck-progress { opacity: .35; }
+/* Hovering chrome cancels idle fade visually (the JS mousemove also fires) */
+.deck-ui .mode-toggle:hover,
+.deck-ui .deck-controls:hover { opacity: 1 !important; }
+
+/* Mobile: shrink controls, remove hint */
+@media (max-width: 640px) {
+  .deck-ui .deck-controls { gap: 2px; padding: 4px 6px; bottom: 16px; }
+  .deck-ui .deck-controls .ctl { width: 32px; height: 32px; }
+  .deck-ui .deck-controls .indicator { min-width: 56px; font-size: 13px; }
+  .deck-ui .nav-hint { display: none !important; }
+  .deck-ui .mode-toggle { right: 16px; top: 14px; padding: 6px 12px; font-size: 12px; }
+}
+
+/* ============================================================================
+   Slide chrome — logo + footer (used by every non-cover layout)
+   ============================================================================ */
+
+.slide { color: var(--fs-text); font-family: var(--fs-font-cjk); overflow: hidden; }
+
+/* ---- Real 飞书 logo (extracted from .thmx master) ----
+   规范: 飞书 logo is ALWAYS the COLORED tri-petal mark + 飞书 wordmark.
+   Mono-white is reserved for the rare case of overlaying the logo on full-bleed
+   bright imagery — it is NOT the default and should not appear on dark slides.
+   Default placement = colored logo top-RIGHT, smaller (content/section pages).
+   Cover/End = colored logo top-LEFT, larger. */
+.slide .wordmark {
+  position: absolute;
+  top: 61px; right: 124px;             /* master pic13: x=1118 y=41 native × 1.5 */
+  width: 160px; height: 50px;          /* master 106.4 × 33.5 native × 1.5 */
+  background: var(--fs-asset-logo) left center/contain no-repeat;
+  text-indent: -9999px; overflow: hidden;
+}
+/* Cover & End (封面 / 封底) — same colored logo, top-LEFT, larger */
+.slide[data-layout="cover"] .wordmark,
+.slide[data-layout="end"] .wordmark {
+  top: 113px; left: 120px; right: auto;
+  width: 235px; height: 74px;          /* master pic6: 156.8 × 49.3 native × 1.5 */
+  background-image: var(--fs-asset-logo);
+}
+/* Opt-in mono-white variant for over-imagery edge cases ONLY */
+.slide .wordmark.is-mono { background-image: var(--fs-asset-logo-mono); }
+
+.slide .footer {
+  position: absolute; left: 96px; right: 96px; bottom: 48px;
+  display: flex; justify-content: space-between; align-items: center;
+  font: 500 16px/1 var(--fs-font-latin);
+  letter-spacing: 0.08em; color: var(--fs-text-40);
+}
+.slide .footer .dot::before { content: " · "; color: var(--fs-text-16); }
+
+/* Eyebrow (uppercase Latin, accent color, tracked) */
+.slide .eyebrow {
+  font: 600 18px/1 var(--fs-font-latin);
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--fs-accent);
+}
+
+/* Keyline accent bar */
+.slide .keyline {
+  width: 96px; height: 3px;
+  background: var(--fs-grad-keyline);
+  border: 0; border-radius: 999px;
+}
+
+/* Reusable bilingual title block */
+.slide .title-zh {
+  font: 600 64px/1.15 var(--fs-font-cjk);
+  letter-spacing: -0.005em; color: #fff;
+}
+.slide .title-en {
+  margin-top: 14px;
+  font: 500 22px/1.4 var(--fs-font-latin);
+  color: var(--fs-text-48); letter-spacing: 0.02em;
+}
+
+/* Body text */
+.slide .body {
+  font: 500 28px/1.5 var(--fs-font-cjk); color: var(--fs-text-72);
+}
+.slide .lede {
+  font: 500 32px/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
+}
+.slide .caption {
+  font: 500 16px/1.4 var(--fs-font-latin);
+  color: var(--fs-text-48); letter-spacing: 0.06em;
+}
+
+/* Inline highlight: cyan keyword inside white text. Use sparingly. */
+.slide .accent-text {
+  background: var(--fs-grad-keyline);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+.slide .hl { color: var(--fs-cyan); }
+
+/* Tinted icon tile (48–64 px) */
+.slide .tile {
+  width: 64px; height: 64px;
+  border-radius: var(--fs-radius-tile);
+  background: color-mix(in srgb, var(--fs-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fs-accent) 42%, transparent);
+  display: grid; place-items: center;
+  color: var(--fs-accent);
+}
+.slide .tile svg { width: 32px; height: 32px; }
+.slide .tile.sm { width: 48px; height: 48px; }
+.slide .tile.sm svg { width: 24px; height: 24px; }
+
+/* Pills */
+.slide .pill {
+  display: inline-flex; align-items: center; gap: 10px;
+  border: 1px solid var(--fs-text-16);
+  border-radius: var(--fs-radius-pill);
+  padding: 10px 18px;
+  font: 500 18px/1 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+  background: rgba(255,255,255,0.02);
+}
+.slide .pill svg { width: 20px; height: 20px; color: var(--fs-accent); }
+.slide .pill.solid {
+  background: var(--fs-accent); border-color: transparent; color: #fff;
+}
+
+/* Cards on dark */
+.slide .card {
+  position: relative;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+  border: 1px solid var(--fs-hairline);
+  border-radius: var(--fs-radius-card);
+  padding: 36px;
+  display: flex; flex-direction: column; gap: 20px;
+  min-height: 400px;
+}
+
+/* ============================================================================
+   LAYOUT 01 — Cover (封面) — matches master slideLayout1
+   - Background: image2.jpg (white flower on dark, occupies right ~50%)
+   - Logo top-LEFT at (120, 113) size 235×74 — handled by .wordmark cover override
+   - Title at left: 124, top: 285, width: 884 (left half), font 100px / 700
+   - Subtitle below at top: 551, same font family, smaller
+   - Author / company block at bottom-left at top: 803
+   ============================================================================ */
+.slide[data-layout="cover"] {
+  background: #000 var(--fs-asset-cover-bg) center/cover no-repeat;
+}
+.slide[data-layout="cover"] .stage {
+  position: absolute; top: 285px; left: 124px;
+  width: 884px;                         /* left half — flower lives in right half */
+}
+.slide[data-layout="cover"] h1.title {
+  font: 700 100px/1.18 var(--fs-font-cjk);  /* master: 50pt → 100px on 1920 canvas */
+  letter-spacing: -0.005em;
+  color: #fff;
+  margin: 0;
+}
+.slide[data-layout="cover"] .subtitle {
+  margin-top: 132px;                    /* master gap: y=367-189-156 = ~22 native = 33 → larger to breathe */
+  font: 600 40px/1.4 var(--fs-font-cjk);
+  color: rgba(255,255,255,0.92);
+  margin-bottom: 0;
+}
+.slide[data-layout="cover"] .author {
+  position: absolute; left: 124px; top: 803px;
+  font: 600 30px/1.45 var(--fs-font-cjk);
+  color: rgba(255,255,255,0.85);
+  letter-spacing: 0.02em;
+}
+.slide[data-layout="cover"] .author .role {
+  display: inline-block; margin-right: 32px;
+  color: rgba(255,255,255,0.55); font-weight: 500;
+}
+.slide[data-layout="cover"] .footer { display: none; }   /* master cover has no footer chrome */
+
+/* ============================================================================
+   LAYOUT 02 — Section / chapter divider (一级章节页) — master slideLayout3
+   - Background: image4 (dark with cool blue glow on right) — section gradient
+   - Chapter "01." at (126, 271), font 160 px / 700  ← was 280, that's why it clipped
+   - Title at (126, 447), font 88 px / 700           ← was 128
+   - Subtitle at (126, 567), font 48 px / 500
+   - Logo top-RIGHT (mono) handled by default .wordmark
+   ============================================================================ */
+.slide[data-layout="section"] {
+  background: #000 var(--fs-asset-section-bg) center/cover no-repeat;
+}
+.slide[data-layout="section"] .chapter-num {
+  position: absolute; top: 271px; left: 126px;
+  /* line-height 1.0 (was 0.9) + padding-top prevents the gradient-clipped glyph from
+     being cut off at the line-box top edge in WebKit when -webkit-background-clip:text */
+  font: 700 160px/1 var(--fs-font-latin);
+  letter-spacing: -0.02em; padding-top: 8px;
+  color: #fff;
+  background: var(--fs-grad-keyline);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+.slide[data-layout="section"] h2.title {
+  position: absolute; top: 447px; left: 126px;
+  font: 700 88px/1.18 var(--fs-font-cjk);
+  letter-spacing: -0.005em; color: #fff;
+  max-width: 1300px;
+}
+.slide[data-layout="section"] .lede {
+  position: absolute; top: 597px; left: 126px;
+  font: 500 36px/1.45 var(--fs-font-cjk);
+  color: rgba(255,255,255,0.72);
+  max-width: 1100px;
+}
+.slide[data-layout="section"] .pills {
+  position: absolute; bottom: 96px; left: 126px; right: 124px;
+  display: flex; flex-wrap: wrap; gap: 14px;
+}
+
+/* ============================================================================
+   LAYOUT 03 — Content (3-up cards)
+   ============================================================================ */
+.slide[data-layout="content-3up"] {
+  background: var(--fs-bg-0);
+}
+.slide[data-layout="content-3up"] .header {
+  position: absolute; top: 96px; left: 96px; right: 96px;
+  padding-bottom: 32px; border-bottom: 1px solid var(--fs-hairline);
+  display: grid; grid-template-columns: 1fr auto; align-items: end;
+}
+.slide[data-layout="content-3up"] .header .title-zh { font-size: 64px; }
+.slide[data-layout="content-3up"] .header .pageno {
+  font: 500 18px/1 var(--fs-font-latin);
+  color: var(--fs-text-48); letter-spacing: 0.18em;
+}
+.slide[data-layout="content-3up"] .grid {
+  position: absolute; top: 360px; left: 96px; right: 96px; bottom: 120px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px;
+}
+.slide[data-layout="content-3up"] .card .head {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.slide[data-layout="content-3up"] .card .num {
+  font: 700 56px/1 var(--fs-font-latin);
+  color: var(--fs-accent); opacity: 0.55; letter-spacing: -0.02em;
+}
+.slide[data-layout="content-3up"] .card .ctitle {
+  font: 600 32px/1.3 var(--fs-font-cjk); color: #fff;
+}
+.slide[data-layout="content-3up"] .card .cbody {
+  font: 500 20px/1.6 var(--fs-font-cjk); color: var(--fs-text-65); flex: 1;
+}
+.slide[data-layout="content-3up"] .card .cfoot {
+  display: flex; align-items: center; justify-content: space-between;
+  border-top: 1px solid var(--fs-hairline); padding-top: 16px;
+  font: 500 14px/1 var(--fs-font-latin); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--fs-text-48);
+}
+.slide[data-layout="content-3up"] .card .cfoot svg { color: var(--fs-accent); }
+
+/* ============================================================================
+   LAYOUT 04 — Content 2-column (text + visual)
+   ============================================================================ */
+.slide[data-layout="content-2col"] { background: var(--fs-bg-0); }
+.slide[data-layout="content-2col"] .header {
+  position: absolute; top: 96px; left: 96px; right: 96px;
+  padding-bottom: 32px; border-bottom: 1px solid var(--fs-hairline);
+  display: grid; grid-template-columns: 1fr auto; align-items: end;
+}
+.slide[data-layout="content-2col"] .grid {
+  position: absolute; top: 360px; left: 96px; right: 96px; bottom: 120px;
+  display: grid; grid-template-columns: 1.1fr 1fr; gap: 96px;
+}
+.slide[data-layout="content-2col"] .col-text { display: flex; flex-direction: column; gap: 32px; }
+.slide[data-layout="content-2col"] .col-text .lede { color: #fff; }
+.slide[data-layout="content-2col"] .col-text ul.feature-list {
+  display: flex; flex-direction: column; gap: 22px; margin-top: 12px;
+}
+.slide[data-layout="content-2col"] .col-text ul.feature-list li {
+  display: grid; grid-template-columns: 36px 1fr; gap: 18px; align-items: start;
+  font: 500 24px/1.45 var(--fs-font-cjk); color: var(--fs-text-72);
+}
+.slide[data-layout="content-2col"] .col-text ul.feature-list li::before {
+  content: ""; width: 8px; height: 8px; border-radius: 999px;
+  background: var(--fs-accent); margin-top: 14px; align-self: start;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--fs-accent) 16%, transparent);
+}
+.slide[data-layout="content-2col"] .col-visual {
+  border: 1px solid var(--fs-hairline); border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+  position: relative; overflow: hidden;
+}
+
+/* ============================================================================
+   LAYOUT 05 — Quote / 金句
+   ============================================================================ */
+.slide[data-layout="quote"] {
+  background: #000;
+}
+.slide[data-layout="quote"]::before {
+  content: ""; position: absolute; inset: 0; background: var(--fs-grad-glow-blue);
+}
+.slide[data-layout="quote"] .stack {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; gap: 56px;
+  align-items: center; justify-content: center;
+  padding: 0 200px; text-align: center;
+}
+.slide[data-layout="quote"] blockquote {
+  font: 600 92px/1.2 var(--fs-font-cjk); color: #fff; max-width: 1500px;
+}
+.slide[data-layout="quote"] .attrib {
+  font: 500 30px/1.4 var(--fs-font-cjk); color: var(--fs-text-48);
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================================
+   LAYOUT 06 — Stats (4-up KPI)
+   ============================================================================ */
+.slide[data-layout="stats"] { background: var(--fs-bg-0); --fs-accent: var(--fs-teal); }
+.slide[data-layout="stats"] .header {
+  position: absolute; top: 96px; left: 96px; right: 96px;
+  padding-bottom: 32px; border-bottom: 1px solid var(--fs-hairline);
+  display: grid; grid-template-columns: 1fr auto; align-items: end;
+}
+.slide[data-layout="stats"] .grid {
+  position: absolute; top: 380px; left: 96px; right: 96px;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+}
+.slide[data-layout="stats"] .col {
+  padding: 16px 36px; display: flex; flex-direction: column; gap: 22px;
+  border-left: 1px solid var(--fs-text-16);
+}
+.slide[data-layout="stats"] .col:first-child { border-left: 0; padding-left: 0; }
+/* 规范: stats trend tags must be readable at slide projection distance.
+   ≥ 20 px CJK font, no Latin-uppercase forcing on CJK glyphs (which falls back
+   to system font and renders smaller). */
+.slide[data-layout="stats"] .col .trend {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 600 20px/1 var(--fs-font-cjk); letter-spacing: 0.04em;
+  text-transform: none; color: var(--fs-accent);
+}
+.slide[data-layout="stats"] .col .num {
+  font: 700 132px/1 var(--fs-font-latin); letter-spacing: -0.03em;
+  color: #fff;
+}
+.slide[data-layout="stats"] .col .num .unit {
+  font-size: 56px; color: var(--fs-text-72); margin-left: 8px; font-weight: 600;
+}
+.slide[data-layout="stats"] .col .label {
+  font: 500 24px/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
+}
+.slide[data-layout="stats"] .col .source {
+  font: 500 14px/1.4 var(--fs-font-latin); color: var(--fs-text-40);
+  letter-spacing: 0.06em;
+}
+.slide[data-layout="stats"] .footnote {
+  position: absolute; left: 96px; right: 96px; bottom: 110px;
+  font: 500 14px/1.4 var(--fs-font-latin); color: var(--fs-text-40);
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================================
+   LAYOUT 07 — Image-text (full-bleed image, type over)
+   ============================================================================ */
+.slide[data-layout="image-text"] {
+  background-color: #000; background-size: cover; background-position: center;
+}
+.slide[data-layout="image-text"]::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.0) 30%, rgba(0,0,0,0.7) 100%),
+              linear-gradient(90deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 60%);
+}
+.slide[data-layout="image-text"] .stage {
+  position: absolute; left: 96px; right: 96px; bottom: 130px; max-width: 1100px;
+}
+.slide[data-layout="image-text"] h2.title {
+  margin-top: 24px;
+  font: 700 96px/1.1 var(--fs-font-cjk); letter-spacing: -0.005em;
+}
+.slide[data-layout="image-text"] .lede { margin-top: 28px; color: var(--fs-text-65); }
+
+/* ============================================================================
+   LAYOUT 08 — Table
+   ============================================================================ */
+.slide[data-layout="table"] { background: var(--fs-bg-0); }
+.slide[data-layout="table"] .header {
+  position: absolute; top: 96px; left: 96px; right: 96px;
+  padding-bottom: 32px; border-bottom: 1px solid var(--fs-hairline);
+  display: grid; grid-template-columns: 1fr auto; align-items: end;
+}
+.slide[data-layout="table"] .table-wrap {
+  position: absolute; top: 360px; left: 96px; right: 96px; bottom: 120px;
+  display: flex; flex-direction: column;
+}
+.slide[data-layout="table"] table { width: 100%; border-collapse: collapse; }
+/* 规范: table header row uses CJK font at body weight, NOT Latin-uppercase
+   tracked. The previous 16 px / Latin / uppercase pattern was unreadable for
+   CJK column labels because the font fallback rendered them at a smaller
+   apparent size. Headers must be ≥ 24 px / 600 / CJK / white. */
+.slide[data-layout="table"] thead th {
+  text-align: left; padding: 22px 24px;
+  font: 600 24px/1.3 var(--fs-font-cjk); letter-spacing: 0.02em;
+  text-transform: none; color: #fff;
+  border-bottom: 1px solid var(--fs-divider);
+}
+.slide[data-layout="table"] tbody td {
+  padding: 26px 24px; vertical-align: top;
+  font: 500 22px/1.45 var(--fs-font-cjk); color: var(--fs-text-72);
+  border-bottom: 1px solid var(--fs-hairline);
+}
+.slide[data-layout="table"] tbody td:first-child {
+  color: #fff; font-weight: 600;
+}
+.slide[data-layout="table"] tbody tr:last-child td { border-bottom: 0; }
+
+/* ============================================================================
+   LAYOUT 09 — Timeline (horizontal milestones)
+   ============================================================================ */
+.slide[data-layout="timeline"] { background: var(--fs-bg-0); }
+.slide[data-layout="timeline"] .header {
+  position: absolute; top: 96px; left: 96px; right: 96px;
+  padding-bottom: 32px; border-bottom: 1px solid var(--fs-hairline);
+  display: grid; grid-template-columns: 1fr auto; align-items: end;
+}
+.slide[data-layout="timeline"] .axis {
+  position: absolute; top: 540px; left: 96px; right: 96px; height: 2px;
+  background: linear-gradient(90deg, var(--fs-accent), var(--fs-text-16));
+  border-radius: 2px;
+}
+.slide[data-layout="timeline"] .nodes {
+  position: absolute; top: 400px; left: 96px; right: 96px; bottom: 160px;
+  display: grid; grid-template-columns: repeat(var(--cols, 4), 1fr); gap: 24px;
+}
+.slide[data-layout="timeline"] .node {
+  display: flex; flex-direction: column; gap: 18px; position: relative;
+  padding-top: 168px;
+}
+.slide[data-layout="timeline"] .node::before {
+  content: ""; position: absolute; left: 0; top: 132px;
+  width: 18px; height: 18px; border-radius: 999px;
+  background: var(--fs-accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--fs-accent) 18%, transparent);
+}
+.slide[data-layout="timeline"] .node .when {
+  font: 700 28px/1 var(--fs-font-latin); color: #fff; letter-spacing: 0.04em;
+}
+.slide[data-layout="timeline"] .node .what {
+  font: 600 26px/1.3 var(--fs-font-cjk); color: #fff;
+}
+.slide[data-layout="timeline"] .node .desc {
+  font: 500 18px/1.5 var(--fs-font-cjk); color: var(--fs-text-65);
+}
+
+/* ============================================================================
+   LAYOUT 10 — Process (numbered horizontal flow)
+   ============================================================================ */
+.slide[data-layout="process"] { background: var(--fs-bg-0); }
+.slide[data-layout="process"] .header {
+  position: absolute; top: 96px; left: 96px; right: 96px;
+  padding-bottom: 32px; border-bottom: 1px solid var(--fs-hairline);
+  display: grid; grid-template-columns: 1fr auto; align-items: end;
+}
+.slide[data-layout="process"] .flow {
+  position: absolute; top: 420px; left: 96px; right: 96px; bottom: 160px;
+  display: grid; grid-template-columns: repeat(var(--cols, 4), 1fr) ; gap: 28px;
+  align-items: stretch;
+}
+.slide[data-layout="process"] .step {
+  border: 1px solid var(--fs-hairline);
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+  border-radius: 16px; padding: 32px;
+  display: flex; flex-direction: column; gap: 20px; position: relative;
+}
+.slide[data-layout="process"] .step .stnum {
+  font: 700 56px/1 var(--fs-font-latin); color: var(--fs-accent); opacity: 0.6;
+}
+.slide[data-layout="process"] .step h3 {
+  font: 600 28px/1.3 var(--fs-font-cjk); color: #fff;
+}
+.slide[data-layout="process"] .step p {
+  font: 500 18px/1.55 var(--fs-font-cjk); color: var(--fs-text-65);
+}
+.slide[data-layout="process"] .step:not(:last-child)::after {
+  content: ""; position: absolute; right: -22px; top: 50%;
+  width: 16px; height: 16px;
+  border-top: 2px solid var(--fs-accent); border-right: 2px solid var(--fs-accent);
+  transform: translateY(-50%) rotate(45deg); opacity: 0.6;
+}
+
+/* 规范 L4: process layout's output panel (right-side ~400 px wide) attribute
+   list MUST be a single column — 2-col grid in a 400 px container yields
+   ~180 px cells which truncate body-floor (22 px) text like
+   "Communication style". Vertical stack fits the panel's tall proportion. */
+.slide[data-layout="process"] .output {
+  display: flex; flex-direction: column; gap: 16px;
+}
+.slide[data-layout="process"] .output .attrs {
+  display: grid;
+  grid-template-columns: 1fr;            /* single column — never 1fr 1fr */
+  gap: 14px 0;
+}
+.slide[data-layout="process"] .output .attrs > * {
+  font: 500 22px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ============================================================================
+   LAYOUT 11 — Agenda (TOC)
+   ============================================================================ */
+.slide[data-layout="agenda"] { background: var(--fs-grad-section); }
+.slide[data-layout="agenda"] .header {
+  position: absolute; top: 96px; left: 96px; right: 96px;
+}
+.slide[data-layout="agenda"] .header h2 {
+  font: 700 96px/1.05 var(--fs-font-cjk); letter-spacing: -0.005em;
+}
+.slide[data-layout="agenda"] .header .en {
+  font: 500 26px/1.4 var(--fs-font-latin); color: var(--fs-text-48); margin-top: 16px;
+}
+.slide[data-layout="agenda"] .toc {
+  position: absolute; top: 380px; left: 96px; right: 96px; bottom: 120px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 80px;
+}
+.slide[data-layout="agenda"] .toc .item {
+  display: grid; grid-template-columns: 100px 1fr;
+  align-items: baseline; gap: 24px;
+  padding: 24px 0; border-bottom: 1px solid var(--fs-hairline);
+}
+.slide[data-layout="agenda"] .toc .item .n {
+  font: 700 36px/1 var(--fs-font-latin); color: var(--fs-accent);
+  letter-spacing: 0.02em;
+}
+.slide[data-layout="agenda"] .toc .item .title-zh { font-size: 36px; line-height: 1.25; }
+.slide[data-layout="agenda"] .toc .item .title-en { font-size: 16px; margin-top: 6px; }
+
+/* ============================================================================
+   LAYOUT 12 — Big stat (single hero number)
+   ============================================================================ */
+.slide[data-layout="big-stat"] { background: var(--fs-grad-hero); }
+.slide[data-layout="big-stat"] .stage {
+  position: absolute; inset: 0; padding: 0 96px;
+  display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 80px;
+}
+.slide[data-layout="big-stat"] .num {
+  font: 700 312px/0.95 var(--fs-font-latin);
+  background: var(--fs-grad-keyline);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  letter-spacing: -0.04em;
+}
+.slide[data-layout="big-stat"] .num .unit {
+  font-size: 96px; -webkit-text-fill-color: #fff; color: #fff;
+  background: none; opacity: 0.85; margin-left: 8px;
+}
+.slide[data-layout="big-stat"] .copy h2 {
+  font: 700 64px/1.15 var(--fs-font-cjk); margin-bottom: 24px;
+}
+.slide[data-layout="big-stat"] .copy p {
+  font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); max-width: 600px;
+}
+
+/* ============================================================================
+   LAYOUT 13 — Closing / End (封底带 slogan) — master slideLayout8
+   - Background: same flower image as cover
+   - Logo top-LEFT at (120, 121) — handled by .wordmark cover/end override
+   - Slogan PNG ("先进团队 先用飞书") at (102, 348) size 561×345
+   - That's it — no title, no CTA, no contact grid.
+     The brand statement does the entire job.
+   ============================================================================ */
+.slide[data-layout="end"] {
+  background: #000 var(--fs-asset-cover-bg) center/cover no-repeat;
+}
+.slide[data-layout="end"] .wordmark {
+  top: 121px;            /* master pic16: y=80.7 native */
+}
+.slide[data-layout="end"] .slogan {
+  position: absolute;
+  top: 348px; left: 102px;             /* master pic5: x=67.9 y=231.7 native × 1.5 */
+  width: 561px; height: 345px;          /* master 374.1 × 229.9 native × 1.5 */
+  background: var(--fs-asset-slogan) left center/contain no-repeat;
+}
+/* Optional contact line at bottom — kept off the master but provided as opt-in */
+.slide[data-layout="end"] .contact {
+  position: absolute; left: 124px; bottom: 80px;
+  font: 500 18px/1.5 var(--fs-font-latin);
+  color: rgba(255,255,255,0.55); letter-spacing: 0.06em;
+}
+.slide[data-layout="end"] .footer { display: none; }
+
+/* ============================================================================
+   Helpers — accent overrides for siblings (charts, columns, pills)
+   ============================================================================ */
+/* 规范: cyan is INLINE-WORD-HIGHLIGHT only — never a slide accent.
+   Removed cyan from this map intentionally. Use .accent-text or .hl
+   for cyan inline highlight. */
+.slide [data-accent="blue"]   { --fs-accent: var(--fs-blue); }
+.slide [data-accent="teal"]   { --fs-accent: var(--fs-teal); }
+.slide [data-accent="purple"] { --fs-accent: var(--fs-purple); }
+.slide [data-accent="violet"] { --fs-accent: var(--fs-violet); }
+.slide [data-accent="orange"] { --fs-accent: var(--fs-orange); }
+
+/* slide-level accent override (applies to chrome too) */
+.slide[data-accent="blue"]   { --fs-accent: var(--fs-blue); }
+.slide[data-accent="teal"]   { --fs-accent: var(--fs-teal); }
+.slide[data-accent="purple"] { --fs-accent: var(--fs-purple); }
+.slide[data-accent="violet"] { --fs-accent: var(--fs-violet); }
+.slide[data-accent="orange"] { --fs-accent: var(--fs-orange); }
+
+/* ============================================================================
+   MASTER PARITY OVERRIDES (loaded last to win cascade)
+   The .thmx master lays out content pages with a SMALL top-left title and a
+   small mono-white logo top-right. No eyebrow underline, no bottom rule under
+   the header. Body content fills the rest of the slide. These rules align our
+   12 content layouts to that pattern.
+   ============================================================================ */
+
+/* Subtle ambient gradient for content/agenda/table/etc (master uses image1.jpg) */
+.slide[data-layout="agenda"],
+.slide[data-layout="content-3up"],
+.slide[data-layout="content-2col"],
+.slide[data-layout="stats"],
+.slide[data-layout="table"],
+.slide[data-layout="timeline"],
+.slide[data-layout="process"],
+.slide[data-layout="big-stat"],
+.slide[data-layout="quote"] {
+  background: #000 var(--fs-asset-content-bg) center/cover no-repeat;
+}
+
+/* Unified small-title header for all content layouts.
+   规范: page header title sits at master coordinates (73, 61) — vertically
+   aligned with the top-right logo. Title is 52 px / 600 / SINGLE LINE.
+   Optional eyebrow goes BELOW the title as a secondary tag.
+   <br> inside the title is forbidden (CSS strips it as a defense). */
+.slide[data-layout="agenda"] .header,
+.slide[data-layout="content-3up"] .header,
+.slide[data-layout="content-2col"] .header,
+.slide[data-layout="stats"] .header,
+.slide[data-layout="table"] .header,
+.slide[data-layout="timeline"] .header,
+.slide[data-layout="process"] .header,
+.slide[data-layout="big-stat"] .header {
+  position: absolute; top: 61px; left: 73px; right: 320px;  /* matches logo top */
+  padding-bottom: 0; border-bottom: 0;
+  display: block;
+}
+.slide .header > .pageno { display: none; }
+.slide .header > div:first-child {
+  display: flex; flex-direction: column-reverse; align-items: flex-start;
+  /* DOM order: eyebrow, title — visual order: title above, eyebrow below */
+}
+.slide .header .eyebrow {
+  display: block; margin: 14px 0 0 0;
+  font: 600 14px/1 var(--fs-font-latin); letter-spacing: 0.18em;
+  color: var(--fs-accent);
+}
+.slide .header .title-zh,
+.slide .header h2,
+.slide .header h2.title-zh {
+  display: block; margin: 0 !important; padding: 0;
+  font: 600 52px/1.1 var(--fs-font-cjk);
+  letter-spacing: -0.005em; color: #fff;
+  white-space: nowrap;                      /* 规范: single line — no wrap */
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+/* Defense: strip stray <br> from header titles (规范: titles must be one line) */
+.slide .header .title-zh br,
+.slide .header h2 br { display: none; }
+
+/* 规范: title-only pages (cover, agenda, big-stat) suppress the eyebrow so the
+   real title stays vertically aligned with the top-right logo. Dense content
+   pages (3up, 2col, stats, table, timeline, process) keep the eyebrow as a
+   secondary tag below the title — it doesn't push the title off the logo line. */
+.slide[data-layout="agenda"] .header .eyebrow,
+.slide[data-layout="big-stat"] .header .eyebrow {
+  display: none;
+}
+
+/* Reposition each body-content area to use the freed vertical space.
+   These rules supersede the per-layout `.grid` / `.flow` / `.nodes` top values.
+
+   规范 L2: every body-content container must vertically center its row when
+   content is shorter than the available canvas height. Without this, cards
+   stack at the top with empty bottom — the most-reported "looks unfinished"
+   bug. align-content: center applies only when row natural height < container.
+   When content fills 80%+ naturally, align-content has no visual effect, so
+   this is safe to apply universally. */
+.slide[data-layout="content-3up"]  .grid       { top: 200px; bottom: 110px; align-content: center; }
+.slide[data-layout="content-2col"] .grid       { top: 200px; bottom: 110px; align-content: center; }
+.slide[data-layout="stats"]        .grid       { top: 220px; align-content: center; }
+.slide[data-layout="stats"]        .footnote   { bottom: 96px; }
+.slide[data-layout="table"]        .table-wrap { top: 200px; bottom: 110px; }
+.slide[data-layout="timeline"]     .nodes      { top: 240px; bottom: 160px; align-content: center; }
+.slide[data-layout="timeline"]     .axis       { top: 380px; }
+.slide[data-layout="process"]      .flow       { top: 240px; bottom: 130px; align-content: center; }
+
+/* `.stage` is the canonical name for a body-content container in the abstract
+   规范 (some layouts use .grid / .flow / .nodes for historical reasons —
+   they're aliases). Generic .stage rule provides the L2 default for any
+   custom layout an author writes. */
+.slide .stage { align-content: center; justify-content: center; }
+
+/* 规范 L3: cards must size to content, not stretch to full canvas. The grid
+   parent does the vertical centering (via L2 rules above); cards take
+   intrinsic height. This eliminates the "card empty-middle" bug where a
+   stretched card with margin-top: auto on inner pills creates a giant gap. */
+.slide .grid > .card,
+.slide .flow > .step {
+  align-self: stretch;        /* equal-height cards within their row (cosmetic) */
+  margin: 0;                   /* override the auto-margin default — we're in grid now */
+}
+/* Override the .card { margin: auto 0 } default when inside a grid;
+   the auto-margin made sense when card sat alone, but in a grid row the
+   grid does the vertical placement. */
+
+/* Agenda — same small-title pattern as every other content page (规范).
+   The title sits on the logo line, not as a hero heading. The body energy
+   comes from the TOC items below, where number and title share a font size. */
+.slide[data-layout="agenda"] .header h2 {
+  /* unset the old big h2 override — agenda h2 follows the standard 52/600 */
+  font: 600 52px/1.1 var(--fs-font-cjk) !important;
+  letter-spacing: -0.005em; color: #fff;
+  white-space: nowrap !important; margin: 0 !important;
+}
+.slide[data-layout="agenda"] .header .en {
+  display: block; margin-top: 14px;
+  font: 500 16px/1.4 var(--fs-font-latin);
+  color: var(--fs-text-48); letter-spacing: 0.04em;
+}
+/* Agenda TOC — default-centered when items are short, lets list grow when long */
+.slide[data-layout="agenda"] .toc {
+  top: 220px; bottom: 110px;
+  gap: 0 96px;
+  align-content: center;        /* 规范: fixed-shape layout default-centers */
+  justify-content: stretch;
+}
+.slide[data-layout="agenda"] .toc .item {
+  grid-template-columns: 110px 1fr;
+  align-items: baseline; gap: 28px;
+  padding: 26px 0;
+  border-bottom: 1px solid var(--fs-hairline);  /* very subtle, not form-like */
+}
+/* 规范: TOC number and title share the SAME font size (visual rhythm) */
+.slide[data-layout="agenda"] .toc .item .n {
+  font: 700 44px/1.1 var(--fs-font-latin);
+  color: var(--fs-accent);
+  letter-spacing: 0.01em;
+}
+.slide[data-layout="agenda"] .toc .item .title-zh {
+  font: 600 44px/1.15 var(--fs-font-cjk);
+  color: #fff;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.slide[data-layout="agenda"] .toc .item .title-en {
+  font: 500 16px/1.4 var(--fs-font-latin);
+  color: var(--fs-text-48); margin-top: 8px;
+  letter-spacing: 0.04em;
+}
+
+/* Big-stat keeps its dramatic numeral but moves under the small-title header.
+   规范: fixed-shape layout default-centers vertically. */
+.slide[data-layout="big-stat"] .stage {
+  top: 220px; bottom: 130px;
+  align-items: center; justify-content: center;
+  align-content: center;
+}
+.slide[data-layout="big-stat"] .num { font-size: 240px; line-height: 1; padding-top: 16px; }
+.slide[data-layout="big-stat"] .num .unit { font-size: 72px; }
+
+/* Footer — ALL non-cover/non-end slides keep the master footer chrome */
+.slide[data-layout="cover"] .footer,
+.slide[data-layout="end"] .footer { display: none; }
+
+/* ============================================================================
+   LAYOUT OVERFLOW DEFENSES (规范: stage must never exceed 1080×1920)
+   These rules prevent the four classic flex/grid pitfalls that blow out the
+   slide canvas. Any custom layout we add to a slide should follow these.
+   ============================================================================ */
+
+/* (1) Flex column with flex:1 children + min-content: parent overflows.
+       Solution: every flex item also gets min-height: 0 so it can shrink. */
+.slide [class*="flex-col"],
+.slide .stage,
+.slide .grid,
+.slide .flow,
+.slide .col-text {
+  min-height: 0; min-width: 0;
+}
+
+/* (2) CSS Grid rows with content that overflows: cells take max-content height.
+       Solution: use minmax(0, 1fr) and apply min-height:0 to grid cells. */
+.slide .grid > *,
+.slide .flow > *,
+.slide .nodes > *,
+.slide .toc > * {
+  min-width: 0; min-height: 0;
+}
+
+/* (3) flex-wrap: wrap on a min-width:0 parent makes mixed-width children
+       blow up scrollHeight. Default our pill rows to nowrap with horizontal
+       overflow hidden — if you need wrapping, declare it explicitly. */
+.slide .pills,
+.slide .cta-row {
+  flex-wrap: nowrap; overflow-x: hidden;
+}
+
+/* (4) Card vertical density control. Default = card heights are content-driven
+       (margin: auto 0 centers them in the cell). Add class="is-stretch" only
+       when content density justifies stretching to fill the cell. */
+.slide .card { margin: auto 0; }
+.slide .card.is-stretch { margin: 0; flex: 1 1 auto; }
+.slide .grid .card { align-self: stretch; } /* legacy: existing layouts expect stretch */
+
+/* (5) Cover-stage and full-bleed image text containers: clip overflow defensively */
+.slide[data-layout="cover"] .stage,
+.slide[data-layout="image-text"] .stage,
+.slide[data-layout="end"]   .stage { overflow: hidden; }
+
+/* AURORA — superseded by data-decor="aurora". The .has-aurora class is
+   deprecated. Use data-decor="aurora" instead. (Empty rule kept for one
+   release to avoid silent breakage of decks that still use .has-aurora.) */
+
+/* ============================================================================
+   PER-PAGE REVEAL ANIMATION — staggered via --child-i set by JS at init.
+   Single keyframes + single rule replaces 7 nth-child rules (P3 perf).
+   GPU-friendly: translate3d + will-change-style is implicit via animation.
+   ============================================================================ */
+@media (prefers-reduced-motion: no-preference) {
+  .slide-frame.is-current .slide > * {
+    opacity: 0; transform: translate3d(0, 14px, 0);
+    animation: fs-reveal .45s ease forwards;
+    animation-delay: calc(0.06s * var(--child-i, 1));
+  }
+  /* chrome (wordmark, footer) reveals immediately, no stagger */
+  .slide-frame.is-current .slide .wordmark,
+  .slide-frame.is-current .slide .footer {
+    opacity: 1; transform: none; animation: none;
+  }
+}
+@keyframes fs-reveal {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* ============================================================================
+   ATMOSPHERIC DECORATION — data-decor attribute (规范)
+   Decoration is ORTHOGONAL to layout. A slide can carry any combination of
+   layout + variant + decor. When re-rendering an existing slide into a
+   standard layout, the slide's distinctive atmospheric imagery (radial glows,
+   full-bleed photos, brand gradients, aurora, film grain) MUST be preserved
+   via data-decor — silent stripping makes the redesign feel sterile.
+   The decor renders as a ::before pseudo-element under all slide content,
+   pointer-events: none. Multiple decors stack via space-separated tokens:
+     <div class="slide" data-layout="content-3up" data-decor="violet-glow grain">
+   ============================================================================ */
+
+.slide[data-decor]::before {
+  content: ""; position: absolute; inset: 0;
+  pointer-events: none; z-index: 0;
+  /* default: transparent — concrete decor rules below stack via box-shadow tricks
+     and background composition */
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-blend-mode: normal;
+}
+/* Ensure all slide content is layered ABOVE the decor */
+.slide > * { position: relative; z-index: 1; }
+
+/* — Decor tokens: each adds a background layer.
+     Use ~= (whitespace-separated word matcher) so tokens compose freely. — */
+
+/* violet-glow: lower-right violet bloom (Digital Workforce / 数字员工 signature) */
+.slide[data-decor~="violet-glow"]::before {
+  background-image:
+    radial-gradient(50% 42% at 88% 92%, rgba(159,111,241,0.34), transparent 65%),
+    radial-gradient(38% 30% at 78% 78%, rgba(92,63,251,0.18), transparent 70%);
+}
+
+/* blue-glow: centered cool blue bloom (quote / hero accent) */
+.slide[data-decor~="blue-glow"]::before {
+  background-image:
+    radial-gradient(70% 55% at 50% 55%, rgba(60,127,255,0.22), transparent 60%);
+}
+
+/* mix-glow: purple top-right + blue bottom-left (closing-style cinematic mix) */
+.slide[data-decor~="mix-glow"]::before {
+  background-image:
+    radial-gradient(55% 45% at 92% 8%, rgba(159,111,241,0.30), transparent 60%),
+    radial-gradient(55% 45% at 8% 92%, rgba(60,127,255,0.22), transparent 60%);
+}
+
+/* teal-glow: bottom-left teal bloom (data / KPI emphasis) */
+.slide[data-decor~="teal-glow"]::before {
+  background-image:
+    radial-gradient(48% 42% at 14% 86%, rgba(51,214,192,0.26), transparent 65%);
+}
+
+/* orange-spark: top-right warm flare (alert / 例外 emphasis) */
+.slide[data-decor~="orange-spark"]::before {
+  background-image:
+    radial-gradient(40% 32% at 88% 18%, rgba(254,127,0,0.22), transparent 65%);
+}
+
+/* aurora: three-color ambient (matches the legacy .has-aurora class) */
+.slide[data-decor~="aurora"]::before {
+  background-image:
+    radial-gradient(40% 35% at 12% 18%, rgba(60,127,255,0.18), transparent 70%),
+    radial-gradient(35% 30% at 88% 12%, rgba(159,111,241,0.14), transparent 70%),
+    radial-gradient(40% 32% at 70% 92%, rgba(51,214,192,0.12), transparent 70%);
+}
+
+/* grain: subtle film grain via CSS noise (no external asset) */
+.slide[data-decor~="grain"]::after {
+  content: ""; position: absolute; inset: 0;
+  pointer-events: none; z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.22'/></svg>");
+  background-size: 200px 200px;
+  mix-blend-mode: overlay;
+  opacity: 0.32;
+}
+
+/* topo: faint topographic line motif (process / engineering pages) */
+.slide[data-decor~="topo"]::before {
+  background-image:
+    repeating-linear-gradient(115deg,
+      rgba(255,255,255,0.045) 0px,
+      rgba(255,255,255,0.045) 1px,
+      transparent 1px,
+      transparent 28px),
+    radial-gradient(60% 50% at 80% 40%, rgba(60,127,255,0.10), transparent 70%);
+}
+
+/* flower-bg: full-bleed flower master image (cover/end style for any layout) */
+.slide[data-decor~="flower-bg"] {
+  background-image: var(--fs-asset-cover-bg) !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+/* darker overlay so text on flower-bg remains legible on content layouts */
+.slide[data-decor~="flower-bg"]:not([data-layout="cover"]):not([data-layout="end"])::before {
+  background-image:
+    linear-gradient(90deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0.18) 75%, transparent 100%),
+    linear-gradient(180deg, rgba(0,0,0,0.45) 0%, transparent 25%, transparent 70%, rgba(0,0,0,0.55) 100%);
+}
+
+/* section-bg: re-uses the section gradient on any layout (color-rich chapters) */
+.slide[data-decor~="section-bg"] {
+  background-image: var(--fs-asset-section-bg) !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+
+/* photo-bg: opt-in slot for a custom photographic background.
+   Author sets the URL via inline style or a CSS variable on the slide:
+     <div class="slide" data-decor="photo-bg" style="--photo: url('...')"> */
+.slide[data-decor~="photo-bg"] {
+  background-image: var(--photo, none) !important;
+  background-size: cover !important; background-position: center !important;
+}
+.slide[data-decor~="photo-bg"]::before {
+  background-image:
+    linear-gradient(180deg, rgba(0,0,0,0.4) 0%, transparent 30%, rgba(0,0,0,0.7) 100%),
+    linear-gradient(90deg, rgba(0,0,0,0.55) 0%, transparent 60%);
+}
+
+/* Legacy .has-aurora rule removed — use data-decor="aurora" instead. */
+
+/* ============================================================================
+   NARRATIVE PATTERN COMPONENTS (DESIGN.md §9 patterns A–K)
+   Optional opt-in classes for advanced narrative layouts. See DESIGN.md.
+   ============================================================================ */
+
+/* North-Star chip (pattern C) — `★ 北极星指标 · [指标名]` */
+.slide .north-star {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 18px; border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, var(--fs-teal) 60%, transparent);
+  font: 600 18px/1 var(--fs-font-cjk);
+  color: var(--fs-teal); letter-spacing: 0.02em;
+}
+.slide .north-star::before {
+  content: "★"; font-size: 18px; color: var(--fs-teal);
+}
+
+/* Verdict pill matrix (pattern B) — Go / Conditional / No-Go cards */
+.slide .verdict-card {
+  position: relative; overflow: hidden; border-radius: var(--fs-radius-card);
+  border: 2px solid var(--fs-text-16);
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+  padding: 36px;
+}
+.slide .verdict-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 5px;
+  background: var(--fs-text-16);
+}
+.slide .verdict-card[data-verdict="go"] { border-color: color-mix(in srgb, var(--fs-teal) 60%, transparent); }
+.slide .verdict-card[data-verdict="go"]::before { background: var(--fs-teal); }
+.slide .verdict-card[data-verdict="conditional"] { border-color: color-mix(in srgb, var(--fs-violet) 60%, transparent); }
+.slide .verdict-card[data-verdict="conditional"]::before { background: var(--fs-violet); }
+.slide .verdict-card[data-verdict="nogo"] { border-color: color-mix(in srgb, var(--fs-orange) 60%, transparent); }
+.slide .verdict-card[data-verdict="nogo"]::before { background: var(--fs-orange); }
+.slide .verdict-card .badge {
+  position: absolute; top: 24px; right: 24px;
+  font: 700 14px/1 var(--fs-font-latin); letter-spacing: 0.18em;
+  color: var(--fs-text-72); text-transform: uppercase;
+}
+.slide .verdict-card[data-verdict="go"] .badge        { color: var(--fs-teal); }
+.slide .verdict-card[data-verdict="conditional"] .badge{ color: var(--fs-violet); }
+.slide .verdict-card[data-verdict="nogo"] .badge      { color: var(--fs-orange); }
+
+/* Boundary band (pattern D) — 不做 / 做 contrast */
+.slide .boundary-band {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+}
+.slide .boundary-no, .slide .boundary-yes {
+  border-radius: 16px; padding: 28px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+}
+.slide .boundary-no  { border: 1px dashed color-mix(in srgb, var(--fs-orange) 60%, transparent); }
+.slide .boundary-yes { border: 1px solid color-mix(in srgb, var(--fs-teal) 60%, transparent); }
+.slide .boundary-no .pill, .slide .boundary-yes .pill {
+  display: inline-flex; padding: 8px 14px; font: 600 14px/1 var(--fs-font-latin);
+  letter-spacing: 0.14em; text-transform: uppercase; border-radius: 999px;
+  margin-bottom: 14px;
+}
+.slide .boundary-no .pill  { background: rgba(254,127,0,0.16);  color: var(--fs-orange); }
+.slide .boundary-yes .pill { background: rgba(51,214,192,0.16); color: var(--fs-teal); }
+.slide .boundary-no .body  { font: 500 22px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); text-decoration: line-through; text-decoration-color: rgba(254,127,0,.45); }
+.slide .boundary-yes .body { font: 500 22px/1.55 var(--fs-font-cjk); color: var(--fs-text); }
+.slide .boundary-yes .hl   { color: var(--fs-teal); font-weight: 600; }
+
+/* Evolution chip (pattern F) — 现阶段 → 未来 */
+.slide .evolution-chip {
+  display: grid; grid-template-columns: auto 1fr; gap: 12px 18px;
+  padding: 18px 22px; border-radius: 14px;
+  border: 1px dashed var(--fs-text-16);
+}
+.slide .evolution-chip .stage-tag {
+  font: 600 14px/1 var(--fs-font-latin); letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--fs-text-48);
+  white-space: nowrap;
+}
+.slide .evolution-chip .stage-body {
+  font: 500 22px/1.4 var(--fs-font-cjk); color: var(--fs-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.slide .evolution-chip .stage-body.is-future { color: var(--fs-teal); font-weight: 600; }
+
+/* Three-color principle band (pattern J) */
+.slide .principle-band {
+  display: inline-flex; flex-wrap: wrap; gap: 24px;
+  padding: 18px 24px; border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0));
+  border: 1px solid var(--fs-hairline);
+}
+.slide .principle-band .principle {
+  display: inline-flex; align-items: center; gap: 10px;
+  font: 600 18px/1 var(--fs-font-cjk);
+}
+.slide .principle-band .principle::before {
+  content: ""; width: 8px; height: 8px; border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 16%, transparent);
+}
+.slide .principle-band .principle[data-color="teal"]   { color: var(--fs-teal); }
+.slide .principle-band .principle[data-color="blue"]   { color: var(--fs-blue); }
+.slide .principle-band .principle[data-color="purple"] { color: var(--fs-purple); }
+.slide .principle-band .principle[data-color="violet"] { color: var(--fs-violet); }
+.slide .principle-band .principle[data-color="orange"] { color: var(--fs-orange); }
+
+/* Source footer (Section 七 #1) — every content page should carry one */
+.slide .source-footer {
+  position: absolute; left: 73px; bottom: 92px;
+  font: 500 14px/1.5 var(--fs-font-latin);
+  color: var(--fs-text-40); letter-spacing: 0.04em;
+}
+
+/* Mobile portrait toast (Section 六 #4) */
+@media (orientation: portrait) and (max-width: 900px) {
+  body.fs-portrait-warn::after {
+    content: "横屏体验更佳 · Rotate for best view";
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: rgba(60,127,255,0.92); color: #fff;
+    font: 500 13px/1 var(--fs-font-cjk);
+    padding: 10px 18px; border-radius: 999px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    z-index: 200; pointer-events: none;
+    animation: fs-toast-fade 7s ease forwards;
+  }
+}
+@keyframes fs-toast-fade {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  10%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  85%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* iframe / phone-frame helpers (Section 五) */
+.slide .phone-frame {
+  width: 280px; aspect-ratio: 9/19.5;
+  background: #000; padding: 7px; border-radius: 32px;
+  position: relative;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.slide .phone-frame::before {
+  /* notch */
+  content: ""; position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  width: 80px; height: 18px; border-radius: 999px;
+  background: #000; pointer-events: none; z-index: 2;
+}
+.slide .phone-frame::after {
+  /* home indicator */
+  content: ""; position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+  width: 90px; height: 3px; border-radius: 999px;
+  background: rgba(255,255,255,0.85); pointer-events: none; z-index: 2;
+}
+.slide .phone-frame .phone-screen {
+  width: 100%; height: 100%; border-radius: 26px; overflow: hidden;
+  background: #000;
+}
+.slide .phone-frame .phone-screen iframe {
+  width: 100%; height: 100%; border: 0; display: block;
+}
+
+.slide .desktop-frame {
+  width: 100%; aspect-ratio: 16/10;
+  border-radius: 16px; overflow: hidden;
+  background: #000;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.08);
+  position: relative;
+}
+.slide .desktop-frame iframe {
+  width: 100%; height: 100%; border: 0; display: block;
+}
+.slide .desktop-frame .iframe-hint {
+  position: absolute; top: 16px; right: 16px;
+  font: 600 14px/1 var(--fs-font-latin); letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: rgba(60,127,255,0.85); color: #fff;
+  padding: 8px 14px; border-radius: 999px;
+  pointer-events: none;             /* 规范: hint never blocks clicks */
+  animation: fs-hint-fade 7s ease forwards;
+}
+@keyframes fs-hint-fade {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ============================================================================
+   VARIANT EXAMPLES (规范: data-variant must redeclare all structural props)
+   --------------------------------------------------------------------------
+   These canonical variants show the discipline. Each variant block redeclares
+   EVERY directional/structural property of its base layout — even when the
+   value is identical to the base. This makes variants self-contained and
+   audit-friendly. See SKILL.md "Variant override discipline" for the full
+   explanation. validate.py R47 enforces the redeclaration.
+   ============================================================================ */
+
+/* content-3up · variant="vertical" → flip the 3-card row into a vertical stack
+   (useful when the third card is genuinely longer and would push the row out
+   of canvas height) */
+.slide[data-layout="content-3up"][data-variant="vertical"] .grid {
+  display: grid;                                     /* same engine */
+  grid-template-columns: 1fr;                        /* was: repeat(3, 1fr) */
+  grid-template-rows: repeat(3, auto);               /* was: auto */
+  align-items: stretch;                              /* same — explicit anyway */
+  align-content: center;                             /* same */
+  justify-items: stretch;                            /* same */
+  justify-content: stretch;                          /* same */
+  gap: 24px;                                         /* tighter than base 36px */
+}
+
+/* content-2col · variant="reversed" → swap text/visual sides without re-ordering DOM */
+.slide[data-layout="content-2col"][data-variant="reversed"] .grid {
+  display: grid;                                     /* same engine */
+  grid-template-columns: 1fr 1.1fr;                  /* was: 1.1fr 1fr */
+  grid-template-rows: auto;                          /* same */
+  align-items: stretch;                              /* same */
+  align-content: center;                             /* same */
+  justify-items: stretch;                            /* same */
+  justify-content: stretch;                          /* same */
+  gap: 96px;                                         /* same */
+  direction: rtl;                                    /* swap visual order */
+}
+.slide[data-layout="content-2col"][data-variant="reversed"] .grid > * {
+  direction: ltr;                                    /* restore content direction */
+}
+
+/* process · variant="vertical" → step row becomes vertical timeline */
+.slide[data-layout="process"][data-variant="vertical"] .flow {
+  display: grid;                                     /* swap from grid-cols to grid-rows */
+  grid-template-columns: 1fr;                        /* was: repeat(N, 1fr) */
+  grid-template-rows: repeat(var(--cols, 4), auto);  /* explicit row count */
+  align-items: stretch;                              /* same */
+  align-content: center;                             /* same */
+  justify-items: stretch;                            /* same */
+  justify-content: stretch;                          /* same */
+  gap: 18px;                                         /* tighter for vertical */
+}
+/* hide the right-pointing arrow; vertical variant gets no arrow */
+.slide[data-layout="process"][data-variant="vertical"] .step:not(:last-child)::after {
+  display: none;
+}
+
+/* ============================================================================
+   UI MOCK PRIMITIVES (规范: re-render screenshots as HTML, not raster images)
+   --------------------------------------------------------------------------
+   When adapting source content into HTML, every system UI screenshot,
+   chat thread, file list, spreadsheet, dashboard, or app window MUST be
+   recreated in HTML/CSS — never embedded as a JPG/PNG.
+   - HTML mocks scale crisply to any resolution (no pixelation in fullscreen)
+   - Use brand fonts/colors so the mock harmonizes with the deck
+   - Are inspectable, accessible, and lighter than raster
+   - Avoid licensing / NDA exposure of real product screenshots
+   The classes below are the canonical primitives. Compose them.
+   ============================================================================ */
+
+/* ---- Window / frame chrome ---- */
+
+.slide .ui-window {
+  position: relative;
+  background: linear-gradient(180deg, #131723 0%, #0B0E18 100%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.45);  /* allowed: real product UI panel */
+}
+.slide .ui-titlebar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+  font: 500 16px/1 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+}
+.slide .ui-traffic-lights {
+  display: inline-flex; gap: 8px; align-items: center;
+}
+.slide .ui-traffic-lights::before,
+.slide .ui-traffic-lights::after,
+.slide .ui-traffic-lights > i {
+  content: ""; display: inline-block; width: 12px; height: 12px;
+  border-radius: 999px;
+}
+.slide .ui-traffic-lights::before { background: #FF5F57; }
+.slide .ui-traffic-lights > i     { background: #FEBC2E; }
+.slide .ui-traffic-lights::after  { background: #28C840; }
+
+/* ---- Browser-style window with URL pill ---- */
+
+.slide .ui-browser .ui-titlebar {
+  gap: 16px;
+  padding: 12px 16px;
+}
+.slide .ui-browser .ui-urlbar {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  padding: 8px 18px;
+  font: 500 16px/1 var(--fs-font-latin);
+  color: var(--fs-text-72);
+  letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---- Sidebar + main split ---- */
+
+.slide .ui-window .ui-body {
+  display: flex; flex: 1 1 auto; min-height: 0;
+}
+.slide .ui-sidebar {
+  width: 260px; flex: 0 0 260px;
+  background: rgba(255,255,255,0.02);
+  border-right: 1px solid rgba(255,255,255,0.06);
+  padding: 20px 14px; overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.slide .ui-sidebar .ui-section {
+  font: 600 14px/1 var(--fs-font-latin); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--fs-text-40);
+  padding: 14px 12px 8px;
+}
+.slide .ui-main {
+  flex: 1 1 auto; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+/* ---- Toolbar with tabs ---- */
+
+.slide .ui-toolbar {
+  display: flex; align-items: center; gap: 24px;
+  padding: 12px 22px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.015);
+}
+.slide .ui-tab-bar { display: flex; gap: 4px; align-items: center; }
+.slide .ui-tab {
+  position: relative;
+  padding: 10px 16px;
+  font: 500 16px/1.2 var(--fs-font-cjk);
+  color: var(--fs-text-48);
+  border-radius: 8px;
+  cursor: default;
+}
+.slide .ui-tab.is-active {
+  color: #fff; font-weight: 600;
+  background: rgba(60,127,255,0.10);
+}
+.slide .ui-tab.is-active::after {
+  content: ""; position: absolute; left: 16px; right: 16px; bottom: -13px;
+  height: 2px; background: var(--fs-blue);
+}
+
+/* ---- Lists (chat / contacts / files) ---- */
+
+.slide .ui-list {
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.slide .ui-list-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font: 500 18px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+}
+.slide .ui-list-item.is-selected {
+  background: rgba(60,127,255,0.10);
+  color: #fff;
+}
+.slide .ui-list-item .ui-meta {
+  font: 500 14px/1 var(--fs-font-latin);
+  color: var(--fs-text-40); letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.slide .ui-list-item .ui-line {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.slide .ui-list-item .ui-line .name {
+  font-size: 18px; color: #fff; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.slide .ui-list-item .ui-line .preview {
+  font-size: 14px; color: var(--fs-text-48);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---- Avatar (round, color-mix initial) ---- */
+
+.slide .ui-avatar {
+  width: 40px; height: 40px; border-radius: 999px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--fs-blue) 22%, #131723);
+  color: #fff; font: 700 16px/1 var(--fs-font-latin);
+  letter-spacing: 0.02em; text-transform: uppercase;
+}
+/* Per-tone variants — rgba baked statically (was color-mix). Identical visual,
+   skips the per-repaint mix calculation. */
+.slide .ui-avatar[data-tone="teal"]   { background: #1F2D34; background: rgba(51,214,192,0.26); }
+.slide .ui-avatar[data-tone="purple"] { background: #1E1A38; background: rgba(92,63,251,0.26); }
+.slide .ui-avatar[data-tone="orange"] { background: #292019; background: rgba(254,127,0,0.26); }
+.slide .ui-avatar.lg { width: 56px; height: 56px; font-size: 20px; }
+.slide .ui-avatar.sm { width: 32px; height: 32px; font-size: 14px; }
+
+/* ---- Chat bubbles ---- */
+
+.slide .ui-msg {
+  max-width: 70%;
+  padding: 14px 18px;
+  border-radius: 16px;
+  font: 500 18px/1.45 var(--fs-font-cjk);
+  background: rgba(255,255,255,0.06);
+  color: var(--fs-text);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.slide .ui-msg.is-self {
+  background: var(--fs-blue);
+  border-color: transparent;
+  color: #fff;
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+.slide .ui-msg.is-other {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+.slide .ui-msg-stack {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 18px;
+}
+
+/* ---- Form inputs / buttons ---- */
+
+.slide .ui-input {
+  display: block; width: 100%;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  font: 500 18px/1.3 var(--fs-font-cjk);
+  color: #fff;
+}
+.slide .ui-input::placeholder { color: var(--fs-text-40); }
+.slide .ui-input:focus { outline: 0; border-color: var(--fs-blue); }
+
+.slide .ui-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 22px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font: 600 16px/1 var(--fs-font-cjk);
+  cursor: default;
+}
+.slide .ui-btn.is-primary {
+  background: var(--fs-blue); color: #fff;
+}
+.slide .ui-btn.is-secondary {
+  background: rgba(255,255,255,0.06); color: #fff;
+  border-color: rgba(255,255,255,0.10);
+}
+.slide .ui-btn.is-ghost {
+  background: transparent; color: var(--fs-text-72);
+  border-color: rgba(255,255,255,0.16);
+}
+
+/* ---- Cell-grid (Base / spreadsheet / multi-dim table) ---- */
+
+.slide .ui-grid {
+  display: grid; gap: 0;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.015);
+}
+.slide .ui-grid .ui-cell {
+  padding: 12px 16px;
+  border-right: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font: 500 16px/1.3 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.slide .ui-grid .ui-cell.is-header {
+  background: rgba(255,255,255,0.04);
+  color: #fff; font-weight: 600;
+  font-size: 14px; letter-spacing: 0.04em;
+}
+.slide .ui-grid .ui-cell.is-tag {
+  display: inline-block;
+}
+.slide .ui-grid .ui-cell .ui-pill {
+  display: inline-block; padding: 4px 10px; border-radius: 999px;
+  font: 600 14px/1 var(--fs-font-latin); letter-spacing: 0.06em;
+}
+/* Per-tone pill backgrounds — rgba baked (was color-mix). */
+.slide .ui-grid .ui-cell .ui-pill[data-tone="teal"]   { background: rgba(51,214,192,0.18);  color: var(--fs-teal); }
+.slide .ui-grid .ui-cell .ui-pill[data-tone="blue"]   { background: rgba(60,127,255,0.18);  color: var(--fs-blue); }
+.slide .ui-grid .ui-cell .ui-pill[data-tone="purple"] { background: rgba(92,63,251,0.18);   color: var(--fs-purple); }
+.slide .ui-grid .ui-cell .ui-pill[data-tone="orange"] { background: rgba(254,127,0,0.18);   color: var(--fs-orange); }
+
+/* ---- Status dots / badges ---- */
+
+.slide .ui-status-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 999px;
+  background: var(--fs-text-40); vertical-align: middle;
+}
+.slide .ui-status-dot.is-online { background: var(--fs-teal); }
+.slide .ui-status-dot.is-busy   { background: var(--fs-orange); }
+.slide .ui-status-dot.is-offline{ background: var(--fs-text-40); }
+
+.slide .ui-badge {
+  display: inline-grid; place-items: center;
+  min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;
+  background: var(--fs-blue); color: #fff;
+  font: 700 14px/1 var(--fs-font-latin);
+}
+.slide .ui-badge.is-mute { background: rgba(255,255,255,0.16); color: var(--fs-text-72); }
+
+/* ---- Progress bar ---- */
+
+.slide .ui-progress {
+  display: block; width: 100%; height: 4px;
+  background: rgba(255,255,255,0.08); border-radius: 999px;
+  overflow: hidden;
+}
+.slide .ui-progress > .bar {
+  display: block; height: 100%;
+  background: var(--fs-grad-keyline);
+  width: var(--ui-progress, 0%);
+}
+
+/* ============================================================================
+   Print (export) hint
+   ============================================================================ */
+@media print {
+  .deck-ui { display: none !important; }
+  .deck { display: block !important; }
+  .slide-frame { page-break-after: always; }
+}

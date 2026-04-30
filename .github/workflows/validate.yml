@@ -1,0 +1,79 @@
+name: validate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: build + self-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify required files
+        run: |
+          test -f assets/feishu-deck.css || (echo "MISSING: feishu-deck.css" && exit 1)
+          test -f assets/feishu-deck.js  || (echo "MISSING: feishu-deck.js"  && exit 1)
+          test -f assets/validate.py     || (echo "MISSING: validate.py"     && exit 1)
+          test -f _body.partial.html     || (echo "MISSING: _body.partial.html" && exit 1)
+          test -f build.sh               || (echo "MISSING: build.sh"        && exit 1)
+
+      - name: Verify brand assets present (private repo only)
+        run: |
+          for f in lark-logo.png lark-logo-mono-white.png lark-cover-bg.jpg \
+                   lark-section-bg.jpg lark-content-bg.jpg lark-slogan.png; do
+            test -f "assets/$f" || (echo "MISSING brand asset: $f" && exit 1)
+          done
+
+      - name: JS syntax check
+        run: |
+          node --check assets/feishu-deck.js
+
+      - name: CSS sanity (balanced braces)
+        run: |
+          python3 -c "
+          with open('assets/feishu-deck.css') as f: c = f.read()
+          o, n = c.count('{'), c.count('}')
+          if o != n:
+              print(f'CSS UNBALANCED: open={o} close={n}'); exit(1)
+          print(f'CSS balanced: {o}/{n}')
+          "
+
+      - name: Build (linked + inlined)
+        run: |
+          bash build.sh --inline
+
+      - name: Validate linked deck (default)
+        run: python3 assets/validate.py examples/sample-deck.html
+
+      - name: Validate linked deck (--strict)
+        run: python3 assets/validate.py examples/sample-deck.html --strict
+
+      - name: Validate inlined deck (default)
+        run: python3 assets/validate.py examples/sample-deck-inline.html
+
+      - name: Validate inlined deck (--strict)
+        run: python3 assets/validate.py examples/sample-deck-inline.html --strict
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "=== build artifacts ==="
+          ls -la examples/
+          echo
+          echo "=== self-check items in SKILL.md ==="
+          grep -cE '^\[ \] +[0-9]+\. ' SKILL.md
+          echo "=== audit functions in validate.py ==="
+          grep -cE '^def (audit|check)_' assets/validate.py
