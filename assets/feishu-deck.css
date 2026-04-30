@@ -1818,15 +1818,17 @@ body {
 
 /* Subtle dot-grid backdrop — pairs well with data-decor glows.
    Add `<div class="grid-bg"></div>` as the first child of any .slide that
-   wants ambient texture. z-index: 0 so it sits beneath all content. */
+   wants ambient texture. z-index: 0 so it sits beneath all content.
+   No mask-image — earlier versions used a radial mask which on some GPUs
+   produced repaint flicker when combined with the slide's reveal animation.
+   A lighter opacity + smaller dot pitch achieves a similar look without the
+   compositing cost. */
 .slide .grid-bg {
-  position: absolute; inset: 0; pointer-events: none; z-index: 0; opacity: 0.16;
+  position: absolute; inset: 0; pointer-events: none; z-index: 0; opacity: 0.10;
   background-image:
-    linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
-  background-size: 80px 80px;
-  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
-          mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+    linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 64px 64px;
 }
 
 /* Card hover affordance — color + glow only. NEVER translate.
