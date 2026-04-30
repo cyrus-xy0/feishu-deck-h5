@@ -1709,7 +1709,17 @@ body {
 /* ---- Sidebar + main split ---- */
 
 .slide .ui-window .ui-body {
-  display: flex; flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+  flex: 1 1 auto; min-height: 0;
+  gap: 12px; padding: 16px;
+}
+/* Sidebar+main split (legacy ui-sidebar pattern) re-enables row direction
+   and kills the gap/padding so the sidebar can paint border-right edge-
+   to-edge inside the window. Detected via :has() so authors don't need
+   an explicit modifier class on .ui-body. */
+.slide .ui-window .ui-body:has(> .ui-sidebar) {
+  flex-direction: row;
+  gap: 0; padding: 0;
 }
 .slide .ui-sidebar {
   width: 260px; flex: 0 0 260px;
