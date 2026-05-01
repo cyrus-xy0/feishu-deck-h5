@@ -64,12 +64,32 @@ if ! mkdir -p "$RUN_DIR/input" "$RUN_DIR/output"; then
   exit 1
 fi
 
+# Drop one-click apply launchers into output/ so the local user gets the
+# same edit-loop UX as the bundled deliverable zip: edit texts.md → double
+# click apply.command (macOS) / apply.bat (Windows) → refresh index.html.
+# Without these, Mode 1 users have to type a multi-arg python command from
+# the repo root, which is the friction this addresses.
+for src in \
+  "$SKILL_ROOT/assets/apply-texts.py" \
+  "$SKILL_ROOT/templates/apply.command" \
+  "$SKILL_ROOT/templates/apply.bat"
+do
+  if [[ -f "$src" ]]; then
+    cp "$src" "$RUN_DIR/output/" || echo "warning: could not copy $src" >&2
+  else
+    echo "warning: launcher source missing: $src" >&2
+  fi
+done
+chmod +x "$RUN_DIR/output/apply.command" 2>/dev/null || true
+
 REL_DIR="${RUN_DIR#$RUNS_BASE/}"
 
 echo "NEW RUN OK"
 echo "  run name : $RUN_NAME"
 echo "  input    : $REL_DIR/input/    ← user drops source files here"
 echo "  output   : $REL_DIR/output/   ← agent writes the deck here"
+echo "  launcher : $REL_DIR/output/apply.command (mac) / apply.bat (win)"
+echo "             ↑ edit texts.md → double-click → index.html updates"
 echo "  abs path : $RUN_DIR"
 echo "$RUN_DIR"
 exit 0
