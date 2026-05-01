@@ -1,0 +1,6 @@
+feishu-deck-h5 validator  ·  deck-feishu.html
+  slides: 22
+  errors:   0
+  warnings: 0
+
+PASS — all programmatic checks satisfied.
