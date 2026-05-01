@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>〔Deck title〕 · Lark Suite</title>
 
-  <!-- Option A: link the stylesheet (relative path) -->
-  <link rel="stylesheet" href="../assets/feishu-deck.css">
+  <!-- Option A: link the stylesheet (relative path).
+       Default path assumes the deck lives at  <repo>/runs/<ts>/output/index.html
+       per WORKSPACE LAYOUT. Adjust if you put the deck somewhere else. -->
+  <link rel="stylesheet" href="../../../skills/feishu-deck-h5/assets/feishu-deck.css">
   <!-- Option B (recommended for delivery): inline the contents of feishu-deck.css here -->
   <!-- <style>/* paste feishu-deck.css */</style> -->
 </head>
@@ -14,16 +16,16 @@
 
   <div class="deck">
 
-    <!-- 01 · Cover (master 封面) -->
+    <!-- 01 · Cover (master 封面) — title + 发起人 + 日期, no subtitle, no team line -->
     <div class="slide-frame">
       <div class="slide" data-layout="cover" data-screen-label="01 Cover">
         <div class="wordmark">飞书</div>
         <div class="stage">
-          <h1 class="title">〔主标题<br>第二行〕</h1>
-          <p class="subtitle">〔English subtitle — short and direct〕</p>
+          <h1 class="title title-zh" data-text-id="slide-01.title">〔主标题<br>第二行〕</h1>
         </div>
         <div class="author">
-          <span class="role">〔议题类型 · 日期〕</span>〔团队 / 公司名〕
+          <span data-text-id="slide-01.author">〔发起人姓名〕</span><br>
+          <span data-text-id="slide-01.date">〔YYYY.MM.DD〕</span>
         </div>
       </div>
     </div>
@@ -43,8 +45,8 @@
 
   </div>
 
-  <!-- Option A: link the runtime -->
-  <script src="../assets/feishu-deck.js"></script>
+  <!-- Option A: link the runtime (path matches the CSS link above) -->
+  <script src="../../../skills/feishu-deck-h5/assets/feishu-deck.js"></script>
   <!-- Option B (recommended): inline the contents of feishu-deck.js here -->
   <!-- <script>/* paste feishu-deck.js */</script> -->
 </body>

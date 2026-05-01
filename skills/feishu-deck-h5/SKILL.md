@@ -127,12 +127,35 @@ This is a non-negotiable convention so that:
 
 ### Required structure
 
+`runs/` lives at the **repo root**, NOT inside `skills/<skill-name>/`.
+This avoids the common-case path bloat for a single-skill marketplace
+repo: users see `<repo>/runs/<ts>/output/index.html`, not the deeper
+`<repo>/skills/feishu-deck-h5/runs/<ts>/output/index.html`. `new-run.sh`
+resolves "repo root" via `git rev-parse --show-toplevel` and falls back
+to skill root only when the skill isn't inside a git tree.
+
 ```
-runs/
-└── YYYYMMDD-HHMMSS/        ← one folder per skill invocation, timestamp to the second
-    ├── input/              ← USER drops source files here (PDFs, images, briefs, refs, .thmx, etc.)
-    └── output/             ← AGENT writes the deck HTML, validate reports, intermediate artifacts here
+<repo-root>/
+├── README.md, INSTALL.md, install.sh, …   ← repo-level docs
+├── runs/                                   ← ★ user artifacts live here
+│   └── YYYYMMDD-HHMMSS/                    ← one folder per skill invocation
+│       ├── input/                          ← USER drops source files here
+│       └── output/                         ← AGENT writes the deck + validate reports here
+└── skills/feishu-deck-h5/                  ← skill source (don't write outputs here)
+    ├── SKILL.md, assets/, templates/, examples/, …
+    └── (no runs/ subfolder — runs are at repo root)
 ```
+
+The deck's CSS / JS link in `runs/<ts>/output/index.html` points at the
+skill's assets via a relative path:
+
+```html
+<link rel="stylesheet" href="../../../skills/feishu-deck-h5/assets/feishu-deck.css">
+<script src="../../../skills/feishu-deck-h5/assets/feishu-deck.js"></script>
+```
+
+(Three `../` to climb from `output/` to repo root, then down into the
+skill folder.)
 
 ### Required steps (run IN ORDER, after PREFLIGHT)
 
@@ -797,7 +820,9 @@ for parallel concepts; otherwise alternate to keep rhythm.
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>〔Deck title〕 · Lark Suite</title>
-  <link rel="stylesheet" href="assets/feishu-deck.css">
+  <!-- For per-run decks at <repo>/runs/<ts>/output/index.html, the CSS / JS
+       path needs to climb three levels then dive into the skill folder: -->
+  <link rel="stylesheet" href="../../../skills/feishu-deck-h5/assets/feishu-deck.css">
   <!-- Or inline the css for single-file delivery: see "Single-file inlined output" -->
 </head>
 <body>
@@ -809,7 +834,7 @@ for parallel concepts; otherwise alternate to keep rhythm.
     </div>
     <!-- more <div class="slide-frame"> entries -->
   </div>
-  <script src="assets/feishu-deck.js"></script>
+  <script src="../../../skills/feishu-deck-h5/assets/feishu-deck.js"></script>
 </body>
 </html>
 ```

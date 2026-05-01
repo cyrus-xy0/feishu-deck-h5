@@ -22,6 +22,23 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Where to root the runs/ folder.
+#
+# Preference order:
+#   1. Repo root (resolved via `git rev-parse --show-toplevel`) — when the
+#      skill lives inside a git checkout, runs/ goes at the repo top so
+#      users see  <repo>/runs/<ts>/  instead of having to dive through
+#      <repo>/skills/<skill-name>/runs/<ts>/. Saves two levels in the
+#      typical single-skill repo and matches user expectation that
+#      generated artifacts live next to README, not inside skill source.
+#   2. Skill root — fallback when the skill isn't inside a git tree
+#      (rare; ad-hoc copies, untracked installs).
+if REPO_ROOT="$(git -C "$SKILL_ROOT" rev-parse --show-toplevel 2>/dev/null)"; then
+  RUNS_BASE="$REPO_ROOT"
+else
+  RUNS_BASE="$SKILL_ROOT"
+fi
+
 SLUG="${1:-}"
 TS="$(date +%Y%m%d-%H%M%S)"
 
@@ -33,7 +50,7 @@ else
   RUN_NAME="$TS"
 fi
 
-RUN_DIR="$SKILL_ROOT/runs/$RUN_NAME"
+RUN_DIR="$RUNS_BASE/runs/$RUN_NAME"
 
 # In the unlikely case of a same-second collision, append -2, -3, ...
 if [[ -e "$RUN_DIR" ]]; then
@@ -47,7 +64,7 @@ if ! mkdir -p "$RUN_DIR/input" "$RUN_DIR/output"; then
   exit 1
 fi
 
-REL_DIR="${RUN_DIR#$SKILL_ROOT/}"
+REL_DIR="${RUN_DIR#$RUNS_BASE/}"
 
 echo "NEW RUN OK"
 echo "  run name : $RUN_NAME"
