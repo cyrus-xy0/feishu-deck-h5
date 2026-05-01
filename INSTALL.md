@@ -73,6 +73,24 @@ bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh
 
 If `ssh -T git@github.com` fails, stop and ask the user to set up their SSH key first — every install path depends on it.
 
+### Don't have collaborator access yet?
+
+If `git ls-remote git@github.com:FuQiang/feishu-deck-h5.git HEAD` fails with
+"Repository not found" or "Permission denied" but `ssh -T git@github.com`
+works, the user has SSH set up but is not yet a collaborator on this private
+repo.
+
+`install.sh` detects this and exits with **code 2**, printing a copy-pasteable
+Lark/Feishu message template (with the user's GitHub username pre-filled) for
+them to send to FuQiang. The agent should:
+
+1. Show the printed template to the user verbatim
+2. Tell them to paste it into Lark to FuQiang
+3. Wait for them to confirm the GitHub invitation email arrived + was accepted
+4. Re-run `install.sh`
+
+Do **not** try to add them as a collaborator via `gh api` — only the repo owner can do that.
+
 ---
 
 ## Repo structure (so agents know what they cloned)

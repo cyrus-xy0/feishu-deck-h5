@@ -30,12 +30,37 @@ echo "    target:  $INSTALL_DIR"
 echo "    symlink: $LINK_PATH"
 echo
 
-# Prereq: SSH access to GitHub
-if ! ssh -T -o BatchMode=yes -o ConnectTimeout=5 git@github.com 2>&1 | grep -q "successfully authenticated\|Hi "; then
+# Prereq 1: SSH access to GitHub
+SSH_OUT="$(ssh -T -o BatchMode=yes -o ConnectTimeout=5 git@github.com 2>&1 || true)"
+if ! echo "$SSH_OUT" | grep -q "successfully authenticated\|Hi "; then
   echo "ERROR — SSH to github.com failed. Make sure your SSH key is registered:"
   echo "  https://github.com/settings/keys"
   echo "  Test with: ssh -T git@github.com"
   exit 1
+fi
+GH_USER="$(echo "$SSH_OUT" | sed -n 's/^Hi \([^!]*\)!.*/\1/p')"
+
+# Prereq 2: access to this specific repo (collaborator on private repo)
+if ! git ls-remote "$REPO_URL" HEAD >/dev/null 2>&1; then
+  cat <<EOF
+
+ERROR — your SSH key works, but you don't have access to FuQiang/feishu-deck-h5
+(it's a private repo). Send this message to FuQiang on Lark/Feishu:
+
+  ──────────────────────────────────────────────────────────────
+  你好 FuQiang，想用一下 feishu-deck-h5 这个 skill，
+  请把我加为仓库 collaborator：
+
+  · GitHub 用户名: ${GH_USER:-<你的 GitHub username, 在 https://github.com 登录后右上角>}
+  · 仓库: https://github.com/FuQiang/feishu-deck-h5
+  · 添加入口（FuQiang 这边点）:
+    https://github.com/FuQiang/feishu-deck-h5/settings/access
+  ──────────────────────────────────────────────────────────────
+
+收到 GitHub 邀请邮件后点 "Accept invitation"，然后重新运行本脚本。
+
+EOF
+  exit 2
 fi
 
 # 1. clone (or update if exists)
