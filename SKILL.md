@@ -149,6 +149,247 @@ reserved for the maintainers' reference sample.
 
 ---
 
+## TEXT-EDIT SIDECAR (mandatory) — `data-text-id` + `texts.md`
+
+Decks are 1500+ lines of dense HTML. Users CANNOT comfortably hunt through
+markup to fix a typo or rewrite a sentence. Every deck this skill produces
+MUST ship with a paired `texts.md` sidecar so the user can edit copy in
+one ergonomic file and reapply the changes back into the HTML without
+touching layout, CSS, decoration, or SVG mocks.
+
+### Required deliverables (per run)
+
+After PREFLIGHT and WORKSPACE setup, the agent's `runs/<timestamp>/output/`
+folder MUST contain BOTH:
+
+```
+output/
+  index.html          ← deck, every text leaf carries data-text-id="slide-NN.field"
+  texts.md            ← sidecar, edit-only file paired with index.html
+```
+
+The user edits `texts.md`; running
+
+```bash
+python3 assets/apply-texts.py output/index.html output/texts.md
+```
+
+patches `index.html` in place (with a `.bak` first), changing only the
+`textContent` of every element matching the changed ids. Layout, CSS,
+SVG, decoration are byte-for-byte preserved.
+
+### Authoring rule — every text leaf gets a `data-text-id`
+
+When generating slide markup, every element whose inner content is plain
+text (optionally containing `<br>`) MUST carry a `data-text-id` attribute
+following this scheme:
+
+```
+data-text-id="slide-{NN}.{field}"
+```
+
+- `NN` is the zero-padded slide ordinal matching `data-screen-label`
+  order (`slide-01`, `slide-02`, …). It MUST stay stable across
+  regenerations of the same deck.
+- `field` is a semantic, dot-namespaced name (`title`, `subtitle`,
+  `card-01.body`, `agenda.item-03.zh`, `kpi-02.label`, `footer.brand`).
+  Use ordinals (`-01`, `-02`) on repeating siblings even when there's
+  only one today, so that adding a sibling later doesn't silently
+  renumber the existing one.
+
+**Examples (correct):**
+
+```html
+<h1 class="title" data-text-id="slide-01.title">先进团队的<br>工作方式</h1>
+<p class="subtitle" data-text-id="slide-01.subtitle">The way advanced teams work</p>
+<div class="agenda-item">
+  <div class="n">01</div>
+  <div class="title-zh" data-text-id="slide-02.agenda.item-01.zh">背景与挑战</div>
+  <div class="title-en" data-text-id="slide-02.agenda.item-01.en">Context and challenges</div>
+</div>
+```
+
+### Excluded from `data-text-id` (NEVER annotate these)
+
+- `<svg>` and any element inside SVG (decorative, not user copy).
+- `.pageno` (derived from slide order, never edited by hand).
+- Anything inside `<script>`, `<style>`, `<noscript>`, HTML comments.
+- The `<title>` in `<head>` (page-level metadata; edit the file directly
+  if needed).
+- Brand-locked text that must never change (e.g., the "飞书" wordmark)
+  — these MAY be annotated for completeness, but MUST be flagged in
+  `texts.md` with a `(brand-locked)` suffix in the field name comment.
+
+### Mixed-text-and-inline rule (this is the trap)
+
+If an element contains text AND inline tags other than `<br>` — for
+instance `<blockquote>飞书让 30 万人 <span class="accent-text">像一个团队</span>
+一样工作。</blockquote>` — DO NOT put a single `data-text-id` on the
+parent. Instead, split the content into separate leaves:
+
+```html
+<blockquote>
+  <span data-text-id="slide-06.quote.lead">飞书让 30 万人 </span>
+  <span class="accent-text" data-text-id="slide-06.quote.emphasis">像一个团队</span>
+  <span data-text-id="slide-06.quote.tail"> 一样工作。</span>
+</blockquote>
+```
+
+This keeps every editable run a clean text leaf so `apply-texts.py` can
+substitute it with no markup-aware logic. The cost is two extra `<span>`
+wrappers, which CSS doesn't see (they have no class).
+
+### `texts.md` format
+
+A single flat file, one section per slide. The `extract-texts.py` script
+generates it; the agent emits it directly when authoring a fresh deck.
+
+```markdown
+# {Deck title} — texts
+
+> Edit text below. After save, run:
+>   python3 assets/apply-texts.py <deck.html> <texts.md>
+>
+> Rules:
+>   • Edit ONLY this file. Visual tweaks → overrides.css.
+>     Layout / structure / new slides → re-ask Claude.
+>   • Use `\n` to insert a line break (renders as <br>).
+>   • Do NOT rename the slide-NN.field ids — they pair with HTML.
+
+## slide-01 (cover) — 01 Cover
+title: 先进团队的\n工作方式
+subtitle: The way advanced teams work
+author.role: 客户提案 · 2026.04
+author.team: 飞书企业服务团队
+
+## slide-02 (agenda) — 02 Agenda
+title: 本次汇报共六个部分
+agenda.item-01.zh: 背景与挑战
+agenda.item-01.en: Context and challenges
+…
+```
+
+- Section header: `## slide-NN (layout) — screen-label` exactly.
+- Lines: `field-name: value` (single line). Use `\n` literal (two chars,
+  backslash + n) to encode a `<br>` inside the value.
+- Lines starting with `>` or `#` are comments / headers — ignored on
+  apply.
+
+### Edit discipline (relay to the user when delivering)
+
+1. **Text changes → `texts.md`**, then run `apply-texts.py`. Never edit
+   text directly in `index.html` (the next regeneration / re-extract
+   will conflict).
+2. **Visual / spacing / color tweaks → `overrides.css`** linked at the
+   end of the deck. Never edit the inline CSS in the deck.
+3. **Layout, new slides, structural changes → re-ask Claude.** That
+   triggers a regeneration; ids must remain stable for slides that
+   already existed.
+
+### Tools shipped with the skill
+
+| Script | Purpose |
+|---|---|
+| `assets/apply-texts.py [<html> <texts.md>] [--dry-run] [--check]` | Apply edits from texts.md back into HTML. With no args, defaults to `index.html` + `texts.md` in the script's own directory (so it works inside the bundled deliverable zip). `--check` exits 1 on drift. |
+| `assets/extract-texts.py <html> [--out texts.md] [--annotate out.html]` | Bootstrap texts.md from a deck. Mode A: deck already annotated — just dump. Mode B: bare deck — auto-add `data-text-id` and emit annotated HTML alongside texts.md. |
+| `assets/package-deliverable.sh <output-dir> [--name foo]` | Bundle the per-run output into `deck-editable.zip` containing `index.html`, `texts.md`, `apply-texts.py`, `apply.command` (macOS), `apply.bat` (Windows), and a user-facing `README.txt`. The recipient unzips, edits texts.md, double-clicks the launcher — no Claude Code or pip required, just stock Python 3. |
+
+**Retrofit limitation**: `extract-texts.py` Mode B captures pure text
+leaves only. Mixed-content elements (text + inline tags) are skipped —
+the user must restructure them per the "mixed-text-and-inline rule"
+above. For NEW decks the agent generates, this never comes up because
+the agent splits leaves up front.
+
+### Validator behaviour
+
+`assets/validate.py` runs `audit_text_ids` (rule T01–T03) on every
+deck. It enforces:
+
+- T01 — every `data-text-id` value matches `^slide-\d+\.[\w.\-]+$`.
+- T02 — `data-text-id` values are unique within the deck.
+- T03 — if a paired `texts.md` lives next to the HTML, its id set
+  matches the HTML's id set (no drift). For a per-run deck at
+  `runs/<ts>/output/index.html`, the validator looks for
+  `runs/<ts>/output/texts.md` automatically.
+
+Decks with no `data-text-id` at all are flagged with a single warning
+("texts.md sidecar not generated") rather than 200 individual errors,
+so legacy / external decks still pass through.
+
+---
+
+## DELIVERY MODES — pick by harness
+
+The skill produces files in `runs/<timestamp>/output/`. How those files
+reach the human depends on which harness invoked the skill. Pick the
+right delivery mode and call it out explicitly when handing off.
+
+### Mode 1 · Claude Code on the user's local machine
+
+Default. The user has filesystem access to `runs/<timestamp>/output/`
+already. Just tell them the path:
+
+> 已生成：
+> · `runs/<ts>/output/index.html` — 浏览器双击打开
+> · `runs/<ts>/output/texts.md` — 改文字时编辑这个，然后跑
+>   `python3 assets/apply-texts.py runs/<ts>/output/index.html runs/<ts>/output/texts.md`
+
+No packaging step needed.
+
+### Mode 2 · OpenClaw / OpenCode / remote agent / Feishu bot
+
+The skill ran in a sandbox the user can't reach. Filesystem paths are
+useless. **Generate `deck-editable.zip` and ship that as the deliverable**:
+
+```bash
+bash assets/package-deliverable.sh runs/<ts>/output/
+# produces: runs/<ts>/output/deck-editable.zip
+```
+
+The zip contains:
+
+```
+deck-editable.zip
+├── index.html        ← the deck (single inlined file, viewable offline)
+├── texts.md          ← editable copy of every visible string
+├── apply-texts.py    ← engine, stdlib-only Python 3
+├── apply.command     ← macOS one-click launcher (double-click)
+├── apply.bat         ← Windows one-click launcher
+└── README.txt        ← user-facing instructions, including macOS Gatekeeper
+                       and Windows Python install notes
+```
+
+Hand the zip to the harness for delivery. Typical bot flows:
+
+- **Feishu bot**: send as file attachment via `im/v1/messages` with a
+  one-line caption ("飞书风格 deck — 解压后双击 index.html 看，改文字看 README.txt").
+  ~15-30 KB for the launchers/scripts plus whatever the deck weighs
+  (typically 50-300 KB inlined).
+- **OpenClaw remote**: return the zip path; OpenClaw's transport layer
+  handles uploading or attaching it to the response.
+- **Slack / email / etc.**: same — attach the zip.
+
+The user does not need Claude Code, OpenClaw, or pip. Only stock
+`python3` (default on macOS, one-time install on Windows).
+
+### Mode 3 · View-only delivery (when editability isn't needed)
+
+If the recipient is "客户/老板看一眼就行" and editing is not in scope,
+ship just the inlined `index.html` (no zip, no texts.md, no scripts).
+Use `build.sh --inline` to produce a fully self-contained single file.
+
+This loses the texts.md edit loop — only choose it when you're certain
+the recipient is consuming, not authoring.
+
+### Choosing between Mode 2 and Mode 3
+
+Default to **Mode 2 (zip with edit kit)** unless the user explicitly
+says "this is the final version, no more edits" or "send to the
+customer, just the visual." Most internal handoffs eventually need
+copy tweaks; shipping the edit kit pre-empts a round-trip back to you.
+
+---
+
 Generate a dark, cinematic Lark / 飞书 brand-aligned **HTML deck** at 1920×1080 in a single
 self-contained file that:
 
@@ -188,6 +429,11 @@ feishu-deck-h5/
 ├── assets/
 │   ├── feishu-deck.css         ← all design tokens + 13 slide layouts (single source of truth)
 │   ├── feishu-deck.js          ← scale-to-fit + present/scroll modes + keyboard nav
+│   ├── validate.py             ← programmatic self-check (HARD GATE before delivery)
+│   ├── apply-texts.py          ← patch HTML from edited texts.md (text-edit sidecar)
+│   ├── extract-texts.py        ← bootstrap texts.md from a deck (annotate or dump)
+│   ├── new-run.sh              ← create runs/<timestamp>/{input,output}/ workspace
+│   ├── preflight.sh            ← mandatory local-mount check
 │   ├── lark-logo.png           ← color logo (petals + 飞书) for cover/end. From master image3.png
 │   ├── lark-logo-mono-white.png← mono-white variant for content/section pages
 │   ├── lark-cover-bg.jpg       ← flower-on-dark master background. From master image2.jpg
@@ -405,9 +651,16 @@ logo, R13 br-in-title, R56 eyebrow-in-header, P50 base64 budget),
    - copy the corresponding markup block from `templates/slide-recipes.html`
    - drop it into the shell, fill the placeholders, set `data-screen-label`,
      and increment the footer page number.
-5. **Run the self-check** (final section of this file).
-6. **Deliver as one HTML file**. Inline the CSS + JS for portability if the user
+5. **Annotate every text leaf with `data-text-id`** as you author markup, and
+   emit a paired `texts.md` next to `index.html`. See "TEXT-EDIT SIDECAR"
+   above for the ID scheme and format. The user edits `texts.md` to fix
+   copy without touching layout.
+6. **Run the self-check** (final section of this file). The validator
+   enforces the text-id scheme and `texts.md` sync.
+7. **Deliver as one HTML file**. Inline the CSS + JS for portability if the user
    wants a single attachment (see "Single-file inlined output" below).
+   Tell the user the workflow: edit `texts.md` → run
+   `python3 assets/apply-texts.py output/index.html output/texts.md`.
 
 ---
 
