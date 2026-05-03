@@ -31,6 +31,10 @@ screenshots/
 # often contain large user-provided scene images. Keep out of source.
 runs/
 
+# Skill distribution artifacts from package-skill.sh — regenerable,
+# binary, dated. Don't commit.
+feishu-deck-h5-*.zip
+
 # Node (if you ever add tooling)
 node_modules/
 package-lock.json
