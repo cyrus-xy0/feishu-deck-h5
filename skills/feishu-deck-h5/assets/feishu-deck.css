@@ -304,13 +304,14 @@ body {
 /* Opt-in mono-white variant for over-imagery edge cases ONLY */
 .slide .wordmark.is-mono { background-image: var(--fs-asset-logo-mono); }
 
-.slide .footer {
-  position: absolute; left: 96px; right: 96px; bottom: 48px;
-  display: flex; justify-content: space-between; align-items: center;
-  font: 500 16px/1 var(--fs-font-latin);
-  letter-spacing: 0.08em; color: var(--fs-text-40);
-}
-.slide .footer .dot::before { content: " · "; color: var(--fs-text-16); }
+/* Per-slide .footer chrome (brand line + page no.) is RETIRED as of 2026-05.
+   The fullscreen present-mode pager (bottom-center prev/page-no/next bar
+   in feishu-deck.js / .deck-ui) shows the page number, and the corner
+   logo (.wordmark) carries the brand. The repeated bottom-right strip
+   was redundant clutter. Templates and render.py no longer emit this
+   markup; this rule hides any leftover .footer/.pageno DOM in legacy
+   decks generated before the cleanup. */
+.slide .footer, .slide .pageno { display: none; }
 
 /* Eyebrow (uppercase Latin, accent color, tracked) */
 .slide .eyebrow {
@@ -452,7 +453,7 @@ body {
   display: inline-block; margin-right: 32px;
   color: rgba(255,255,255,0.55); font-weight: 500;
 }
-.slide[data-layout="cover"] .footer { display: none; }   /* master cover has no footer chrome */
+/* (cover .footer hide rule retired — global .slide .footer { display: none } now handles it.) */
 
 /* ============================================================================
    LAYOUT 02 — Section / chapter divider (一级章节页) — master slideLayout3
@@ -883,7 +884,7 @@ body {
   font: 500 18px/1.5 var(--fs-font-latin);
   color: rgba(255,255,255,0.55); letter-spacing: 0.06em;
 }
-.slide[data-layout="end"] .footer { display: none; }
+/* (end .footer hide rule retired — global .slide .footer { display: none } now handles it.) */
 
 /* ============================================================================
    Helpers — accent overrides for siblings (charts, columns, pills)
@@ -1024,8 +1025,7 @@ body {
          <div class="cta-box">…</div>      ← optional CTA
        </div>
        <p class="source-footer">…</p>      ← stays outside .stage
-       <div class="footer">…</div>
-     </div>
+     </div>     <!-- .footer removed 2026-05; pager UI handles page no. -->
 
    No backward-compat impact: pre-1.3.2 decks (no .stage wrapper) keep
    absolute body positioning unchanged via the rules at lines 936-943.
@@ -1133,9 +1133,8 @@ body {
 .slide[data-layout="big-stat"] .num { font-size: 240px; line-height: 1; padding-top: 16px; }
 .slide[data-layout="big-stat"] .num .unit { font-size: 72px; }
 
-/* Footer — ALL non-cover/non-end slides keep the master footer chrome */
-.slide[data-layout="cover"] .footer,
-.slide[data-layout="end"] .footer { display: none; }
+/* (Footer-on-non-cover/non-end rule retired 2026-05 — .footer is fully
+   removed from templates; the global hide above kills any leftover DOM.) */
 
 /* ============================================================================
    LAYOUT OVERFLOW DEFENSES (规范: stage must never exceed 1080×1920)
@@ -1197,9 +1196,9 @@ body {
     animation: fs-reveal 0.28s ease forwards;
     animation-delay: calc(0.035s * var(--child-i, 1));
   }
-  /* chrome (wordmark, footer) reveals immediately, no stagger */
-  .slide-frame.is-current .slide .wordmark,
-  .slide-frame.is-current .slide .footer {
+  /* chrome (wordmark) reveals immediately, no stagger.
+     .footer was retired 2026-05 — present-mode pager replaces it. */
+  .slide-frame.is-current .slide .wordmark {
     opacity: 1; transform: none; animation: none;
   }
   /* First load: skip the staggered reveal on the first slide so users see

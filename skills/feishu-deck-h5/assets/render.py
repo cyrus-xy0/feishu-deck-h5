@@ -48,7 +48,6 @@ VALIDATOR = ASSETS_DIR / "validate.py"
 ONE_PAGER_REQUIRED = (
     "title",
     "industry",
-    "brand",
     "source",
     "hook.lead", "hook.accent", "hook.tail",
     "arc.pain",
@@ -80,7 +79,6 @@ ONE_PAGER_TEXT_IDS = (
     ("slide-01.arc.value.tail",   "arc.value.tail"),
     ("slide-01.scene.caption",    "scene.caption"),
     ("slide-01.source",           "source"),
-    ("slide-01.footer.brand",     "brand"),
 )
 
 # Beats whose content carries the rhetorical weight of the case. If an
@@ -106,12 +104,11 @@ ONE_PAGER_ACCENT_PATHS = (
 # ---------------------------------------------------------------------------
 
 QUOTE_REQUIRED = (
-    "title", "brand", "attribution",
+    "title", "attribution",
     "quote.lead", "quote.accent", "quote.tail",
 )
 QUOTE_DEFAULTS = {
     "decor": "blue-glow",
-    "pageno": "01",
     "screen_label": None,
 }
 QUOTE_TEXT_IDS = (
@@ -119,7 +116,6 @@ QUOTE_TEXT_IDS = (
     ("slide-01.quote.accent", "quote.accent"),
     ("slide-01.quote.tail",   "quote.tail"),
     ("slide-01.attribution",  "attribution"),
-    ("slide-01.footer.brand", "brand"),
 )
 QUOTE_FIT_CHECK = (
     "quote.lead", "quote.accent", "quote.tail",
@@ -135,13 +131,12 @@ QUOTE_ACCENT_PATHS = (
 # ---------------------------------------------------------------------------
 
 BIG_STAT_REQUIRED = (
-    "title", "brand",
+    "title",
     "stat.number", "stat.unit",
     "heading", "body",
 )
 BIG_STAT_DEFAULTS = {
     "decor": "",
-    "pageno": "01",
     "eyebrow": "",
     "source": "",
     "screen_label": None,
@@ -153,7 +148,6 @@ BIG_STAT_TEXT_IDS = (
     ("slide-01.heading",      "heading"),
     ("slide-01.body",         "body"),
     ("slide-01.source",       "source"),
-    ("slide-01.footer.brand", "brand"),
 )
 # stat.number / stat.unit can be naturally short (e.g. "30" / "%"). Skip
 # them in fit_check; only the narrative beats need the safety net.
@@ -171,7 +165,8 @@ BIG_STAT_ACCENT_PATHS = ()    # big-stat has no inline accent structure
 MULTI_CASE_BUNDLE_REQUIRED = (
     "deck.title", "deck.author", "deck.date",
     "agenda.title",
-    "brand.line", "brand.contact",
+    "brand.contact",   # used by end-fragment; brand.line was for the
+                       # retired .footer chrome — no longer required.
 )
 MULTI_CASE_BUNDLE_DEFAULTS = {}     # nothing optional
 
@@ -614,7 +609,6 @@ def render_composite(pattern: str, input_path: Path, output_dir: Path,
     ]
     agenda_data = {
         "agenda": bundle.get("agenda", {}),
-        "brand":  get_path(bundle, "brand.line"),
         "agenda_items_html": _build_agenda_items_html(cases_for_agenda),
         "asset_path": asset_path,
     }
@@ -642,7 +636,6 @@ def render_composite(pattern: str, input_path: Path, output_dir: Path,
             **case_data,
             "slide_no": slide_no,
             "slide_no_padded": slide_no_padded,
-            "pageno": slide_no_padded,
             "scene_filename": scene_filename,
         }
         case_htmls.append(render_template(case_fragment_template, case_render_data))

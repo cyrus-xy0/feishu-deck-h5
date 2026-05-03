@@ -51,9 +51,8 @@
       frame.dataset.idx = String(i);
       const slide = frame.querySelector('.slide');
       if (!slide) return;
-      // Footer page no.
-      const fNum = slide.querySelector('.footer .pageno');
-      if (fNum && !fNum.textContent.trim()) fNum.textContent = pad(i + 1);
+      // (Per-slide .footer/.pageno retired 2026-05 — pager UI in present
+      //  mode shows the page number; no per-slide DOM read needed.)
       // Reveal animation: assign --child-i 1..N to direct children for staggered delay
       Array.prototype.forEach.call(slide.children, (child, idx) => {
         child.style.setProperty('--child-i', String(Math.min(idx + 1, 7)));

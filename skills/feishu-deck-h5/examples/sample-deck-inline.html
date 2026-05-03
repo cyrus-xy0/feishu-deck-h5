@@ -312,13 +312,14 @@ body {
 /* Opt-in mono-white variant for over-imagery edge cases ONLY */
 .slide .wordmark.is-mono { background-image: var(--fs-asset-logo-mono); }
 
-.slide .footer {
-  position: absolute; left: 96px; right: 96px; bottom: 48px;
-  display: flex; justify-content: space-between; align-items: center;
-  font: 500 16px/1 var(--fs-font-latin);
-  letter-spacing: 0.08em; color: var(--fs-text-40);
-}
-.slide .footer .dot::before { content: " · "; color: var(--fs-text-16); }
+/* Per-slide .footer chrome (brand line + page no.) is RETIRED as of 2026-05.
+   The fullscreen present-mode pager (bottom-center prev/page-no/next bar
+   in feishu-deck.js / .deck-ui) shows the page number, and the corner
+   logo (.wordmark) carries the brand. The repeated bottom-right strip
+   was redundant clutter. Templates and render.py no longer emit this
+   markup; this rule hides any leftover .footer/.pageno DOM in legacy
+   decks generated before the cleanup. */
+.slide .footer, .slide .pageno { display: none; }
 
 /* Eyebrow (uppercase Latin, accent color, tracked) */
 .slide .eyebrow {
@@ -460,7 +461,7 @@ body {
   display: inline-block; margin-right: 32px;
   color: rgba(255,255,255,0.55); font-weight: 500;
 }
-.slide[data-layout="cover"] .footer { display: none; }   /* master cover has no footer chrome */
+/* (cover .footer hide rule retired — global .slide .footer { display: none } now handles it.) */
 
 /* ============================================================================
    LAYOUT 02 — Section / chapter divider (一级章节页) — master slideLayout3
@@ -567,13 +568,17 @@ body {
 .slide[data-layout="content-2col"] .col-text ul.feature-list {
   display: flex; flex-direction: column; gap: 22px; margin-top: 12px;
 }
+/* li uses block + left padding (NOT grid). Grid would treat <b> and the
+   trailing text node as two separate items: text node would auto-place
+   into row 2 / col 1 (36px wide) and CJK chars would wrap one-per-line. */
 .slide[data-layout="content-2col"] .col-text ul.feature-list li {
-  display: grid; grid-template-columns: 36px 1fr; gap: 18px; align-items: start;
+  position: relative; padding-left: 36px;
   font: 500 24px/1.45 var(--fs-font-cjk); color: var(--fs-text-72);
 }
 .slide[data-layout="content-2col"] .col-text ul.feature-list li::before {
-  content: ""; width: 8px; height: 8px; border-radius: 999px;
-  background: var(--fs-accent); margin-top: 14px; align-self: start;
+  content: ""; position: absolute; left: 0; top: 14px;
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--fs-accent);
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--fs-accent) 16%, transparent);
 }
 .slide[data-layout="content-2col"] .col-visual {
@@ -704,6 +709,17 @@ body {
   color: #fff; font-weight: 600;
 }
 .slide[data-layout="table"] tbody tr:last-child td { border-bottom: 0; }
+/* Optional caption / 说明 paragraph under the table. Same convention as
+   stats layout — pin above the page footer. Without this rule, .footnote
+   is the only non-absolute child in the slide and gets dumped at the top
+   of the canvas (above the header). :has() so tables WITHOUT a footnote
+   keep using the full body zone — no penalty. */
+.slide[data-layout="table"]:has(.footnote) .table-wrap { bottom: 180px; }
+.slide[data-layout="table"] .footnote {
+  position: absolute; left: 96px; right: 96px; bottom: 96px;
+  font: 500 16px/1.5 var(--fs-font-cjk); color: var(--fs-text-40);
+  letter-spacing: 0.02em;
+}
 
 /* ============================================================================
    LAYOUT 09 — Timeline (horizontal milestones)
@@ -876,7 +892,7 @@ body {
   font: 500 18px/1.5 var(--fs-font-latin);
   color: rgba(255,255,255,0.55); letter-spacing: 0.06em;
 }
-.slide[data-layout="end"] .footer { display: none; }
+/* (end .footer hide rule retired — global .slide .footer { display: none } now handles it.) */
 
 /* ============================================================================
    Helpers — accent overrides for siblings (charts, columns, pills)
@@ -982,8 +998,13 @@ body {
 .slide[data-layout="stats"]        .grid       { top: 220px; align-content: center; }
 .slide[data-layout="stats"]        .footnote   { bottom: 96px; }
 .slide[data-layout="table"]        .table-wrap { top: 200px; bottom: 110px; }
-.slide[data-layout="timeline"]     .nodes      { top: 240px; bottom: 160px; align-content: center; }
-.slide[data-layout="timeline"]     .axis       { top: 380px; }
+/* Timeline opts OUT of L2 vertical centering. .axis is absolutely positioned
+   relative to .slide (not .nodes), so it can't follow when .nodes' rows center
+   vertically — dots drift down by (zone_h - row_h)/2 and unalign from the
+   horizontal line. Keep nodes top-pinned at 400 so dot center (400 + node
+   padding-top 132 + dot radius 9) = 541 = .axis center (540 + 1). */
+.slide[data-layout="timeline"]     .nodes      { top: 400px; bottom: 160px; }
+.slide[data-layout="timeline"]     .axis       { top: 540px; }
 .slide[data-layout="process"]      .flow       { top: 240px; bottom: 130px; align-content: center; }
 
 /* `.stage` is the canonical name for a body-content container in the abstract
@@ -1012,8 +1033,7 @@ body {
          <div class="cta-box">…</div>      ← optional CTA
        </div>
        <p class="source-footer">…</p>      ← stays outside .stage
-       <div class="footer">…</div>
-     </div>
+     </div>     <!-- .footer removed 2026-05; pager UI handles page no. -->
 
    No backward-compat impact: pre-1.3.2 decks (no .stage wrapper) keep
    absolute body positioning unchanged via the rules at lines 936-943.
@@ -1121,9 +1141,8 @@ body {
 .slide[data-layout="big-stat"] .num { font-size: 240px; line-height: 1; padding-top: 16px; }
 .slide[data-layout="big-stat"] .num .unit { font-size: 72px; }
 
-/* Footer — ALL non-cover/non-end slides keep the master footer chrome */
-.slide[data-layout="cover"] .footer,
-.slide[data-layout="end"] .footer { display: none; }
+/* (Footer-on-non-cover/non-end rule retired 2026-05 — .footer is fully
+   removed from templates; the global hide above kills any leftover DOM.) */
 
 /* ============================================================================
    LAYOUT OVERFLOW DEFENSES (规范: stage must never exceed 1080×1920)
@@ -1185,9 +1204,9 @@ body {
     animation: fs-reveal 0.28s ease forwards;
     animation-delay: calc(0.035s * var(--child-i, 1));
   }
-  /* chrome (wordmark, footer) reveals immediately, no stagger */
-  .slide-frame.is-current .slide .wordmark,
-  .slide-frame.is-current .slide .footer {
+  /* chrome (wordmark) reveals immediately, no stagger.
+     .footer was retired 2026-05 — present-mode pager replaces it. */
+  .slide-frame.is-current .slide .wordmark {
     opacity: 1; transform: none; animation: none;
   }
   /* First load: skip the staggered reveal on the first slide so users see
@@ -2321,6 +2340,79 @@ body {
 .slide .ui-kpi.is-teal .t { color: var(--fs-teal); }
 
 /* ----------------------------------------------------------------------------
+   .data-panel — brand-aligned "report block" container for showing structured
+   data (lists, status rows, KPI summaries, callouts). USE THIS by default;
+   reach for `.ui-window` only when actually mocking a macOS desktop app.
+   Distinguishing visuals: 4 px side-accent bar (blue / teal / violet),
+   inset top highlight, gradient keyline under the heading. NO traffic lights.
+   ---------------------------------------------------------------------------- */
+.slide .data-panel {
+  background: rgba(10, 18, 48, 0.55);
+  border: 1px solid rgba(60, 127, 255, 0.15);
+  border-left: 4px solid var(--fs-blue);
+  border-radius: 14px;
+  padding: 30px 34px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.slide .data-panel > h4 {
+  font: 600 22px/1.3 var(--fs-font-cjk);
+  color: var(--fs-text);
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+.slide .data-panel > hr {
+  height: 1px;
+  background: linear-gradient(to right,
+    color-mix(in srgb, var(--fs-blue) 60%, transparent), transparent);
+  margin: 0;
+  border: 0;
+}
+/* Lightweight in-panel row — flatter than .ui-row (no pill background).
+   Use when the panel itself already provides the framing.  */
+.slide .data-panel .row {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  font: 500 22px/1.45 var(--fs-font-cjk);
+  color: var(--fs-text);
+}
+.slide .data-panel .row::before {
+  content: "▸";
+  color: var(--fs-blue);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.slide .data-panel .row .lbl { flex: 1;          color: var(--fs-text); }
+.slide .data-panel .row .val { flex-shrink: 0;   color: var(--fs-teal); font-weight: 600; }
+.slide .data-panel .row .val.warn,
+.slide .data-panel .row .val.dn  { color: var(--fs-orange); }
+.slide .data-panel .row .val.up  { color: var(--fs-teal);   }
+
+/* Tonal variants — opt-in via .is-teal / .is-violet for differentiation
+   when multiple data-panels coexist on a slide.                         */
+.slide .data-panel.is-teal {
+  border-left-color: var(--fs-teal);
+  border-color: rgba(51, 214, 192, 0.15);
+}
+.slide .data-panel.is-teal > hr {
+  background: linear-gradient(to right,
+    color-mix(in srgb, var(--fs-teal) 60%, transparent), transparent);
+}
+.slide .data-panel.is-teal .row::before { color: var(--fs-teal); }
+
+.slide .data-panel.is-violet {
+  border-left-color: #5C3FFB;
+  border-color: rgba(92, 63, 251, 0.15);
+}
+.slide .data-panel.is-violet > hr {
+  background: linear-gradient(to right, rgba(92, 63, 251, 0.6), transparent);
+}
+.slide .data-panel.is-violet .row::before { color: #5C3FFB; }
+
+/* ----------------------------------------------------------------------------
    .ui-wave — animated audio waveform, for INPUT side of a transform widget.
    10 bars driven by staggered keyframe so the wave undulates left→right.
    ---------------------------------------------------------------------------- */
@@ -2350,6 +2442,186 @@ body {
   0%, 100% { opacity: 0.4; }
   50%      { opacity: 1;   }
 }
+
+/* ----------------------------------------------------------------------------
+   .north-star-map — N-up survey of parallel projects / initiatives.
+   Each card carries a per-card accent color, an idx numeral, a single h4 title,
+   the project's North-Star metric, the core sellable, and 3 tag chips listing
+   sub-capabilities. Optional `.is-hero` modifier highlights the lead card with
+   a thicker accent border. Pattern L · DESIGN.md §9-L.
+   ---------------------------------------------------------------------------- */
+.slide .north-star-map {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 5), 1fr);
+  gap: 14px;
+  align-self: center;        /* vertical center inside .stage */
+}
+.slide .ns-card {
+  background: rgba(15, 22, 50, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding: 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+.slide .ns-card.is-hero {
+  border-width: 2px;
+  border-color: var(--fs-blue);
+  box-shadow: 0 0 0 4px rgba(60, 127, 255, 0.10);
+}
+.slide .ns-card .idx {
+  font: 800 44px/1 var(--fs-font-cjk);
+  letter-spacing: -0.02em;
+  color: var(--fs-blue);
+}
+.slide .ns-card h4 {
+  font: 700 26px/1.3 var(--fs-font-cjk);
+  color: var(--fs-text);
+  margin: 0;
+}
+.slide .ns-card .star-label,
+.slide .ns-card .core-label {
+  font: 700 14px/1 var(--fs-font-cjk);
+  letter-spacing: 0.18em;
+  color: var(--fs-text-72);
+  margin-top: 4px;
+}
+.slide .ns-card .star {
+  font: 700 22px/1.3 var(--fs-font-cjk);
+  color: var(--fs-teal);
+}
+.slide .ns-card .core {
+  font: 600 18px/1.4 var(--fs-font-cjk);
+  color: var(--fs-text);
+}
+.slide .ns-card .tags {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.slide .ns-card .tag-chip {
+  font: 600 14px/1.3 var(--fs-font-cjk);
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
+  color: var(--fs-blue);    /* default — overridden by tonal variant */
+}
+/* Tonal variants — accent the idx numeral, the star value, and the chips. */
+.slide .ns-card.is-blue   .idx,
+.slide .ns-card.is-blue   .tag-chip { color: var(--fs-blue);   }
+.slide .ns-card.is-violet .idx,
+.slide .ns-card.is-violet .tag-chip { color: #5C3FFB;          }
+.slide .ns-card.is-teal   .idx,
+.slide .ns-card.is-teal   .tag-chip { color: var(--fs-teal);   }
+.slide .ns-card.is-purple .idx,
+.slide .ns-card.is-purple .tag-chip { color: #9F6FF1;          }
+.slide .ns-card.is-orange .idx,
+.slide .ns-card.is-orange .tag-chip { color: var(--fs-orange); }
+.slide .ns-card.is-violet.is-hero { border-color: #5C3FFB; box-shadow: 0 0 0 4px rgba(92, 63, 251, 0.10); }
+.slide .ns-card.is-teal.is-hero   { border-color: var(--fs-teal);   box-shadow: 0 0 0 4px rgba(51, 214, 192, 0.10); }
+.slide .ns-card.is-purple.is-hero { border-color: #9F6FF1; box-shadow: 0 0 0 4px rgba(159, 111, 241, 0.10); }
+.slide .ns-card.is-orange.is-hero { border-color: var(--fs-orange); box-shadow: 0 0 0 4px rgba(254, 127, 0, 0.10); }
+
+/* ----------------------------------------------------------------------------
+   .scene-grid / .scene-card — adjacency grid showing how one principle applies
+   across N domains, with a quantified economic lever per scene. Default 3×2 = 6
+   scenes; override grid via `style="--cols:4"` etc. The lever uses dashed outline
+   + a bold <em> for the impact number — that's the rhetorical hook. Pattern M.
+   ---------------------------------------------------------------------------- */
+.slide .scene-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  gap: 14px;
+  align-self: center;
+}
+.slide .scene-card {
+  background: rgba(15, 22, 50, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding: 22px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  overflow: hidden;
+  /* `color` is set by the tonal variant below; ::before reads it via currentColor. */
+  color: var(--fs-blue);
+}
+.slide .scene-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0;
+  height: 3px; width: 100%;
+  background: currentColor;
+  opacity: 0.85;
+}
+.slide .scene-card .sc-icon {
+  width: 42px; height: 42px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.slide .scene-card .sc-icon svg {
+  width: 22px; height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.slide .scene-card .sc-top {
+  display: flex; align-items: center; gap: 12px;
+}
+.slide .scene-card .sc-name {
+  font: 700 24px/1.2 var(--fs-font-cjk);
+  color: var(--fs-text);
+  letter-spacing: -0.005em;
+}
+.slide .scene-card hr,
+.slide .scene-card .sc-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.10);
+  margin: 4px 0;
+  border: 0;
+}
+.slide .scene-card .sc-label {
+  font: 700 14px/1 var(--fs-font-cjk);
+  letter-spacing: 0.18em;
+  color: currentColor;
+}
+.slide .scene-card .sc-obj {
+  font: 600 18px/1.5 var(--fs-font-cjk);
+  color: var(--fs-text);
+}
+.slide .scene-card .sc-lever {
+  font: 500 16px/1.5 var(--fs-font-cjk);
+  color: var(--fs-text-72);
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  margin-top: auto;
+}
+.slide .scene-card .sc-lever em {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--fs-text);
+}
+/* Tonal variants — recolor the top accent bar, icon, and label. */
+.slide .scene-card.is-blue   { color: var(--fs-blue);   }
+.slide .scene-card.is-violet { color: #5C3FFB;          }
+.slide .scene-card.is-teal   { color: var(--fs-teal);   }
+.slide .scene-card.is-purple { color: #9F6FF1;          }
+.slide .scene-card.is-orange { color: var(--fs-orange); }
 
 /* ----------------------------------------------------------------------------
    .report-item — tagged finding row for the OUTPUT side of a transform widget.
@@ -2402,6 +2674,140 @@ body {
 .slide[data-layout="process"] .step:last-child::after,
 .slide[data-layout="process"][data-variant="vertical"] .step::after { display: none; }
 
+
+/* ============================================================================
+   v1.4 layout fixes — 2026-05-02
+   Four production-deck regressions caught in the 数字员工指南 deck (杰森
+   2026-04-28 transcript). Each fix maps to one user-visible bug; comment
+   names the rule id (BF1-BF4) so the validator can reference them later.
+   ============================================================================ */
+
+/* BF1 — big-stat short numerals hugging the canvas left edge.
+   The .stage uses a 1fr | 1fr grid and .num lives in the LEFT cell, defaulting
+   to justify-self: stretch / text-align: left. With single-character values
+   ("5", "3"), the digit sits at the very left padding (96px from slide edge)
+   and looks orphaned.
+
+   v2 (2026-05-03) — v1 used justify-self: end / text-align: right. That
+   right-anchored the numeral against the slide centerline, which made it
+   feel jammed up against the .copy block on the right side. v2 uses
+   center alignment instead, sitting the numeral in the visual center of
+   its left half-canvas. Authors are encouraged to use multi-character
+   values (e.g. "30 → 5" instead of bare "5") so the cell fills naturally
+   AND the comparison is visible in one glance. */
+.slide[data-layout="big-stat"] .num {
+  justify-self: center;
+  text-align: center;
+}
+
+/* BF2 — .col-visual double-frame when carrying a self-decorated child.
+   The .col-visual default frame (1px hairline + 16px radius + faint
+   gradient) is meant for raw image / mock placeholders. Putting a
+   self-framed component inside (data-panel, ui-window, kpi-strip,
+   scene-grid, north-star-map, calc, ui-kpi) renders an outer "browser
+   chrome" wrapper around the inner panel — the user reads it as visual
+   noise. When such a child is detected, strip the wrapper frame so only
+   the inner component's decoration shows. */
+.slide[data-layout="content-2col"] .col-visual:has(> .data-panel),
+.slide[data-layout="content-2col"] .col-visual:has(> .ui-window),
+.slide[data-layout="content-2col"] .col-visual:has(> .kpi-strip),
+.slide[data-layout="content-2col"] .col-visual:has(> .scene-grid),
+.slide[data-layout="content-2col"] .col-visual:has(> .north-star-map),
+.slide[data-layout="content-2col"] .col-visual:has(> .calc),
+.slide[data-layout="content-2col"] .col-visual:has(> .ui-kpi) {
+  border: none !important;
+  background: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+
+/* BF3 — helpers (.scene-grid / .north-star-map) compressed in middle of stage.
+   These helpers default to align-self: center and take only their content's
+   natural height. Inside a layout's .stage flex column, this leaves visible
+   empty space top + bottom when the cell count is small (e.g. 4 cards at
+   --cols:2 = 2x2). Override so they span full stage width.
+
+   v2 (2026-05-02 PM) — v1 also added `flex: 1; align-content: stretch` to
+   force cards to fill the stage vertically. That overshot: ns-cards at
+   --cols:5 stretched to ~750px tall while content was only ~400px,
+   leaving giant empty borders, and `.tags` (which uses margin-top: auto)
+   ended up jammed against the bottom border, looking like the border was
+   "blocking" the text. v2 drops the vertical stretch and instead bumps
+   card padding + grid gap when the helper is dominant — cards stay
+   content-sized but feel naturally richer, so the grid occupies more of
+   the canvas without empty interiors. */
+.slide > .stage > .scene-grid,
+.slide > .stage > .north-star-map {
+  align-self: stretch;          /* full horizontal width */
+  width: 100%;
+}
+/* When the helper is the major body block (alone, or paired only with a
+   trailing pullquote / source-footer / lede), bump card padding + grid gap
+   so the visual mass spreads across the canvas naturally. NO stretch on
+   the grid or the cards — content-sized cards keep .tags / lever items
+   close to their content rather than against the bottom border. */
+.slide > .stage > .scene-grid:only-child,
+.slide > .stage > .scene-grid:first-child:nth-last-child(-n+2) {
+  gap: 24px;
+}
+.slide > .stage > .scene-grid:only-child .scene-card,
+.slide > .stage > .scene-grid:first-child:nth-last-child(-n+2) .scene-card {
+  padding: 32px 28px;
+}
+.slide > .stage > .north-star-map:only-child,
+.slide > .stage > .north-star-map:first-child:nth-last-child(-n+2) {
+  gap: 18px;
+}
+.slide > .stage > .north-star-map:only-child .ns-card,
+.slide > .stage > .north-star-map:first-child:nth-last-child(-n+2) .ns-card {
+  padding: 28px 22px;
+}
+
+/* BF4 — pullquote left-bar pulls text 32px right of grid edge.
+   A pullquote placed below a body grid (.grid / .scene-grid /
+   .north-star-map) inherits padding-left: 28px + border-left: 4px,
+   which shifts its text 32px to the right of the grid's left edge.
+   Visually the pullquote text appears INDENTED relative to the cards
+   above — readers register it as misaligned. Pull the bar OUTSIDE
+   the text column with negative margin so the text-left aligns with
+   the grid's left edge while the bar still reads as decoration. */
+.slide > .stage > .pullquote,
+.slide > .stage > * + .pullquote {
+  margin-left: -32px;           /* compensate for border + padding */
+}
+
+/* BF5 — macOS traffic-lights (red/yellow/green dots) hidden by default
+   in 飞书 enterprise decks. The dots make any .ui-window mock read as a
+   casual macOS screenshot rather than a brand-aligned data panel — too
+   consumer/playful for 汇报 / 客户提案 contexts. The .ui-titlebar without
+   the dots still reads as a "window header bar", which is enough chrome
+   for an app-mock context (e.g. mocking a Lark Base 多维表格 view).
+   To opt back in for a genuine macOS-aesthetic real-screenshot mock,
+   add `data-show-chrome` on the parent .ui-window. */
+.slide .ui-window:not([data-show-chrome]) .ui-traffic-lights {
+  display: none;
+}
+
+/* BF6 — .ui-grid (Lark Base / spreadsheet mock) defaulting to fixed-px
+   columns sits at intrinsic width and clusters at the left of its parent.
+   Reported as "内容都在一头" (content stuck on one side) on a sales-table
+   slide where columns were `130px 90px 80px 70px` (370px total) inside an
+   864px col-visual.
+
+   Defense: every .ui-grid stretches to fill its container by default.
+   Authors can keep the relative column proportions by switching to fr
+   units (`grid-template-columns: 1.5fr 1fr 1fr 0.8fr`); the absolute
+   widths get redistributed proportionally. If a deck legitimately needs
+   a narrow content-sized table (e.g. left-aligned key-value box),
+   override `.ui-grid { width: max-content; }` inline.
+
+   The flex stretching also propagates correctly through .ui-window's
+   flex column — the grid takes the row width that .ui-window provides. */
+.slide .ui-grid {
+  width: 100%;
+  align-self: stretch;
+}
 
 /* ============================================================================
    Print (export) hint
@@ -2470,7 +2876,6 @@ body {
       <div class="item"><div class="n">05</div><div><div class="title-zh">部署与服务</div><div class="title-en">Rollout and service</div></div></div>
       <div class="item"><div class="n">06</div><div><div class="title-zh">下一步</div><div class="title-en">Next steps</div></div></div>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">02</span></div>
   </div>
 </div>
 
@@ -2488,7 +2893,6 @@ body {
       <span class="pill">飞书知识库</span>
       <span class="pill">飞书视频会议</span>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">03</span></div>
   </div>
 </div>
 
@@ -2528,7 +2932,6 @@ body {
         <div class="cfoot"><span>BASE · MEETINGS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">04</span></div>
   </div>
 </div>
 
@@ -2626,7 +3029,6 @@ body {
         </svg>
       </div>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">05</span></div>
   </div>
 </div>
 
@@ -2639,7 +3041,6 @@ body {
       <blockquote>飞书让 30 万人 <span class="accent-text">像一个团队</span> 一样工作。</blockquote>
       <div class="attrib">某头部互联网公司 · CIO · 2024</div>
     </div>
-    <div class="footer"><span>飞书 · Customer Voice</span><span class="pageno">06</span></div>
   </div>
 </div>
 
@@ -2681,7 +3082,6 @@ body {
       </div>
     </div>
     <p class="footnote">数据样本: 12 家中国头部企业, 2024 Q3-Q4 实测, 口径见附录 A.</p>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">07</span></div>
   </div>
 </div>
 
@@ -2696,7 +3096,6 @@ body {
         <p>飞书的消息、文档、视频会议在 30 万人量级下保持秒级响应,且不依赖私有部署。</p>
       </div>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">08</span></div>
   </div>
 </div>
 
@@ -2731,7 +3130,6 @@ body {
       <h2 class="title title-zh">现场决策,<br>从未离线</h2>
       <p class="lede">门店、产线、出差、远程,飞书让每一处节点都能即时被看到、被对齐。</p>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">09</span></div>
   </div>
 </div>
 
@@ -2756,7 +3154,6 @@ body {
         </tbody>
       </table>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">10</span></div>
   </div>
 </div>
 
@@ -2774,7 +3171,6 @@ body {
       <div class="node"><div class="when">W9-12</div><div class="what">数据复盘</div><div class="desc">复盘 KPI, 调整流程, 形成长期治理机制。</div></div>
     </div>
     <div class="axis"></div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">11</span></div>
   </div>
 </div>
 
@@ -2791,7 +3187,6 @@ body {
       <div class="step"><div class="stnum">03</div><h3>交付</h3><p>负责人在 Base 中流转, 责任人 + 时间戳每一步可追溯。</p></div>
       <div class="step"><div class="stnum">04</div><h3>复盘</h3><p>会后 Meetings 自动生成纪要, 关键指标进入下个周期。</p></div>
     </div>
-    <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">12</span></div>
   </div>
 </div>
 
@@ -2859,9 +3254,8 @@ body {
       frame.dataset.idx = String(i);
       const slide = frame.querySelector('.slide');
       if (!slide) return;
-      // Footer page no.
-      const fNum = slide.querySelector('.footer .pageno');
-      if (fNum && !fNum.textContent.trim()) fNum.textContent = pad(i + 1);
+      // (Per-slide .footer/.pageno retired 2026-05 — pager UI in present
+      //  mode shows the page number; no per-slide DOM read needed.)
       // Reveal animation: assign --child-i 1..N to direct children for staggered delay
       Array.prototype.forEach.call(slide.children, (child, idx) => {
         child.style.setProperty('--child-i', String(Math.min(idx + 1, 7)));

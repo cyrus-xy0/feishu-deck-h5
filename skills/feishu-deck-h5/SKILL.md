@@ -277,7 +277,7 @@ data-text-id="slide-{NN}.{field}"
   order (`slide-01`, `slide-02`, …). It MUST stay stable across
   regenerations of the same deck.
 - `field` is a semantic, dot-namespaced name (`title`, `subtitle`,
-  `card-01.body`, `agenda.item-03.zh`, `kpi-02.label`, `footer.brand`).
+  `card-01.body`, `agenda.item-03.zh`, `kpi-02.label`).
   Use ordinals (`-01`, `-02`) on repeating siblings even when there's
   only one today, so that adding a sibling later doesn't silently
   renumber the existing one.
@@ -297,7 +297,7 @@ data-text-id="slide-{NN}.{field}"
 ### Excluded from `data-text-id` (NEVER annotate these)
 
 - `<svg>` and any element inside SVG (decorative, not user copy).
-- `.pageno` (derived from slide order, never edited by hand).
+- `.pageno` (retired 2026-05; the present-mode pager UI shows page numbers, no per-slide DOM).
 - Anything inside `<script>`, `<style>`, `<noscript>`, HTML comments.
 - The `<title>` in `<head>` (page-level metadata; edit the file directly
   if needed).
@@ -789,8 +789,8 @@ arranged as:
 - **Right column** (`.col-visual`): the case illustration as a hero
   frame (see "Image is the visual hero" below for sizing rules — image
   goes in via `background-image`, NEVER an `<img>` tag, to satisfy UI1).
-- **`.source-footer`** (above the chrome footer): "数据来源 · …"
-- **Chrome footer**: brand line + page number.
+- **`.source-footer`** (single line at slide bottom): "数据来源 · …" — used when a slide cites a data source.
+- ~~**Chrome footer**: brand line + page number.~~ **Retired 2026-05.** The fullscreen present-mode pager (bottom-center prev/next/page-no bar) now shows the page number; the corner `.wordmark` carries the brand. Templates and `render.py` no longer emit `<div class="footer">` / `<span class="pageno">`. Validator R07 no longer requires it. Don't add it to new slides.
 
 The 4-beat 痛点/冲突/解法/价值 arc IS the rhetorical structure of a
 one-pager case. Don't replace it with generic bullets; the labeled
@@ -914,10 +914,6 @@ History of the rule (relevant context for future maintainers):
     </div>
   </div>
   <p class="source-footer">数据来源 · …</p>
-  <div class="footer">
-    <span>飞书企业 AI · 客户案例 · STORY 0NN</span>
-    <span class="pageno">01</span>
-  </div>
 </div>
 ```
 
@@ -1012,10 +1008,9 @@ python3 assets/render.py quote <input.toml> <output-dir>/
 
 ```toml
 title       = "案例 · 客户原话"
-brand       = "飞书企业 AI · Customer Voice"
 attribution = "客户名 · 角色 · 年份"
-# pageno = "01"           # default
-# decor  = "blue-glow"    # default; or "mix-glow" / "teal-glow" etc.
+# decor = "blue-glow"     # default; or "mix-glow" / "teal-glow" etc.
+# (brand / pageno fields retired 2026-05 — footer chrome is gone.)
 
 [quote]
 lead   = "...before the accent phrase..."
@@ -1373,7 +1368,7 @@ volume — the right-half flower image carries the atmosphere.
 | Title | left-half only (max-width 884px), 100/700, can be 1-2 lines (hero allowed `<br>`) |
 | Subtitle | **NONE** (no EN translation, no marketing tagline — drop it; if you really need a sentence, put it on slide 02) |
 | Author block | bottom-left at top:803. Two stacked spans separated by `<br>`: line 1 = the **initiator's personal name** (the meeting host / deck owner / report author — NOT a team / department / role title); line 2 = the date (`YYYY.MM.DD`). |
-| Footer chrome | NONE (cover doesn't have a footer row) |
+| Footer chrome | NONE (retired 2026-05; pager UI shows page number) |
 | Eyebrow | NONE |
 
 ```html
@@ -1412,14 +1407,13 @@ default authoring behavior is "no subtitle" unless asked.
     <h2 class="title-zh">〔Source title — single line, no &lt;br&gt;〕</h2>
   </div>
   <!-- body content (.grid / .flow / .nodes / .table-wrap / etc.) -->
-  <div class="footer"><span>〔brand line · client name〕</span><span class="pageno">04</span></div>
 </div>
 ```
 
 What you MUST drop from the source:
 - Eyebrow / kicker text above the title (R56)
 - Subtitle / lead text below the title
-- Inline page numbers in the header (footer only)
+- Inline page numbers anywhere — page numbers are entirely retired from per-slide DOM (the present-mode pager handles them)
 - Source page numbers in any other position
 - Decorative breadcrumbs / "you are here" indicators
 - Watermarks
@@ -1481,8 +1475,8 @@ logo, R13 br-in-title, R56 eyebrow-in-header, P50 base64 budget),
 | Use `data-layout="cover"` for an internal "agenda" or "section" page | Cover layout has the flower background and left-half text positioning that doesn't suit an agenda | Use `agenda` or `section` |
 | Use mono-white logo on content pages | Mono is opt-in for over-imagery edge cases only (L1) | Use the default colored logo |
 | Multi-line `<h2>` on content pages with `<br>` | Forbidden by R13 | Shorten the title; if it really needs two lines, the source title is too long for a deck |
-| Add eyebrow above content page title | Forbidden by R56 | Drop the eyebrow; if context is essential, put it in the footer brand line |
-| Re-use source page numbers verbatim in the title area | Page no. lives in the footer only | Add `<span class="pageno">07</span>` inside the footer |
+| Add eyebrow above content page title | Forbidden by R56 | Drop the eyebrow; if context is essential, work it into the title or move it to the slide body |
+| Re-use source page numbers verbatim in the title area | Footer/pageno retired 2026-05 — page numbers come from the pager UI in present mode | Drop the inline page no.; if you need an editorial label like "07 / 12", do it as a hand-placed `.eyebrow` or `.callout` once per deck, not standardized chrome |
 | Inline raster screenshots of 飞书 UI as `<img>` | Forbidden by UI1 | Recreate using `.ui-window / .ui-grid / .ui-list / .ui-msg` etc. |
 | Use cyan as a slide accent | Forbidden by R49 (cyan = inline highlight only) | Pick blue / teal / purple / violet / orange instead |
 
@@ -1647,7 +1641,6 @@ Master pixel grid (1920×1080 design canvas):
     <div class="item"><div class="n">05</div><div><div class="title-zh">部署与服务</div><div class="title-en">Rollout and service</div></div></div>
     <div class="item"><div class="n">06</div><div><div class="title-zh">下一步</div><div class="title-en">Next steps</div></div></div>
   </div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">02</span></div>
 </div>
 ```
 
@@ -1668,7 +1661,6 @@ Chapter divider. Big numeral with a period (`02.` not `02`), section title below
     <span class="pill">飞书知识库</span>
     <span class="pill">飞书视频会议</span>
   </div>
-  <div class="footer"><span>飞书 · 2026 客户提案</span><span class="pageno">03</span></div>
 </div>
 ```
 
@@ -1690,7 +1682,6 @@ Master pixel grid (1920×1080):
       <div class="eyebrow">CAPABILITIES · 三大能力</div>
       <h2 class="title-zh" style="margin-top:14px">先进团队的<br>三大工作方式</h2>
     </div>
-    <div class="pageno">04 / 12</div>
   </div>
   <div class="grid">
     <div class="card">
@@ -1721,7 +1712,6 @@ Master pixel grid (1920×1080):
       <div class="cfoot"><span>BASE · MEETINGS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
     </div>
   </div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">04</span></div>
 </div>
 ```
 
@@ -1735,7 +1725,6 @@ Master pixel grid (1920×1080):
       <div class="eyebrow">PRODUCT · LARK BASE</div>
       <h2 class="title-zh" style="margin-top:14px">让流程在表格里运转</h2>
     </div>
-    <div class="pageno">05 / 12</div>
   </div>
   <div class="grid">
     <div class="col-text">
@@ -1751,7 +1740,6 @@ Master pixel grid (1920×1080):
       <!-- 〔TODO drop in product UI screenshot or SVG mock here〕 -->
     </div>
   </div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">05</span></div>
 </div>
 ```
 
@@ -1765,7 +1753,6 @@ Master pixel grid (1920×1080):
     <blockquote>飞书让 30 万人 <span class="accent-text">像一个团队</span> 一样工作。</blockquote>
     <div class="attrib">某头部互联网公司 · CIO · 2024</div>
   </div>
-  <div class="footer"><span>Lark Suite · Customer Voice</span><span class="pageno">06</span></div>
 </div>
 ```
 
@@ -1779,7 +1766,6 @@ Master pixel grid (1920×1080):
       <div class="eyebrow">BUSINESS IMPACT · 实测数据</div>
       <h2 class="title-zh" style="margin-top:14px">飞书带来的可量化结果</h2>
     </div>
-    <div class="pageno">07 / 12</div>
   </div>
   <div class="grid">
     <div class="col">
@@ -1812,7 +1798,6 @@ Master pixel grid (1920×1080):
     </div>
   </div>
   <p class="footnote">数据样本: 12 家中国头部企业,2024 Q3-Q4 实测,口径见附录 A.</p>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">07</span></div>
 </div>
 ```
 
@@ -1829,7 +1814,6 @@ Master pixel grid (1920×1080):
       <p>飞书的消息、文档、视频会议在 30 万人量级下保持秒级响应,且不依赖私有部署。</p>
     </div>
   </div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">08</span></div>
 </div>
 ```
 
@@ -1844,7 +1828,6 @@ Master pixel grid (1920×1080):
     <h2 class="title">现场决策,<br>从未离线</h2>
     <p class="lede">门店、产线、出差、远程,飞书让每一处节点都能即时被看到、被对齐。</p>
   </div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">09</span></div>
 </div>
 ```
 
@@ -1858,7 +1841,6 @@ Master pixel grid (1920×1080):
       <div class="eyebrow">COMPARISON · 平台对比</div>
       <h2 class="title-zh" style="margin-top:14px">飞书与传统办公套件</h2>
     </div>
-    <div class="pageno">10 / 12</div>
   </div>
   <div class="table-wrap">
     <table>
@@ -1874,7 +1856,6 @@ Master pixel grid (1920×1080):
       </tbody>
     </table>
   </div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">10</span></div>
 </div>
 ```
 
@@ -1888,7 +1869,6 @@ Master pixel grid (1920×1080):
       <div class="eyebrow">ROADMAP · 部署节奏</div>
       <h2 class="title-zh" style="margin-top:14px">12 周落地路径</h2>
     </div>
-    <div class="pageno">11 / 12</div>
   </div>
   <div class="nodes">
     <div class="node"><div class="when">W1-2</div><div class="what">需求蓝图</div><div class="desc">访谈 6 部门, 输出协同地图与目标 KPI。</div></div>
@@ -1897,7 +1877,6 @@ Master pixel grid (1920×1080):
     <div class="node"><div class="when">W9-12</div><div class="what">数据复盘</div><div class="desc">复盘 KPI, 调整流程, 形成长期治理机制。</div></div>
   </div>
   <div class="axis"></div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">11</span></div>
 </div>
 ```
 
@@ -1911,7 +1890,6 @@ Master pixel grid (1920×1080):
       <div class="eyebrow">SERVICE · 协同闭环</div>
       <h2 class="title-zh" style="margin-top:14px">需求到交付,四步成型</h2>
     </div>
-    <div class="pageno">12 / 12</div>
   </div>
   <div class="flow">
     <div class="step"><div class="stnum">01</div><h3>提出</h3><p>任意一线员工在 Messenger 发起,自动落入 Base 队列。</p></div>
@@ -1919,7 +1897,6 @@ Master pixel grid (1920×1080):
     <div class="step"><div class="stnum">03</div><h3>交付</h3><p>负责人在 Base 中流转, 责任人 + 时间戳每一步可追溯。</p></div>
     <div class="step"><div class="stnum">04</div><h3>复盘</h3><p>会后 Meetings 自动生成纪要, 关键指标进入下个周期。</p></div>
   </div>
-  <div class="footer"><span>Lark Suite · 2026 客户提案</span><span class="pageno">12</span></div>
 </div>
 ```
 
@@ -2590,7 +2567,9 @@ checklist for your reading pleasure. Before declaring a deck "done":
    HTML against every check that doesn't require a real browser:
 
    - **Structure** (R02 / R07): every `.slide` has `data-layout`,
-     `data-screen-label`, `.wordmark`, and (non-cover/end) a `.footer`.
+     `data-screen-label`, and `.wordmark`. (`.footer` was retired 2026-05;
+     the present-mode pager handles page numbers — no per-slide chrome
+     is required anymore.)
    - **One-line titles** (R13): no `<br>` inside `.header h2` /
      `.header h2.title-zh` / `.header h2.title` on layouts other than
      `cover` / `image-text` / `end`.
@@ -3331,7 +3310,6 @@ The fix is to wrap the body container AND its helpers in `<div class="stage">`:
     <div class="cta-box">…</div>            <!-- helper, flows below pullquote -->
   </div>
   <p class="source-footer">…</p>            <!-- stays OUTSIDE .stage -->
-  <div class="footer">…</div>
 </div>
 ```
 
@@ -3347,7 +3325,7 @@ big-stat have their own `.stage` semantics — see their layout recipes.)
 For `timeline`: when wrapped in `.stage`, the `.axis` line stays as a direct
 child of `.slide` (outside `.stage`) and auto-aligns to slide center.
 
-If a slide has NO helpers (just body + footer), you can omit `.stage`
+If a slide has NO helpers (just body), you can omit `.stage`
 without harm. Pre-1.3.2 decks (no `.stage` wrapper anywhere) still render
 correctly via the legacy absolute positioning.
 
@@ -3530,7 +3508,7 @@ the content-page header is intentionally minimal:
 ```
 
 That's it. **No eyebrow above. No subtitle below. No inner wrapper div.
-No inline page number** (the page number lives in the footer).
+No inline page number** — page numbers come from the present-mode pager UI; per-slide chrome was retired 2026-05.
 
 The reasoning: a content slide already carries a card grid / table /
 process flow / etc. as its main body. Stacking an eyebrow + title +
@@ -3570,7 +3548,7 @@ Brand & content
 [ ]  6. Body text ≥ 22 px on canvas; chrome ≥ 14 px.
 [ ]  7. Wordmark present on EVERY slide (cover/end top-left, others top-right) —
         always the COLORED logo unless class="is-mono" is explicitly set.
-[ ]  8. Page numbers are zero-padded ('01') in the footer of non-cover/non-end slides.
+[ ]  8. (Retired 2026-05 — per-slide footer/pageno is gone; pager UI shows page no.)
 [ ]  9. All icons are inline SVG with stroke:currentColor.
 [ ] 10. All hex values come from --fs-* tokens.
 [ ] 11. CJK punctuation full-width, EN punctuation ASCII, never mixed.
@@ -3721,10 +3699,11 @@ Performance budget
 
 Content-page header minimalism
 [ ] 56. R56 — content-page `.header` contains ONLY a single `<h2>` title.
-        No `.eyebrow`, no inline page-no, no inner wrapper div. The
-        page number lives in the footer. CSS defends this with
-        `.slide .header .eyebrow { display: none }` — but the markup
-        should be clean too. Validator: audit_header_minimal.
+        No `.eyebrow`, no inline page-no, no inner wrapper div. (Page
+        numbers no longer live anywhere in slide DOM since 2026-05 —
+        the present-mode pager UI handles them.) CSS defends this
+        with `.slide .header .eyebrow { display: none }` — but the
+        markup should be clean too. Validator: audit_header_minimal.
 
 Conversion compliance (when re-rendering external material)
 [ ] 57. C1 — when converting external material (PDF / HTML / PPT export),
@@ -3734,7 +3713,8 @@ Conversion compliance (when re-rendering external material)
         End pages use `data-layout="end"` (NOT a content layout with a
         manually-built thank-you grid). No 14th invented layout.
 [ ] 58. C2 — during conversion, source-only artifacts are STRIPPED before
-        rendering: source page numbers (use the footer pageno only),
+        rendering: source page numbers (drop them — the pager UI shows
+        the deck's own page no.),
         watermarks, decorative breadcrumbs, kicker text above titles,
         emoji / `!` / `…` / `???`, and `<br>` inside content-page titles.
         Atmospheric content (radial glows, photographic backgrounds, brand

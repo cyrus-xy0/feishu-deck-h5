@@ -104,10 +104,8 @@ def audit_structure(slides: list[str], iss: Issues):
             iss.err('R02', f'slide {i}: missing data-screen-label')
         if 'class="wordmark' not in fr:
             iss.err('R07', f'slide {i} ({layout}): missing .wordmark')
-        # cover/end use no footer; everyone else must have one
-        if layout and layout not in {'cover', 'end'}:
-            if 'class="footer"' not in fr:
-                iss.err('R07', f'slide {i} ({layout}): missing .footer with page no.')
+        # .footer chrome was retired 2026-05 — fullscreen pager handles
+        # page numbers, so no per-slide footer is required anymore.
 
 
 def audit_titles_one_line(slides: list[str], iss: Issues):
@@ -534,10 +532,8 @@ def audit_header_minimal(slides: list[str], iss: Issues):
                     f'slide {i} ({layout}): .header still contains an .eyebrow. '
                     'CSS hides it visually but the markup should be removed too '
                     '— the content-page header is title-only.')
-            if 'class="pageno"' in hdr:
-                iss.warn('R56',
-                    f'slide {i} ({layout}): .header contains an inline .pageno. '
-                    'Page numbers belong in the .footer, not the header.')
+            # .pageno was retired 2026-05 — no warning needed; rule
+            # only flags the historical "eyebrow inside header" footgun.
 
 
 def audit_no_cyan_accent(slides: list[str], iss: Issues):
