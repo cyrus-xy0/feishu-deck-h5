@@ -1362,6 +1362,182 @@ specifically called out before:
 - multi-layer header on content pages with eyebrow + title + subtitle
 - `<br>` inside content-page titles
 - pre-existing watermarks / page numbers carried over
+- **silently compressing N source pages into ~M pages** (the "I'll distill 54 → 17 because it's tighter" failure)
+
+### Step 0 · Preserve the page count — DO NOT compress by default
+
+When the user hands you a source deck (PDF / PPT / HTML) and asks for a
+"feishu-deck-h5 version" (or any phrasing that means "convert this"),
+the **default contract is 1:1 page mapping**:
+
+- N source pages → N HTML slides
+- Original section dividers, agenda recap pages, "thank you" closings
+  ALL stay as their own slides
+- Per-slide content can be UPGRADED (raster UI → `.ui-window` HTML mock,
+  flat list → `.scene-grid` / `.north-star-map` / `.kpi-strip`,
+  cropped chart → typographic data viz), but information items don't
+  drop off
+- The deck's narrative pacing (a 3-part agenda revealed gradually,
+  the same idea spread over 3 build-up slides) is the user's prior
+  editorial choice — preserve it
+
+**Why this is non-negotiable** (rule elevated 2026-05-05 after a 54-page
+博裕&星巴克 deck was silently compressed to 17 slides on first attempt;
+user reaction: "不要压缩,这种让你基于PDF生成html,要保持页数不变,等于
+就是每页仿制和体验升级"):
+
+- The user already did editorial selection on the source. A page
+  exists because they decided it earned its slot.
+- Section dividers and agenda-recap slides ARE pacing — pulling
+  them strips presentation rhythm.
+- A single-case page that gets its own slide says "this case
+  matters"; lumping 6 cases into one matrix says "these are
+  interchangeable." Different message.
+- Internal sales decks routinely get presented page-by-page; if
+  the agent "distills" the deck, the speaker has lost their map.
+
+**When compression IS appropriate** (opt-in only):
+- User explicitly says "精简" / "提炼" / "压成 N 页" / "做执行摘要" /
+  "summarize this in N slides".
+- User specifies a target page count different from the source.
+- User asks for a "one-pager" / "single-page summary" of a multi-page
+  source.
+
+In all other cases — convert page-for-page. If the source has 54
+pages, the output has 54 slides.
+
+**How to apply (mechanical)**:
+1. Inventory source: count pages (`mdls -name kMDItemNumberOfPages`,
+   `pdfinfo`, manual scroll). Write down the count.
+2. Use `data-screen-label` numbering that matches the source page
+   numbers ("01 Cover" through "54 End" for a 54-page source) so
+   any reviewer can cross-reference the validator output to the
+   original PDF.
+3. Per-page upgrade is the goal — not per-deck redesign. Match the
+   source's information items, then re-render in feishu-deck-h5
+   style.
+4. If a source page is genuinely empty (just a logo/transition),
+   render it as a transition slide rather than dropping it.
+
+### Step 0.5 · Pick the conversion mode — Replica vs Rewrite
+
+Before deciding HOW to render each page, decide WHICH MODE the
+overall conversion uses. There are two:
+
+#### Replica mode (page-as-image · DEFAULT for designed source decks)
+
+Each PDF page is rendered as a high-res JPG and placed in the slide
+as a full-bleed `background-image`. feishu-deck-h5 only contributes
+the wrapping shell — fullscreen present mode, mobile vertical
+browse, keyboard nav, page indicator, URL hash sync. The source's
+typography, screenshots, illustrations, color choices are preserved
+**byte-for-byte**.
+
+```bash
+# Render all pages to JPG (1920px wide, q85 ~= 200-450 KB each)
+mkdir -p runs/<ts>/output/pages
+pdftoppm -png -scale-to-x 1920 -scale-to-y -1 input.pdf runs/<ts>/output/pages/p
+for f in runs/<ts>/output/pages/p-*.png; do
+  sips -s format jpeg -s formatOptions 85 "$f" --out "${f%.png}.jpg" >/dev/null
+done
+rm runs/<ts>/output/pages/p-*.png
+```
+
+Slide markup template:
+
+```html
+<div class="slide-frame">
+  <div class="slide page-replica" data-layout="image-text"
+       data-screen-label="01 Cover"
+       style="background-image: url('./pages/p-01.jpg')">
+    <div class="wordmark"></div>      <!-- DOM present (R07), hidden via CSS -->
+  </div>
+</div>
+```
+
+Required CSS (one block, applies to every slide):
+
+```css
+.slide.page-replica {
+  background-color: #000 !important;
+  background-position: center center !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+}
+/* Source page already carries 飞书 logo — hide our shell wordmark
+   so the brand mark doesn't double up. R07 is satisfied because the
+   .wordmark DOM element is still present. */
+.slide.page-replica .wordmark { display: none; }
+```
+
+Validator behaviour:
+- **No `data-text-id` annotations** are added (image is the content).
+- Validator emits exactly **one T00 warning** ("no data-text-id
+  attributes found"). This is **expected for Replica mode** — do
+  NOT silence it by adding fake text-ids to images.
+- All other rules (R02 / R07 / R48 / etc.) pass on stub conditions.
+- `texts.md` is NOT generated for Replica decks (there's no editable
+  text leaf to edit — if the user wants copy changes, they re-export
+  the source PDF).
+
+#### Rewrite mode (LLM re-authors each page · OPT-IN)
+
+Each page is hand-authored in feishu-deck-h5 native HTML — every
+`.ui-window` mock is rebuilt from `.ui-*` primitives, every logo
+matrix becomes a `.logo-cell` text grid, every brand palette item
+maps to `--fs-*` tokens. Full `data-text-id` + `texts.md` flow is
+in scope.
+
+This is the mode the rest of SKILL.md (Steps 1–5, layout recipes,
+narrative patterns) describes. It's the right call when:
+
+- The user explicitly says "用飞书原生组件重画 / native HTML /
+  redesign / 改造排版 / 不要截图".
+- The source is text / markdown / docs / docs export — there are no
+  meaningful screenshots to preserve.
+- The source is low-resolution / poorly designed / off-brand and
+  needs a real redesign.
+- The source is a customer-story table row / case-library row — that
+  routes to one-pager / Path A / Path B per the existing rules.
+
+#### Default = Replica when source is a designed PDF/PPT
+
+If the user gives you a presentable PDF or PPT (designer-touched
+master, brand-aligned, has actual screenshots and product mocks)
+and says "convert to feishu-deck-h5 HTML" — DEFAULT TO REPLICA.
+
+Why:
+- The user already paid for the design. Rewriting it loses that
+  investment AND tends to lose UI screenshots, atmospheric photos,
+  and bespoke visualizations that the LLM can't faithfully recreate
+  in a single pass.
+- "样式变化很大 · 截图都没了" is the most common reaction to a
+  Rewrite output when Replica was the right answer.
+- Replica is fast (~30 seconds for `pdftoppm` + `sips` + 60 lines
+  of HTML), zero token cost, 100% information fidelity.
+- The "experience upgrade" the user actually wanted is the SHELL —
+  fullscreen present mode, ←/→ nav, mobile reflow, URL hash sync.
+  Replica delivers all of that without touching content.
+
+Lesson elevated 2026-05-05 from the 54-page 博裕&星巴克 deck:
+first attempt was Rewrite (compressed to 17 slides) — rejected.
+Second attempt was Rewrite (1:1 page count) — rejected with "整体
+不太行,这种如何尽量模仿之前的内容,很多截图都没有了,样式变化
+很大". Third attempt was Replica — accepted.
+
+#### How to decide in 5 seconds
+
+| Source signal | Mode |
+|---|---|
+| Designer-polished PDF/PPT, has UI screenshots, brand-aligned | **Replica** (default) |
+| Markdown / docs / Google Doc / text export | Rewrite |
+| Low-res screenshots / off-brand source / "redesign this" | Rewrite |
+| Customer story table row, "做这个客户案例" | one-pager (Path A/B) |
+| User says "用 native 组件 / 重画 / 升级排版" | Rewrite |
+| User says "保持原样 / 模仿原版 / 别动样式" | Replica |
+
+If ambiguous, **ask the user once** before deciding — the rebuild
+cost between modes is high, but the question cost is one IM line.
 
 ### Step 1 · Inventory the source
 
