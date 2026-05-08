@@ -3116,6 +3116,60 @@ column widths AND fills the parent uniformly. If you genuinely need a
 narrow content-sized table (e.g. a left-aligned key-value box), override
 inline with `style="width: max-content"` on the .ui-grid.
 
+### BF8 — flex-stage shrinks chart container, but inner grid bars don't
+
+**Symptom**: A bar chart with a positioned X-axis line
+(`::after { bottom: 80px }`) sits inside a flex-column `.stage`
+alongside another body block. When stage content (chart + gap + other
+block) exceeds stage height, flex shrinks the chart proportionally.
+The chart shrinks fine, but the grid `.bars` inside doesn't (Grid
+items are intrinsically sized to content). Result: **bars overflow
+the chart's content area; bar bottoms drop below the X-axis line**.
+Year labels end up between the bars and the X-axis, making the axis
+look detached. Reported on P06 ARR chart.
+
+This is the mirror of the failure documented in "Bar chart · X-axis
+alignment & in-chart brand logos" (search the file). That section's
+failure: bars TOO SHORT for chart's content area → bars float ABOVE
+X-axis. Fix: grow bars (`flex: column` on chart + `flex: 1` on bars).
+BF8's failure: bars TOO TALL because chart was SHRUNK → bars push
+BELOW X-axis. Fix: stop the chart from shrinking.
+
+**Defense** (authoring rule, not framework CSS):
+
+```css
+.slide[data-page="NN"] .arr-chart,
+.slide[data-page="NN"] .<your-chart-class> {
+  /* ... existing padding/border/min-height ... */
+  flex-shrink: 0;             /* ← key rule */
+}
+```
+
+With `flex-shrink: 0` the chart keeps its natural height. The cost:
+the OTHER stage block shrinks instead, or the stage slightly
+overflows. Usually fine — most non-chart blocks (tables, lists, KPI
+strips) tolerate shrinking. If they don't, trim chart's internal
+padding or the other block's content.
+
+**Authoring rule** — apply when ALL of these are true:
+1. Chart container holds an X-axis line positioned at `bottom: <padding>`.
+2. Inside the chart, a Grid lays out bars with content-sized rows
+   (`grid-auto-rows`, `align-items: end`).
+3. Chart sits in a flex-column `.stage` alongside ≥1 other body block
+   with appreciable natural height.
+
+**Self-check** — if the chart "looks fine alone but breaks when a
+second body block sits below it", BF8 is the cause. In DevTools,
+`.bars` rect bottom should equal X-axis line bottom; if `.bars` is
+lower, the chart was shrunk.
+
+**Why this is a separate failure from the X-axis-alignment rule
+above**: that rule prevents bars from being too SHORT for the chart.
+BF8 prevents the CHART from being too short for the bars. Same
+"axis line drifts away from bar bottoms" symptom, opposite causes,
+opposite fixes. Apply both rules together when authoring a new chart
+layout — they don't conflict.
+
 ### R57 — quote / 金句 pages: no trailing periods
 
 **Symptom**: A `<blockquote>` ending with `。` (or `.`) reads as a
