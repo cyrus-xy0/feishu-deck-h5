@@ -6,12 +6,15 @@
 # orchestrated command. Idempotent — safe to re-run after edits.
 #
 # Usage:
-#     bash assets/finalize.sh <output-dir> [mode] [--strict]
-#         mode:    local (default) | remote | inline
-#         --strict promotes validator warnings to errors (use for final delivery)
+#     bash assets/finalize.sh <output-dir> [mode] [--strict] [--name <slug>]
+#         mode:           local (default) | remote | inline
+#         --strict        promote validator warnings to errors (final delivery)
+#         --name <slug>   emit a delivery-named copy alongside index.html
+#                         convention: lark-<customer>-<presentation-date>
+#                         e.g. --name lark-boyu-starbucks-2026-05-08
 #
-#     local   = copy-assets + extract-texts + validate
-#     remote  = local steps + package-deliverable.sh (zip kit)
+#     local   = copy-assets + extract-texts + validate (+ named copy if --name)
+#     remote  = local steps + package-deliverable.sh (zip kit, zip name from --name)
 #     inline  = local steps + base64-inline assets into single .html
 #
 # Exit codes:
@@ -27,19 +30,31 @@ set -euo pipefail
 OUT_DIR="${1:-}"
 MODE="local"
 STRICT=""
+NAME=""
 
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
         local|remote|inline) MODE="$1"; shift ;;
         --strict) STRICT="--strict"; shift ;;
+        --name) NAME="$2"; shift 2 ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
 
+# Validate --name against the convention if provided
+if [ -n "$NAME" ]; then
+    if ! [[ "$NAME" =~ ^lark-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        echo "✗ --name must follow lark-<customer>-<YYYY-MM-DD> (got: $NAME)" >&2
+        echo "  example: --name lark-boyu-starbucks-2026-05-08" >&2
+        exit 1
+    fi
+fi
+
 if [ -z "$OUT_DIR" ] || [ ! -d "$OUT_DIR" ]; then
-    echo "usage: bash $(basename "$0") <output-dir> [local|remote|inline] [--strict]" >&2
+    echo "usage: bash $(basename "$0") <output-dir> [local|remote|inline] [--strict] [--name <slug>]" >&2
     echo "       output-dir must exist (typically runs/<ts>/output/)" >&2
+    echo "       --name convention: lark-<customer>-<YYYY-MM-DD>" >&2
     exit 1
 fi
 
@@ -87,23 +102,51 @@ if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $STRICT; then
     exit 4
 fi
 
-# ---------- 4 · mode-specific packaging ----------
+# ---------- 4 · delivery-named copy (if --name provided) ----------
+NAMED_HTML=""
+if [ -n "$NAME" ]; then
+    NAMED_HTML="$OUT_DIR/$NAME.html"
+    cp "$HTML" "$NAMED_HTML"
+    echo "  · copied → $NAME.html"
+fi
+
+# ---------- 5 · mode-specific packaging ----------
 case "$MODE" in
     local)
         echo ""
-        echo "✓ ready (local) — open in browser:"
-        echo "    open $HTML"
+        if [ -n "$NAMED_HTML" ]; then
+            echo "✓ ready (local) — deliver this file:"
+            echo "    $NAMED_HTML"
+            echo "  (working copy still at $HTML for further edits)"
+        else
+            echo "✓ ready (local) — open in browser:"
+            echo "    open $HTML"
+            echo ""
+            echo "  TIP: when delivering, re-run with --name lark-<customer>-<YYYY-MM-DD>"
+            echo "       to emit a properly-named copy (convention for site sync /"
+            echo "       slide-library inbox / customer hand-off)."
+        fi
         ;;
     remote)
         echo "  · package-deliverable …"
-        if ! bash "$SCRIPT_DIR/package-deliverable.sh" "$OUT_DIR" >/dev/null 2>&1; then
+        ZIP_ARGS=("$OUT_DIR")
+        if [ -n "$NAME" ]; then
+            ZIP_ARGS+=("--name" "$NAME")
+        fi
+        if ! bash "$SCRIPT_DIR/package-deliverable.sh" "${ZIP_ARGS[@]}" >/dev/null 2>&1; then
             echo "✗ packaging failed" >&2
             exit 5
         fi
-        ZIP="$OUT_DIR/deck-editable.zip"
+        ZIP_NAME="${NAME:-deck-editable}"
+        ZIP="$OUT_DIR/${ZIP_NAME}.zip"
         echo ""
         echo "✓ ready (remote) — attach this zip to your delivery:"
         echo "    $ZIP"
+        if [ -z "$NAME" ]; then
+            echo ""
+            echo "  TIP: pass --name lark-<customer>-<YYYY-MM-DD> for a named zip"
+            echo "       instead of the generic deck-editable.zip."
+        fi
         ;;
     inline)
         echo "  · inline mode not yet wired — run manually:"

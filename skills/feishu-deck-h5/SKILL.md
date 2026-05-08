@@ -519,6 +519,55 @@ In every other case (delivery, hand-off, demo, attachment, "请给我看看"),
 **run it**. The user's "把所有引用 assets 的文件复制到 output 下" instruction
 is a baseline, not a special request.
 
+### File-naming convention (mandatory) — `lark-<customer>-<presentation-date>.html`
+
+While generating, the deck lives at `runs/<ts>/output/index.html` —
+the `index.html` filename is canonical for working / preview / HTTP
+serving. **But every artifact that leaves that working folder MUST be
+renamed** to:
+
+```
+lark-<customer-slug>-<YYYY-MM-DD>.html
+```
+
+The date is the **presentation date** (when the deck will be
+presented / shared / posted), NOT the generation timestamp. Apply
+this convention to:
+
+- The HTML you copy into a public site (e.g. `feishusolution/<...>`)
+- The HTML you drop into the slide-library inbox
+- The zip name from `package-deliverable.sh` (`--name lark-<customer>-<date>`)
+- Any "send this to the customer" copy
+
+**Customer slug rules**:
+- Lowercase, kebab-case
+- Pinyin or English short name, NOT Chinese characters
+  (CJK in filenames breaks URLs, IM previews, some scp/rsync chains)
+- Multiple customers: chain with `-`, longest-first by recognition
+- Examples: `boyu-starbucks` (博裕 + 星巴克 联合提案), `luckin`,
+  `mixue-franchise`, `hetnet-ai-keynote`
+
+**Date format**: `YYYY-MM-DD` — full ISO. Quarters (`2026q2`) and
+year-month (`2026-05`) are NOT precise enough to disambiguate
+re-presentations.
+
+**Examples**:
+| Use case | Filename |
+|---|---|
+| 博裕 + 星巴克 5/8 提案 | `lark-boyu-starbucks-2026-05-08.html` |
+| 瑞幸内部周会 4/30 | `lark-luckin-2026-04-30.html` |
+| 茶饮行业 keynote 5/15 | `lark-tea-beverage-keynote-2026-05-15.html` |
+
+**Why this convention**: search-friendly when you have 100 decks in
+a folder; `git log` shows the customer + date at a glance; matches
+the slide-library's `deck_id` pattern (`lark-<customer>-<date>`)
+so 1 deck → 1 deck_id without rename surgery.
+
+`finalize.sh` accepts `--name <slug>` to emit the named copy
+alongside `index.html` automatically. Pass it whenever you're
+delivering — the working `index.html` stays in place for further
+edits, and the named copy goes out to the recipient.
+
 ### Mode 1 · Claude Code on the user's local machine
 
 Default. The user has filesystem access to `runs/<timestamp>/output/`
@@ -528,6 +577,8 @@ already. Just tell them the path:
 > · `runs/<ts>/output/index.html` — 浏览器双击打开
 > · `runs/<ts>/output/texts.md` — 改文字时编辑这个，然后跑
 >   `python3 assets/apply-texts.py runs/<ts>/output/index.html runs/<ts>/output/texts.md`
+> · `runs/<ts>/output/lark-<customer>-<YYYY-MM-DD>.html` — 命名规范副本，
+>   投递 / 入库 / 同步公网就用这个名字（`finalize.sh --name lark-<...>` 自动产出）
 
 No packaging step needed.
 
