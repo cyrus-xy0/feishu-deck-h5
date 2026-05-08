@@ -337,6 +337,29 @@ def set_default(d: dict, dotted: str, value):
     cur.setdefault(keys[-1], value)
 
 
+def kebab_case(value, fallback: str = "slide") -> str:
+    """Return a stable kebab-case slug for data-slide-key values."""
+    text = str(value or "").strip().lower()
+    chars: list[str] = []
+    pending_dash = False
+    for ch in text:
+        if ch.isascii() and ch.isalnum():
+            if pending_dash and chars:
+                chars.append("-")
+            chars.append(ch)
+            pending_dash = False
+        else:
+            pending_dash = True
+    return "".join(chars).strip("-") or fallback
+
+
+def slide_key(*parts, fallback: str = "slide") -> str:
+    """Join multiple values into one kebab-case slide key."""
+    slugs = [kebab_case(part, fallback="") for part in parts]
+    key = "-".join(slug for slug in slugs if slug)
+    return key or fallback
+
+
 def relpath_from_to(src_dir: Path, dst_dir: Path) -> str:
     """Filesystem-relative path from src_dir to dst_dir using POSIX separators."""
     return os.path.relpath(dst_dir, start=src_dir).replace(os.sep, "/")
@@ -592,7 +615,11 @@ def render_composite(pattern: str, input_path: Path, output_dir: Path,
     asset_path = relpath_from_to(output_dir, ASSETS_DIR)
 
     # Render cover fragment
-    cover_data = {**bundle.get("deck", {}), "asset_path": asset_path}
+    cover_data = {
+        **bundle.get("deck", {}),
+        "asset_path": asset_path,
+        "slide_key": "cover",
+    }
     cover_html = render_template(
         (TEMPLATES_DIR / info["cover_fragment"]).read_text(encoding="utf-8"),
         cover_data,
@@ -607,6 +634,7 @@ def render_composite(pattern: str, input_path: Path, output_dir: Path,
         "agenda": bundle.get("agenda", {}),
         "agenda_items_html": _build_agenda_items_html(cases_for_agenda),
         "asset_path": asset_path,
+        "slide_key": "agenda",
     }
     agenda_html = render_template(
         (TEMPLATES_DIR / info["agenda_fragment"]).read_text(encoding="utf-8"),
@@ -633,6 +661,8 @@ def render_composite(pattern: str, input_path: Path, output_dir: Path,
             "slide_no": slide_no,
             "slide_no_padded": slide_no_padded,
             "scene_filename": scene_filename,
+            "slide_key": slide_key("case", offset + 1, get_path(case_data, "title"),
+                                   fallback=f"case-{offset + 1}"),
         }
         case_htmls.append(render_template(case_fragment_template, case_render_data))
 
@@ -642,6 +672,7 @@ def render_composite(pattern: str, input_path: Path, output_dir: Path,
         "slide_no_padded": f"{end_slide_no:02d}",
         "contact": get_path(bundle, "brand.contact"),
         "asset_path": asset_path,
+        "slide_key": "closing",
     }
     end_html = render_template(
         (TEMPLATES_DIR / info["end_fragment"]).read_text(encoding="utf-8"),
@@ -753,6 +784,8 @@ def render(pattern: str, input_path: Path, output_dir: Path,
         # Strip CN punctuation + collapse whitespace; cap at 20 chars.
         cleaned = re.sub(r"\s+", " ", re.sub(r"[·:：—\-]+", " ", get_path(data, "title")))
         data["screen_label"] = cleaned.strip()[:20]
+    if not data.get("slide_key"):
+        data["slide_key"] = slide_key(pattern, get_path(data, "title"), fallback=pattern)
 
     missing = validate_input(data, info["required"])
     if missing:

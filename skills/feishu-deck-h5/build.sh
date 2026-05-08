@@ -34,6 +34,7 @@ fi
 
 OUT_LINK="$ROOT/examples/sample-deck.html"
 OUT_INLINE="$ROOT/examples/sample-deck-inline.html"
+OUT_WITH_TEXTS="$ROOT/examples/sample-deck-with-texts.html"
 
 # ---- Build the linked version (default delivery) ----
 {
@@ -53,6 +54,28 @@ HEAD
   cat "$ROOT/_body.partial.html"
   echo '<script src="../assets/feishu-deck.js"></script></body></html>'
 } > "$OUT_LINK"
+python3 "$ROOT/assets/extract-texts.py" "$OUT_LINK" \
+  --out "$ROOT/examples/sample-deck.texts.md" \
+  --annotate "$OUT_LINK" >/dev/null
+ANNOTATED_BODY="$(mktemp "${TMPDIR:-/tmp}/feishu-deck-body.XXXXXX.html")"
+trap 'rm -f "$ANNOTATED_BODY"' EXIT
+python3 - "$OUT_LINK" "$ANNOTATED_BODY" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+html = Path(sys.argv[1]).read_text(encoding='utf-8')
+match = re.search(r'<body[^>]*>(.*)</body>', html, re.S)
+if not match:
+    raise SystemExit('ERROR: cannot extract annotated body from linked deck')
+body = re.sub(
+    r'\s*<script\s+src="\.\./assets/feishu-deck\.js"></script>\s*$',
+    '',
+    match.group(1),
+    flags=re.S,
+)
+Path(sys.argv[2]).write_text(body.strip() + '\n', encoding='utf-8')
+PY
 
 # Patch the linked CSS so --fs-asset-* point to ../assets relative to examples/
 # (the CSS already has the right relative paths from assets/ — examples/ → ../assets/ works)
@@ -89,12 +112,16 @@ print(out)
     echo "$ASSET_OVERRIDE"
     echo '</style>'
     echo '</head><body>'
-    cat "$ROOT/_body.partial.html"
+    cat "$ANNOTATED_BODY"
     echo '<script>'
     cat "$ROOT/assets/feishu-deck.js"
     echo '</script></body></html>'
   } > "$OUT_INLINE"
+  cp "$ROOT/examples/sample-deck.texts.md" "$ROOT/examples/sample-deck-inline.texts.md"
 fi
+
+cp "$OUT_LINK" "$OUT_WITH_TEXTS"
+cp "$ROOT/examples/sample-deck.texts.md" "$ROOT/examples/sample-deck-with-texts.texts.md"
 
 # ---- Build slide-recipes.html (also linked) ----
 {
@@ -103,7 +130,7 @@ fi
   echo '<title>Slide recipes · feishu-deck-h5</title>'
   echo '<link rel="stylesheet" href="../assets/feishu-deck.css">'
   echo '</head><body>'
-  cat "$ROOT/_body.partial.html"
+  cat "$ANNOTATED_BODY"
   echo '<script src="../assets/feishu-deck.js"></script></body></html>'
 } > "$ROOT/templates/slide-recipes.html"
 

@@ -89,6 +89,9 @@ def slide_attr(fr: str, name: str) -> str | None:
     return m.group(1) if m else None
 
 
+SLIDE_KEY_VALID_RE = re.compile(r'^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$')
+
+
 # ---------------------------------------------------------------------------
 #  Per-rule audits
 # ---------------------------------------------------------------------------
@@ -106,6 +109,36 @@ def audit_structure(slides: list[str], iss: Issues):
             iss.err('R07', f'slide {i} ({layout}): missing .wordmark')
         # .footer chrome was retired 2026-05 — fullscreen pager handles
         # page numbers, so no per-slide footer is required anymore.
+
+
+def audit_slide_keys(slides: list[str], iss: Issues):
+    """K00-K03: every slide has a stable, unique, kebab-case data-slide-key."""
+    keys = [slide_attr(fr, 'slide-key') for fr in slides]
+    present = [(i, key) for i, key in enumerate(keys, 1) if key]
+
+    if not present:
+        iss.warn('K00',
+            'no data-slide-key attributes found — new decks should assign '
+            'stable slide keys for review, diffing, and downstream automation.')
+        return
+
+    missing = [i for i, key in enumerate(keys, 1) if not key]
+    if missing:
+        iss.err('K01',
+            f'{len(missing)} slides missing data-slide-key '
+            f'(e.g. slide {", ".join(str(i) for i in missing[:10])}). '
+            'Either annotate every slide or omit keys entirely for legacy decks.')
+
+    counts = Counter(key for _, key in present)
+    for key, n in sorted((key, n) for key, n in counts.items() if n > 1)[:10]:
+        iss.err('K02',
+            f'duplicate data-slide-key {key!r} appears {n}× in deck.')
+
+    for i, key in present:
+        if not SLIDE_KEY_VALID_RE.match(key):
+            iss.err('K03',
+                f'slide {i}: data-slide-key={key!r} does not match '
+                '`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`.')
 
 
 def audit_titles_one_line(slides: list[str], iss: Issues):
@@ -830,6 +863,7 @@ def main():
 
     iss = Issues()
     audit_structure(slides, iss)
+    audit_slide_keys(slides, iss)
     audit_titles_one_line(slides, iss)
     audit_brand_chrome(slides, iss, args.strict)
     audit_copy_rules(html, iss)
