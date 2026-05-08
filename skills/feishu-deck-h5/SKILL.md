@@ -585,55 +585,31 @@ copy tweaks; shipping the edit kit pre-empts a round-trip back to you.
 
 ---
 
-## LANGUAGE POLICY (mandatory) — Chinese-only by default
+## LANGUAGE POLICY — declared by `<meta>`, enforced by validator R-LANG
 
-When the user writes to you in Chinese, **every piece of slide copy is
-ZH-only**. Do NOT pair Chinese with English translations underneath
-("instinct sync / Instant sync" stacked, "三大共识 / Three principles"
-stacked). Bilingual ZH + EN is opt-in only — switch to it ONLY when the
-user explicitly asks (e.g. "give me a bilingual deck for an external
-customer", "面向英文客户"). The default is monolingual ZH.
+**Default = ZH-only.** Decks emit a single language line per visible
+text leaf; no EN translation track underneath CN copy. The mode is
+declared in `<head>` and enforced by `validate.py`:
 
-### Why this is mandatory
+```html
+<meta name="fs-language" content="zh-only">   <!-- default -->
+<meta name="fs-language" content="zh-en">     <!-- bilingual opt-in -->
+```
 
-- Internal team / customer-summary decks read like marketing
-  brochures when every Chinese line is mirrored in English. Native
-  Chinese speakers find the EN line redundant and visually noisy.
-- The flower-master visual + 飞书 brand wordmark is already strongly
-  Chinese-aligned. Stacking EN underneath every ZH item dilutes that.
-- Most decks this skill produces are internal alignment / 汇报材料 /
-  客户提案 — none of these need an EN translation track.
+`templates/_shell.html` already includes the zh-only meta. **Switch to
+`zh-en` only when the user explicitly asks** (e.g. "面向英文客户",
+"give me a bilingual deck"). When you switch, the CSS recipes for
+agenda `.title-en`, content-3up bilingual card titles, two-hand-arch
+EN mottos, etc. all light up — no token changes needed.
 
-### Specifically — drop these by default
+In zh-only mode the validator's R-LANG audit warns on:
+- `class="title-en"` / `subtitle-en` / `label-en` rendered in slide
+  markup (these classes exist for bilingual mode only).
 
-| Element | Old (bilingual) | New (default ZH-only) |
-|---|---|---|
-| Agenda item | `<div class="title-zh">背景与挑战</div><div class="title-en">Context and challenges</div>` | `<div class="title-zh">背景与挑战</div>` (drop the `.title-en` div entirely) |
-| `content-3up` card title | `<h3 class="ctitle">即时同步<br>Instant sync</h3>` | `<h3 class="ctitle">即时同步</h3>` (drop the `<br>` and EN line) |
-| Two-hand-arch motto | `<h3>左手 · 透明化管控</h3><span class="em">CONTROL</span>` | `<h3>左手 · 透明化管控</h3>` (drop the `.em` EN motto span) |
-| Cover subtitle | `<p class="subtitle">The way advanced teams work</p>` | (already removed by Step 2 cover spec — no subtitle at all) |
-| Section lede | "实时同步 · 共识对齐 · 闭环交付 / Instant sync · …" | "即时同步 · 共识对齐 · 闭环交付" (no EN trail) |
-
-### When bilingual IS appropriate (opt-in)
-
-Switch to bilingual ZH + EN ONLY when the user says one of:
-- "做一份双语的 deck"
-- "面向 [国际/英文/海外] 客户"
-- "ZH + EN bilingual"
-- Or the user is writing to you in English and the deck is for a
-  Chinese audience the user is helping.
-
-In those cases, restore `.title-en` divs in agenda, EN second line in
-card titles, and so on. The CSS shipped already supports both modes
-without any token changes.
-
-### Tokenized vocabulary stays English
-
-Brand names (Lark, Base, Wiki, Meetings), product code names
-(Salesforce, C360), numerical units (px, pt, %), and tokenized
-vocabulary (KPI, ROI, OKR, CEO, KOL, agent, demo) stay in their
-original form even in ZH-only decks. The ban is on **translation
-tracks**, not on every Latin-script word.
+It does NOT touch tokenized vocabulary that's English by convention:
+brand names (Lark, Base, Wiki, Meetings), product codes (Salesforce,
+C360), units (px, pt, %), abbreviations (KPI, ROI, OKR, KOL). The
+ban is on **translation tracks**, not on every Latin-script word.
 
 ---
 

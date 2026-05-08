@@ -623,6 +623,50 @@ def audit_no_cyan_accent(slides: list[str], iss: Issues):
                 'accent. Use blue / teal / purple / violet / orange instead.')
 
 
+def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: bool):
+    """R-LANG: enforce the SKILL's ZH-only-by-default language policy.
+
+    The deck declares its language mode in <head>:
+        <meta name="fs-language" content="zh-only">   ← default if absent
+        <meta name="fs-language" content="zh-en">     ← bilingual opt-in
+
+    In zh-only mode, EN-translation tracks under CN copy are forbidden:
+      • `.title-en` / `.subtitle-en` / `.label-en` div siblings
+      • paired CJK + Latin lines on agenda items, content-3up cards, mottos
+
+    The most reliable static signal is the `.title-en` / `.subtitle-en` /
+    `.label-en` class — these EXIST in feishu-deck.css specifically for
+    bilingual mode. If a deck declares zh-only but renders these classes,
+    it's drifting back to bilingual without saying so.
+
+    A bilingual deck just sets the meta and the audit is a no-op.
+    """
+    meta_m = re.search(
+        r'<meta[^>]*name="fs-language"[^>]*content="([^"]+)"', html)
+    mode = (meta_m.group(1) if meta_m else 'zh-only').strip().lower()
+
+    if mode == 'zh-en':
+        return  # bilingual explicitly opted in
+
+    if mode not in ('zh-only', 'zh-en'):
+        iss.warn('R-LANG',
+            f'<meta name="fs-language" content="{mode}"> — unknown value. '
+            'Use "zh-only" (default, monolingual ZH) or "zh-en" (bilingual). '
+            'Treating as zh-only.')
+
+    en_class_re = re.compile(r'class="[^"]*\b(title|subtitle|label)-en\b')
+    for i, fr in enumerate(slides, 1):
+        for m in en_class_re.finditer(fr):
+            cls = m.group(0).split('class="')[-1]
+            msg = (f'slide {i}: bilingual class `{cls}…` rendered in '
+                   'zh-only mode — drop the EN translation track, or '
+                   'opt into bilingual via `<meta name="fs-language" '
+                   'content="zh-en">` in <head>.')
+            if strict: iss.err('R-LANG', msg)
+            else:      iss.warn('R-LANG', msg)
+            break  # one report per slide is enough
+
+
 def audit_default_centering(html: str, iss: Issues):
     """R48: every fixed-shape container layout vertically centers by default."""
     for style_m in re.finditer(r'<style[^>]*>(.*?)</style>', html, re.S):
@@ -918,6 +962,7 @@ def main():
     audit_ui_mocks_are_html(slides, iss)
     audit_no_cyan_accent(slides, iss)
     audit_header_minimal(slides, iss)
+    audit_language_policy(html, slides, iss, args.strict)
     audit_perf(html, iss, args.strict)
     audit_text_ids(html, path, iss)
 
