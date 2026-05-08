@@ -664,6 +664,124 @@ ban is on **translation tracks**, not on every Latin-script word.
 
 ---
 
+## CONTENT-DENSITY POLICY (mandatory) — confirm before augmenting thin input
+
+A 飞书 deck slide is **information-dense by design**. Empty space + 3 lines
+of body copy reads as half-finished — the audience reaction is "为什么这页
+这么空,你是不是没准备好"。The skill's defaults aim for slides that look
+*deliberately curated*, not *padded out*。
+
+When the user provides input that is too thin to fill the chosen layout,
+the agent has THREE choices, in priority order:
+
+1. **Pick a sparser-by-design layout** instead (`quote` / `big-stat` /
+   `cover` / `end` / `image-text`) — these are intentionally minimal,
+   2 lines of copy is plenty.
+2. **Stop and ask the user for more context** — this is the default
+   when the input is genuinely too thin for any layout to carry.
+3. **Augment with relevant industry / product / customer context** —
+   ALLOWED only after **explicit user confirmation**.
+
+### The rule (mandatory)
+
+When the agent detects a thin-input situation on layouts that **need
+density** to look right (`content-2col` / `content-3up` / `stats` /
+`table` / `timeline` / `process`), it MUST:
+
+1. **Stop before generating.**
+2. **Tell the user what's thin** — specifically which layout was picked
+   and what the layout expects vs. what the user provided.
+3. **Propose 2-3 concrete augmentation options** the agent can supply
+   from its knowledge: industry benchmarks, common pain points,
+   complementary product capabilities, related customer stories,
+   typical adjacent metrics. Each option a one-line description.
+4. **Wait for the user to pick** — yes-pick-this / no-just-render-thin
+   / no-let-me-add-more-context / change-layout.
+
+Only after the user confirms which augmentation (if any) to use does
+the agent generate the slide.
+
+### What counts as "thin" — heuristic
+
+| Layout | Expects | Thin signal |
+|---|---|---|
+| `content-3up` | 3 distinct points, each with title + 2-3 body lines | < 3 points provided, OR each point is 1 sentence |
+| `content-2col` | One narrative + a stack of supporting points OR a visual | text column < ~80 chars, no visual material in scope |
+| `stats` | 4 KPI numbers + labels + brief sources | < 3 numbers, OR all from same domain |
+| `table` | ≥ 4 rows × 3 cols of meaningful comparison | < 3 rows, OR the columns aren't really distinct |
+| `timeline` | 4-6 chronological milestones | < 3 milestones, OR all in same week |
+| `process` | 3-6 sequential steps | < 3 steps, OR steps are vague |
+| `one-pager case` (story-case) | 4 beats: 痛点 / 冲突 / 解法 / 价值 | any beat < 10 chars (already enforced by render.py schema-fit refusal — exit 4) |
+
+For `quote` / `big-stat` / `cover` / `agenda` / `section` / `end` /
+`image-text`, terse input is **fine** — these are sparse-by-design.
+The agent doesn't need to ask for these.
+
+### What augmentation is allowed (after user confirms)
+
+The framing the agent uses during augmentation:
+
+> **"结合输入的信息,如果画一页专业的 PPT,请帮我设计对应的内容,
+> 要专业风格的。"**
+
+That is — treat the user's input as a SEED, then design the slide with
+the information density and structural rigor of a real consulting /
+strategy deck. Not as a creative-writing exercise, not as a marketing
+brochure: as a **content-rich page a senior decision-maker would actually
+read**. Concrete numbers, concrete capabilities, concrete examples,
+named adjacent customers — the kind of detail that earns the slide's
+real estate.
+
+ALLOWED:
+- Industry context the agent knows (e.g. "便利店行业的库存周转一般 12-15 次/年")
+- Common pain points associated with the user's named scenario
+- Product capability descriptions (飞书 / 多维表格 / 飞书会议 etc.)
+- Adjacent customer stories from the agent's knowledge (e.g. "类似海底捞这种连锁门店常用 ……")
+- Typical KPI values for the industry (always tagged as "行业基准 · 公开数据")
+
+NOT ALLOWED, even after user confirms:
+- Specific numbers attributed to a specific company (the user didn't give)
+- Quotes attributed to a named person (the user didn't provide)
+- Source citations like "客户访谈" / "内部口径" (covered by the existing
+  "NEVER fabricate STORY ids" rule)
+- Future product roadmap claims
+
+The line: **augmentation is general industry / product knowledge tagged
+as such**; it's NEVER specific facts attributed to specific entities.
+
+### Asking-prompt template
+
+When the agent stops to ask, use roughly this shape:
+
+> "你给的信息支撑不满 `<layout>` 这个版式 —— 它通常需要 `<X>`,
+> 你给的是 `<Y>`,直接出图会显得空。
+>
+> 我可以从以下几个方向**补**(都是公开行业知识 / 产品能力 / 类似客户故事,
+> 不会编你没说的具体数据):
+>
+> 1. `<选项 1 · 一句话>`
+> 2. `<选项 2 · 一句话>`
+> 3. `<选项 3 · 一句话>`
+>
+> 或者:换成 `<sparser layout 建议>` / 你再补一段背景给我 / 直接出空版自己改。
+>
+> 你选哪个?"
+
+### Connection to the no-fabrication rule
+
+This policy and the **NEVER fabricate STORY ids / source attributions**
+rule (next section) are siblings:
+
+| Rule | What can never happen | What CAN happen |
+|---|---|---|
+| No fabrication (next section) | Specific facts (story id, source citation, quote attribution) made up | (nothing — facts are either real or absent) |
+| Content-density (this section) | Silently padding a thin slide with industry context the user didn't ask for | Same context, AFTER user explicitly says "yes, augment with that" |
+
+Both come from the same north star: **the deck must not silently invent
+material that the user couldn't defend in front of the audience**.
+
+---
+
 ## ONE-PAGER CASE POLICY (mandatory) — 一页纸案例 layout
 
 This is the **canonical layout for a single customer case rendered on
