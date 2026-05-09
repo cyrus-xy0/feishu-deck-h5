@@ -146,13 +146,27 @@
       goTo(deck, frames, next);
     }, { signal, passive: true });
 
-    // ---- Hash sync (#3 → slide 3) ----
+    // ---- Hash sync — #3 (1-based slide index) OR #<slide-key>
+    // (data-slide-key slug, e.g. #cover / #cup-journey). Slug form is
+    // how the slide-library viewer deep-links into a specific slide.
     function readHash() {
-      const m = location.hash.match(/^#(\d+)$/);
-      if (!m) return false;
-      const idx = Math.max(0, Math.min(frames.length - 1, parseInt(m[1], 10) - 1));
-      goTo(deck, frames, idx, false);
-      return true;
+      const raw = decodeURIComponent(location.hash.replace(/^#/, ''));
+      if (!raw) return false;
+      if (/^\d+$/.test(raw)) {
+        const idx = Math.max(0, Math.min(frames.length - 1, parseInt(raw, 10) - 1));
+        goTo(deck, frames, idx, false);
+        return true;
+      }
+      // data-slide-key / id live on the inner .slide, not on .slide-frame
+      const idx = frames.findIndex(f => {
+        const slide = f.querySelector('.slide');
+        return slide && (slide.dataset.slideKey === raw || slide.id === raw);
+      });
+      if (idx >= 0) {
+        goTo(deck, frames, idx, false);
+        return true;
+      }
+      return false;
     }
     window.addEventListener('hashchange', readHash, { signal });
     if (!readHash()) goTo(deck, frames, 0, false);
