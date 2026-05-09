@@ -14,7 +14,18 @@ HTML path to a relative local path. Result: output/ is portable; the
 deck runs standalone when copied/zipped/uploaded anywhere.
 
 USAGE:
-    python3 assets/copy-assets.py runs/<timestamp>/output/
+    python3 assets/copy-assets.py runs/<timestamp>/output/ [--shared=MODE]
+
+    --shared=copy    (default) copy assets/shared/* into output/assets/shared/
+                     and rewrite HTML to local paths. Output is a self-contained
+                     zip-shippable bundle.
+    --shared=skip    don't copy assets/shared/*. Leave HTML refs to shared/*
+                     pointing skill-relative (../...skills/feishu-deck-h5/
+                     assets/shared/...) — output runs only while next to skill,
+                     but downstream tools like the slide library resolve those
+                     refs against their own shared pool. Saves ~50–500 KB
+                     per deck. The manifest still lists every shared file
+                     referenced, so consumers know what to dedupe against.
 
 Exits 0 on success. Idempotent: running twice is fine. Prints a summary
 of bytes copied and HTML files patched.
@@ -25,11 +36,13 @@ from pathlib import Path
 
 # Match any reference of form *path*?/skills/feishu-deck-h5/(assets|...)/<file>
 # and any input/ reference. Captures: prefix path back-tracking + the asset path.
+# Path char class excludes ? and # so cache-busting query strings (e.g.
+# `assets/foo.png?v=3`) don't get glued onto the captured rest.
 RX_SKILL = re.compile(
-    r'((?:\.\./)+)skills/feishu-deck-h5/(assets|examples|templates)/([^\'")\s]+)'
+    r'((?:\.\./)+)skills/feishu-deck-h5/(assets|examples|templates)/([^\'")\s?#]+)'
 )
 RX_INPUT = re.compile(
-    r'((?:\.\./)+)input/([^\'")\s]+)'
+    r'((?:\.\./)+)input/([^\'")\s?#]+)'
 )
 # AFTER first rewrite, HTMLs use assets/<file> or ../assets/<file>
 # (no skills/feishu-deck-h5 prefix). Both bare and ../-prefixed refs must
@@ -37,11 +50,16 @@ RX_INPUT = re.compile(
 # `*` (zero-or-more `../`) covers BOTH the deck root case (index.html in
 # output/, refs like `assets/feishu-deck.css`) AND the sub-folder case
 # (output/single-pages/p-NN.html, refs like `../assets/foo.png`).
+# The `(?<!...)` negative lookbehind avoids matching the `assets/...`
+# segment INSIDE a still-skill-relative path like
+# `../../../skills/feishu-deck-h5/assets/clientlogo/x.png` — those are
+# left unchanged in --shared=skip mode and shouldn't be classified as
+# already-local refs.
 RX_LOCAL_ASSET = re.compile(
-    r'((?:\.\./)*)assets/([^\'")\s]+)'
+    r'(?<!skills/feishu-deck-h5/)((?:\.\./)*)assets/([^\'")\s?#]+)'
 )
 RX_LOCAL_INPUT = re.compile(
-    r'((?:\.\./)*)input/([^\'")\s]+)'
+    r'(?<!skills/feishu-deck-h5/)((?:\.\./)*)input/([^\'")\s?#]+)'
 )
 
 def find_skill_root() -> Path:
@@ -52,6 +70,47 @@ def find_skill_root() -> Path:
             return parent
     raise SystemExit("Cannot locate feishu-deck-h5 skill root from script location.")
 
+# Subtrees of assets/ that count as the "library-grade shared content pool"
+# (cross-deck reusable: client logos, digital employee avatars, third-party
+# tool logos, feishu sub-product brand kit). The slide library dedupes these
+# via assets-manifest.yaml; everything else under assets/ is framework
+# (CSS/JS/lark brand) that every deck self-contains.
+SHARED_PREFIX = "shared/"
+
+# Back-compat for old decks that still reference the pre-reorg paths
+# (assets/clientlogo/foo.png instead of assets/shared/clientlogo/foo.png).
+# When the original location is missing, retry with these prefixes.
+LEGACY_DIR_REDIRECTS = {
+    "clientlogo/": "shared/clientlogo/",
+    "digital_employee_avatars_50/": "shared/digital_employee_avatars_50/",
+    "mydigitalemployee/": "shared/mydigitalemployee/",
+}
+
+def resolve_asset(skill_root: Path, sub: str, rest: str) -> tuple[Path, str]:
+    """Return (origin_path, possibly-redirected-rest) for an asset reference.
+    If `rest` points to a legacy location, return the new shared/ location."""
+    direct = skill_root / sub / rest
+    if direct.exists():
+        return direct, rest
+    if sub != "assets":
+        return direct, rest  # only assets/ has the shared/ reorg
+    # Legacy directory prefix match
+    for old, new in LEGACY_DIR_REDIRECTS.items():
+        if rest.startswith(old):
+            redirected = new + rest[len(old):]
+            cand = skill_root / sub / redirected
+            if cand.exists():
+                return cand, redirected
+    # Legacy top-level filename — search shared/ subtree by basename
+    if "/" not in rest:
+        shared_root = skill_root / "assets" / "shared"
+        if shared_root.is_dir():
+            matches = list(shared_root.rglob(rest))
+            if len(matches) == 1:
+                redirected = str(matches[0].relative_to(skill_root / "assets"))
+                return matches[0], redirected
+    return direct, rest  # not found — caller will warn
+
 def find_run_root(out_dir: Path) -> Path:
     """Find runs/<ts>/ root from any nested output path."""
     for parent in [out_dir, *out_dir.parents]:
@@ -60,11 +119,24 @@ def find_run_root(out_dir: Path) -> Path:
     raise SystemExit(f"Cannot find run root from {out_dir}; expected runs/<ts>/output/.")
 
 def main():
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    shared_mode = "copy"
+    positional = []
+    for a in args:
+        if a.startswith("--shared="):
+            shared_mode = a.split("=", 1)[1]
+            if shared_mode not in ("copy", "skip"):
+                sys.exit(f"Invalid --shared value: {shared_mode!r} (expected 'copy' or 'skip')")
+        elif a in ("-h", "--help"):
+            print(__doc__)
+            sys.exit(0)
+        else:
+            positional.append(a)
+    if len(positional) != 1:
         print(__doc__)
         sys.exit(1)
 
-    out_dir = Path(sys.argv[1]).resolve()
+    out_dir = Path(positional[0]).resolve()
     if not out_dir.is_dir():
         sys.exit(f"Not a directory: {out_dir}")
 
@@ -82,7 +154,9 @@ def main():
     bytes_copied = 0
     files_copied = set()
     htmls_patched = 0
-    referenced = set()      # paths still referenced after this run (relative to out_dir)
+    referenced = set()      # files that exist (or should exist) in output/ — protects from prune
+    shared_refs = set()     # all assets/shared/* logical refs (for manifest, regardless of mode)
+    shared_skipped = 0      # count of shared/* refs left as skill-relative under --shared=skip
 
     for html_path in out_dir.rglob("*.html"):
         # Compute relative depth for new local paths
@@ -95,10 +169,22 @@ def main():
         original = src
 
         def replace_skill(m):
-            nonlocal bytes_copied
+            nonlocal bytes_copied, shared_skipped
             sub = m.group(2)  # assets / examples / templates
             rest = m.group(3)
-            origin = skill_root / sub / rest
+            origin, rest = resolve_asset(skill_root, sub, rest)
+
+            is_shared = (sub == "assets" and rest.startswith(SHARED_PREFIX))
+            if is_shared:
+                shared_refs.add(f"assets/{rest}")
+                if shared_mode == "skip":
+                    # Don't copy, don't rewrite. Leave HTML ref as skill-relative.
+                    # Output won't be portable on its own, but the slide-library
+                    # ingest path (and iteration-mode authoring) doesn't need it
+                    # to be — it resolves shared/* against its own pool.
+                    shared_skipped += 1
+                    return m.group(0)
+
             target = local_assets / rest if sub == "assets" else local_assets / sub / rest
             referenced.add(str(target.relative_to(out_dir)))
             if origin.exists():
@@ -137,22 +223,68 @@ def main():
         src = RX_SKILL.sub(replace_skill, src)
         src = RX_INPUT.sub(replace_input, src)
 
-        # Track already-rewritten refs (for second+ runs) so prune doesn't delete them.
-        # Also self-heal: if the local target is missing, copy from skill_root/assets/
-        # (or run input/) — protects against stale state after manual deletes.
-        for m in RX_LOCAL_ASSET.finditer(src):
+        # Process already-local refs (second+ runs OR pre-reorg legacy outputs):
+        #  - track for prune so existing files aren't deleted
+        #  - apply legacy redirect (rewriting both HTML AND moving files in
+        #    place) so an output produced before the assets/shared/ reorg can
+        #    be upgraded by simply re-running this script
+        #  - self-heal: if the canonical target is missing, copy from skill
+        def replace_local_asset(m):
+            nonlocal bytes_copied
+            prefix = m.group(1)
             rest = m.group(2)
-            target = (out_dir / "assets" / rest).resolve()
-            if not target.is_relative_to(out_dir):
-                continue
-            referenced.add(str(target.relative_to(out_dir)))
-            if not target.exists():
-                origin = skill_root / "assets" / rest
+
+            # Compute canonical rest via legacy redirects (mirrors
+            # resolve_asset but for already-local paths). If rest is the
+            # legacy form, new_rest gets a shared/ prefix.
+            new_rest = rest
+            if not rest.startswith(SHARED_PREFIX):
+                for old, new in LEGACY_DIR_REDIRECTS.items():
+                    if rest.startswith(old):
+                        new_rest = new + rest[len(old):]
+                        break
+                else:
+                    # Top-level legacy filename (zoom.png / 飞书标识_*.png /
+                    # 茶百道.jpg etc.) — look it up by basename in skill's
+                    # shared/ tree.
+                    if "/" not in rest:
+                        shared_root = skill_root / "assets" / "shared"
+                        if shared_root.is_dir():
+                            matches = list(shared_root.rglob(rest))
+                            if len(matches) == 1:
+                                new_rest = str(matches[0].relative_to(skill_root / "assets"))
+
+            old_target = (out_dir / "assets" / rest).resolve()
+            new_target = (out_dir / "assets" / new_rest).resolve()
+            if not new_target.is_relative_to(out_dir):
+                return m.group(0)
+
+            # If we redirected, migrate the file in place (legacy → shared/).
+            if new_rest != rest and old_target.exists() and not new_target.exists():
+                new_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old_target), str(new_target))
+
+            # In --shared=skip, leftover already-rewritten shared/* refs from a
+            # prior copy-mode run shouldn't be re-tracked or self-healed —
+            # they'll get pruned. Still record them in shared_refs so the
+            # manifest is accurate.
+            if new_rest.startswith(SHARED_PREFIX):
+                shared_refs.add(f"assets/{new_rest}")
+                if shared_mode == "skip":
+                    return f"{prefix}assets/{new_rest}"
+
+            referenced.add(str(new_target.relative_to(out_dir)))
+            if not new_target.exists():
+                origin = skill_root / "assets" / new_rest
                 if origin.exists():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(origin, target)
+                    new_target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(origin, new_target)
                     bytes_copied += origin.stat().st_size
-                    files_copied.add(str(target.relative_to(out_dir)))
+                    files_copied.add(str(new_target.relative_to(out_dir)))
+
+            return f"{prefix}assets/{new_rest}"
+
+        src = RX_LOCAL_ASSET.sub(replace_local_asset, src)
         for m in RX_LOCAL_INPUT.finditer(src):
             rest = m.group(2)
             target = (out_dir / "input" / rest).resolve()
@@ -231,11 +363,56 @@ def main():
             if d.is_dir() and not any(d.iterdir()):
                 d.rmdir()
 
+    # Emit assets-manifest.yaml — classifies every referenced file as
+    # shared / framework / deck-local so downstream tools (slide library
+    # ingest) can dedupe shared-pool files against their own copy.
+    # `shared` comes from shared_refs (always tracked, regardless of mode);
+    # `framework` and `deck-local` come from `referenced` (files in output/).
+    shared_files = sorted(shared_refs)
+    framework_files, deck_local_files = [], []
+    for rel in sorted(referenced):
+        if rel.startswith("input/"):
+            deck_local_files.append(rel)
+        elif rel.startswith(f"assets/{SHARED_PREFIX}"):
+            continue  # captured via shared_refs
+        else:
+            framework_files.append(rel)
+
+    manifest_lines = ["# Generated by copy-assets.py — do not edit by hand.",
+                      "# Paths are relative to this output/ folder.",
+                      f"# shared-mode: {shared_mode}",
+                      "# Classification:",
+                      "#   shared      — library-grade reusable content (clientlogo, digital-employee,",
+                      "#                  third-party-logos, feishu-products). The slide library should",
+                      "#                  dedupe these against its own assets/shared/ pool. With",
+                      "#                  --shared=skip, these files are NOT in this output/; HTML refs",
+                      "#                  remain skill-relative until a downstream consumer rewrites them.",
+                      "#   framework   — feishu-deck CSS/JS + lark brand kit. Every deck self-contains.",
+                      "#   deck-local  — deck-unique inputs (covers, custom photos). Stay deck-local.",
+                      ""]
+    for label, paths in (("shared", shared_files),
+                         ("framework", framework_files),
+                         ("deck-local", deck_local_files)):
+        if paths:
+            manifest_lines.append(f"{label}:")
+            for p in paths:
+                manifest_lines.append(f"  - {p}")
+        else:
+            manifest_lines.append(f"{label}: []")
+    manifest_path = out_dir / "assets-manifest.yaml"
+    manifest_path.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+
     print()
-    print(f"Done. {htmls_patched} HTML(s) patched · {len(files_copied)} unique asset(s) copied · {bytes_copied / 1024:.1f} KB copied")
+    print(f"Done [shared-mode={shared_mode}]. {htmls_patched} HTML(s) patched · {len(files_copied)} unique asset(s) copied · {bytes_copied / 1024:.1f} KB copied")
     if pruned:
         print(f"      {pruned} stale file(s) pruned · {pruned_bytes / 1024:.1f} KB freed")
-    print(f"Output is now self-contained — you can move {out_dir} anywhere and the deck still runs.")
+    if shared_skipped:
+        print(f"      {shared_skipped} shared/* ref(s) left as skill-relative (not copied)")
+    print(f"      manifest: {len(shared_files)} shared / {len(framework_files)} framework / {len(deck_local_files)} deck-local → {manifest_path.relative_to(out_dir.parent)}")
+    if shared_mode == "copy":
+        print(f"Output is now self-contained — you can move {out_dir} anywhere and the deck still runs.")
+    else:
+        print(f"Output runs only while next to the skill folder (shared/* refs are skill-relative). Use --shared=copy before zipping/sending.")
 
 if __name__ == "__main__":
     main()
