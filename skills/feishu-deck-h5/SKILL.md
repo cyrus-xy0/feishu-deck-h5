@@ -504,6 +504,54 @@ desktop, or any other ad-hoc location, unless the user explicitly
 asks ("放到下载目录"). If the harness sandbox can't reach
 `runs/<ts>/output/`, that's Mode 2 — package and attach, don't relocate.
 
+### 🔒 Delivery contract — NEVER hand back a single linked HTML file
+
+This is a **hard rule, no exceptions**. Before any artifact crosses
+the agent → user boundary (chat reply attachment, remote-codex
+transport-back, harness "download to user" hook, manual file-pick),
+verify the artifact form. Pick exactly **one** of three valid shapes:
+
+| Shape | When | What goes back |
+|---|---|---|
+| **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. 90% of cases. | `bash build.sh --inline` → ship `examples/sample-deck-inline.html` (or its renamed copy under `runs/<ts>/output/`). Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. |
+| **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + assets + `texts.md` + `apply-texts.py` + `apply.command`/`apply.bat` launchers. Recipient unzips, edits `texts.md`, double-clicks the launcher to regenerate. |
+| **C · hosted URL** *(when the user already deploys to Pages / a CDN)* | Deck lives at a stable web URL. | Ship the URL string. No file attachment. |
+
+**Banned form · single linked HTML**: never hand back just one
+`*.html` file that points to sibling `assets/` / `input/` /
+`prototypes/` directories. It works locally inside the skill folder
+and **breaks the moment** it crosses any transport boundary — remote
+codex auto-downloads to `~/Downloads/` strip the siblings, IM
+attachments take only the file the agent named, `airdrop` /
+`scp` of one file leaves the directory behind. The user will see a
+naked unstyled DOM and call it "乱码".
+
+**Why this rule exists**: the skill's linked-output mode is meant
+for **in-skill iteration** (fast browser cache, small HTML diffs),
+not for delivery. The delivery boundary is where linked must convert
+to one of A/B/C. The author of the skill knows the convention; the
+agent doing the hand-back must enforce it.
+
+**Specific failure mode this rule prevents** (remote codex / web
+sandbox): an agent runs the skill in a remote container, finishes
+the build, and the harness's "return artifact" hook picks **the most
+recently modified file** matching `*.html` (which is the linked
+`output/<deck>.html`). The HTML lands in the user's `~/Downloads/`
+without its sibling `assets/` directory. Every `<link>`,
+`background-image`, `<script src>` is a dead path. Always produce a
+single-file artifact (inline HTML or zip) so the hand-back hook has
+something correct to grab.
+
+**How to apply in chat replies**: when surfacing the deck path,
+**name the shape**, not just the path:
+
+> ✅ `runs/<ts>/output/lark-opple-2026-05-13-inline.html` (inline, 任意位置可开)
+> ❌ `runs/<ts>/output/index.html` (linked — 只在 skill 目录内可开)
+
+If the user typed "把 deck 发我" / "给客户看" / "传到飞书" without
+specifying form, default to **A (inline)**. Only switch to B if they
+say "客户要改文字" / "我要自己改" / mention apply-texts.
+
 ### Self-contained output (mandatory · runs before every hand-back)
 
 The HTML files in `runs/<ts>/output/` reference assets via relative
