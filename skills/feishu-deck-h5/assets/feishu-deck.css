@@ -442,6 +442,130 @@ body {
   background: var(--fs-accent); border-color: transparent; color: #fff;
 }
 
+/* ---- Content tag (24 Body) — for labels that CARRY CONTENT, not chrome.
+   Use when the label is "who owns / when due / what status / what category"
+   that the reader needs to read at body weight. Differs from `.pill` (16
+   Foot chrome) — `.pill` is for true chrome like pagination indicator;
+   `.content-tag` is for content-bearing labels.
+   2026-05-16: introduced after a session where 6 slides used `.pill`-style
+   16px chrome for category labels and the user flagged each as "too small". */
+.slide .content-tag {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 700 var(--fs-body)/1.2 var(--fs-font-cjk);
+  letter-spacing: 0.04em;
+  color: var(--fs-accent);
+}
+
+/* ---- Column pill (28 Sub) — for COLUMN-LABEL chips that label a panel
+   or column. E.g. "困境 / 解法" in a content-2col compare layout,
+   "重点客群" in a big-stat focus card, "DEADLINE / 截止时间" in a
+   deadline-card. These are SECTION-level labels, not meta — they belong
+   to Sub tier (28), with optional pill chrome (border + padding). */
+.slide .column-pill {
+  display: inline-flex; align-items: center; gap: 10px;
+  font: 700 var(--fs-sub)/1 var(--fs-font-cjk);
+  letter-spacing: 0.06em;
+  color: var(--fs-accent);
+  padding: 10px 22px; border-radius: var(--fs-radius-pill);
+  background: color-mix(in srgb, var(--fs-accent) 18%, transparent);
+}
+
+/* ---- Pattern N · 5-up Overview with Hero Numerals (2026-05-16) ----
+   When a `.slide[data-layout="content-3up"]` has a `.grid.overview-grid`
+   child, override the framework's hardcoded `repeat(3, 1fr)` to give
+   the 5-column layout. Uses a 2-class selector (`grid.overview-grid`)
+   to outweigh the single-attribute framework rule on specificity.
+   Pair with `.overview-card` for the per-card layout (hero numeral +
+   title + body, with min-height to give the hero numeral breathing room).
+   Tonal accents `.is-c1 ... .is-c5` ship below. */
+.slide .grid.overview-grid {
+  grid-template-columns: repeat(5, 1fr);
+  gap: 24px;
+}
+.slide .grid.overview-grid .overview-card {
+  padding: 36px 28px 32px;
+  display: flex; flex-direction: column; gap: 18px;
+  min-height: 320px;
+  border-radius: var(--fs-radius-card);
+  border: 1px solid var(--fs-text-16);
+  background: rgba(255,255,255,0.04);
+}
+.slide .grid.overview-grid .overview-card .ov-num {
+  /* allow:typescale — Hero numeral, 88px (>1.8× Title 48 to clear muddled
+     middle per Goldilocks). Weight 500 medium + 55% semi-transparent brand
+     color → editorial, doesn't compete with the bold card title. */
+  font: 500 88px/0.95 var(--fs-font-latin);
+  letter-spacing: -0.01em;
+  margin-bottom: 4px;
+}
+.slide .grid.overview-grid .overview-card .ov-name {
+  font: 700 var(--fs-title)/1.15 var(--fs-font-cjk);
+  color: #fff; letter-spacing: -0.005em;
+}
+.slide .grid.overview-grid .overview-card .ov-desc {
+  font: 500 var(--fs-body)/1.5 var(--fs-font-cjk);
+  color: #fff; opacity: 0.92; margin-top: auto;
+}
+/* Tonal accents per card */
+.slide .grid.overview-grid .overview-card.is-c1 { border-color: rgba(60,127,255,0.55);  background: linear-gradient(180deg, rgba(60,127,255,0.12) 0%, rgba(8,12,24,0.50) 100%); }
+.slide .grid.overview-grid .overview-card.is-c1 .ov-num { color: color-mix(in srgb, var(--fs-blue) 55%, transparent); }
+.slide .grid.overview-grid .overview-card.is-c2 { border-color: rgba(159,111,241,0.55); background: linear-gradient(180deg, rgba(159,111,241,0.14) 0%, rgba(8,12,24,0.50) 100%); }
+.slide .grid.overview-grid .overview-card.is-c2 .ov-num { color: color-mix(in srgb, var(--fs-violet) 55%, transparent); }
+.slide .grid.overview-grid .overview-card.is-c3 { border-color: rgba(51,214,192,0.55);  background: linear-gradient(180deg, rgba(51,214,192,0.12) 0%, rgba(8,12,24,0.50) 100%); }
+.slide .grid.overview-grid .overview-card.is-c3 .ov-num { color: color-mix(in srgb, var(--fs-teal) 55%, transparent); }
+.slide .grid.overview-grid .overview-card.is-c4 { border-color: rgba(254,127,0,0.50);   background: linear-gradient(180deg, rgba(254,127,0,0.14) 0%, rgba(8,12,24,0.50) 100%); }
+.slide .grid.overview-grid .overview-card.is-c4 .ov-num { color: color-mix(in srgb, var(--fs-orange) 55%, transparent); }
+.slide .grid.overview-grid .overview-card.is-c5 { border-color: rgba(255,255,255,0.30); background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(8,12,24,0.50) 100%); }
+.slide .grid.overview-grid .overview-card.is-c5 .ov-num {
+  /* allow:white-opacity — decorative Hero numeral, 55% mirrors c1-c4. */
+  color: rgba(255,255,255,0.55);
+}
+
+/* ---- Canonical card recipe (use this for ANY "tag + title + body" card) ----
+   2026-05-16: extracted from slide-7/8 pattern that took 8 iterations
+   to converge. The canonical shape:
+     <div class="canonical-card">
+       <span class="cc-tag">类别 / 状态 / owner (24 body bold brand)</span>
+       <h3 class="cc-title">标题 (28 sub bold white)</h3>
+       <p class="cc-body">描述 (24 body regular white)</p>
+     </div>
+   Child classes are `cc-*` prefixed (NOT `card-*`) to avoid collision
+   with the existing `.card` global class system (`.card .ctitle`,
+   `.card .cbody`, `.card .cfoot`). Apply `.is-hero` for the focal
+   card (brand border + glow). Apply `.is-urgent` for orange warning.
+*/
+.slide .canonical-card {
+  padding: 26px 28px;
+  border-radius: var(--fs-radius-card);
+  border: 1px solid var(--fs-text-16);
+  background: rgba(255,255,255,0.04);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.slide .canonical-card .cc-tag {
+  font: 700 var(--fs-body)/1.2 var(--fs-font-cjk);
+  letter-spacing: 0.04em;
+  color: var(--fs-accent);
+}
+.slide .canonical-card .cc-title {
+  font: 700 var(--fs-sub)/1.25 var(--fs-font-cjk);
+  color: #fff; letter-spacing: -0.005em; margin: 0;
+}
+.slide .canonical-card .cc-body {
+  font: 500 var(--fs-body)/1.45 var(--fs-font-cjk);
+  color: #fff; margin-top: auto;
+}
+.slide .canonical-card.is-hero {
+  border: 1.5px solid color-mix(in srgb, var(--fs-accent) 55%, transparent);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--fs-accent) 16%, transparent) 0%,
+    rgba(8,12,24,0.50) 100%);
+}
+.slide .canonical-card.is-urgent {
+  border-color: rgba(254,127,0,0.55);
+  background: linear-gradient(180deg, rgba(254,127,0,0.14) 0%, rgba(8,12,24,0.50) 100%);
+}
+.slide .canonical-card.is-urgent .cc-tag { color: var(--fs-orange); }
+
 /* Cards on dark */
 .slide .card {
   position: relative;
@@ -978,6 +1102,67 @@ body {
 }
 .slide[data-layout="big-stat"] .copy p {
   font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); max-width: 600px;
+}
+
+/* BF11 — Hero zone content centered, not left-flush (2026-05-16).
+   When big-stat is composed as a 2-col stage (hero number left + focus
+   card right), the LEFT column's content can be visually centered within
+   its half via the `.hero.is-centered` modifier — useful when the right
+   column carries a card that "balances" the visual weight from the left.
+   OPT-IN to avoid retroactively shifting legacy big-stat decks that
+   relied on the default left-flush layout. New decks should write:
+       <div class="hero is-centered"><div class="num">56%</div>...</div>
+*/
+.slide[data-layout="big-stat"] .hero.is-centered {
+  display: flex; flex-direction: column;
+  align-items: center; text-align: center;
+  gap: 22px;
+}
+.slide[data-layout="big-stat"] .hero.is-centered .gap-row,
+.slide[data-layout="big-stat"] .hero.is-centered .stat-row {
+  justify-content: center;
+}
+
+/* BF10 — Mixed-size row alignment (2026-05-16).
+   When a row contains text elements at significantly different font-sizes
+   (ratio > 1.5×, e.g. a 48px numeral followed by 24px body text), the
+   default `align-items: baseline` LOOKS misaligned because the typographic
+   baselines diverge by 50%+ of the smaller font's x-height. Center
+   alignment puts the smaller element at the visual middle of the bigger
+   element's line-box — reads as "on the same line".
+   Use `.mixed-row` as a grid/flex container utility class for this pattern.
+   Example: `<div class="mixed-row"><span class="num">01</span>
+            <p class="text">内容...</p></div>` */
+.slide .mixed-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 22px;
+  align-items: center;       /* explicit — NOT baseline */
+}
+
+/* BF12 — Multi-card column equal-height (2026-05-16).
+   When a `.col-text` or `.col-visual` contains MULTIPLE cards (typically
+   2-3 stacked vertically), the cards should fill the column equally.
+   Scoped via `:has()` so that SINGLE-child visual columns (image / UI
+   mock / hero illustration) keep their legacy "styled container" behavior
+   and don't get force-stacked into a flex column. */
+.slide .col-text:has(> .canonical-card + .canonical-card),
+.slide .col-text:has(> .news-card + .news-card),
+.slide .col-text:has(> .canonical-card + .news-card),
+.slide .col-text:has(> .news-card + .canonical-card),
+.slide .col-visual:has(> .canonical-card + .canonical-card),
+.slide .col-visual:has(> .news-card + .news-card),
+.slide .col-visual:has(> .canonical-card + .news-card),
+.slide .col-visual:has(> .news-card + .canonical-card),
+.slide .col-visual:has(> .data-panel + .data-panel) {
+  display: flex; flex-direction: column; gap: 24px;
+}
+.slide .col-text:has(> .canonical-card + .canonical-card) > .canonical-card,
+.slide .col-text:has(> .news-card + .news-card) > .news-card,
+.slide .col-visual:has(> .canonical-card + .canonical-card) > .canonical-card,
+.slide .col-visual:has(> .news-card + .news-card) > .news-card,
+.slide .col-visual:has(> .data-panel + .data-panel) > .data-panel {
+  flex: 1;
 }
 
 /* ============================================================================

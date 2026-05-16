@@ -1004,6 +1004,137 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: boo
             else:      iss.warn('R-LANG', msg)
             break  # one report per slide is enough
 
+    # 2026-05-16 · Additional check: Latin-uppercase chrome tags inside
+    # short text leaves (span / p / div with eyebrow / kicker / pill / tag
+    # / -tag / -eyebrow class names). The deck shouldn't carry "MODE 01" /
+    # "DEADLINE" / "SKILL" / "PREDIT" as chrome labels when the page-level
+    # language is zh-only — they look like rolling EN translation tracks.
+    # Brand names / product codes / acronyms are exempt via whitelist.
+    LATIN_BRAND_WHITELIST = {
+        'AI', 'API', 'HTML', 'CSS', 'JS', 'CLI', 'SDK', 'UI', 'UX',
+        'PDF', 'PNG', 'JPG', 'SVG', 'CTA', 'KPI', 'OKR', 'ROI', 'SOP',
+        'CXO', 'CEO', 'CTO', 'CFO', 'COO', 'CMO', 'CIO', 'VP', 'BD', 'KA',
+        'PR', 'HR', 'IT', 'BG', 'BU',
+        'SaaS', 'PaaS', 'IaaS', 'B2B', 'B2C', 'O2O', 'MVP',
+        'LBP', 'IDC', 'AWS', 'GCP', 'OEM', 'ODM', 'NPS', 'GMV',
+        'Q1', 'Q2', 'Q3', 'Q4', 'H1', 'H2',
+        'Lark', 'Feishu', 'Codex', 'Mira', 'Flow', 'Base', 'Wiki',
+        'OpenAI', 'Anthropic', 'Claude', 'GPT', 'LLM',
+    }
+    # Scan small text leaves whose markup smells like chrome labels.
+    chrome_class_text_re = re.compile(
+        r'<(?:span|p|div|h[1-6])\s[^>]*?'
+        r'class="[^"]*\b(?:eyebrow|kicker|pill|tag|chip|badge|'
+        r'\w+-tag|\w+-pill|\w+-eyebrow|\w+-chip|\w+-badge|nc-tag|'
+        r'db-tag|dl-eyebrow|mode-tag|side-pill|focus-pill|td-owner)\b'
+        r'[^"]*"[^>]*>([^<]+)</(?:span|p|div|h[1-6])>',
+        re.S)
+    # Match a chunk that is purely Latin uppercase + digits + spaces + punctuation
+    # (2-30 chars). Pure-Latin gate keeps CJK label content out.
+    latin_uc_re = re.compile(r'^[A-Z0-9 ·\-/_]{2,30}$')
+
+    for i, fr in enumerate(slides, 1):
+        for m in chrome_class_text_re.finditer(fr):
+            text = m.group(1).strip()
+            if not latin_uc_re.match(text):
+                continue
+            # Tokenize; if every non-numeric token is in whitelist, skip
+            tokens = [t for t in re.split(r'[\s·\-/_]+', text)
+                      if t and not t.isdigit()]
+            if not tokens:
+                continue
+            if all(t in LATIN_BRAND_WHITELIST for t in tokens):
+                continue
+            iss.warn('R-LANG',
+                f'slide {i}: chrome label `{text}` looks like a Latin label '
+                'in a zh-only deck. If it\'s genuinely a brand / product / '
+                'acronym, add it to LATIN_BRAND_WHITELIST in validate.py; '
+                'otherwise translate to CJK (e.g. "MODE 01" → "方式 01", '
+                '"DEADLINE" → "截止时间", "PREDIT"-style typos → fix).')
+
+
+def audit_hierarchy(html: str, iss: Issues):
+    """R-HIERARCHY: visual size hierarchy must respect semantic hierarchy.
+
+    Within a card / panel / list-item, meta-info (owner / attribution /
+    source / timestamp / status / kicker) is structurally LESS important
+    than the body content it describes. If the meta element is BIGGER
+    than the body it labels, the reader's eye gets pulled to the meta
+    first — visual hierarchy contradicts semantic hierarchy.
+
+    Concrete rule: any selector matching META_CLASS_RE that authors a
+    font-size > 24 (Body floor) in per-page CSS triggers a warning. The
+    24 ceiling is because body classes are at 24 (Body tier); meta on the
+    SAME card should be ≤ 24, never above.
+
+    Exempt:
+      • Column-label classes that ARE the column's title (e.g. .side-pill
+        for `困境` / `解法`, .focus-pill for `重点客群`). These are NOT
+        meta — they're content labels. They live in a separate name
+        bucket: .column-pill / .side-pill / .focus-pill / .section-tag.
+      • Rules with `/* allow:meta-larger */` opt-out (rare, e.g. when the
+        owner literally IS the slide's hero — unusual but possible).
+    """
+    # Use negative lookahead `(?![-_\w])` instead of `\b` so compound class
+    # names like `.kicker-bar` / `.byline-link` / `.timestamp-label` don't
+    # match — `\b` treats `-` as a word boundary in regex, but we want the
+    # class name to END after the meta term.
+    META_CLASS_RE = re.compile(
+        r'\.(?:'
+        r'owner|attrib|source(?:-footer)?|who|byline|author-meta|'
+        r'timestamp|date|status|kicker|'
+        r'td-owner|nc-author|case-attrib|quote-attrib|voice-who|'
+        r'eyebrow'    # eyebrow is meta-tier by tradition
+        r')(?![-_\w])'
+    )
+    # Selectors that LOOK like meta but are actually column labels — exempt.
+    # Only list classes that ARE shipped in feishu-deck.css or referenced in
+    # SKILL.md recipes; dead exemptions hide bugs.
+    COLUMN_LABEL_RE = re.compile(
+        r'\.(?:column-pill|side-pill|focus-pill|'
+        r'agenda-label|story-label|case-label)(?![-_\w])'
+    )
+
+    for raw, _is_fw in _iter_style_blocks(html, include_framework=False):
+        css = _strip_nested_at_rules(raw)
+        for rule_m in _RULE_WITH_COMMENTS_RE.finditer(css):
+            # Strip any leading/trailing comments from the captured selector
+            # (the regex eats them as part of [^{}]+? if they appear between
+            # rules). Without this, a trailing `/* meta ... */` after a rule
+            # gets picked up as the NEXT rule's selector.
+            selector = re.sub(r'/\*.*?\*/', '', rule_m.group(1), flags=re.S).strip()
+            if not selector:
+                continue
+            body_with_comments = rule_m.group(2)
+            if 'allow:meta-larger' in body_with_comments:
+                continue
+            if not META_CLASS_RE.search(selector):
+                continue
+            if COLUMN_LABEL_RE.search(selector):
+                continue
+            # Strip comments to get pure rule block
+            block = re.sub(r'/\*.*?\*/', '', body_with_comments, flags=re.S)
+            sizes = []
+            for fm in re.finditer(r'font-size:\s*(\d+)px', block):
+                sizes.append(int(fm.group(1)))
+            for fm in re.finditer(r'\bfont:\s*[^;{}]*?(\d+)px', block):
+                sizes.append(int(fm.group(1)))
+            for size in sizes:
+                if size > FLOOR_BODY_PX:
+                    iss.warn('R-HIERARCHY',
+                        f'meta-class selector `{selector[:80]}` at '
+                        f'{size}px (> body floor {FLOOR_BODY_PX}px). Meta '
+                        '(owner / attrib / source / timestamp / kicker / '
+                        'eyebrow) must NOT exceed body — otherwise visual '
+                        'hierarchy reads inverted: the reader\'s eye '
+                        'lands on "who" before "what". Drop to ≤ 24, OR '
+                        'add `/* allow:meta-larger */` if this is a '
+                        'deliberate hero exception (very rare). If this '
+                        'is actually a column-LABEL (e.g. column-pill, '
+                        'side-pill), rename the class — column labels '
+                        'belong to a different name bucket.')
+                    break  # one warn per rule is enough
+
 
 def audit_default_centering(html: str, iss: Issues):
     """R48: every fixed-shape container layout vertically centers by default.
@@ -1720,6 +1851,7 @@ def main():
     audit_centering_pattern(html, iss)
     audit_layout_integrity(html, iss)
     audit_default_centering(html, iss)
+    audit_hierarchy(html, iss)
     audit_variant_discipline(html, iss)
     audit_ui_mocks_are_html(slides, iss)
     audit_no_cyan_accent(slides, iss)

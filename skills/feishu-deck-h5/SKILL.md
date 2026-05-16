@@ -2562,6 +2562,57 @@ DRIFT          → SNAP TO
   ladder makes the "snap" choice trivial: 24 for body content, 16
   for chrome.
 
+#### Goldilocks zones — decorative elements have only TWO safe sizes (2026-05-16)
+
+Decorative elements (large numerals, display markers, eyebrow indices
+like "01 / 05") that AREN'T semantic content must sit in one of two
+safe size zones, NEVER in the middle.
+
+For a slide with Title at 48 px:
+
+| Element size | Zone | Outcome |
+|---|---|---|
+| ≥ 86 px (1.8× Title) | **Hero zone** | "I'm decoration, not text" — reads as visual marker |
+| 24–48 px (0.5–1.0×) | **Muddled middle** ⚠️ | Eye can't tell — looks like a wannabe-title that's too small |
+| ≤ 19 px (0.4× Title) | **Chrome zone** | "I'm an index / aux info" — reads as eyebrow / footnote |
+
+**Don't sit in 50–80% of the title size.** A decorative numeral at
+24, 28, 32, 38, 40 next to a 48 title looks "stuck" — neither
+clearly Hero nor clearly Chrome.
+
+**Concrete rule for decorative numerals**:
+- Big-numeral-overview cards (like Pattern N, 5-up overview): use
+  ≥ 88 px (Hero exception, requires `/* allow:typescale */`).
+- Eyebrow-style "N of 5" markers: use **16 (Foot)** as the framework
+  `.content-tag` or the new `.column-pill` would in their default.
+
+**Postmortem (20260516 南区周会 slide 1)**: hero numerals iterated
+88 → 64 → 16 → 28 → 24 → 88 over 6 rounds. Every middle value
+"looked stuck"; user kept saying either "too small" (24) or "too
+big" (88) depending on which way they were leaving from. The
+Goldilocks rule formalizes this: don't even TRY the middle.
+
+#### Card density — title-size depends on cards-per-page (2026-05-16)
+
+When you author N parallel cards on a slide, the per-card title size
+must scale DOWN as N grows. A 48px Title on 4 cards reads decisively;
+the same 48px on 8 cards crowds the canvas and the cards lose visual
+breathing room.
+
+| Cards per slide | Card title tier | Why |
+|---|---|---|
+| ≤ 4 cards | **48 (Title)** | Plenty of horizontal room per card; 48 is decisive |
+| 5–6 cards | 28–48 (author judges) | Depends on card aspect ratio. Wide cards still fit 48; narrow drops to 28 |
+| ≥ 7 cards | **28 (Sub)** | 48 titles make the page feel "full"; 28 is the right rhythm for dense grids |
+
+When in doubt with 5–6 cards: shrink to 28, OR shrink the card count
+by consolidating related items. Don't keep 48 and add cards.
+
+**Postmortem (20260516 南区周会 slide 8)**: 8 todos rendered with 48
+titles in a 4×2 grid → cards visually fought each other, user flagged
+"太满 / 拥挤". Dropping titles to 28 (Sub) fixed it without losing
+content.
+
 #### Nested grids must replicate the parent's column ratio (mandatory)
 
 When a region (e.g. `bottom-cta`, a strip of CTA pills) sits *underneath*
@@ -5005,6 +5056,114 @@ scenes are weaker than three hard ones. Per-card tonal variants
 (`.is-blue / .is-violet / .is-teal / .is-purple / .is-orange`) recolor the
 accent bar, icon, and label; keep adjacent cards in different tones so the
 viewer can pre-attentively count the panels.
+
+### N. 5-up Overview with Hero Numerals — `overview-grid` (2026-05-16)
+
+Use this for **"this month / quarter / week, 5 things to push forward"**
+overview pages. Each card carries a large decorative numeral (88 px Hero
+exception) + a bold Title-tier topic name + one-line description body.
+The hero numeral signals "5 parallel directions" pre-attentively; the
+topic name takes the focal weight.
+
+This pattern was evolved during the 2026-05-16 南区周会 session through
+~10 iterations of size / weight / treatment tuning. The final values:
+
+| Element | Size | Weight | Color | Notes |
+|---|---|---|---|---|
+| Page title (top, page-wide) | 48 Title | 700 | #fff | Standard |
+| Card numeral 01–05 | **88 Hero** | 500 medium | 55% semi-transparent brand color | `/* allow:typescale */` |
+| Card topic name | **48 Title** | 700 | #fff | Bold dominates within card |
+| Card description | 24 Body | 500 medium | #fff @ 92% | Margin-top auto pushes to bottom |
+
+5 cards in a horizontal `grid-template-columns: repeat(5, 1fr)`, gap 24px,
+each card `min-height: 320px` to give numeral + title + body proper
+breathing room.
+
+Markup:
+```html
+<div class="slide" data-layout="content-3up" data-screen-label="01 五个推进方向"
+     data-slide-key="weekly-overview">
+  <div class="wordmark"></div>
+  <div class="header">
+    <h2 class="title-zh">本周南区周会 · 五个推进方向</h2>
+  </div>
+  <div class="stage">
+    <div class="grid overview-grid">
+      <div class="card overview-card is-c1">
+        <span class="ov-num">01</span>
+        <span class="ov-name">商机管理</span>
+        <span class="ov-desc">Q2/Q3 大扫除 · 周末截止</span>
+      </div>
+      <!-- 4 more cards: is-c2 / is-c3 / is-c4 / is-c5 -->
+    </div>
+  </div>
+</div>
+```
+
+Per-card tonal variants `.is-c1` (blue) / `.is-c2` (violet) / `.is-c3`
+(teal) / `.is-c4` (orange) / `.is-c5` (neutral white) recolor the
+border + numeral. Keep the SAME color → SAME topic across the deck (if
+slide 1 says 商机管理 = blue, then slide 2 which is a deep-dive on 商机
+should also lead with blue).
+
+**Why this pattern needed naming**: a 5-up overview is structurally
+different from a 3-up content layout (Pattern A) or a generic list. The
+hero numeral makes each card READ as a "chapter" rather than a "cell".
+Without the hero treatment, "5 things" devolves into "5 small cards",
+and the page reads as "a list" not "an overview".
+
+**Don't use this for**:
+- 3 or 4 cards (too few — the hero numeral overpowers; use Pattern A
+  content-3up or content-2col instead)
+- 6+ cards (too many — hero numerals visually fight; collapse to
+  smaller scale or split across two slides)
+- Cards with > 2 lines of body (cards become tall and the hero numeral
+  loses dominance; use Pattern A with regular sizes instead)
+
+---
+
+## BF10–12 — Alignment defenses (2026-05-16)
+
+Framework CSS now ships three alignment defaults that catch common
+"why doesn't it line up" footguns. All three apply automatically; the
+notes here are for context when authors hand-write similar layouts.
+
+### BF10 — Mixed-size row uses `align-items: center`, not baseline
+
+When a row has elements at very different font sizes (ratio > 1.5×,
+e.g. a 48 px numeral followed by 24 px body), `align-items: baseline`
+LOOKS misaligned — the baselines do align but the visual centers don't.
+Center alignment puts the smaller element at the visual middle of the
+bigger element's line-box.
+
+Apply via `.mixed-row` utility class:
+```html
+<div class="mixed-row">
+  <span class="num">01</span>
+  <p class="text">不留意向沟通阶段的商机...</p>
+</div>
+```
+
+Default: `display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 22px`.
+
+### BF11 — Hero zone content centered, not flex-start
+
+For big-stat (and similar 2-col-hero) layouts, the LEFT column's
+content (hero number + caption + secondary stat) should be visually
+centered within its half — not hugging the slide's left edge.
+
+Framework default: `.slide[data-layout="big-stat"] .hero { align-items: center; text-align: center; }`. Don't override unless you intentionally
+want left-flush (rare; for that, use `.slide[data-layout="content-2col"] .col-text` which is left-flush by design).
+
+### BF12 — Multi-card column equal-height
+
+When `.col-text` / `.col-visual` contain multiple stacked cards (2–3
+typical), the cards should fill the column height equally — otherwise
+left / right columns of a 2-col grid mis-align across the page.
+
+Framework default: `.canonical-card / .news-card / .data-panel` get
+`flex: 1` when they're direct children of `.col-text` / `.col-visual`.
+Heights balance automatically; no per-deck override needed.
 
 ---
 
