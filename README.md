@@ -1,248 +1,95 @@
 # feishu-deck-h5
 
-> **HTML 版飞书风格汇报材料系统** · 不是 .pptx，是用 HTML 完整模仿 PPT 视觉的 deck 生成技能。
+> **飞书风格的客户提案 deck，但是 HTML 不是 PPT。**
+> 浏览器全屏放映、单文件发 IM、文本编辑器改字、视觉与飞书母版完全对齐。
 
-把飞书母版 2025（深色通用）.thmx 深度解析成 design system，生成跟 PPT 视觉无差别的 HTML deck，
-单文件支持 16:9 PC 全屏 + 移动端浏览，内置 55 项规范的程序化自检 (`validate.py`)，
-零外部依赖（除浏览器和 Python 3）。
-
-```
-Linked deck (default):    24 KB · 浏览器外部加载 assets · 首屏快
-Inlined deck (opt-in):   361 KB · 单文件交付 · 邮件/IM 用
-Self-check items:         55  · validate.py exit 0 = 通过
-audit/check functions:    20  · CSS / JS / 文档全覆盖
-```
+🔗 看样品 → [`examples/sample-deck.html`](examples/sample-deck.html)
+（双击在浏览器打开，左右键翻页）
 
 ---
 
-## Install
+## 这是什么
 
-仓库是公开的，匿名克隆即可。
+把飞书母版 2025（深色通用）的 PowerPoint 视觉**完整搬到 HTML**，生成的就是一份
+`.html` 文件，但它表现得跟 PPT 一样：
 
-### 最简：让 Claude 帮你装
-
-跟你的 Claude Code agent 说：
-
-> 帮我安装 feishu-deck-h5 这个 skill：`https://github.com/FuQiang/feishu-deck-h5.git`
-
-Agent 会读 [INSTALL.md](./INSTALL.md) 自动选对应的安装路径并验证。完整决策树和
-prerequisites 也在那个文件里。
-
-### 路径 A：通过 plugin marketplace（Claude Code）
-
-```
-/plugin marketplace add git@github.com:FuQiang/feishu-deck-h5.git
-/plugin install feishu-deck-h5@feishu-deck-h5
-```
-
-装完 SKILL 自动注册，重启会话即可让 agent 调用。
-- 升级：`/plugin marketplace update feishu-deck-h5`
-- 卸载：`/plugin uninstall feishu-deck-h5`
-
-### 路径 B：通过 install.sh（不支持 plugin 的环境，例如 openclaw / 老版 CLI）
-
-```bash
-git clone git@github.com:FuQiang/feishu-deck-h5.git /tmp/feishu-deck-h5-installer
-bash /tmp/feishu-deck-h5-installer/install.sh
-rm -rf /tmp/feishu-deck-h5-installer
-```
-
-非 Claude Code 的 harness 用 `CLAUDE_DIR` 覆盖 skill 注册目录：
-
-```bash
-CLAUDE_DIR=~/.openclaw bash install.sh
-```
-
-### 路径 C：纯手动 git clone
-
-```bash
-git clone git@github.com:FuQiang/feishu-deck-h5.git ~/Projects/feishu-deck-h5
-mkdir -p ~/.claude/skills
-ln -s ~/Projects/feishu-deck-h5/skills/feishu-deck-h5 ~/.claude/skills/feishu-deck-h5
-```
-
-### Verify install
-
-```bash
-bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh
-# Expected: "PREFLIGHT OK · skill root: ... · writable: yes · ..."
-# Any non-zero exit → fix before generating decks.
-```
-
-### Local-mount requirement
-
-This skill **requires a local mount**. It refuses to work in ephemeral
-session storage. See [SKILL.md PREFLIGHT](./skills/feishu-deck-h5/SKILL.md#preflight-mandatory-blocks-all-work--local-mount-required)
-for the full reasoning. TL;DR — without a mount you lose the deck when
-the conversation ends, you can't `git commit`, you can't open it in
-your browser. Plugin install puts files at `~/.claude/skills/feishu-deck-h5/`
-which is read-only; mount a project folder where the generated deck will
-be written.
+- **浏览器全屏 = 16:9 演示模式** — 左右键翻页、底部进度条、闲置自动隐藏控件
+- **手机能看** — 自动切换成纵向滚动浏览，发链接给客户立刻能预览
+- **单文件可直接转发** — 飞书 / 邮件 / IM 任何途径，对方双击就开，不用装 Office
+- **文字用记事本改** — 配套 `texts.md` 文本侧文件，改文字不动布局
+- **视觉跟飞书品牌完全对齐** — 13 种 layout 全部从官方 .thmx 母版抽出，色值/字号/留白都是母版坐标
 
 ---
 
-## Quick start (after install + mount)
+## 为什么不直接用 PowerPoint
 
-```bash
-# 1. From inside the skill folder (plugin install or manual clone)
-cd ~/Projects/feishu-deck-h5/skills/feishu-deck-h5
+| | PowerPoint .pptx | feishu-deck-h5 .html |
+|---|---|---|
+| 文件大小 | 几十 MB 起步 | 24-360 KB |
+| 需要 Office license | 是 | 否（任何浏览器都能开） |
+| 飞书/IM 转发 | 经常变形 | 单文件，对方双击即看 |
+| AI 直接生成 | 很难做出像样的 | 天然适合（HTML 是 LLM 母语） |
+| 视觉一致性 | 靠人盯 | 55 项规范程序化自动校验 |
+| 版本管理 / 协作 | git 看不了 diff | 标准 git diff，PR review 友好 |
 
-# 2. Verify mount + write access
-bash assets/preflight.sh
-
-# 3. Build (default = linked, 24 KB)
-bash build.sh
-
-# 4. Build single-file inline mode (361 KB, opt-in for email/IM)
-bash build.sh --inline
-
-# 5. Run programmatic self-check
-python3 assets/validate.py examples/sample-deck.html
-python3 assets/validate.py examples/sample-deck-inline.html --strict
-
-# 6. Open in browser
-open examples/sample-deck.html
-```
+不是替代 PPT 所有场景——客户硬要 .pptx 还是给 .pptx。但售前/内训/产品提案
+这些**多人迭代 + 多渠道分发**的场景，HTML 几乎是完胜。
 
 ---
 
-## Per-run workspace (when an agent uses this skill)
+## 谁在用 · 4 个高频场景
 
-When the skill is invoked interactively (a Claude agent generating a
-deck for you), it MUST create a fresh per-run folder so source materials
-and deliverables stay separated:
+### 1. 售前给客户做提案 deck
+PDF/Word 输入 → Claude 按规范生成 → 浏览器全屏走全程。
+客户那边发 IM 链接看预览、要 PPT 就直接 inline 单文件版发过去。
 
-```bash
-bash assets/new-run.sh                 # → runs/<YYYYMMDD-HHMMSS>/{input,output}/
-bash assets/new-run.sh customer-pitch  # → runs/<ts>-customer-pitch/{input,output}/
-```
+### 2. PMM 做产品发布材料
+13 种 layout 已经把"封面 / 议程 / 章节页 / 三卡并列 / 数据 / 客户证言 / 流程 / 时间轴"
+全部封好。新内容塞进去就是品牌一致的输出，不用每次重新调字号留白。
 
-```
-runs/
-└── 20260430-143022/        ← timestamped per invocation
-    ├── input/              ← you drop PDFs / images / briefs here
-    └── output/              ← agent writes the deck HTML + validate report here
-```
+### 3. 内训讲师做培训材料
+texts.md 文本侧文件给非技术同事用——他们不用碰 HTML，只改一份 markdown
+就能更新整份 deck 的文字。
 
-The agent will announce the folder path at the start of each session.
-This is enforced by `SKILL.md` "WORKSPACE LAYOUT" — you don't have to
-do it manually. `runs/` is intentionally NOT in `.gitignore`; commit
-or delete per-run folders as you see fit.
-
-`build.sh` and `examples/` are out of scope for this rule — they
-exist for maintainers regenerating the reference sample deck.
+### 4. 想把旧 PDF 升级成 HTML 演示
+源 PDF 直接渲染成图片做底，外层套上 feishu-deck-h5 的演示外壳（全屏 / 翻页 /
+移动端）。1:1 还原视觉、零信息损失、几十秒出活。
 
 ---
 
-## 仓库结构
+## 看更多例子
 
-```
-feishu-deck-h5/
-├── .claude-plugin/
-│   ├── marketplace.json       ← Claude Code marketplace 入口
-│   └── plugin.json            ← 插件元数据
-├── skills/
-│   └── feishu-deck-h5/        ← 实际 skill 内容（plugin loader 从这里读）
-│       ├── SKILL.md           ← 主文档：13 layouts + 55 自检项 + 所有规范
-│       ├── build.sh           ← 构建脚本（默认 linked，--inline 出单文件版）
-│       ├── assets/
-│       │   ├── feishu-deck.css        ← 全部 design tokens + layouts + decor + UI primitives
-│       │   ├── feishu-deck.js         ← 运行时（scale-fit, fullscreen, idle-fade, etc.）
-│       │   ├── validate.py            ← 程序化自检（20 个 audit/check 函数）
-│       │   ├── lark-logo.png          ← 飞书品牌资产（从 .thmx 母版抽取）
-│       │   ├── lark-logo-mono-white.png
-│       │   ├── lark-cover-bg.jpg
-│       │   ├── lark-section-bg.jpg
-│       │   ├── lark-content-bg.jpg
-│       │   └── lark-slogan.png
-│       ├── templates/
-│       │   ├── _shell.html            ← 空 deck 骨架，复制改名即可
-│       │   └── slide-recipes.html     ← 13 layouts 全部示范
-│       ├── examples/
-│       │   ├── sample-deck.html       ← 默认交付样品（linked, 24 KB）
-│       │   └── sample-deck-inline.html← 单文件版（inlined, 361 KB，opt-in）
-│       ├── preview-dark.html          ← 设计令牌 + 组件可视化
-│       └── _body.partial.html         ← build.sh 用的 body 片段
-├── DESIGN.md                  ← 9-section design system（awesome-design-md 格式）
-├── README.md
-├── LICENSE
-└── runs/                      ← per-run workspace（agent 生成 deck 时写这里）
-```
+- [`examples/sample-deck.html`](examples/sample-deck.html) — 12 张 slide 涵盖全部 13 种 layout
+- [`preview-dark.html`](preview-dark.html) — 设计令牌（颜色 / 字号 / 渐变）+ 组件 gallery
+- [`templates/slide-recipes.html`](templates/slide-recipes.html) — 每种 layout 的 reference 实现
 
 ---
 
-## 13 个 layouts
+## 怎么开始用
 
-| Layout              | 用途 |
-|---------------------|---|
-| `cover`             | 封面（飞书母版花朵背景，左半部文字） |
-| `agenda`            | 议程（号码与标题等字号） |
-| `section`           | 章节分隔（大序号 + 标题 + 产品 pill） |
-| `content-3up`       | 三卡并列 |
-| `content-2col`      | 文字 + 视觉双栏 |
-| `quote`             | 金句 |
-| `stats`             | 4-up KPI |
-| `big-stat`          | 单大数字 |
-| `image-text`        | 全屏图 + 文字 |
-| `table`             | 对比表格 |
-| `timeline`          | 横向时间轴 |
-| `process`           | 步骤流程 |
-| `end`               | 封底带 slogan |
+**让 Claude 帮你装 + 帮你做**，一句话：
 
-外加 11 个叙事模式（A–K）和 27 个 UI 原语（`.ui-window` / `.ui-grid` / `.ui-msg` 等）— 详见 SKILL.md。
+> "帮我安装 feishu-deck-h5 skill：https://github.com/FuQiang/feishu-deck-h5，
+> 装完帮我做一份关于〔你的主题〕的 deck"
+
+Claude 会读 [INSTALL.md](INSTALL.md) 走标准安装流程（plugin marketplace 或 install.sh），
+然后按 [SKILL.md](skills/feishu-deck-h5/SKILL.md) 的规范生成 deck。
 
 ---
 
-## 验证
+## 想看怎么搭出来的
 
-`assets/validate.py` 会在不需要浏览器的情况下静态校验 HTML：
-
-```bash
-python3 assets/validate.py path/to/your-deck.html
-# exit 0 = 通过 · exit 1 = 失败 · exit 2 = 文件未找到
-
-python3 assets/validate.py path/to/your-deck.html --strict
-# 把 warnings 提升为 errors，作为最终交付前的硬门槛
-```
-
-20 个 audit/check 函数覆盖 49 项规范 + 6 项性能预算。完整列表见 `SKILL.md` 自检清单。
-
----
-
-## CI
-
-`.github/workflows/validate.yml` 会在每次 push 和 PR 时跑一遍 build + validate（默认和 strict 双模式）。
-主分支 always-green 不让 perf 退化或规范违反混进来。
-
----
-
-## 设计原则
-
-完整规范在 [SKILL.md](./skills/feishu-deck-h5/SKILL.md) 和 [DESIGN.md](./DESIGN.md)。简单说：
-
-1. **每张 slide 1920×1080 设计画布**，运行时缩放
-2. **彩色 logo 永远默认**，mono 是 opt-in 边缘 case
-3. **页头标题永远单行**（cover/image-text/end 的 hero 双行除外）
-4. **Title-only 页面隐藏 eyebrow**，让标题与 logo 同基线
-5. **固定形状 layout 默认垂直居中**，pipeline/timeline/process 是 fill 例外
-6. **Layout 与 decor 正交** — `data-decor` 装饰可与任意 layout 组合，不动结构
-7. **Variant 必须重声明所有结构属性** — cascade 不会自动重置
-8. **UI 截图必须 HTML 重建** — 用 `.ui-*` 原语而不是贴 PNG
-9. **演示模式自动全屏**，顶部进度条 + 底部控件 + 闲置淡出
-10. **性能预算硬规则** — base64 ≤ 100 KB / blur ≤ 10px / 单 ResizeObserver / AbortController 清理 / contain + will-change
-
----
-
-## 致谢
-
-- **飞书母版 2025（深色通用）** — 设计参考来自 ByteDance / 飞书设计团队
-- **awesome-design-md** ([VoltAgent](https://github.com/VoltAgent/awesome-design-md)) — DESIGN.md 9-section 格式来源
-- **Lucide** — 图标风格参考（生产建议替换为 ByteDance IconPark）
+| 内容 | 文档 |
+|---|---|
+| 安装路径（marketplace / install.sh / 手动 clone） | [INSTALL.md](INSTALL.md) |
+| 13 layouts + 11 叙事模式 + 27 UI 原语 + 55 自检项 | [SKILL.md](skills/feishu-deck-h5/SKILL.md) |
+| 9-section 完整设计系统 | [DESIGN.md](DESIGN.md) |
 
 ---
 
 ## License
 
-MIT — see [LICENSE](./LICENSE)。
+MIT — 见 [LICENSE](LICENSE)。
 
-注意：`assets/lark-*.png/jpg` 是 ByteDance / 飞书的公开品牌资产，版权归属 ByteDance / 飞书设计团队，不在本仓库 MIT 许可范围内。第三方使用前请遵守飞书品牌使用规范。
+`assets/lark-*.png/jpg` 是 ByteDance / 飞书的官方品牌资产，版权归飞书设计团队，
+不在本仓库 MIT 许可范围内，第三方使用前请遵守飞书品牌规范。
