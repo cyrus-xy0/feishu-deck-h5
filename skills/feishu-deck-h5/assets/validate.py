@@ -18,7 +18,7 @@ Exit codes:
 """
 
 from __future__ import annotations
-import re, sys, argparse
+import functools, re, sys, argparse
 from collections import Counter
 from pathlib import Path
 
@@ -170,6 +170,10 @@ def audit_copy_rules(html: str, iss: Issues):
         iss.err('R05', "'???' detected in slide text")
 
 
+_STYLE_BLOCK_RE = re.compile(
+    r'<style(?P<attrs>[^>]*)>(?P<body>.*?)</style>', re.S)
+
+
 def _iter_style_blocks(html: str, *, include_framework: bool = True):
     """Iterate `<style>` block contents in `html`.
 
@@ -184,8 +188,7 @@ def _iter_style_blocks(html: str, *, include_framework: bool = True):
     Audits that need ALL CSS (R29-R32 chrome, R36 centering pattern,
     R20 per-page ladder) call with the default `include_framework=True`.
     """
-    pat = re.compile(r'<style(?P<attrs>[^>]*)>(?P<body>.*?)</style>', re.S)
-    for m in pat.finditer(html):
+    for m in _STYLE_BLOCK_RE.finditer(html):
         attrs = m.group('attrs') or ''
         is_framework = 'data-source="framework"' in attrs
         if is_framework and not include_framework:
@@ -193,6 +196,25 @@ def _iter_style_blocks(html: str, *, include_framework: bool = True):
         yield m.group('body'), is_framework
 
 
+# Module-level compiled regexes used by hot-path audits. Hoisted out of
+# function bodies so they compile ONCE per process, not per-call. The
+# `re` module caches but the explicit pattern at module scope is clearer.
+
+# Rule pattern allowing inline `/* ... */` comments inside the body.
+# Selector is non-brace chars (non-greedy); body is a sequence of either
+# a CSS comment or non-brace chars. Used by audits that need to see the
+# raw comment text (e.g. /* allow:white-opacity */ markers) without
+# making a second pass through the source.
+_RULE_WITH_COMMENTS_RE = re.compile(
+    r'([^{}]+?)\{((?:/\*.*?\*/|[^{}])*)\}',
+    re.S,
+)
+
+
+_AT_RULE_RE = re.compile(r'@[a-zA-Z-]+[^{]*\{(?:[^{}]|\{[^{}]*\})*\}', re.S)
+
+
+@functools.lru_cache(maxsize=64)
 def _strip_nested_at_rules(css: str) -> str:
     """Remove `@media`, `@keyframes`, `@supports`, `@font-face` blocks
     (and any other `@thing { ... }`) from CSS before flat-rule scanning.
@@ -212,17 +234,23 @@ def _strip_nested_at_rules(css: str) -> str:
     flat CSS to walk. We do this destructively (no preservation) because
     the audits only need to evaluate top-level rule blocks; nested rules
     inside @media etc. are responsive variants that aren't subject to
-    the body-floor / type-ladder /drop-shadow rules anyway.
+    the body-floor / type-ladder / drop-shadow rules anyway.
+
+    Cached (perf fix 2026-05-16): 7 audits each call this on the same
+    `<style>` block contents per validate run. With LRU caching keyed on
+    the raw CSS string, the strip runs once per unique input; subsequent
+    calls (~85% on a CTG-sized deck) hit the cache. Cache lifetime is
+    process-scoped; one validate run = one process, so no cross-deck
+    leak. Cache size 64 covers any realistic deck (a deck has ≤ 20
+    distinct `<style>` blocks even after framework inlining).
     """
-    # Strip simple block-style at-rules. A bracket-balanced regex would
-    # be ideal but Python re lacks recursion; iterate until no change.
-    pattern = re.compile(r'@[a-zA-Z-]+[^{]*\{(?:[^{}]|\{[^{}]*\})*\}', re.S)
+    # Iterate until no change — pathological inputs would converge slowly,
+    # so cap at 10 passes.
     prev = None
     out = css
-    # Cap iterations to avoid pathological inputs
     for _ in range(10):
         prev = out
-        out = pattern.sub('', out)
+        out = _AT_RULE_RE.sub('', out)
         if out == prev:
             break
     return out
@@ -446,42 +474,47 @@ def audit_runtime_chrome(html: str, iss: Issues, html_path: 'Path'):
     this, decks that link feishu-deck.js externally would always fail
     the audit even though they work fine in browser.
     """
-    # Inline <script> bodies
-    inline_scripts = re.findall(r'<script[^>]*>(.+?)</script>', html, re.S)
-    script_blocks = ' '.join(inline_scripts)
+    # main()'s `inline_linked` has already inlined every resolvable
+    # `<script src="...">` into a `<script data-source="framework">…</script>`
+    # block, so the framework JS body is captured by the findall below
+    # WITHOUT a second disk read here.
+    #
+    # If a `<script src>` survived past inline_linked, that's because
+    # the file couldn't be resolved (missing / outside base_dir / etc.) —
+    # report it as the specific R29-R32 failure cause, NOT as "7 chrome
+    # needles missing" downstream noise.
+    script_blocks = ' '.join(re.findall(r'<script[^>]*>(.+?)</script>', html, re.S))
 
-    # External <script src="..."> — load file content if it resolves.
-    # If the src is a relative path but the file is missing OR unreadable,
-    # report the SPECIFIC failure (not "deck-progress missing"). Otherwise
-    # the user sees 7 generic chrome-missing errors and has to guess that
-    # the real cause is a broken JS link.
     base_dir = html_path.parent
     js_link_failures: list[str] = []
-    for src in re.findall(r'<script[^>]*\bsrc=["\']([^"\']+)["\']', html):
+    for src in re.findall(r'<script[^>]*\bsrc=["\']([^"\']+)["\']\s*[^>]*>\s*</script>', html):
         if src.startswith(('http:', 'https:', '//', 'data:')):
             continue
         js_path = (base_dir / src).resolve()
         if not js_path.is_file():
             js_link_failures.append(
                 f'JS file not found: {src} (resolved to {js_path}). '
-                'Did the deck folder move without `copy-assets.py`? '
-                'Subsequent R29-R32 needle errors are downstream of this.')
-            continue
-        try:
-            script_blocks += ' ' + js_path.read_text(encoding='utf-8', errors='replace')
-        except OSError as e:
+                'Did the deck folder move without `copy-assets.py`?')
+        else:
+            # File exists but inline_linked didn't substitute it — likely
+            # permission error or the regex didn't match its `<script src>`
+            # form (e.g. attributes in a non-standard order).
             js_link_failures.append(
-                f'JS file unreadable: {src} ({type(e).__name__}: {e}). '
-                'Subsequent R29-R32 needle errors are downstream of this.')
+                f'JS file present but not inlined: {src}. '
+                'inline_linked in main() failed to replace this script tag; '
+                'verify file permissions and the tag has no body content.')
 
     if js_link_failures:
         for msg in js_link_failures:
-            iss.err('R29-32', msg)
+            iss.err('R29-32', msg
+                + ' Subsequent R29-R32 needle errors are downstream of this.')
         # If linked JS is broken, skip needle checks — they'll all fail
         # with downstream noise that hides the real cause.
         return
 
-    # All searchable text (HTML markup + inline JS + linked JS bodies)
+    # All searchable text (HTML markup + inline JS + linked JS bodies — the
+    # last is already in script_blocks because inline_linked rewrote
+    # <script src> into inline <script> with the file's content).
     full_text = html + ' ' + script_blocks
 
     dom_needles = [
@@ -1248,34 +1281,50 @@ def audit_white_text(html: str, iss: Issues, strict: bool):
     soft_white_re = re.compile(
         r'(?<![-\w])color:\s*rgba\(\s*255\s*,\s*255\s*,\s*255\s*,\s*0?\.\d+\s*\)')
     fs_re = re.compile(r'font-size:\s*(\d+)px')
+    comment_re = re.compile(r'/\*.*?\*/', re.S)
 
     flagged: list[tuple[str, str]] = []
     # Skip framework CSS — its master-spec rules carry their own
     # allow:white-opacity tags where appropriate. R-WHITE-TEXT polices
     # author CSS, where the gray-text-on-projector trap actually hurts.
+    #
+    # Single-pass parse (perf fix 2026-05-16): we used to iterate the
+    # comment-stripped CSS, then for EACH .slide rule re-search the raw
+    # CSS again via re.escape(selector) to find the /* allow:white-opacity */
+    # marker. That was O(rules × raw_size) — 457 ms on the 53-slide CTG
+    # deck. Now we iterate raw directly with a comment-tolerant rule
+    # regex; each rule's body carries its OWN comments inline so we can
+    # check the marker without a second pass.
     for raw, _is_fw in _iter_style_blocks(html, include_framework=False):
-        css = re.sub(r'/\*.*?\*/', '', raw, flags=re.S)
-        css = _strip_nested_at_rules(css)
-        for rule_m in re.finditer(r'([^{}]+)\{([^}]+)\}', css):
+        # Strip nested @-rules first (@media / @keyframes / @supports) so
+        # the top-level rule regex doesn't trip on nested braces. CSS
+        # inside @media is intentionally not audited (responsive variants).
+        css = _strip_nested_at_rules(raw)
+        # Rule body can contain /* ... */ comments. Allow them in the body
+        # via the alternation: `comment | non-brace char`. This preserves
+        # the comment text (including the allow:white-opacity marker) in
+        # group(2) so a single substring check decides exemption.
+        for rule_m in _RULE_WITH_COMMENTS_RE.finditer(css):
             selector = rule_m.group(1).strip()
-            block = rule_m.group(2)
+            body_with_comments = rule_m.group(2)
             if '.slide' not in selector and '.card' not in selector \
                and '.col' not in selector:
                 continue
             if chrome_class_re.search(selector):
                 continue
-            # find the raw block from `raw` so we can see the comment marker
-            raw_rule_m = re.search(
-                re.escape(selector) + r'\s*\{([^}]*)\}', raw, re.S)
-            raw_block = raw_rule_m.group(1) if raw_rule_m else block
-            if 'allow:white-opacity' in raw_block:
+            if 'allow:white-opacity' in body_with_comments:
                 continue
-            # rule's own font-size hint — small fonts are chrome
-            fs_m = fs_re.search(block)
+            # Strip comments from THIS rule's body before checking for the
+            # rgba declaration — a comment like `/* hint: rgba(255,...) */`
+            # shouldn't trigger. Per-rule strip is O(body_size); since
+            # bodies are typically <1 KB and we visit each char once total,
+            # the audit is O(css_size), no longer quadratic.
+            body = comment_re.sub('', body_with_comments)
+            fs_m = fs_re.search(body)
             if fs_m and int(fs_m.group(1)) <= 14:
                 continue
-            if soft_white_re.search(block):
-                flagged.append((selector, block.strip()[:80]))
+            if soft_white_re.search(body):
+                flagged.append((selector, body.strip()[:80]))
 
     # Inline style="" on slide markup
     body_m = re.search(r'<body[^>]*>(.*)</body>', html, re.S)
