@@ -17,14 +17,13 @@ audit/check functions:    20  · CSS / JS / 文档全覆盖
 
 ## Install
 
-仓库目前是 private，先让仓库 owner（FuQiang）把你加为 collaborator，并确认本机
-SSH key 已加到 GitHub 账号（`ssh -T git@github.com` 能跑通即可）。
+仓库是公开的，匿名克隆即可。
 
 ### 最简：让 Claude 帮你装
 
 跟你的 Claude Code agent 说：
 
-> 帮我安装 feishu-deck-h5 这个 skill：`git@github.com:FuQiang/feishu-deck-h5.git`
+> 帮我安装 feishu-deck-h5 这个 skill：`https://github.com/FuQiang/feishu-deck-h5.git`
 
 Agent 会读 [INSTALL.md](./INSTALL.md) 自动选对应的安装路径并验证。完整决策树和
 prerequisites 也在那个文件里。
@@ -244,6 +243,6 @@ python3 assets/validate.py path/to/your-deck.html --strict
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [LICENSE](./LICENSE)。
 
-注意：`assets/lark-*.png/jpg` 是 ByteDance / 飞书的品牌资产，不在 MIT 之内。仓库公开化前必须移除或替换。
+注意：`assets/lark-*.png/jpg` 是 ByteDance / 飞书的公开品牌资产，版权归属 ByteDance / 飞书设计团队，不在本仓库 MIT 许可范围内。第三方使用前请遵守飞书品牌使用规范。
