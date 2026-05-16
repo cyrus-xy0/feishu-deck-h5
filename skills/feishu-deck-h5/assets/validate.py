@@ -256,21 +256,79 @@ def _strip_nested_at_rules(css: str) -> str:
     return out
 
 
-def audit_font_sizes(html: str, iss: Issues):
-    """R06 / R17 / R18 / R19: font-size minimums on SLIDE CONTENT only.
+# Body content classes — selectors matching these get the 22 px BODY floor.
+# Names taken from SKILL.md "Typography floor" table + framework + observed
+# author conventions. These are class names that semantically carry SLIDE
+# COPY (paragraphs, descriptions, list items, table cells, captions).
+_BODY_CLASS_RE = re.compile(
+    r'\.(?:'
+    r'cbody|body|desc|sub|lede|paragraph|para|caption|cap|note|'
+    r'feat-body|brand-desc|dir-desc|dir-sub|sc-obj|sc-lever|'
+    r'arch-item|arch-base|arch-hand-title|story-hook|story-arc|'
+    r'principle|voice-card|voice-q|cta-box|the-who|content-body|'
+    r'who|name|preview-text|hook|takeaway|callout-body|'
+    r'sec ?ul|sec ?ol|item-body|row-body|cell-body|col-body|col-text|'
+    r'page-sub|subtitle(?!-en)|lead|timeline-desc'
+    r')\b'
+    r'|\b(?:ts-tasks|ts-time)\b'
+)
 
-    We walk every CSS rule and only flag font-size below floor when the
-    rule's selector targets slide content (`.slide`). Selectors targeting
-    `.deck-ui` (the auxiliary navigation overlay outside the slide) are
-    exempt from the规范 floor — they're not slide content.
+# Chrome / decorative classes — selectors matching these get only the
+# 14 px chrome floor (keep current R06 behaviour). These are small-by-design:
+# pills, tags, footnotes, page numbers, eyebrows, source citations, mockup-
+# internal text.
+_CHROME_CLASS_RE = re.compile(
+    r'\.(?:'
+    r'eyebrow|footnote|pageno|deck-pageno|attrib|source(?:-footer)?|'
+    r'pill|chip|tag(?:-chip)?|badge|label-small|chrome|kicker|overline|'
+    r'meta|trend|axis(?:-cap)?|hint|tip|legend|nav-hint|mode-toggle|'
+    r'phase-pill|status|status-dot|fmt|fix|disclaim|fineprint|'
+    r'sc-cap|cfoot|stnum|chapter-num|stat-unit|kpi-unit|unit|'
+    r'iframe-hint|count|'
+    # `.n` is the canonical numeric-badge class throughout the skill
+    # (`.arch-item .n`, `.toc .item .n`, `.scene-card .n`, etc.) — small
+    # circular glyph showing "1" / "2" / "3", not body text. Chrome.
+    r'n'
+    r')\b|'
+    # all .ui-* mock primitives (window/list/cell/btn/etc.) are mockup-
+    # internal per SKILL.md rung 8 — exempt from body floor by class.
+    r'\.ui-[a-z][\w-]*'
+)
+
+
+def audit_font_sizes(html: str, iss: Issues):
+    """R06: font-size minimums on slide content.
+
+    Two floors apply, distinguished by selector class semantics:
+
+    1. **Chrome floor (14 px)** — applies to chrome / mockup classes
+       (eyebrow, footnote, pageno, pill, tag, .ui-* mockup primitives,
+       etc.). Sizes < 14 are errors; 14 px is the absolute minimum.
+
+    2. **Body floor (22 px)** — applies to selectors that look like body
+       content (cbody, desc, lede, caption, list items, cell content,
+       arch-*, principle, voice-card, cta-box, etc.). Sizes < 22 are
+       errors. This is the floor that prevents the "字还是小 on
+       projector" complaint — 18-20 px reads as fine print at 5+ m.
+
+    3. **Ambiguous classes** (selectors matching neither pattern, e.g.
+       a custom `.foo`) get the chrome floor by default. Authors should
+       either use a body-class name for body content (will then be
+       caught) or add `/* allow:body-floor */` to opt out (rare).
+
+    Both floors honor `/* allow:typescale */` (rung-8 mockup-internal
+    10-13 px) and the new `/* allow:body-floor */` for genuine
+    exceptions where a body-class selector legitimately uses < 22 px.
     """
-    violations = []
-    for style_m in re.finditer(r'<style[^>]*>(.*?)</style>', html, re.S):
-        css = _strip_nested_at_rules(style_m.group(1))
+    body_violations: list[tuple[int, str]] = []
+    chrome_violations: list[tuple[int, str]] = []
+
+    for raw, _is_fw in _iter_style_blocks(html):
+        css = _strip_nested_at_rules(raw)
         for rule_m in re.finditer(r'([^{}]+)\{([^}]+)\}', css):
             selector = rule_m.group(1).strip()
             block    = rule_m.group(2)
-            # Skip auxiliary chrome (deck-UI overlay, deck-controls, deck-progress)
+            # Skip auxiliary deck chrome (overlay outside slide canvas)
             if '.deck-ui' in selector or '.deck-controls' in selector \
                or '.deck-progress' in selector or '.mode-toggle' in selector \
                or '.nav-hint' in selector or '@' in selector:
@@ -281,26 +339,52 @@ def audit_font_sizes(html: str, iss: Issues):
                and '.cell' not in selector and 'thead' not in selector \
                and 'tbody' not in selector:
                 continue
-            # Same opt-out as R20 — rung 8 mockup-internal text (10–13 px) is
-            # legitimate per SKILL.md when the parent is a UI mockup. Authors
-            # mark such rules with /* allow:typescale */ so both R06 and R20
-            # ignore them.
+            # Per-rule opt-outs (preserve marker check on raw block before
+            # comments are stripped — but our `block` is the post-strip body,
+            # so the markers must live in the raw CSS comment that survived
+            # _strip_nested_at_rules. Simpler: check the raw style-block CSS
+            # for proximity to this selector via substring on the body itself.)
             if 'allow:typescale' in block:
-                continue
-            for m in re.finditer(r'font-size:\s*(\d+)px', block):
-                size = int(m.group(1))
-                if size < FLOOR_CHROME_PX:
-                    violations.append((size, selector))
-            for m in re.finditer(r'\bfont:\s*[^;{}]*?(\d+)px', block):
-                size = int(m.group(1))
-                if size < FLOOR_CHROME_PX:
-                    violations.append((size, selector))
-    if violations:
-        for size, sel in violations[:10]:
-            iss.err('R06',
-                f'font-size {size}px on `{sel.strip()}` below {FLOOR_CHROME_PX}px slide-content floor')
+                continue   # rung-8 mockup-internal, fully exempt
+            allow_body_floor = 'allow:body-floor' in block
 
-    # Inline styles on slide markup
+            # Determine which floor applies. CHROME wins over BODY when both
+            # match (e.g. `.cta-box .source` is a chrome citation inside a
+            # body container — the leaf class wins).
+            is_chrome  = bool(_CHROME_CLASS_RE.search(selector))
+            is_body    = bool(_BODY_CLASS_RE.search(selector)) and not is_chrome
+
+            sizes = []
+            for m in re.finditer(r'font-size:\s*(\d+)px', block):
+                sizes.append(int(m.group(1)))
+            for m in re.finditer(r'\bfont:\s*[^;{}]*?(\d+)px', block):
+                sizes.append(int(m.group(1)))
+
+            for size in sizes:
+                if is_body and not allow_body_floor:
+                    if size < FLOOR_BODY_PX:
+                        body_violations.append((size, selector))
+                elif size < FLOOR_CHROME_PX:
+                    chrome_violations.append((size, selector))
+
+    for size, sel in chrome_violations[:10]:
+        iss.err('R06',
+            f'font-size {size}px on `{sel.strip()}` below '
+            f'{FLOOR_CHROME_PX}px chrome floor')
+
+    for size, sel in body_violations[:10]:
+        iss.err('R06',
+            f'font-size {size}px on `{sel.strip()}` below '
+            f'{FLOOR_BODY_PX}px BODY floor — selector looks like body content '
+            '(card body / description / caption / list / cell / arch-* / etc.) '
+            'and projector readability requires ≥ 22 px. Bump to 22, OR if '
+            'this is genuinely chrome, rename to a chrome class '
+            '(.eyebrow / .footnote / .source / .pill / .tag / etc.), OR '
+            'add /* allow:body-floor */ in the rule for a documented exception.')
+
+    # Inline styles on slide markup — apply chrome floor only (body classes
+    # rarely show up as inline `style=""`; we don't try to parse the element's
+    # class attribute here).
     body_m = re.search(r'<body[^>]*>(.*)</body>', html, re.S)
     if body_m:
         body = re.sub(r'<!--.*?-->', '', body_m.group(1), flags=re.S)

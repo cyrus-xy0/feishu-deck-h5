@@ -385,7 +385,12 @@ body {
   font: 500 32px/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
 }
 .slide .caption {
-  font: 500 16px/1.4 var(--fs-font-latin);
+  /* Body content per SKILL.md "Typography floor — content body & captions
+     (mandatory, ≥ 22 px)". 2026-05-16: bumped from 16 → 22; pre-bump
+     value was below the documented body floor and read as illegible
+     fine print on projector. For chrome-style citations (e.g. footnote
+     under a stats table) use `.footnote` (14 px chrome) instead. */
+  font: 500 22px/1.4 var(--fs-font-latin);
   color: var(--fs-text-48); letter-spacing: 0.06em;
 }
 
@@ -582,7 +587,8 @@ body {
   font: 600 32px/1.3 var(--fs-font-cjk); color: #fff;
 }
 .slide[data-layout="content-3up"] .card .cbody {
-  font: 500 20px/1.6 var(--fs-font-cjk); color: var(--fs-text-65); flex: 1;
+  /* 2026-05-16: 20 → 22 — body content per SKILL.md typography floor. */
+  font: 500 22px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); flex: 1;
 }
 .slide[data-layout="content-3up"] .card .cfoot {
   display: flex; align-items: center; justify-content: space-between;
@@ -798,7 +804,9 @@ body {
   font: 600 26px/1.3 var(--fs-font-cjk); color: #fff;
 }
 .slide[data-layout="timeline"] .node .desc {
-  font: 500 18px/1.5 var(--fs-font-cjk); color: var(--fs-text-65);
+  /* 2026-05-16: 18 → 22 — timeline node body content per SKILL.md
+     typography floor. Was reading as illegible fine print on projector. */
+  font: 500 22px/1.5 var(--fs-font-cjk); color: var(--fs-text-65);
 }
 
 /* ============================================================================
@@ -828,7 +836,8 @@ body {
   font: 600 28px/1.3 var(--fs-font-cjk); color: #fff;
 }
 .slide[data-layout="process"] .step p {
-  font: 500 18px/1.55 var(--fs-font-cjk); color: var(--fs-text-65);
+  /* 2026-05-16: 18 → 22 — process-step body per SKILL.md typography floor. */
+  font: 500 22px/1.55 var(--fs-font-cjk); color: var(--fs-text-65);
 }
 .slide[data-layout="process"] .step:not(:last-child)::after {
   content: ""; position: absolute; right: -22px; top: 50%;
@@ -1535,8 +1544,11 @@ body {
   border: 1px solid var(--fs-hairline);
 }
 .slide .principle-band .principle {
+  /* 2026-05-16: 18 → 22 — principles carry strategic content, not chrome.
+     Per SKILL.md: "Content chips that carry meaning ≥ 18 px min" — but
+     these are headline strategy labels, treated as body. */
   display: inline-flex; align-items: center; gap: 10px;
-  font: 600 18px/1 var(--fs-font-cjk);
+  font: 600 22px/1.2 var(--fs-font-cjk);
 }
 .slide .principle-band .principle::before {
   content: ""; width: 8px; height: 8px; border-radius: 999px;
@@ -1621,20 +1633,24 @@ body {
   color: var(--fs-text);
 }
 .slide .arch-hand-title .em {
-  font: 600 16px/1 var(--fs-font-latin);
-  letter-spacing: 0.24em;
+  /* 2026-05-16: 16 → 22 — EN motto under hand title is a content sub-line
+     (carries the architecture's English name); per SKILL.md it's body. */
+  font: 600 22px/1.2 var(--fs-font-latin);
+  letter-spacing: 0.18em;
   color: var(--fs-text-72);
 }
 .slide .arch-hand .sub {
-  font: 500 20px/1.5 var(--fs-font-cjk);
+  /* 2026-05-16: 20 → 22 — hand explanation line per SKILL.md body floor. */
+  font: 500 22px/1.5 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .arch-items { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .slide .arch-item {
+  /* 2026-05-16: 20 → 22 — numbered architecture item body per body floor. */
   display: flex; align-items: center; gap: 14px;
   padding: 14px 16px; border-radius: 10px;
   background: rgba(255,255,255,0.05);
-  font: 500 20px/1.45 var(--fs-font-cjk);
+  font: 500 22px/1.45 var(--fs-font-cjk);
   color: var(--fs-text);
 }
 .slide .arch-item .n {
@@ -1646,13 +1662,14 @@ body {
 }
 .slide .arch-hand.right .arch-item .n { background: var(--fs-teal); color: #0A0E1B; }
 .slide .arch-base {
+  /* 2026-05-16: 20 → 22 — base layer label per SKILL.md body floor. */
   padding: 18px 28px; border-radius: 14px;
   background: linear-gradient(90deg,
     color-mix(in srgb, var(--fs-blue) 12%, transparent),
     color-mix(in srgb, var(--fs-teal) 12%, transparent));
   border: 1px dashed color-mix(in srgb, var(--fs-text) 18%, transparent);
   text-align: center;
-  font: 500 20px/1.45 var(--fs-font-cjk);
+  font: 500 22px/1.45 var(--fs-font-cjk);
   color: var(--fs-text-72);
   letter-spacing: 0.04em;
 }
@@ -2206,7 +2223,10 @@ body {
   margin-top: 36px;
 }
 .slide .voice-card .who {
-  font: 500 18px/1.4 var(--fs-font-cjk);
+  /* 2026-05-16: 18 → 22 — customer/attribution name MUST be legible on
+     projector; this is content, not chrome. Use .attrib (14 px chrome)
+     for anonymous attribution like "anonymous source · 2024 industry data". */
+  font: 500 22px/1.4 var(--fs-font-cjk);
   color: var(--fs-text-72);
   letter-spacing: 0.04em;
   border-top: 1px dashed var(--fs-hairline);
@@ -2237,17 +2257,20 @@ body {
   margin-bottom: 8px;
 }
 .slide .cta-box .l p {
-  font: 500 20px/1.6 var(--fs-font-cjk);
+  /* 2026-05-16: 20 → 22 — CTA explanation body per SKILL.md body floor. */
+  font: 500 22px/1.55 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .cta-box .cta-btn {
+  /* 2026-05-16: 20 → 22 — CTA button label is the slide's emphasis,
+     must be legible on projector. */
   flex-shrink: 0;
   padding: 16px 32px;
   border: 1px solid color-mix(in srgb, var(--fs-blue) 55%, transparent);
   border-radius: var(--fs-radius-pill);
   background: var(--fs-text);
   color: var(--fs-bg);
-  font: 700 20px/1 var(--fs-font-cjk);
+  font: 700 22px/1 var(--fs-font-cjk);
   letter-spacing: 0.04em;
   cursor: pointer;
   transition:
@@ -2709,11 +2732,15 @@ body {
   color: currentColor;
 }
 .slide .scene-card .sc-obj {
-  font: 600 18px/1.5 var(--fs-font-cjk);
+  /* 2026-05-16: 18 → 22 — scene-card "个性化对象" body line per body floor.
+     The 6-up grid is dense, but 18 px reads as fine print on projector. */
+  font: 600 22px/1.45 var(--fs-font-cjk);
   color: var(--fs-text);
 }
 .slide .scene-card .sc-lever {
-  font: 500 16px/1.5 var(--fs-font-cjk);
+  /* 2026-05-16: 16 → 22 — scene-card economic-lever line is the rhetorical
+     hook per SKILL.md scene-grid recipe; MUST be legible. */
+  font: 500 22px/1.45 var(--fs-font-cjk);
   color: var(--fs-text-72);
   padding: 10px 12px;
   border-radius: 8px;

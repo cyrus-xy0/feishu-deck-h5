@@ -2428,33 +2428,69 @@ What you MUST preserve:
 
 #### Typography floor — content body & captions (mandatory, ≥ 22 px)
 
-The validator R06 catches anything < 14 px (chrome floor). But on a
-1920×1080 canvas viewed full-screen / projected, **body copy and
-captions must be ≥ 22 px** or they read as illegible "fine print"
-even though they technically pass R06. Apply these floors when
-authoring per-page CSS (especially in `<style>` blocks inside
-single-page polish files):
+Two enforced floors. **Validator R06 enforces both** as of 2026-05-16
+(prior to that, only the chrome floor was checked, and the body floor
+was a documented-but-unenforced norm — which is why "字还是小" kept
+showing up in delivered decks):
+
+- **Chrome floor: ≥ 14 px** (current behaviour) — applies to selectors
+  matching chrome-class names: `.eyebrow`, `.footnote`, `.pageno`,
+  `.attrib`, `.source`, `.pill`, `.chip`, `.tag`, `.badge`, `.meta`,
+  `.trend`, `.cfoot`, `.stnum`, `.chapter-num`, `.unit`, `.kpi-unit`,
+  `.stat-unit`, `.iframe-hint`, `.deck-pageno` and any `.ui-*` mockup
+  primitive (`.ui-window`, `.ui-list`, `.ui-msg`, `.ui-btn`, etc.).
+  Sizes < 14 are errors; chrome can sit at 14, 18 (rung 6 pill), or
+  any rung above.
+
+- **Body floor: ≥ 22 px** (newly enforced 2026-05-16) — applies to
+  selectors matching body-class names: `.cbody`, `.body`, `.desc`,
+  `.sub`, `.lede`, `.paragraph`, `.para`, `.caption`, `.cap`, `.note`,
+  `.feat-body`, `.brand-desc`, `.dir-desc`, `.dir-sub`, `.sc-obj`,
+  `.sc-lever`, `.arch-item`, `.arch-base`, `.arch-hand-title`,
+  `.story-hook`, `.story-arc`, `.principle`, `.voice-card`, `.voice-q`,
+  `.cta-box`, `.who`, `.hook`, `.takeaway`, `.callout-body`,
+  `.col-text`, `.page-sub`, `.subtitle`, `.lead`, `.timeline-desc`,
+  `.ts-tasks`, `.ts-time`. Sizes < 22 on these selectors are errors.
+  Bump to 22 (rung 5).
 
 | Role | Minimum | Notes |
 |---|---|---|
-| Card body description (e.g. `.dir-desc`, `.brand-desc`, `.feat-body`) | **22 px** | Often paired with 1.45–1.55 line-height |
-| Image caption under a `pic-frame` / `pic-cell` (e.g. `.pic-cap`) | **22 px** | Use body, not chrome — captions are content |
+| Card body description (e.g. `.dir-desc`, `.brand-desc`, `.feat-body`, `.cbody`) | **22 px** | Often paired with 1.45–1.55 line-height |
+| Image caption under a `pic-frame` / `pic-cell` (e.g. `.pic-cap`, `.caption`) | **22 px** | Use body, not chrome — captions are content |
 | Sub-heading under a card name (e.g. `.dir-sub`) | **22 px** | Bump to 700 weight for hierarchy if needed |
-| Timeline / table cell content (e.g. `.ts-tasks`, `.tr td`) | **20–22 px** | Each cell IS body content, not chrome — don't drop to 16 px to fit more rows |
+| Timeline / table cell content (e.g. `.ts-tasks`, `.tr td`, `.node .desc`) | **22 px** | Each cell IS body content; don't drop to 16-18 px to fit more rows |
 | Time-slot label / row header (e.g. `.ts-time`) | **22 px** | Even a 4-character header is body |
-| Content chips that carry meaning (e.g. `.lib-chip` listing knowledge sources) | **18 px min** | These are content tags, not pure chrome |
-| Large numerals as visual markers (e.g. `01` / `02` / `03` / `04`) | **36 px** | They are typographic icons, not chrome — go bigger |
-| Tag pills (filter / category toggles, only meta) | 14–16 px allowed | True chrome |
+| Process step body (e.g. `.step p`) | **22 px** | Same family as `.desc` |
+| Two-hand-arch items + base (`.arch-item`, `.arch-base`, `.arch-hand .sub`, `.arch-hand-title .em`) | **22 px** | Architecture-pattern body lines |
+| Voice-card attribution (`.voice-card .who`) | **22 px** | Customer name MUST be legible — `.attrib` (chrome) is for anonymous citations |
+| CTA box body + button (`.cta-box .l p`, `.cta-btn`) | **22 px** | The CTA is the slide's emphasis — never make it small |
+| Scene-grid descriptors (`.sc-obj`, `.sc-lever`) | **22 px** | The lever line is the rhetorical hook of the layout |
+| Content chips that carry meaning (e.g. `.lib-chip` listing knowledge sources) | **18 px min** | Borderline — for chrome-feeling chips use `.tag` / `.pill` instead |
+| Large numerals as visual markers (e.g. `01` / `02` / `03` / `04`) | **38 px** | Rung 3 of the type ladder; 36 was the OLD recommendation but is off-ladder. Use 38. |
+| Tag pills (filter / category toggles, only meta) | 14–18 px allowed | True chrome |
 | Footnote / "排名不分先后" disclaimer | 14 px allowed | True chrome |
+| Mockup-internal text (Lark Doc body, dashboard label inside `.ui-window`) | 10–13 px allowed | Tag with `/* allow:typescale */`; rung 8 |
+
+**Opt-outs**:
+- `/* allow:typescale */` — full exemption from R06 + R20 (use for
+  rung-8 mockup-internal text; e.g. simulated Lark Doc body inside
+  `.ui-window`).
+- `/* allow:body-floor */` — exempt this specific rule from R06's
+  body floor (use sparingly for genuine cases where a body-class
+  selector legitimately needs < 22 px; rare).
 
 If a card layout can't fit 22 px body without overflow, the fix is to
 **reduce content / shorten copy / reduce columns** — never shrink the
 body below 22 px. Changing `font-size` to escape an overflow is a
 content-density problem masquerading as a typography problem.
 
-Why: master 母版 content pages put body at 22–28 pt, projected on
-1920×1080 from 5+ meters back. 16 px body works in a desktop preview
-but vanishes on a meeting-room screen.
+**Why this matters**: master 母版 content pages put body at 22–28 pt,
+projected on 1920×1080 from 5+ meters back. 16 px body works in a
+desktop preview but vanishes on a meeting-room screen. Pre-2026-05-16
+the validator only enforced 14 px (chrome floor); body classes
+authored at 16-20 px slipped through silently and the user kept
+flagging "字还是小" delivery after delivery. R06's body floor (22 px)
+now closes that gap.
 
 #### Modular type scale — pick from the ladder, do NOT free-style (mandatory)
 
@@ -2477,10 +2513,12 @@ Decreasing ratio between rungs is ~1.3–1.5× — the standard modular
 scale. Ascending ratios are: 13→14 (1.08, chrome jitter), 14→18 (1.29),
 18→22 (1.22), 22→28 (1.27), 28→38 (1.36), 38→44 (1.16), 44→100 (2.27).
 
-**Forbidden between-rung values**: 16 px, 17 px, 19 px, 20 px, 24 px,
-26 px, 32 px, 36 px (unless it's the `.dir-num` numeral marker per the
-table above), 48 px. If you find yourself wanting one of these, you've
-mis-classified the role — pick the correct rung instead.
+**Forbidden between-rung values**: 16, 17, 19, 20, 24, 26, 32, 36, 40,
+48, 60, 72, 80, 96 px. If you find yourself wanting one of these, you've
+mis-classified the role — pick the correct rung instead. (Earlier
+versions of this doc said "36 px is OK for `.dir-num` numerals" — that
+was a contradiction with R20; numeral markers should be **38** (rung 3),
+which is on-ladder and visually identical.)
 
 **Mockup-internal exception (rung 8)**: text *inside* a simulated UI
 (Lark Doc preview, dashboard mock, chart label) sits at 10–13 px to
