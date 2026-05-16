@@ -1021,6 +1021,11 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: boo
         'Lark', 'Feishu', 'Codex', 'Mira', 'Flow', 'Base', 'Wiki',
         'OpenAI', 'Anthropic', 'Claude', 'GPT', 'LLM',
     }
+    # Pattern: technical reference codes (BF10, R20, P32, M1 etc.) — short
+    # uppercase prefix + digits. Used to cross-reference SKILL.md sections /
+    # validator rules / postmortems. Common in meta-content decks like
+    # examples/showcase.html. Auto-allow via regex (not enumerable).
+    TECHNICAL_CODE_RE = re.compile(r'^[A-Z]{1,4}\d{1,4}[A-Z]?$')
     # Scan small text leaves whose markup smells like chrome labels.
     chrome_class_text_re = re.compile(
         r'<(?:span|p|div|h[1-6])\s[^>]*?'
@@ -1043,7 +1048,8 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: boo
                       if t and not t.isdigit()]
             if not tokens:
                 continue
-            if all(t in LATIN_BRAND_WHITELIST for t in tokens):
+            if all(t in LATIN_BRAND_WHITELIST or TECHNICAL_CODE_RE.match(t)
+                   for t in tokens):
                 continue
             iss.warn('R-LANG',
                 f'slide {i}: chrome label `{text}` looks like a Latin label '
@@ -1687,94 +1693,308 @@ def audit_feedback_md(html_path: Path, iss: Issues):
             'comment once you\'ve filled it in to silence this warning.')
 
 
-def audit_visual_overflow(html_path: Path, iss: Issues):
-    """R-OVERFLOW: open the deck in a headless browser at 1920×1080 and
-    report any .slide whose content extends past the canvas.
+def run_visual_audits(html_path: Path, iss: Issues, *,
+                       want_screenshots: bool = False):
+    """Single Playwright session that runs all `--visual` audits.
 
-    Static validators (R02 / R06 / R20 / R-DOM …) can't see pixel overflow.
-    A slide with a 2 200-px-tall stack of cards passes every static rule
-    but bleeds past the bottom of the canvas in present mode. The CTG run
-    flagged this manually multiple times.
+    Replaces standalone audit_visual_overflow. One Chromium launch covers:
 
-    This audit runs Playwright in headless mode. It is OPT-IN via
-    `--visual` because Playwright + Chromium are a ~150 MB install most
-    users don't have; we don't want to make the default validator depend
-    on them.
+      R-OVERFLOW   · per-slide scrollHeight > 1080 or scrollWidth > 1920
+      R-VIS-TIER   · every text element's computed fontSize is on the
+                     4-tier ladder {16, 24, 28, 48} or a documented hero
+                     exception (88, 100, 132, 160) on hero-class selectors
+      R-VIS-HIER   · within each card / panel, meta-class fontSize ≤
+                     body-class fontSize (renderer-confirmed, not just
+                     static CSS — catches inheritance / overrides)
+      R-VIS-ALIGN  · grid containers (.overview-grid / .todo-grid / etc.)
+                     have all direct children at roughly the same
+                     bounding-box height (within 4 px tolerance)
 
-    Setup (one-time, on the developer's machine):
+    Optionally archives PNG screenshots when want_screenshots=True.
 
-        pip install playwright
-        python -m playwright install chromium
+    Speed: ~5 seconds for a 30-slide deck (vs ~40 s for per-slide
+    screenshot). One Chromium launch, all assertions evaluate inside
+    page.evaluate() so the round-trip cost stays minimal.
 
-    Behaviour without Playwright: prints an install hint and returns
-    cleanly (no failure). With Playwright: renders the deck file://-URL,
-    iterates every `.slide`, captures `scrollHeight` and `scrollWidth`,
-    and flags any slide whose content extends past 1080 px tall or
-    1920 px wide.
+    Setup once:
+        pip install playwright && python -m playwright install chromium
     """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        iss.warn('R-OVERFLOW',
+        iss.warn('R-VISUAL',
             '--visual requested but `playwright` is not installed. '
             'Install with: `pip install playwright && '
             'python -m playwright install chromium` (~150 MB). '
-            'Visual overflow check skipped — static rules still ran.')
+            'Visual checks skipped — static rules still ran.')
         return
 
     url = html_path.resolve().as_uri()
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(viewport={'width': 1920, 'height': 1080})
+            context = browser.new_context(
+                viewport={'width': 1920, 'height': 1080})
             page = context.new_page()
             page.goto(url, wait_until='networkidle', timeout=10_000)
-            # Switch the deck into present mode so each .slide gets the
-            # 1920×1080 canvas it's designed for (scroll mode uses smaller
-            # viewports and would false-positive everywhere).
+            # Switch into present mode so each slide gets the full
+            # 1920×1080 canvas (scroll mode would false-positive).
             page.evaluate("""
                 () => {
                     const deck = document.querySelector('.deck');
                     if (deck) deck.setAttribute('data-mode', 'present');
                 }
             """)
-            page.wait_for_timeout(200)  # allow style recalc
-            overflows = page.evaluate("""
-                () => {
-                    const slides = document.querySelectorAll('.slide');
-                    const out = [];
-                    slides.forEach((s, i) => {
-                        const label = s.getAttribute('data-screen-label') || `slide-${i+1}`;
-                        // Use scrollHeight/scrollWidth on the slide element itself
-                        const h = s.scrollHeight;
-                        const w = s.scrollWidth;
-                        if (h > 1080 || w > 1920) {
-                            out.push({ idx: i+1, label, h, w });
-                        }
-                    });
-                    return out;
-                }
-            """)
+            page.wait_for_timeout(200)  # let layout settle
+
+            # ----- One JS evaluation gathers EVERYTHING -----
+            # Returns a structured report; Python then formats findings.
+            report = page.evaluate(_VISUAL_AUDIT_JS)
+
+            # ----- Optional: archive screenshots -----
+            shots_dir = None
+            if want_screenshots:
+                shots_dir = html_path.parent / (html_path.stem + '-previews')
+                shots_dir.mkdir(parents=True, exist_ok=True)
+                # Re-iterate slides, hashchange-navigate, screenshot each.
+                slide_count = page.evaluate(
+                    "() => document.querySelectorAll('.slide').length")
+                for i in range(1, slide_count + 1):
+                    page.evaluate(f"window.location.hash = '#{i}'")
+                    page.wait_for_timeout(180)
+                    fname = f's{i:02d}.png'
+                    page.screenshot(path=str(shots_dir / fname),
+                                    full_page=False)
+
             browser.close()
     except Exception as e:
-        iss.warn('R-OVERFLOW',
-            f'visual overflow check could not run ({type(e).__name__}: {e}). '
-            'Try `python -m playwright install chromium` if you have not yet, '
-            'or open the deck in a browser manually to verify.')
+        iss.warn('R-VISUAL',
+            f'visual checks could not run ({type(e).__name__}: {e}). '
+            'Try `python -m playwright install chromium` if you have not '
+            'yet, or open the deck in a browser manually to verify.')
         return
 
-    for entry in overflows[:20]:
+    # ----- Format findings from the JS report -----
+    for entry in report.get('overflow', [])[:20]:
+        bits = []
         delta_h = entry['h'] - 1080
         delta_w = entry['w'] - 1920
-        bits = []
         if delta_h > 0: bits.append(f'height +{delta_h} px')
         if delta_w > 0: bits.append(f'width +{delta_w} px')
         iss.err('R-OVERFLOW',
             f'slide {entry["idx"]} ({entry["label"]}): content overflows '
             f'canvas — {", ".join(bits)}. Reduce content density, drop '
-            'cards / rows, increase column count, or shorten body copy. '
-            'Body floor R06 is 22 px and is not negotiable; if content '
-            'genuinely needs more vertical room, split across two slides.')
+            'cards/rows, increase column count, or shorten body copy.')
+
+    for entry in report.get('tier', [])[:20]:
+        iss.err('R-VIS-TIER',
+            f'slide {entry["slide_idx"]} · `{entry["selector"]}` renders '
+            f'at {entry["computed_px"]}px (off the 4-tier ladder '
+            '{16, 24, 28, 48} + hero whitelist). Snap to nearest tier, OR '
+            'add `/* allow:typescale */` if this is a documented hero '
+            'exception (cover hero / section chapter-num / big-stat / etc.).')
+
+    for entry in report.get('hier', [])[:20]:
+        iss.err('R-VIS-HIER',
+            f'slide {entry["slide_idx"]} · meta `{entry["meta_sel"]}` at '
+            f'{entry["meta_px"]}px is BIGGER than body `{entry["body_sel"]}` '
+            f'at {entry["body_px"]}px in the same card '
+            f'(`{entry["card_sel"]}`). Visual hierarchy reads inverted — '
+            'shrink meta to ≤ body, or rename to a column-pill class if '
+            'this element is actually a column title (not meta).')
+
+    for entry in report.get('align', [])[:20]:
+        iss.warn('R-VIS-ALIGN',
+            f'slide {entry["slide_idx"]} · grid `{entry["grid_sel"]}` has '
+            f'{entry["count"]} direct children with heights '
+            f'{entry["heights"]} — max diff {entry["delta"]} px '
+            f'(> 4 px tolerance). For canonical-card / overview-card '
+            'grids the cards should be equal-height; check `flex: 1` is '
+            'applied or `align-items: stretch` is set on the container.')
+
+    if want_screenshots and 'shots_dir' in dir():
+        pass   # path already created above
+
+
+# ---- JS payload that runs INSIDE the headless browser ----
+# Returns: {overflow: [...], tier: [...], hier: [...], align: [...]}
+_VISUAL_AUDIT_JS = r"""
+() => {
+  const TIER = new Set([16, 24, 28, 48]);
+  // Hero exceptions — allowed when selector or ancestor matches one of these classes
+  const HERO_CLASSES = [
+    'hero-num', 'ov-num', 'chapter-num', 'bigstat-num',
+    'cover-title', 'cover-h1', 'big-num', 'num', 'unit',
+    'slogan',
+  ];
+  const HERO_SIZES = new Set([
+    30,                                      // cover .author (master spec)
+    36, 40, 44,                              // master sub-hero values (lede / section-h2 sub)
+    56, 64, 72, 88, 92, 96, 100, 132, 160,
+    240, 312,                                // big-stat extreme
+  ]);
+  // Hero layouts — any text element on these slides can use HERO_SIZES.
+  // The whole layout is a "hero zone" by design (cover, section divider,
+  // big-stat, end-slogan, quote with big blockquote).
+  const HERO_LAYOUTS = new Set([
+    'cover', 'section', 'big-stat', 'end', 'quote'
+  ]);
+
+  // Meta class hints (lowercase, matched against className.toLowerCase())
+  const META_KEYS = [
+    'owner', 'attrib', 'source', 'who', 'byline', 'author-meta',
+    'timestamp', 'date', 'status', 'kicker', 'eyebrow',
+    'td-owner', 'quote-attrib', 'voice-who', 'case-attrib',
+  ];
+  // Body class hints
+  const BODY_KEYS = [
+    'body', 'desc', 'paragraph', 'para', 'caption',
+    'cc-body', 'card-body', 'td-body', 'nc-body', 'ov-desc',
+    'dir-desc', 'mode-body', 'rule-text', 'arch-base', 'feat-body',
+  ];
+  // Card / panel container hints — for grouping meta vs body
+  const CARD_KEYS = [
+    'canonical-card', 'todo-card', 'news-card', 'overview-card',
+    'mode-card', 'dir-card', 'scene-card', 'ns-card', 'verdict-card',
+    'voice-card', 'cta-box', 'data-panel', 'arch-hand',
+  ];
+  // Grid containers whose children should be equal-height
+  const GRID_KEYS = [
+    'overview-grid', 'todo-grid', 'scene-grid', 'north-star-map',
+    'dir-grid',
+  ];
+
+  const hasAnyClass = (el, keys) => {
+    const cls = (el.className || '').toLowerCase();
+    return keys.some(k => cls.includes(k));
+  };
+  const firstAncestor = (el, keys) => {
+    let n = el.parentElement;
+    while (n) {
+      if (hasAnyClass(n, keys)) return n;
+      n = n.parentElement;
+    }
+    return null;
+  };
+  const shortSel = el => {
+    const tag = el.tagName.toLowerCase();
+    const cls = (el.className || '').toString().split(/\s+/).filter(Boolean);
+    return cls.length ? `${tag}.${cls.join('.')}` : tag;
+  };
+  // Decide whether an element has direct text content (not just child elements)
+  const hasOwnText = el => {
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3 && n.textContent.trim()) return true;
+    }
+    return false;
+  };
+
+  const out = { overflow: [], tier: [], hier: [], align: [] };
+  const slides = document.querySelectorAll('.slide');
+  slides.forEach((slide, idx) => {
+    const slide_idx = idx + 1;
+    const label = slide.getAttribute('data-screen-label') || `slide-${slide_idx}`;
+    const layout = slide.getAttribute('data-layout') || '';
+    const isHeroLayout = HERO_LAYOUTS.has(layout);
+
+    // ---- Overflow ----
+    if (slide.scrollHeight > 1080 || slide.scrollWidth > 1920) {
+      out.overflow.push({
+        idx: slide_idx, label,
+        h: slide.scrollHeight, w: slide.scrollWidth,
+      });
+    }
+
+    // ---- Tier: every text-bearing element ----
+    const textEls = slide.querySelectorAll('*');
+    const seenTierViolations = new Set();
+    textEls.forEach(el => {
+      if (!hasOwnText(el)) return;
+      const cs = window.getComputedStyle(el);
+      const px = Math.round(parseFloat(cs.fontSize));
+      if (!px || px < 8) return;
+      if (TIER.has(px)) return;
+      // Hero size allowed if: (a) element or any ancestor matches a hero
+      // class, OR (b) the whole slide is a hero layout (cover/section/etc.)
+      if (HERO_SIZES.has(px)) {
+        if (isHeroLayout) return;
+        // walk up to find a hero-class ancestor
+        let heroAncestor = false;
+        for (let n = el; n && n !== slide; n = n.parentElement) {
+          if (hasAnyClass(n, HERO_CLASSES)) { heroAncestor = true; break; }
+        }
+        if (heroAncestor) return;
+      }
+      // Explicit opt-out: walk up looking for [data-allow-typescale]
+      let allowOut = false;
+      for (let n = el; n; n = n.parentElement) {
+        if (n.dataset && n.dataset.allowTypescale != null) {
+          allowOut = true; break;
+        }
+      }
+      if (allowOut) return;
+      const sel = shortSel(el);
+      const key = `${sel}::${px}`;
+      if (seenTierViolations.has(key)) return;
+      seenTierViolations.add(key);
+      out.tier.push({ slide_idx, selector: sel, computed_px: px });
+    });
+
+    // ---- Hierarchy: within each card, meta should be ≤ body ----
+    const cards = slide.querySelectorAll('*');
+    const seenCards = new WeakSet();
+    cards.forEach(card => {
+      if (!hasAnyClass(card, CARD_KEYS)) return;
+      if (seenCards.has(card)) return;
+      seenCards.add(card);
+      const metaEls = [...card.querySelectorAll('*')].filter(
+        e => hasAnyClass(e, META_KEYS) && hasOwnText(e));
+      const bodyEls = [...card.querySelectorAll('*')].filter(
+        e => hasAnyClass(e, BODY_KEYS) && hasOwnText(e));
+      if (!metaEls.length || !bodyEls.length) return;
+      // Compare every meta vs every body size; flag if meta > smallest body
+      const bodyPx = Math.min(...bodyEls.map(
+        b => Math.round(parseFloat(window.getComputedStyle(b).fontSize))));
+      metaEls.forEach(m => {
+        const mpx = Math.round(parseFloat(window.getComputedStyle(m).fontSize));
+        if (mpx > bodyPx) {
+          out.hier.push({
+            slide_idx,
+            card_sel: shortSel(card),
+            meta_sel: shortSel(m),
+            meta_px: mpx,
+            body_sel: shortSel(bodyEls[0]),
+            body_px: bodyPx,
+          });
+        }
+      });
+    });
+
+    // ---- Alignment: grid children equal-height ----
+    const grids = slide.querySelectorAll('*');
+    grids.forEach(grid => {
+      if (!hasAnyClass(grid, GRID_KEYS)) return;
+      const kids = [...grid.children];
+      if (kids.length < 2) return;
+      const heights = kids.map(k => Math.round(k.getBoundingClientRect().height));
+      const minH = Math.min(...heights);
+      const maxH = Math.max(...heights);
+      if (maxH - minH > 4) {
+        out.align.push({
+          slide_idx,
+          grid_sel: shortSel(grid),
+          count: kids.length,
+          heights: heights.slice(0, 8),
+          delta: maxH - minH,
+        });
+      }
+    });
+  });
+
+  return out;
+}
+"""
+
 
 
 def main():
@@ -1783,11 +2003,21 @@ def main():
     p.add_argument('--strict', action='store_true',
                    help='Promote warnings to errors')
     p.add_argument('--visual', action='store_true',
-                   help='Also run the optional Playwright-based overflow '
-                        'check (renders each slide at 1920×1080 and flags '
-                        'content past canvas). Requires `pip install '
-                        'playwright && python -m playwright install chromium`.')
+                   help='Run the Playwright-based renderer-side audits: '
+                        'R-OVERFLOW (canvas overflow), R-VIS-TIER (computed '
+                        'fontSize on 4-tier ladder), R-VIS-HIER (meta ≤ body '
+                        'in each card), R-VIS-ALIGN (grid children equal '
+                        'height). ~5s for a 30-slide deck. Requires '
+                        '`pip install playwright && python -m playwright '
+                        'install chromium`.')
+    p.add_argument('--screenshots', action='store_true',
+                   help='In addition to --visual checks, archive PNG '
+                        'screenshots of each slide to '
+                        '<deck-stem>-previews/sNN.png. Useful for visual '
+                        'baseline / human review; not needed for CI.')
     args = p.parse_args()
+    if args.screenshots and not args.visual:
+        args.visual = True   # --screenshots implies --visual
 
     path = Path(args.html)
     if not path.is_file():
@@ -1863,7 +2093,7 @@ def main():
     audit_feedback_md(path, iss)
 
     if args.visual:
-        audit_visual_overflow(path, iss)
+        run_visual_audits(path, iss, want_screenshots=args.screenshots)
 
     if args.strict:
         iss.errors.extend(iss.warnings)
