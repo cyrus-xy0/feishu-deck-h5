@@ -1757,25 +1757,16 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 shots_dir = html_path.parent / (html_path.stem + '-previews')
                 shots_dir.mkdir(parents=True, exist_ok=True)
                 # Wait for deck JS to wire the .is-current class onto the
-                # active slide-frame; otherwise slide-1 stays opacity:1 and
-                # bleeds through every screenshot.
+                # active slide-frame. After init, framework adds
+                # `[data-js-ready]` to the deck and the CSS `:first-child`
+                # fallback automatically de-activates (BF13), so we no
+                # longer need to inject an override stylesheet here.
                 try:
                     page.wait_for_function(
-                        "() => document.querySelector('.slide-frame.is-current') !== null",
+                        "() => document.querySelector('.deck[data-js-ready] .slide-frame.is-current') !== null",
                         timeout=3000)
                 except Exception:
                     pass  # fall through; bleed may occur if JS never runs
-                # Neutralize the pre-JS `:first-child { opacity:1 }` fallback
-                # rule in the deck framework: once JS has wired is-current,
-                # the first frame should follow the same opacity logic as any
-                # other frame — but the CSS rule sticks because :first-child
-                # has equal specificity. Force inline opacity:0 + revert on
-                # is-current via inline style so screenshots don't bleed.
-                page.add_style_tag(content="""
-                    .deck[data-mode="present"] .slide-frame:first-child:not(.is-current) {
-                        opacity: 0 !important;
-                    }
-                """)
                 # Re-iterate slides, hashchange-navigate, screenshot each.
                 slide_count = page.evaluate(
                     "() => document.querySelectorAll('.slide').length")

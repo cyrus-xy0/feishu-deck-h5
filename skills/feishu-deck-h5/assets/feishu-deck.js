@@ -170,6 +170,9 @@
     }
     window.addEventListener('hashchange', readHash, { signal });
     if (!readHash()) goTo(deck, frames, 0, false);
+    // Initial target is now visible via .is-current; disable the CSS
+    // first-frame fallback so the cover cannot bleed through later fades.
+    deck.setAttribute('data-js-ready', '');
 
     // ---- Auto-idle (chrome fades after 2.5s of no input) ----
     let idleTimer;

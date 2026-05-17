@@ -194,9 +194,11 @@ body {
 }
 /* Pre-JS state: first frame visible immediately so users don't see a
    black screen during the gap between CSS-applied (frame opacity:0) and
-   JS-loaded (frame .is-current). After JS init, the explicit .is-current
-   class takes over normally. */
-.deck[data-mode="present"] .slide-frame:first-child {
+   JS-loaded (frame .is-current). IMPORTANT: gate this fallback behind
+   :not([data-js-ready]) so the cover does NOT remain visible underneath
+   later slide transitions after init — that caused occasional "flash back
+   to cover" during content-page navigation. */
+.deck[data-mode="present"]:not([data-js-ready]) .slide-frame:first-child {
   opacity: 1; pointer-events: auto;
 }
 .deck[data-mode="present"] .slide-frame .slide {

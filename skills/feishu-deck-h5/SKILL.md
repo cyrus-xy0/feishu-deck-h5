@@ -5223,6 +5223,65 @@ Framework default: `.canonical-card / .news-card / .data-panel` get
 `flex: 1` when they're direct children of `.col-text` / `.col-visual`.
 Heights balance automatically; no per-deck override needed.
 
+### BF13 — Present-mode first-frame fallback must gate on `[data-js-ready]` (2026-05-17)
+
+**Symptom**: navigating between content pages in present mode, the cover
+(slide 1) **flashes underneath** for a frame or two — most noticeable
+on slower transitions or when screenshotting via headless Chromium.
+The cover bleeds through as a faint background even on slide 13 / 22 /
+whichever the user just navigated to.
+
+**Root cause**: framework CSS provides a "pre-JS first-frame visible"
+fallback so users don't see a black screen during the gap between
+CSS-applied (all frames opacity:0) and JS-loaded (active frame gets
+`.is-current`). The original rule was:
+
+```css
+/* WRONG — fallback stays alive forever */
+.deck[data-mode="present"] .slide-frame:first-child {
+  opacity: 1; pointer-events: auto;
+}
+```
+
+The `:first-child` selector has equal specificity to `.is-current`, but
+this rule was DECLARED LATER in the stylesheet, so it kept winning even
+after JS marked another frame as `.is-current`. The first frame
+remained `opacity: 1` underneath every subsequent slide.
+
+**Defense (CSS + JS, mandatory pair)**:
+
+```css
+/* feishu-deck.css — gate the fallback so it deactivates after JS init */
+.deck[data-mode="present"]:not([data-js-ready]) .slide-frame:first-child {
+  opacity: 1; pointer-events: auto;
+}
+```
+
+```js
+/* feishu-deck.js — set [data-js-ready] AFTER initial goTo() */
+if (!readHash()) goTo(deck, frames, 0, false);
+deck.setAttribute('data-js-ready', '');
+```
+
+**How it works**:
+- Before JS runs: deck has no `[data-js-ready]` → fallback active →
+  first frame visible → no black screen during the ~50 ms init window.
+- After JS runs: deck gains `[data-js-ready]` → fallback DEselects →
+  only `.is-current` frame is opacity:1 → no bleed-through.
+
+**Don't break this pair**:
+- If you simplify CSS to "always show first frame", flash returns.
+- If you simplify CSS to "never show first frame", initial black screen returns.
+- If JS sets `[data-js-ready]` too early (before first `goTo`), brief black flash.
+- If JS forgets to set `[data-js-ready]`, fallback never deactivates.
+
+**Postmortem (2026-05-17)**: showcase eval surfaced the flash during
+screenshot capture. Initial fix was a `page.add_style_tag` injection
+inside `validate.py`'s screenshot loop — only fixed screenshots, not
+the real browser experience. Root fix moved to framework: gate the
+CSS fallback behind `:not([data-js-ready])`. Validator workaround
+removed (commit after BF13 lands).
+
 ---
 
 ## Copy / numbering 规范
