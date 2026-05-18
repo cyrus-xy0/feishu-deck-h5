@@ -5804,32 +5804,38 @@ bash assets/finalize.sh runs/<ts>/output local --strict   # final delivery
 in order. Every validator error prints **what's wrong + how to fix** —
 read it, fix it. Don't suppress.
 
-The validator covers programmable rules:
+The validator covers programmable rules (last refreshed 2026-05-18):
 
 | Family | Rules | What it enforces |
 |---|---|---|
-| Structure | R02 / R07 | every `.slide` has `data-layout`, `data-screen-label`, `.wordmark` |
-| Copy | R05 / R13 | no emoji / `!` / `…`; no `<br>` in content-page titles |
-| Hex palette | R10 | hex values come from `--fs-*` tokens |
+| Structure | R02 / R07 / R-DOM | every `.slide` has `data-layout`, `data-screen-label`, `.wordmark`; balanced `<div>` open/close (`.slide-frame` direct under `.deck`, exactly one `.slide` per frame, no nested frames) |
+| Copy | R05 / R13 | no emoji / `!` / `…`; no `<br>` in content-page titles (allowed on hero layouts: cover / image-text / end / section / quote) |
+| Hex palette | R10 | hex values come from `--fs-*` tokens; SVG decor and inlined framework CSS are exempt |
 | Drop shadows | R12 | no real `box-shadow` offsets (rings + insets only) |
-| Typography | R06 / R20 | body ≥ 22 px; chrome ≥ 14 px; per-page `font-size` on the ladder `{10,11,12,13,14,18,22,28,38,44,52,56,64,88,100,132,160}` |
-| CSS vars | R-CSSVAR | `var(--name)` references must resolve to a defined custom property (or have a fallback). Browser silently drops the surrounding declaration when a var is undefined — the worst case is `font:` shorthand where `font-size` then falls back to 16px regardless of the size you wrote |
-| Redundant echo | R-ECHO | a summary leaf (class contains `legend / note / footnote / caption / summary / footer / lede / disclaimer / callout`, or a plain `<p>`) shouldn't echo ≥ 3 sibling-leaf prefixes — that's a list restatement. Drop the echo and keep only the new information (numbers / verbs / next-step) |
+| Typography | R06 / R20 | body ≥ 24 px; chrome ≥ 16 px; per-page `font-size` on the 4-tier ladder `{16, 24, 28, 48}` — hero exceptions (cover 100, section 88/160, big-stat 132+, quote 88+) require `/* allow:typescale */` in the rule |
+| White-text | R-WHITE-TEXT | semantic body text on dark slides is `#fff` not low-opacity gray (which vanishes on projector); chrome opt-out via `/* allow:white-opacity */` |
+| Hierarchy | R-HIERARCHY | inside a card, meta-info (owner / source / attribution) is structurally less important than body — its rendered fontSize must be ≤ body |
+| CSS vars | R-CSSVAR | `var(--name)` references must resolve to a defined custom property (or have a fallback). Browser silently drops the surrounding declaration when a var is undefined — the worst case is `font:` shorthand where `font-size` falls back to 16 px regardless of the size you wrote |
+| Redundant echo | R-ECHO | a summary leaf (class contains `legend / note / footnote / caption / summary / footer / lede / disclaimer / callout / subtitle / kicker / page-sub / tagline / recap`, or a plain `<p>`) shouldn't echo ≥ 3 sibling-leaf prefixes — that's a list restatement; drop the echo and keep only the new information |
 | Logo | L1 | `.wordmark` defaults to color; mono is `class="is-mono"` opt-in |
-| Layout integrity | L2 / L3 / L4 | balanced stage, content-tall cards, single-col `.process .attrs` |
+| Layout integrity | L1 / L2 / L4 | logo default, balanced stage with content centering, single-col `.process .attrs` (L3 is not currently shipped) |
 | Variants | R47 | structural-changing variants redeclare alignment |
 | Centering | R48 | fixed-shape layouts default-center vertically |
 | Cyan | R49 | cyan is inline-highlight only, not slide accent |
-| Header | R56 | content-page `.header` has only `<h2>` (no eyebrow) |
+| Header | R56 | content-page `.header` has only `<h2>` (no eyebrow); matching is class-list aware (`class="header is-tall"` works) |
 | Decor | R38 | `data-decor` tokens are from ship list |
 | Runtime chrome | R29-R32 | present-mode bar/buttons + `requestFullscreen` wired |
 | Centering pattern | R36 | `margin: -540px 0 0 -960px`, NOT grid `place-items` |
 | UI mocks | UI1 | system UI is HTML primitives, not raster `<img>` |
-| Language | R-LANG | `.title-en`/`.subtitle-en`/`.label-en` only when `<meta name="fs-language" content="zh-en">` |
+| Language | R-LANG | `.title-en` / `.subtitle-en` / `.label-en` classes + chrome-class scan (any class ending in `-en / -eng / -english / -num / -index / -ord` AND eyebrow / kicker / pill / tag / chip / badge family) + sibling-pair detection (CJK leaf paired with Latin-only leaf inside the same parent) — only when `<meta name="fs-language" content="zh-only">` (or absent); meta-attribute order is irrelevant |
 | Slide keys | R-KEY | every `.slide` has unique semantic `data-slide-key` (kebab-case); positional slugs warned |
-| Text-id sidecar | T01 / T02 / T03 | unique ids, valid `slide-NN.field` shape, paired `texts.md` |
+| Text-id sidecar | T00 / T01 / T02 / T03 | data-text-id present (T00); valid `slide-NN.field` shape (T01); unique (T02); paired `texts.md` in sync (T03) |
 | Performance | P50-P55 | base64 budget, blur cap, single ResizeObserver, AbortController, GPU layers |
+| Visual (Playwright, default-on) | R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-HIER / R-VIS-ALIGN / R-VIS-LABEL-FLOOR | slide-level overflow > 1920×1080; sibling bbox intersection inside `.stage / .grid / .flow / .nodes / .toc / .stack / .table-wrap` (catches "column bleeds into legend"); computed `font-size` on 4-tier ladder; meta ≤ body in rendered DOM; grid-children equal height; hero-context cards forbid 16 px non-chrome labels. ~2 s overhead. `--no-visual` skips; gracefully skips when playwright not installed |
+| Run-feedback | R-FEEDBACK | every run produces a `FEEDBACK.md` capturing decisions made for maintainer follow-up |
 | Preflight | PREFLIGHT | local mount writable; not ephemeral |
+
+**Severity model**: every audit emits `warn` or `err` at its inherent severity. `--strict` globally promotes all warnings to errors in one pass at the end of `main()` — no per-audit `if strict:` branching needed.
 
 What the validator can't catch — needs human eyes before delivery:
 

@@ -28,9 +28,8 @@ from pathlib import Path
 
 FLOOR_BODY_PX        = 24   # body text on content pages (was 22 pre-2026-05-16 · 4-tier spec rung 3)
 FLOOR_CHROME_PX      = 16   # corner metadata / footnote / pill / tag (was 14 pre-2026-05-16 · 4-tier rung 4)
-FLOOR_HEADER_PX      = 48   # content-page H2 minimum (4-tier rung 1, was 52 · master spec uses this for cover/section hero only)
-FLOOR_TABLE_TH_PX    = 24   # table thead 规范
-FLOOR_STATS_TREND_PX = 24   # stats trend tag 规范 — body-tier per spec
+# FLOOR_HEADER_PX / FLOOR_TABLE_TH_PX / FLOOR_STATS_TREND_PX were defined but
+# never read (R20 enforces the 4-tier ladder directly). Removed 2026-05-18.
 
 # Brand palette — all hex values inside slide markup must be from this set.
 ALLOWED_HEX = {
@@ -52,10 +51,17 @@ ALLOWED_DECOR = {
 # normal content-page header. Master spec may revisit this — if so,
 # update both the recipe in templates/slide-recipes.html and SKILL.md
 # §"Available layouts" together with this set.
-HERO_TITLE_LAYOUTS = {'cover', 'image-text', 'end'}
+HERO_TITLE_LAYOUTS = {'cover', 'image-text', 'end', 'section', 'quote'}
+# `section` ships hero `.chapter-num` (160) + `<h2 class="title">` (88) where
+# 2-line chapter titles are common ("绿氢革命<br>2026"). `quote` ships
+# `<blockquote>` at 88px where rhetorical line-breaks read better. Both were
+# missing pre-2026-05-18; R13 false-positive on multi-line section/quote
+# titles. `audit_header_minimal` already lists the same 5-layout set
+# verbatim, so this fix lets us drop the duplicate enumeration there.
 
-# Layouts that suppress the eyebrow (规范: title-only pages)
-TITLE_ONLY_LAYOUTS = {'cover', 'agenda', 'big-stat'}
+# TITLE_ONLY_LAYOUTS was defined here but never read. Eyebrow suppression
+# happens via the framework CSS rule `.slide .header .eyebrow { display:none }`
+# (feishu-deck.css) + R56 in `audit_header_minimal`. Removed 2026-05-18.
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +154,7 @@ def audit_titles_one_line(slides: list[str], iss: Issues):
                     'titles must be one line on non-hero layouts')
 
 
-def audit_brand_chrome(slides: list[str], iss: Issues, strict: bool):
+def audit_brand_chrome(slides: list[str], iss: Issues):
     """R07: logo always colored unless explicit is-mono opt-in."""
     for i, fr in enumerate(slides, 1):
         if 'class="wordmark is-mono"' in fr or 'class="is-mono wordmark"' in fr:
@@ -633,11 +639,14 @@ def audit_data_decor(slides: list[str], iss: Issues):
                     f'must be one of {sorted(ALLOWED_DECOR)}')
 
 
-def audit_hex_palette(html: str, iss: Issues, strict: bool):
+def audit_hex_palette(html: str, iss: Issues):
     """R10: all hex values inside slide markup come from --fs-* tokens.
 
     Strips script/style/svg AND data: URIs first — base64 strings can
     contain '#xxx' false matches.
+
+    Always emits as warning; `main()` promotes all warnings → errors in
+    --strict mode globally (see end of main()).
     """
     body_m = re.search(r'<body[^>]*>(.*)</body>', html, re.S)
     if not body_m: return
@@ -649,10 +658,7 @@ def audit_hex_palette(html: str, iss: Issues, strict: bool):
     extras = {h: c for h, c in hexes.items() if h not in ALLOWED_HEX}
     if extras:
         msg = ', '.join(f'#{h}×{c}' for h, c in sorted(extras.items()))
-        if strict:
-            iss.err('R10', f'hex values outside palette in slide markup: {msg}')
-        else:
-            iss.warn('R10', f'hex values outside palette in slide markup: {msg}')
+        iss.warn('R10', f'hex values outside palette in slide markup: {msg}')
 
 
 def audit_runtime_chrome(html: str, iss: Issues, html_path: 'Path'):
@@ -767,7 +773,7 @@ PERF_BASE64_ERROR_KB   = 250   # …becomes error above this in --strict
 PERF_BLUR_MAX_PX       = 10    # backdrop-filter blur radius cap
 
 
-def audit_perf(html: str, iss: Issues, strict: bool):
+def audit_perf(html: str, iss: Issues):
     """P50–P55: performance budget checks.
 
     Catches the regressions that gave us a 365 KB deck and per-pixel
@@ -802,8 +808,7 @@ def audit_perf(html: str, iss: Issues, strict: bool):
                    'soft budget. Use linked CSS for default delivery, or add '
                    '`<meta name="fs-deck-mode" content="inline">` to mark this as '
                    'intentional single-file mode.')
-            if strict: iss.err('P50', msg)
-            else:      iss.warn('P50', msg)
+            iss.warn('P50', msg)  # main() promotes warn→err globally in --strict
 
     # --- P51: backdrop-filter blur radius cap ---
     for m in re.finditer(r'backdrop-filter:\s*blur\((\d+)px\)', html):
@@ -946,11 +951,22 @@ def audit_header_minimal(slides: list[str], iss: Issues):
     """
     for i, fr in enumerate(slides, 1):
         layout = slide_attr(fr, 'layout') or '?'
-        # Hero layouts use .stage not .header — skip
-        if layout in HERO_TITLE_LAYOUTS or layout in ('cover','section','quote','end'):
+        # Hero layouts use .stage not .header — skip. HERO_TITLE_LAYOUTS
+        # already covers cover / image-text / end / section / quote (B1
+        # fix, 2026-05-18); no need for the previous duplicate or-clause.
+        if layout in HERO_TITLE_LAYOUTS:
             continue
-        # Find .header blocks
-        for hdr in re.findall(r'<div class="header">(.*?)</div>\s*(?=<div)', fr, re.S):
+        # Find .header blocks. Match class="header" as a whole-word match
+        # inside the class attr (so `class="header is-tall"` works too),
+        # accept any leading attrs (`data-foo`, `style="…"`), then capture
+        # to the first balancing `</div>`. B3 fix 2026-05-18: old regex
+        # `<div class="header">` was strict-equal and missed legit variants
+        # like `class="header is-tall"`. The non-greedy `.*?` correctly
+        # captures the eyebrow's opening tag for the substring check below
+        # because we only need to find an open tag's literal needle inside.
+        for hdr in re.findall(
+                r'<div\s[^>]*class="(?:[^"]*\s)?header(?:\s[^"]*)?"[^>]*>(.*?)</div>',
+                fr, re.S):
             if '<div class="eyebrow"' in hdr or 'class="eyebrow"' in hdr:
                 iss.warn('R56',
                     f'slide {i} ({layout}): .header still contains an .eyebrow. '
@@ -1045,7 +1061,7 @@ def audit_slide_keys(slides: list[str], iss: Issues):
             '`data-slide-key="<slug>"` next to data-screen-label.')
 
 
-def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: bool):
+def audit_language_policy(html: str, slides: list[str], iss: Issues):
     """R-LANG: enforce the SKILL's ZH-only-by-default language policy.
 
     The deck declares its language mode in <head>:
@@ -1063,9 +1079,20 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: boo
 
     A bilingual deck just sets the meta and the audit is a no-op.
     """
-    meta_m = re.search(
-        r'<meta[^>]*name="fs-language"[^>]*content="([^"]+)"', html)
-    mode = (meta_m.group(1) if meta_m else 'zh-only').strip().lower()
+    # HTML attribute order is irrelevant; match `<meta>` and then look up
+    # name= / content= individually. The previous regex required name= to
+    # appear before content= and silently fell through to zh-only on
+    # `<meta content="zh-en" name="fs-language">` — false-positives on a
+    # deliberately bilingual deck (B2 fix 2026-05-18).
+    mode = 'zh-only'
+    for meta_tag in re.findall(r'<meta\s[^>]*>', html):
+        name_m = re.search(r'\bname\s*=\s*"([^"]+)"', meta_tag)
+        if not name_m or name_m.group(1).strip().lower() != 'fs-language':
+            continue
+        content_m = re.search(r'\bcontent\s*=\s*"([^"]+)"', meta_tag)
+        if content_m:
+            mode = content_m.group(1).strip().lower()
+        break
 
     if mode == 'zh-en':
         return  # bilingual explicitly opted in
@@ -1084,8 +1111,7 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: boo
                    'zh-only mode — drop the EN translation track, or '
                    'opt into bilingual via `<meta name="fs-language" '
                    'content="zh-en">` in <head>.')
-            if strict: iss.err('R-LANG', msg)
-            else:      iss.warn('R-LANG', msg)
+            iss.warn('R-LANG', msg)  # main() promotes warn→err in --strict
             break  # one report per slide is enough
 
     # 2026-05-16 · Additional check: Latin-uppercase chrome tags inside
@@ -1924,7 +1950,7 @@ def audit_dom_integrity(html: str, iss: Issues):
             'prime suspect.')
 
 
-def audit_white_text(html: str, iss: Issues, strict: bool):
+def audit_white_text(html: str, iss: Issues):
     """R-WHITE-TEXT: content text must be pure white on dark slides.
 
     Why: this skill targets 1920×1080 projector-room presentations. Any
@@ -2023,8 +2049,7 @@ def audit_white_text(html: str, iss: Issues, strict: bool):
                'levers for hierarchy (font-weight, font-size, background '
                'tone, border dim). Add `/* allow:white-opacity */` in the '
                'rule if this is a deliberate chrome exception.')
-        if strict: iss.err('R-WHITE-TEXT', msg)
-        else:      iss.warn('R-WHITE-TEXT', msg)
+        iss.warn('R-WHITE-TEXT', msg)  # main() promotes warn→err in --strict
 
 
 def audit_layout_integrity(html: str, iss: Issues):
@@ -2275,8 +2300,10 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'differentiate via font-weight or brand color, not by '
             'shrinking the size.')
 
-    if want_screenshots and 'shots_dir' in dir():
-        pass   # path already created above
+    # (screenshot archival happens inside the Playwright block above; no
+    # post-step needed. The previous `if 'shots_dir' in dir(): pass` was
+    # dead: `dir()` inside a function returns local names, not what one
+    # might assume, and the branch had `pass` anyway. Removed 2026-05-18.)
 
 
 # ---- JS payload that runs INSIDE the headless browser ----
@@ -2629,17 +2656,21 @@ def main():
 
     iss = Issues()
     audit_dom_integrity(html, iss)
+    # All audits emit warn/err at their inherent severity. The global
+    # `--strict` flag promotes ALL warnings to errors after the audits
+    # complete (see end of main()) — per-audit `strict` branches were
+    # redundant and removed 2026-05-18.
     audit_structure(slides, iss)
     audit_titles_one_line(slides, iss)
-    audit_brand_chrome(slides, iss, args.strict)
+    audit_brand_chrome(slides, iss)
     audit_copy_rules(html, iss)
     audit_font_sizes(html, iss)
     audit_type_ladder(html, iss)
     audit_undefined_css_vars(html, iss)
-    audit_white_text(html, iss, args.strict)
+    audit_white_text(html, iss)
     audit_no_drop_shadows(html, iss)
     audit_data_decor(slides, iss)
-    audit_hex_palette(html, iss, args.strict)
+    audit_hex_palette(html, iss)
     audit_runtime_chrome(html, iss, path)
     audit_centering_pattern(html, iss)
     audit_layout_integrity(html, iss)
@@ -2650,9 +2681,9 @@ def main():
     audit_no_cyan_accent(slides, iss)
     audit_header_minimal(slides, iss)
     audit_slide_keys(slides, iss)
-    audit_language_policy(html, slides, iss, args.strict)
+    audit_language_policy(html, slides, iss)
     audit_list_echo(slides, iss)
-    audit_perf(html, iss, args.strict)
+    audit_perf(html, iss)
     audit_text_ids(html, path, iss)
     audit_feedback_md(path, iss)
 
