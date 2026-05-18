@@ -2390,7 +2390,7 @@ body {
 .slide .card .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .slide .card .num {
   font: 700 28px/1 var(--fs-font-cjk);
-  color: var(--fs-text-50);
+  color: var(--fs-text-48);  /* was --fs-text-50 (undefined, silent fallback to currentColor) */
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
@@ -2483,7 +2483,7 @@ body {
   border: 1px solid color-mix(in srgb, var(--fs-blue) 55%, transparent);
   border-radius: var(--fs-radius-pill);
   background: var(--fs-text);
-  color: var(--fs-bg);
+  color: var(--fs-bg-1);  /* was --fs-bg (undefined, silent fallback to currentColor → invisible on white bg) */
   font: 700 24px/1 var(--fs-font-cjk);
   letter-spacing: 0.04em;
   cursor: pointer;
@@ -2609,7 +2609,7 @@ body {
 }
 .slide .calc-hint {
   font: italic 500 16px/1.55 var(--fs-font-cjk);
-  color: var(--fs-text-50);
+  color: var(--fs-text-48);  /* was --fs-text-50 (undefined, silent fallback) */
   letter-spacing: 0.04em;
 }
 

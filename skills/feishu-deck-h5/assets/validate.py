@@ -491,6 +491,90 @@ def audit_type_ladder(html: str, iss: Issues):
                     f'big-stat 132+, quote 88+, or mockup-internal 10-13).')
 
 
+def audit_undefined_css_vars(html: str, iss: Issues):
+    """R-CSSVAR: detect `var(--undefined-name)` references.
+
+    When a CSS `var(--name)` references an undefined custom property AND
+    has no fallback, the browser silently fails the surrounding declaration.
+    The most damaging instance is `font:` shorthand — if any token in the
+    shorthand is invalid (including unresolvable `var()`), the WHOLE
+    shorthand is dropped and font-size falls back to the browser default
+    of 16px. Authors then size a hero numeral at 88px and see it render
+    at 16px, with no diagnostic anywhere.
+
+    Real failure caught 2026-05-18 in Tongrentang P03: author wrote
+        font: 700 88px/0.9 var(--fs-font-en);
+    where the canonical name is `--fs-font-latin`. The `--fs-font-en` var
+    didn't exist, the shorthand silently failed, font-size dropped to
+    16px. Same typo was repeated 6 times across the deck, all silently
+    rendering at 16px regardless of declared size.
+
+    Both definitions and references come from the combined HTML+inlined-CSS
+    sources (main()'s inline_linked has already pulled the framework CSS
+    into a `<style data-source="framework">` block). Variables with an
+    explicit fallback `var(--x, fallback)` are exempt — fallback IS the
+    safety net.
+    """
+    css_blocks = re.findall(r'<style[^>]*>(.*?)</style>', html, re.S)
+    combined = '\n'.join(css_blocks)
+    if not combined:
+        return
+
+    # Strip CSS comments to avoid matching commented-out var() / --name:
+    combined_clean = re.sub(r'/\*.*?\*/', '', combined, flags=re.S)
+
+    # Definitions: `--name: ...;` (or `--name: ...` at rule end without `;`).
+    defined = set(re.findall(r'--([a-zA-Z][\w-]*)\s*:', combined_clean))
+
+    # References. The fallback group greedily captures everything up to the
+    # matching close paren; balanced inner parens are handled by allowing
+    # nested `\([^()]*\)` once (sufficient for our usage, no triple-nested).
+    ref_re = re.compile(
+        r'var\(\s*--([a-zA-Z][\w-]*)\s*'
+        r'(?:,((?:[^()]|\([^()]*\))*))?\)')
+    undefined = {}
+    for m in ref_re.finditer(combined_clean):
+        name = m.group(1)
+        fallback = (m.group(2) or '').strip()
+        if name in defined:
+            continue
+        if fallback:
+            continue  # browser uses the fallback
+        undefined[name] = undefined.get(name, 0) + 1
+
+    if not undefined:
+        return
+
+    # Try to suggest a corrected name from defined set (case-insensitive
+    # match first, then loose prefix match).
+    def _suggest(name: str) -> str:
+        lo = name.lower()
+        for d in defined:
+            if d.lower() == lo:
+                return f' Did you mean `--{d}`?'
+        # cheap edit-distance: same prefix length ≥ 4, length diff ≤ 5
+        for d in defined:
+            common = 0
+            for a, b in zip(name, d):
+                if a == b:
+                    common += 1
+                else:
+                    break
+            if common >= 4 and abs(len(d) - len(name)) <= 5:
+                return f' Did you mean `--{d}`?'
+        return ''
+
+    for name in sorted(undefined):
+        count = undefined[name]
+        hint = _suggest(name)
+        iss.err('R-CSSVAR',
+            f'`var(--{name})` referenced {count}× but never defined in any '
+            'CSS source linked from this deck. Browser silently fails the '
+            'surrounding declaration — common consequence: `font:` shorthand '
+            'parse fails → font-size falls back to browser default 16px.' +
+            hint)
+
+
 def audit_no_drop_shadows(html: str, iss: Issues):
     """R12: no DROP SHADOWS on slide content.
 
@@ -2293,6 +2377,7 @@ def main():
     audit_copy_rules(html, iss)
     audit_font_sizes(html, iss)
     audit_type_ladder(html, iss)
+    audit_undefined_css_vars(html, iss)
     audit_white_text(html, iss, args.strict)
     audit_no_drop_shadows(html, iss)
     audit_data_decor(slides, iss)
