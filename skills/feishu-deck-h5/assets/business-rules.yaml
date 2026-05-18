@@ -1,0 +1,230 @@
+# =============================================================================
+#  feishu-deck-h5 · 业务规则字典 (business-rules.yaml)
+# =============================================================================
+#
+#  作用:
+#    把 validate.py 里的技术规则翻译成业务语言. check-only.py --gate ingest
+#    模式读这份文件, 把"R06: font-size 18px below 24px floor"渲染成
+#    "正文字号太小 / 客户得凑近屏幕看 / 把字号抬到 24px".
+#
+#  谁来维护:
+#    deck 作者 / 业务运营 / 设计同学都可以直接改这里, 不用动 .py 代码.
+#    新增规则只用加一个 entry, 不用重新发包.
+#
+#  字段约定:
+#    concern     · 业务关切桶 (A / B / C, 三选一)
+#    symptom     · 一句话业务症状 (作者扫一眼能 get)
+#    consequence · 不修后果 (用客户 / 库的视角写, 别用代码视角)
+#    fix         · 业务语言修改步骤 (动作动词开头, 具体到 px / 颜色 / 措辞)
+#
+#  三个业务关切桶:
+#    A · 客户看不见     投不出去 / 字太小 / 字色融背景 / 内容堆顶
+#    B · 库找不回这张片 缺身份标识 / DOM 坏 / 字段标识重复
+#    C · 复用时会打架   字号失控 / 品牌色错 / 排版漂移
+#
+# =============================================================================
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  A · 客户看不见 (5 条)
+# ─────────────────────────────────────────────────────────────────────────────
+
+R-OVERFLOW:
+  concern:     "A · 客户看不见"
+  symptom:     "slide 内容超出 1920×1080 画框"
+  consequence: "投影上文字 / 图被裁掉，客户根本看不全这页"
+  fix:
+    - "减少 slide 上的卡片 / 行数 / 列项, 留出留白"
+    - "把过长的正文压短, 或把一句话拆到两行"
+    - "实在装不下: 把内容拆成两张 slide"
+
+R06:
+  concern:     "A · 客户看不见"
+  symptom:     "正文字号小到 5 米外读不清"
+  consequence: "投影上客户得凑近屏幕看，掉档次"
+  fix:
+    - "把违规字段的字号抬到 24px (正文) 或 28px (小标题)"
+    - "右下角脚注 / 数据来源可以保留 16px 不改"
+    - "常见漂移: 14 / 16 / 18 / 20 / 22 → 都往 24 抬; 26 / 30 / 32 / 36 → 都往 28 收"
+    - "整套字号只允许 4 档: 16 脚注 / 24 正文 / 28 小标题 / 48 标题"
+
+R-WHITE-TEXT:
+  concern:     "A · 客户看不见"
+  symptom:     "文字颜色淡到融进背景"
+  consequence: "在黑底深色 deck 上, 灰字 / 半透明白字客户根本看不见"
+  fix:
+    - "正文 / 标题 / 关键数据的文字色改成纯白 #fff"
+    - "半透明白色 rgba(255,255,255,0.x) 只能用在装饰 / 完全不重要的边缘元素"
+    - "如果是脚注 / 数据来源, 也至少用 #fff @ 92% 不透明度, 别低于这个"
+
+L2:
+  concern:     "A · 客户看不见"
+  symptom:     "内容堆在画面顶部, 下半留一大块空白"
+  consequence: "客户看着像'你还没做完就拿出来了', 视觉很草稿"
+  fix:
+    - "给这个版式的内容容器加居中: 在 .grid / .flow / .stage 上加 align-content: center"
+    - "或者让内容拉伸填充: 给主要内容容器加 flex: 1"
+    - "选一种, 不要让短内容停留在画面顶部"
+
+L4:
+  concern:     "A · 客户看不见"
+  symptom:     "右侧 output 面板的属性列表被挤成两列, 字漏出去"
+  consequence: "面板宽 ~400px 装两列, 22px 正文会被截断, 客户读不到完整字段名"
+  fix:
+    - "把 .slide[data-layout=process] .output .attrs 改成 grid-template-columns: 1fr (单列)"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  B · 库找不回这张 slide (5 条)
+# ─────────────────────────────────────────────────────────────────────────────
+
+R-KEY:
+  concern:     "B · 库找不回这张 slide"
+  symptom:     "slide 缺唯一身份标识 (data-slide-key)"
+  consequence: "这张 slide 入库后无法被检索和复用, 半年后想找回这张片完全没办法"
+  fix:
+    - "在每个 <div class='slide'> 上加 data-slide-key='<语义 slug>'"
+    - "命名按内容起: 'cover' / 'arr-history' / 'case-meiyijia' / 'closing'"
+    - "不要用位置编号 'slide-01' / 'page-7' (重排就失效)"
+    - "同一份 deck 里 slide-key 不能重复"
+
+R-DOM:
+  concern:     "B · 库找不回这张 slide"
+  symptom:     "deck HTML 的 <div> 嵌套坏了"
+  consequence: "整份 deck 无法被机器抽片, 演示时部分 slide 会直接消失"
+  fix:
+    - "通常是手工 sed / regex 改 HTML 误删了 </div>; 重新读 source 找一下缺哪个闭合标签"
+    - "确认 .deck > .slide-frame > .slide 三层嵌套都对得上"
+    - "不要用 sed / regex 改 slide 结构, 用 apply-texts.py 改文字, 整页结构改动手动来"
+
+R02:
+  concern:     "B · 库找不回这张 slide"
+  symptom:     "slide 缺 layout 标识 / 屏幕标签"
+  consequence: "缩略图渲不出来, 元数据不齐, 库的 meta.yaml 校验会直接失败"
+  fix:
+    - "每个 <div class='slide'> 都要有 data-layout='<版式名>' 和 data-screen-label='NN 章节名'"
+    - "data-layout 取值参考: cover / agenda / section / content-3up / content-2col / quote / stats / big-stat / image-text / table / timeline / process / end"
+    - "data-screen-label 用 'NN 章节名' 格式 (NN 是页码, 跟源 PDF 对得上)"
+
+T01:
+  concern:     "B · 库找不回这张 slide"
+  symptom:     "文字字段标识 (data-text-id) 格式不对"
+  consequence: "改文字工具会拒绝处理这张 slide, 文案编辑流程整条断掉"
+  fix:
+    - "data-text-id 必须是 'slide-NN.field' 格式 (例如 slide-01.title, slide-03.card-02.body)"
+    - "field 部分用 kebab-case, 不能有空格 / 中文 / 特殊符号"
+    - "NN 是 slide 序号, 跟 data-screen-label 上的页码一致"
+
+T02:
+  concern:     "B · 库找不回这张 slide"
+  symptom:     "同一个 data-text-id 在 deck 里出现多次"
+  consequence: "改文字工具会把两处都同时改掉, 一处改文案的需求会污染另一处"
+  fix:
+    - "每个 data-text-id 在 deck 内必须唯一"
+    - "重复的字段加序号: 'card-01.body' / 'card-02.body' 而不是两个 'card.body'"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  C · 复用时会打架 (11 条)
+# ─────────────────────────────────────────────────────────────────────────────
+
+R05:
+  concern:     "C · 复用时会打架"
+  symptom:     "slide 文字里有 emoji / 感叹号 / 省略号"
+  consequence: "抽到客户提案里时显得不专业, 且不符合飞书内容规范"
+  fix:
+    - "删掉所有 emoji (🚀 ✓ ✗ → 等等)"
+    - "删掉所有感叹号 ! ！"
+    - "省略号 … / ... 改成完整句子或直接去掉"
+    - "??? / ？？？ 改成单个问号或重写成完整疑问句"
+    - "需要图标用真 SVG, 不要用 emoji 代替"
+
+R10:
+  concern:     "C · 复用时会打架"
+  symptom:     "颜色脱离飞书品牌色板"
+  consequence: "抽到别的 deck 拼接时, 颜色不接续, 一眼看出'这张是从别处拼来的'"
+  fix:
+    - "颜色只用 --fs-* token 里的 hex: 蓝 #3C7FFF / 青 #33D6C0 / 紫 #5C3FFB / 粉紫 #9F6FF1 / 橘 #FE7F00"
+    - "白 #fff / 黑 #080C18 / 灰 rgba(255,255,255,0.x) 都 OK"
+    - "如果是 SVG 装饰内部 (logo / icon path), 可以保留原色"
+
+R12:
+  concern:     "C · 复用时会打架"
+  symptom:     "slide 上有真 drop-shadow (元素带阴影偏移)"
+  consequence: "看就知道不是飞书做的; 飞书的纵深感是发光环 (box-shadow 0 0 0 Npx), 不是阴影"
+  fix:
+    - "box-shadow 不允许有非零偏移: 写成 '0 0 0 Npx rgba(...)' 这种发光环形式"
+    - "需要立体感: 用对比色 / 浅描边 / 略浅一档的底色, 别用 drop-shadow"
+    - "如果是 macOS app mock 窗口边框, 在那条 CSS 里加 /* allow:drop-shadow */ 注释豁免"
+
+R13:
+  concern:     "C · 复用时会打架"
+  symptom:     "标题里有强行换行 <br>"
+  consequence: "抽到别的版式里, 换行会断在奇怪位置, 比如把'飞书企'和'业 AI'分开"
+  fix:
+    - "去掉标题里的 <br>, 让浏览器按 CJK 自然换行"
+    - "标题真的太长? 别截断 / 别加省略号; 让它在 16:9 画框里自然 wrap 两行"
+    - "只有 cover / image-text / end 三种 hero 版式允许 <br> (用来构图)"
+
+R20:
+  concern:     "C · 复用时会打架"
+  symptom:     "字号不在统一阶梯上 (出现了 17 / 20 / 32 / 40 这种 off-tier 值)"
+  consequence: "抽到别的 deck 字号会高低乱跳, 整套读起来不齐整"
+  fix:
+    - "整套 deck 的字号只允许 4 档: 16 脚注 / 24 正文 / 28 小标题 / 48 标题"
+    - "常见漂移修法: 14/16/18/20/22 → 都往 24 抬; 26/30/32/36 → 都往 28 收; 38/40/44/52/56 → 都往 48 收"
+    - "Hero 例外 (cover 100 / section 88+160 / big-stat 132+) 写 /* allow:typescale */ 豁免"
+
+R47:
+  concern:     "C · 复用时会打架"
+  symptom:     "data-variant 改了结构 (display / flex-direction / grid-template) 但没重声明 align-items / justify-content"
+  consequence: "抽到别的 deck 同 variant 时, 因为父级 CSS 不同, 对齐方式会反复出怪问题"
+  fix:
+    - "改了 display: flex / grid 时, 一定要同时显式声明 align-items 和 justify-content"
+    - "改了 flex-direction / grid-template-columns 时, 上述对齐属性也要重写一遍"
+    - "原则: variant 改结构, 所有方向性属性 (display / flex-direction / align-* / justify-* / gap) 都重新声明"
+
+R48:
+  concern:     "C · 复用时会打架"
+  symptom:     "多卡片版式没默认居中"
+  consequence: "slide 抽出来到其他 deck 时, 短内容会吊在画面一角, 看起来像没排版好"
+  fix:
+    - "在 .grid / .stage / .flow 容器上加 justify-content: center 或 align-content: center"
+    - "如果版式本来就要内容填满整个画面 (pipeline / timeline / process), 用 flex: 1 让它拉伸"
+    - "选一种, 不要让短内容停留在画面顶部"
+
+R49:
+  concern:     "C · 复用时会打架"
+  symptom:     "用 cyan #24C3FF 当 slide 主色调"
+  consequence: "跟整套品牌色不协调, 看起来像 Apple 风格而不是飞书风格"
+  fix:
+    - "把 slide 的 data-accent 改成 blue / teal / purple / violet / orange 中的一个"
+    - "cyan 只能用在 inline 关键词高亮 <span class='accent-text'> 或 <span class='hl'>"
+    - "cyan 是行内强调色, 不是主色调"
+
+R56:
+  concern:     "C · 复用时会打架"
+  symptom:     "内容页 header 还带 eyebrow 装饰条 (PRODUCT · X / CAPABILITIES · X 这种)"
+  consequence: "跟其它 slide 不一致, 显得叙事节奏没对齐"
+  fix:
+    - "把 .header 里的 .eyebrow 元素整个删掉"
+    - ".header 里只留 <h2 class='title-zh'> 标题"
+    - "如果上下文真的需要个 kicker label, 移到 slide body 内部, 不要放在 header"
+
+R-HIERARCHY:
+  concern:     "C · 复用时会打架"
+  symptom:     "次要字段比主要字段还醒目 (eyebrow / 来源 / 时间戳的字号 > 正文)"
+  consequence: "读者一眼看错重点, 注意力被次要信息抢走"
+  fix:
+    - "把 eyebrow / attrib / source / timestamp / kicker 类小字字段降到 16px 以下"
+    - "确保它们不超过正文字号 (正文 24px 是上限, 这些不能更大)"
+    - "如果某个'次要字段'其实是重点, 把它升级成正文级别 (改 class, 不只改 size)"
+
+L1:
+  concern:     "C · 复用时会打架"
+  symptom:     "logo 配色用错了 (content 页用了单色 / section 页用了彩色)"
+  consequence: "抽到别的 deck 后跟新 deck 的品牌呈现冲突, 一眼看出来'这张是别处拷来的'"
+  fix:
+    - "默认 .slide .wordmark 用彩色: background: var(--fs-asset-logo)"
+    - "只在 section 章节页 / 强 glow 背景的 slide 上, 给 .wordmark 加 class='is-mono' 单色"
+    - "content / agenda / stats 这类内容页一律彩色 logo"

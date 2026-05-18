@@ -12,11 +12,199 @@ description: |
   switch to it only when the user explicitly asks (e.g. for an external bilingual customer
   pitch). Outputs look indistinguishable from a hand-built Lark sales deck. Do NOT use this
   skill when the user actually wants a real PowerPoint (.pptx) file — that's the pptx skill.
+  ALSO use this skill in CHECK-ONLY mode when the user hands over a finished HTML and wants
+  to know what's non-compliant — triggers: "帮我检查这份 HTML/deck", "看看这个 deck 合不合规",
+  "审一下这个 HTML", "validate this", "check the deck", "扫一遍合规问题",
+  or anytime the user supplies an HTML and asks for review/validation without asking for
+  generation. Check-only mode runs assets/check-only.sh and produces a markdown report;
+  it skips PREFLIGHT / new-run / asset-copy entirely.
 ---
 
 # feishu-deck-h5
 
 > **🛑 STOP — read this preflight before doing anything else.**
+
+## MODE SELECTION (read this first — pick CHECK-ONLY vs GENERATION)
+
+Before reading anything else in this file, decide which mode the user is in:
+
+| Mode | Trigger phrases / signals | What to do |
+|---|---|---|
+| **CHECK-ONLY** | "帮我检查这份 HTML/deck" · "看看这个 deck 合不合规" · "审一下这个 HTML" · "validate this" · "check the deck" · "扫一遍合规问题" · "这个 HTML 哪里不对" · user hands over a path to an existing `.html` and asks for review WITHOUT asking to generate / modify content | **Jump to "CHECK-ONLY MODE" section below.** SKIP PREFLIGHT, SKIP `new-run.sh`, SKIP `copy-assets`, SKIP everything else in this file. |
+| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | Follow the rest of this file starting at PREFLIGHT. |
+
+If a request is genuinely ambiguous ("can you look at this HTML and improve it?"
+— check or rewrite?), ask the user once to clarify before branching.
+
+---
+
+## CHECK-ONLY MODE
+
+The user gave you an HTML file (own deck, foreign deck, downloaded sample,
+PR for review) and just wants to know what's non-compliant. The skill ships
+a dedicated entry point for this:
+
+```bash
+bash skills/feishu-deck-h5/assets/check-only.sh <html-path> [--strict] [--visual] [--report PATH]
+```
+
+What it does:
+
+1. Runs the full `validate.py` rule set (R02 / R05 / R06 / R10 / R12 / R13 /
+   R20 / R29-32 / R36 / R38 / R47 / R48 / R49 / R56 / L1-L4 / UI1 / R-LANG /
+   R-KEY / R-DOM / R-WHITE-TEXT / R-HIERARCHY / T00-T03 / P50-P55 / R-FEEDBACK).
+2. Auto-resolves linked `<link rel="stylesheet">` / `<script src="">` so a
+   non-inlined deck validates correctly (same logic as `validate.py`).
+3. Groups issues by **family** (结构/DOM · 排版/文案 · 品牌/调色板 · 布局完整性
+   · UI 仿真/slide-key · 演示模式/运行时 · texts.md 联动 · 性能预算 · 视觉 ·
+   交付物附件) and produces a markdown report.
+4. Auto-detects deck mode via heuristics (Replica `.page-replica` /
+   inline `fs-deck-mode=inline` / bilingual `fs-language=zh-en`) and prints
+   a hints block at the top of the report.
+5. Flags **context-dependent rules** (T00 / T03 / UI1 / P50 / R29-32 /
+   R-FEEDBACK) — these often false-positive when a deck is a Replica, an
+   external HTML, or a non-`new-run`-flow artifact. The report shows them
+   but explains when they're safe to ignore.
+
+### When to use what flags
+
+- **default** — `bash check-only.sh deck.html` — warn ≠ blocker. Use for
+  first-pass review of someone else's deck. Exit 0 if no errors.
+- **`--strict`** — `bash check-only.sh deck.html --strict` — warns promoted
+  to errors. Use when the deck is going to a customer and you want zero
+  warnings.
+- **`--visual`** — adds Playwright-based renderer audits (R-OVERFLOW /
+  R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-ALIGN). ~5s per 30-slide
+  deck. Requires `pip install playwright && python -m playwright install
+  chromium` once.
+- **`--report PATH`** — write the markdown report to a file (stderr prints
+  "✓ 报告已写到 …"). Default: stdout. When writing to a file, you can
+  forward it on Lark / email as a review note.
+- **`--gate ingest`** — 入库门禁模式 (业务语言, A/B/C 业务关切分组).
+  See "Gate ingest mode" below.
+
+### Gate ingest mode (入库门禁)
+
+The `--gate ingest` flag turns check-only into a **slide-library 准入扫描**:
+
+```bash
+bash skills/feishu-deck-h5/assets/check-only.sh deck.html --gate ingest
+```
+
+Differences from default mode:
+
+| Aspect | Default | `--gate ingest` |
+|---|---|---|
+| Rules checked | 全部 (~40 条) | 21 条必修 (业务关切 A/B/C) |
+| Warns | 不阻塞 | 全部升级为 error |
+| Visual audits | `--visual` 开启才跑 | **自动开启** |
+| Report 分组 | 按 family (技术视角) | 按业务关切 A/B/C (业务视角) |
+| Report 语言 | 技术语言 (规则名 + 技术描述) | **业务语言** (症状 + 不修后果 + 修改步骤 + 技术代码小字附注) |
+| 数据来源 | 硬编码在 .py | 读 `business-rules.yaml`, 可由非工程师维护 |
+| 出口码 | exit 1 if any error | exit 1 if any 必修违规 |
+| 用途 | review-style 看 deck 卫生 | **库的 ingest-package.py 自动调** |
+
+#### 21 条必修规则 (按业务关切分组)
+
+> 全部规则的业务文案 (症状 / 不修后果 / 修改步骤) 在
+> `assets/business-rules.yaml`. 非工程师可直接 PR 改文案.
+
+**A · 客户看不见 (5 条)** —— 投影上的硬伤
+- `R-OVERFLOW` 内容超出 1920×1080 画框
+- `R06` 正文字号 < 24px
+- `R-WHITE-TEXT` 文字色融背景
+- `L2` 内容堆顶留空
+- `L4` 多列被挤窄字截断
+
+**B · 库找不回这张 slide (5 条)** —— locator 失锚
+- `R-KEY` 缺 slide-key
+- `R-DOM` DOM 嵌套坏
+- `R02` 缺 layout / 屏幕标签
+- `T01` text-id 格式错
+- `T02` text-id 重复
+
+**C · 复用时会打架 (11 条)** —— slide 复用品质
+- `R05` emoji / `!` / `...` 等违禁标点
+- `R10` 调色板飘移
+- `R12` 真 drop-shadow
+- `R13` 标题 `<br>` 强换行
+- `R20` 字号 off-tier
+- `R47` variant 改结构没重声明对齐
+- `R48` 多卡片版式没默认居中
+- `R49` cyan 当主色调
+- `R56` 内容页 header 有 eyebrow
+- `R-HIERARCHY` 次要字段比主要醒目
+- `L1` logo 配色错
+
+#### 与入库无关 (10 条, gate 模式直接屏蔽)
+
+`T00` · `T03` · `R-FEEDBACK` · `UI1` · `P50` · `P51-P55` · `R29-32` · `R36` · `R-LANG` (单条 title-en warn)
+
+这 10 条要么是生成流程产物 (texts.md / FEEDBACK.md), 要么是交付格式选择
+(inline vs linked / Replica vs Rewrite), 要么是浏览器性能预算 —— 都跟
+slide-library 入库后能否被检索 / 复用 / 追溯无关.
+
+#### 修改业务文案
+
+改 `business-rules.yaml` 即可. 加新规则时同步加 entry:
+
+```yaml
+R-NEW-RULE:
+  concern:     "A · 客户看不见"     # 三选一: A / B / C
+  symptom:     "一句话业务症状"
+  consequence: "不修后果, 客户/库视角"
+  fix:
+    - "动作动词开头的修改步骤"
+    - "具体到 px / 颜色 / 措辞"
+```
+
+不用动 .py 代码; check-only 启动时动态加载. 加完之后跑下
+`python3 -c "import yaml; yaml.safe_load(open('business-rules.yaml'))"`
+验证语法.
+
+### Deliverable to the user (check-only)
+
+In check-only mode the only thing you produce is the markdown report.
+Either dump it in the chat (default) or write to a file the user names.
+
+**Do NOT**:
+- create `runs/<ts>/` work folders
+- run `new-run.sh` / `preflight.sh`
+- call `copy-assets.py` / `extract-texts.py` / `package-deliverable.sh`
+- modify the input HTML in any way
+- offer to "fix" issues automatically — leave that as a follow-up the user
+  can ask for separately (and which routes them into GENERATION mode on
+  the same deck)
+
+**Do**:
+- name the report shape ("✗ N errors / ! M warns, FAIL/PASS") in the
+  first sentence so the user sees the verdict before scrolling
+- if errors are concentrated in one family (e.g. 6 of 8 errors are R20
+  type-ladder violations), call that out explicitly so the user knows
+  where to focus the fix
+- when the heuristic flags Replica-mode / external-deck context, mention
+  it so the user knows to ignore the corresponding context-dependent rules
+
+### Rule families summary (for explaining the report)
+
+| Family | Codes | What it audits |
+|---|---|---|
+| 结构 / DOM | R02 / R07 / R-DOM | every `.slide` has `data-layout` + `data-screen-label` + `.wordmark`; balanced `<div>` tree |
+| 排版 / 文案 | R05 / R06 / R13 / R20 / R56 / R-WHITE-TEXT / R-HIERARCHY | banned punctuation; 24/16 floor; no `<br>` in titles; 4-tier ladder; header-minimal; #fff body text |
+| 品牌 / 调色板 | L1 / R10 / R12 / R38 / R49 / R-LANG | color logo default; brand hex only; no real drop shadows; valid `data-decor` tokens; no cyan as accent; zh-only meta enforcement |
+| 布局完整性 | L2 / L4 / R36 / R47 / R48 | balanced stage / single-col attrs / present-mode centering / variant alignment redeclare / default centering |
+| UI 仿真 / slide-key | UI1 / R-KEY | system UI rebuilt as `.ui-*` HTML primitives (not `<img>`); every `.slide` has semantic `data-slide-key` |
+| 演示模式 / 运行时 | R29-32 | `.deck-progress`, `.deck-controls`, prev/next/fs buttons, `requestFullscreen`, `fullscreenchange`, idle fade |
+| texts.md 联动 | T00 / T01 / T02 / T03 | data-text-id present; valid `slide-NN.field` shape; unique; paired `texts.md` synced |
+| 性能预算 | P50-P55 | base64 budget; blur radius; single ResizeObserver; AbortController; GPU layers |
+| 视觉 (Playwright) | R-OVERFLOW / R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-ALIGN | canvas overflow; computed `fontSize` on ladder; meta ≤ body; grid-children equal height — only with `--visual` |
+| 交付物附件 | R-FEEDBACK | `FEEDBACK.md` sidecar present (relevant ONLY for new-run flow) |
+
+When the user asks "what does [Rxx] mean", look up the rule in `validate.py`
+(grep for the code) — every audit function has a docstring + the error message
+explains the fix.
+
+---
 
 ## PREFLIGHT (mandatory, blocks all work) — local mount required
 
