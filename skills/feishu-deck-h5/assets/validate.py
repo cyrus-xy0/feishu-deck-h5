@@ -1280,6 +1280,202 @@ def audit_translation_track_pairs(html: str, slides: list[str], iss,
                 'it is genuinely a brand / acronym.')
 
 
+def audit_list_echo(slides: list[str], iss: 'Issues'):
+    """R-ECHO: detect a leaf whose text echoes 3+ sibling-leaf prefixes.
+
+    Real failure pattern (Tongrentang P05): the deck has a 5-column scene
+    matrix with column titles `研发提效 / 生产保质 / 营销升级 / 供应链强化 /
+    高效工作`. A footer leaf reads:
+        `已落地 42+ 场景模板,覆盖研发、生产、营销、供应链、行政关键域`
+    The footer mentions 4 of those column titles in abbreviated form
+    (研发 / 生产 / 营销 / 供应链). Pure redundancy — the columns ARE
+    those domains, the footer re-lists them, wasting a sentence.
+
+    Signature:
+      • target leaf contains 3+ DISTINCT short substrings
+      • each substring is the first 2-4 chars of ANOTHER leaf's text
+        on the same slide
+
+    Skip when:
+      • target leaf is an H1-H6 (titles can summarize legitimately)
+      • slide is an agenda / TOC / outline layout (echoing IS the point)
+      • slide is a section divider (chapter pills echo agenda by design)
+
+    Warn-level: editorial judgment may legitimately require an echo
+    (e.g., a closing summary that restates an agenda). Author decides
+    whether to act. Promoted to error only in --strict mode.
+    """
+    # Reuse the html.parser walker from R-LANG pair detector. Each leaf
+    # is (tag, class, text, parent_classes).
+    from html.parser import HTMLParser
+
+    _LEAF_TAGS = {'span', 'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                  'li', 'a', 'b', 'em', 'strong', 'i', 'u', 'small', 'mark',
+                  'blockquote', 'dt', 'dd', 'figcaption', 'caption',
+                  'th', 'td'}
+    _SKIP_CONTAINERS = {'script', 'style', 'svg'}
+    _VOID = {'br', 'hr', 'img', 'input', 'meta', 'link', 'source',
+             'area', 'base', 'col', 'embed', 'param', 'track', 'wbr'}
+
+    class Collector(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.stack = []
+            self.leaves = []  # each = {'tag':, 'class':, 'text':, 'parents':[]}
+            self.skip = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag in _VOID:
+                return
+            if tag in _SKIP_CONTAINERS:
+                self.skip += 1
+                self.stack.append({'tag': tag, 'class': '', 'text': '',
+                                    'has_children': False})
+                return
+            cls = ''
+            for k, v in attrs:
+                if k == 'class':
+                    cls = v or ''
+            self.stack.append({'tag': tag, 'class': cls, 'text': '',
+                                'has_children': False})
+
+        def handle_endtag(self, tag):
+            if tag in _VOID:
+                return
+            if not self.stack:
+                return
+            f = self.stack.pop()
+            if f['tag'] in _SKIP_CONTAINERS:
+                self.skip -= 1
+                return
+            text = f['text'].strip()
+            if self.stack:
+                self.stack[-1]['has_children'] = True
+            # Only collect as a leaf if (a) has direct text, (b) no
+            # element children with their own text.
+            if text and not f['has_children'] and f['tag'] in _LEAF_TAGS:
+                parents = [s.get('class', '') for s in self.stack]
+                self.leaves.append({
+                    'tag': f['tag'], 'class': f['class'],
+                    'text': text, 'parents': parents,
+                })
+
+        def handle_data(self, data):
+            if self.skip > 0:
+                return
+            if self.stack:
+                self.stack[-1]['text'] += data
+
+    # Slide-level layout context for skip detection
+    _SKIP_LAYOUT_RE = re.compile(
+        r'data-layout="(agenda|section|cover|end)"')
+    # Class names on parent chain that signal "echo is intentional"
+    _SKIP_PARENT_CLS = ('agenda', 'toc', 'outline', 'chapter-list',
+                        'section-list', 'pills', 'tabs')
+    # Minimum target leaf length to consider as a "summary" candidate.
+    # Below this, a leaf is too short to be summarizing anything.
+    _MIN_TARGET_LEN = 12
+    # Minimum prefix length to consider as a "name match". 1-char matches
+    # are too noisy (every Chinese deck has single chars in common); 2-4
+    # chars is the typical short-name range.
+    _PREFIX_LENS = (4, 3, 2)
+    # Minimum prefix that's actually a meaningful word (not a stop word).
+    _STOPWORDS = {'的', '是', '在', '了', '和', '或', '与', '及',
+                  '我们', '你们', '他们', '这是', '那是',
+                  '一个', '一些', '一种', '本次', '本周', '本月'}
+    # 2026-05-18 · TARGET-CLASS WHITELIST.
+    # The R-ECHO signature (1 leaf containing N other-leaf prefixes) ALSO
+    # fires legitimately inside UI mockups, chat windows, data tables where
+    # the same customer name / field name appears across rows by design.
+    # To avoid those false positives we only consider a leaf as a target
+    # if its class (or one of its ancestor classes) carries a "summary
+    # intent" marker, OR if the leaf is a `<p>` tag (paragraphs are the
+    # canonical summary host).
+    _TARGET_INTENT = (
+        'legend', 'note', 'footnote', 'caption', 'summary',
+        'footer', 'disclaimer', 'callout', 'lede', 'subline',
+        'subtitle', 'recap', 'echo', 'desc-foot', 'page-sub',
+        'tagline', 'kicker',
+    )
+
+    for i, fr in enumerate(slides, 1):
+        # Skip layouts where echo is by design
+        if _SKIP_LAYOUT_RE.search(fr):
+            continue
+        col = Collector()
+        try:
+            col.feed(fr)
+        except Exception:
+            continue
+
+        leaves = col.leaves
+        if len(leaves) < 4:  # too few to have meaningful echo
+            continue
+
+        for ti, target in enumerate(leaves):
+            # Heuristic skips for target
+            if target['tag'] in {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}:
+                continue
+            text = target['text']
+            if len(text) < _MIN_TARGET_LEN:
+                continue
+            # Skip targets whose parent chain says echo is intentional
+            if any(any(s in p for s in _SKIP_PARENT_CLS)
+                   for p in target['parents']):
+                continue
+            # Skip targets that are CJK-poor (likely Latin chrome)
+            cjk_chars = sum(1 for c in text if '一' <= c <= '鿿')
+            if cjk_chars < 4:
+                continue
+            # Target-intent gate: only consider leaves that LOOK like
+            # they're hosting a summary/legend/footnote/caption. Plain
+            # `<p>` tags also qualify (paragraph is the canonical
+            # summary host).
+            tgt_cls = (target['class'] or '').lower()
+            parent_cls = ' '.join(target['parents']).lower()
+            looks_like_summary = (
+                target['tag'] == 'p' or
+                any(kw in tgt_cls for kw in _TARGET_INTENT) or
+                any(kw in parent_cls for kw in _TARGET_INTENT)
+            )
+            if not looks_like_summary:
+                continue
+
+            matches = set()  # distinct prefix tokens that hit
+            matched_other_idx = set()
+            for oi, other in enumerate(leaves):
+                if oi == ti:
+                    continue
+                otext = other['text']
+                if not otext or otext == text:
+                    continue
+                # Probe progressively shorter prefixes
+                for n in _PREFIX_LENS:
+                    if len(otext) < n:
+                        continue
+                    prefix = otext[:n]
+                    if prefix in _STOPWORDS:
+                        continue
+                    # require CJK in the prefix to avoid Latin noise
+                    if not any('一' <= c <= '鿿' for c in prefix):
+                        continue
+                    if prefix in text:
+                        matches.add(prefix)
+                        matched_other_idx.add(oi)
+                        break  # don't double-count the same other-leaf
+            if len(matches) >= 3:
+                preview = text if len(text) <= 60 else text[:57] + '…'
+                hit = ' / '.join(sorted(matches))
+                iss.warn('R-ECHO',
+                    f'slide {i}: leaf text `{preview}` echoes '
+                    f'{len(matches)} other-leaf prefixes on the same slide '
+                    f'({hit}). Likely redundant summary — consider dropping '
+                    'the echoed list and keeping only the new information '
+                    '(numbers / verbs / next-step). If the echo is '
+                    'intentional (e.g. closing recap of an earlier list), '
+                    'this warn is editorial — leave as-is.')
+
+
 def audit_hierarchy(html: str, iss: Issues):
     """R-HIERARCHY: visual size hierarchy must respect semantic hierarchy.
 
@@ -2393,6 +2589,7 @@ def main():
     audit_header_minimal(slides, iss)
     audit_slide_keys(slides, iss)
     audit_language_policy(html, slides, iss, args.strict)
+    audit_list_echo(slides, iss)
     audit_perf(html, iss, args.strict)
     audit_text_ids(html, path, iss)
     audit_feedback_md(path, iss)

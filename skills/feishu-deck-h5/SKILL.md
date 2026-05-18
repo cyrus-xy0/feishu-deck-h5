@@ -5814,6 +5814,7 @@ The validator covers programmable rules:
 | Drop shadows | R12 | no real `box-shadow` offsets (rings + insets only) |
 | Typography | R06 / R20 | body ≥ 22 px; chrome ≥ 14 px; per-page `font-size` on the ladder `{10,11,12,13,14,18,22,28,38,44,52,56,64,88,100,132,160}` |
 | CSS vars | R-CSSVAR | `var(--name)` references must resolve to a defined custom property (or have a fallback). Browser silently drops the surrounding declaration when a var is undefined — the worst case is `font:` shorthand where `font-size` then falls back to 16px regardless of the size you wrote |
+| Redundant echo | R-ECHO | a summary leaf (class contains `legend / note / footnote / caption / summary / footer / lede / disclaimer / callout`, or a plain `<p>`) shouldn't echo ≥ 3 sibling-leaf prefixes — that's a list restatement. Drop the echo and keep only the new information (numbers / verbs / next-step) |
 | Logo | L1 | `.wordmark` defaults to color; mono is `class="is-mono"` opt-in |
 | Layout integrity | L2 / L3 / L4 | balanced stage, content-tall cards, single-col `.process .attrs` |
 | Variants | R47 | structural-changing variants redeclare alignment |
