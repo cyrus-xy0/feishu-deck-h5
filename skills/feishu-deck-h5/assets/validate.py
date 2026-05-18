@@ -1027,29 +1027,39 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: boo
     # examples/showcase.html. Auto-allow via regex (not enumerable).
     TECHNICAL_CODE_RE = re.compile(r'^[A-Z]{1,4}\d{1,4}[A-Z]?$')
     # Scan small text leaves whose markup smells like chrome labels.
+    # 2026-05-18: added `-en`, `-eng`, `-english`, `-num`, `-index`, `-ord`
+    # suffixes — these names strongly signal "this leaf holds an EN translation
+    # / ordinal marker" and were the bypass route in the Tongrentang run
+    # (custom classes `ap-num` containing "01 · AGGREGATE", `p5-col-en`
+    # containing "PRODUCTION" slipped past the chrome scan).
     chrome_class_text_re = re.compile(
         r'<(?:span|p|div|h[1-6])\s[^>]*?'
         r'class="[^"]*\b(?:eyebrow|kicker|pill|tag|chip|badge|'
-        r'\w+-tag|\w+-pill|\w+-eyebrow|\w+-chip|\w+-badge|nc-tag|'
-        r'db-tag|dl-eyebrow|mode-tag|side-pill|focus-pill|td-owner)\b'
+        r'\w+-tag|\w+-pill|\w+-eyebrow|\w+-chip|\w+-badge|'
+        r'\w+-en|\w+-eng|\w+-english|\w+-num|\w+-index|\w+-ord|'
+        r'nc-tag|db-tag|dl-eyebrow|mode-tag|side-pill|focus-pill|td-owner)\b'
         r'[^"]*"[^>]*>([^<]+)</(?:span|p|div|h[1-6])>',
         re.S)
     # Match a chunk that is purely Latin uppercase + digits + spaces + punctuation
-    # (2-30 chars). Pure-Latin gate keeps CJK label content out.
-    latin_uc_re = re.compile(r'^[A-Z0-9 ·\-/_]{2,30}$')
+    # (2-40 chars). `&` added 2026-05-18 so "R & D" registers. Pure-Latin gate
+    # keeps CJK label content out.
+    latin_uc_re = re.compile(r'^[A-Z0-9 ·\-/_&]{2,40}$')
+
+    def _is_offending_latin(text: str) -> bool:
+        text = text.strip()
+        if not latin_uc_re.match(text):
+            return False
+        tokens = [t for t in re.split(r'[\s·\-/_&]+', text)
+                  if t and not t.isdigit()]
+        if not tokens:
+            return False
+        return not all(t in LATIN_BRAND_WHITELIST or TECHNICAL_CODE_RE.match(t)
+                       for t in tokens)
 
     for i, fr in enumerate(slides, 1):
         for m in chrome_class_text_re.finditer(fr):
             text = m.group(1).strip()
-            if not latin_uc_re.match(text):
-                continue
-            # Tokenize; if every non-numeric token is in whitelist, skip
-            tokens = [t for t in re.split(r'[\s·\-/_]+', text)
-                      if t and not t.isdigit()]
-            if not tokens:
-                continue
-            if all(t in LATIN_BRAND_WHITELIST or TECHNICAL_CODE_RE.match(t)
-                   for t in tokens):
+            if not _is_offending_latin(text):
                 continue
             iss.warn('R-LANG',
                 f'slide {i}: chrome label `{text}` looks like a Latin label '
@@ -1057,6 +1067,133 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues, strict: boo
                 'acronym, add it to LATIN_BRAND_WHITELIST in validate.py; '
                 'otherwise translate to CJK (e.g. "MODE 01" → "方式 01", '
                 '"DEADLINE" → "截止时间", "PREDIT"-style typos → fix).')
+
+    # 2026-05-18 · Sibling-pair detection. The chrome-class scan above is
+    # narrow (only fires on class names containing chrome-flavored tokens).
+    # If an author uses an arbitrary class name to host EN translation copy
+    # (real failure mode caught in Tongrentang run: `ap-num` containing
+    # "01 · AGGREGATE" paired with sibling `ap-title` "审批聚合"), the chrome
+    # scan misses it but the leaf is still a translation track.
+    #
+    # The structural signature is: a parent element with ≥ 2 text-leaf
+    # children where one leaf is pure-Latin and another sibling leaf
+    # contains CJK. That pair IS the translation track.
+    #
+    # We use html.parser (stdlib, no extra deps) to walk the DOM and find
+    # such pairs. Brand-whitelist / technical-code allowlist still apply.
+    audit_translation_track_pairs(html, slides, iss, _is_offending_latin)
+
+
+# ---------------------------------------------------------------------------
+#  R-LANG enhancement (2026-05-18): sibling-pair translation-track detector
+# ---------------------------------------------------------------------------
+
+_CJK_RE = re.compile(r'[一-鿿㐀-䶿豈-﫿]')
+_LANG_PAIR_ALLOWED_TAGS = {
+    'span', 'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'li', 'a', 'b', 'em', 'strong', 'i', 'u', 'small', 'mark',
+    'blockquote', 'dt', 'dd', 'figcaption', 'caption', 'th', 'td',
+}
+_LANG_PAIR_VOID_TAGS = {
+    'br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'area',
+    'base', 'col', 'embed', 'param', 'track', 'wbr',
+}
+_LANG_PAIR_SKIP_CONTAINERS = {'script', 'style', 'svg'}
+
+
+def audit_translation_track_pairs(html: str, slides: list[str], iss,
+                                   is_offending_latin) -> None:
+    """Walk each slide's DOM and flag parent elements whose direct child
+    leaves include BOTH a CJK-content leaf and a Latin-only-content leaf.
+    That pair IS the canonical translation-track signature."""
+    from html.parser import HTMLParser
+
+    class PairDetector(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.stack = []
+            self.flags = []  # (parent_class, leaf_tag, leaf_class, leaf_text)
+            self.skip_depth = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag in _LANG_PAIR_VOID_TAGS:
+                return
+            if tag in _LANG_PAIR_SKIP_CONTAINERS:
+                self.skip_depth += 1
+                self.stack.append({'tag': tag, 'class': '', 'tracked': False,
+                                    'text': '', 'leaves': []})
+                return
+            cls = ''
+            for k, v in attrs:
+                if k == 'class':
+                    cls = v or ''
+            self.stack.append({
+                'tag': tag, 'class': cls,
+                'tracked': tag in _LANG_PAIR_ALLOWED_TAGS,
+                'text': '', 'leaves': [],
+            })
+
+        def handle_endtag(self, tag):
+            if tag in _LANG_PAIR_VOID_TAGS:
+                return
+            if not self.stack:
+                return
+            f = self.stack.pop()
+            if f['tag'] in _LANG_PAIR_SKIP_CONTAINERS:
+                self.skip_depth -= 1
+                return
+            if not f['tracked']:
+                return
+            own = f['text'].strip()
+            is_leaf = bool(own) and not f['leaves']
+            if self.stack and is_leaf:
+                parent = self.stack[-1]
+                if parent.get('tracked'):
+                    parent['leaves'].append({
+                        'tag': f['tag'], 'class': f['class'], 'text': own,
+                    })
+            # Pair-check among f's direct leaf children
+            if len(f['leaves']) >= 2:
+                cjk_lvs = [l for l in f['leaves']
+                           if _CJK_RE.search(l['text'])]
+                lat_lvs = [l for l in f['leaves']
+                           if is_offending_latin(l['text'])]
+                if cjk_lvs and lat_lvs:
+                    for l in lat_lvs:
+                        self.flags.append((
+                            f['class'][:60], l['tag'],
+                            l['class'][:60], l['text'][:60],
+                        ))
+
+        def handle_data(self, data):
+            if self.skip_depth > 0:
+                return
+            if self.stack:
+                self.stack[-1]['text'] += data
+
+    for i, fr in enumerate(slides, 1):
+        pd = PairDetector()
+        try:
+            pd.feed(fr)
+        except Exception:
+            continue
+        # De-dupe by (leaf-class, leaf-text) — repeated patterns across
+        # several siblings still report once each but not twice for the
+        # same leaf flagged via two parents.
+        seen = set()
+        for parent_class, leaf_tag, leaf_class, leaf_text in pd.flags:
+            key = (leaf_class, leaf_text)
+            if key in seen:
+                continue
+            seen.add(key)
+            iss.warn('R-LANG',
+                f'slide {i}: `<{leaf_tag} class="{leaf_class}">{leaf_text}` — '
+                f'Latin-only leaf paired with CJK sibling inside '
+                f'`<… class="{parent_class}">` looks like an EN translation '
+                'track. Drop the Latin leaf, translate to CJK, opt into '
+                'bilingual via `<meta name="fs-language" content="zh-en">`, '
+                'or add the term to LATIN_BRAND_WHITELIST in validate.py if '
+                'it is genuinely a brand / acronym.')
 
 
 def audit_hierarchy(html: str, iss: Issues):

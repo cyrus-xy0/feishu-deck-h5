@@ -963,14 +963,29 @@ declared in `<head>` and enforced by `validate.py`:
 agenda `.title-en`, content-3up bilingual card titles, two-hand-arch
 EN mottos, etc. all light up — no token changes needed.
 
-In zh-only mode the validator's R-LANG audit warns on:
+In zh-only mode the validator's R-LANG audit warns on three signals:
 - `class="title-en"` / `subtitle-en` / `label-en` rendered in slide
   markup (these classes exist for bilingual mode only).
+- Chrome-label classes (`eyebrow` / `kicker` / `pill` / `tag` / `chip` /
+  `badge`, plus any class ending in `-en` / `-eng` / `-english` / `-num`
+  / `-index` / `-ord` and the framework `*-tag` / `*-pill` / `*-eyebrow` /
+  `*-chip` / `*-badge` derivatives) whose text content is pure
+  Latin-uppercase + digits + punctuation (e.g. `AGGREGATE` / `MODE 01` /
+  `PRODUCTION` / `DEADLINE`) and isn't in `LATIN_BRAND_WHITELIST`.
+- **Sibling-pair signature** (2026-05-18): any parent element with ≥ 2
+  text-leaf children where one leaf is CJK and another sibling leaf is
+  pure-Latin. This is the structural "EN translation track" pattern —
+  catches the case where the author uses an arbitrary class name (e.g.
+  `ap-num` containing "01 · AGGREGATE" alongside `ap-title` "审批聚合")
+  that the class-name scan would miss.
 
 It does NOT touch tokenized vocabulary that's English by convention:
 brand names (Lark, Base, Wiki, Meetings), product codes (Salesforce,
 C360), units (px, pt, %), abbreviations (KPI, ROI, OKR, KOL). The
 ban is on **translation tracks**, not on every Latin-script word.
+Mixed-case Latin (e.g. `Context and challenges`) is also exempt — the
+pair check only fires on PURE uppercase + digits + punctuation, which
+is the dominant signature of intentional "label" content.
 
 ---
 
