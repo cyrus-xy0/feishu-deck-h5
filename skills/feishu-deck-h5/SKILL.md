@@ -197,7 +197,7 @@ Either dump it in the chat (default) or write to a file the user names.
 | 演示模式 / 运行时 | R29-32 | `.deck-progress`, `.deck-controls`, prev/next/fs buttons, `requestFullscreen`, `fullscreenchange`, idle fade |
 | texts.md 联动 | T00 / T01 / T02 / T03 | data-text-id present; valid `slide-NN.field` shape; unique; paired `texts.md` synced |
 | 性能预算 | P50-P55 | base64 budget; blur radius; single ResizeObserver; AbortController; GPU layers |
-| 视觉 (Playwright) | R-OVERFLOW / R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-ALIGN | canvas overflow; computed `fontSize` on ladder; meta ≤ body; grid-children equal height — only with `--visual` |
+| 视觉 (Playwright, default-on since 2026-05-18) | R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-ALIGN | canvas overflow; **sibling bbox overlap** (catches "column bleeds into legend" — internal overlap within canvas); computed `fontSize` on ladder; meta ≤ body; grid-children equal height. ~2 s overhead. Use `--no-visual` to skip (CI without Chromium); gracefully skips if playwright is not installed |
 | 交付物附件 | R-FEEDBACK | `FEEDBACK.md` sidecar present (relevant ONLY for new-run flow) |
 
 When the user asks "what does [Rxx] mean", look up the rule in `validate.py`

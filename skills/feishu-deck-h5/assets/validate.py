@@ -2139,11 +2139,15 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        iss.warn('R-VISUAL',
-            '--visual requested but `playwright` is not installed. '
-            'Install with: `pip install playwright && '
-            'python -m playwright install chromium` (~150 MB). '
-            'Visual checks skipped — static rules still ran.')
+        # Visual audits are default-on but gracefully degrade. Print a single
+        # stderr hint (not a warning so it doesn't pollute the issue list /
+        # break CI parsing) and continue with static-only output. Re-enable
+        # by `pip install playwright && python -m playwright install chromium`,
+        # or suppress this notice via `--no-visual`.
+        print('  (visual audits skipped — playwright not installed; '
+              'install with `pip install playwright && python -m playwright '
+              'install chromium` to enable R-OVERFLOW / R-VIS-* checks)',
+              file=sys.stderr)
         return
 
     url = html_path.resolve().as_uri()
@@ -2247,6 +2251,18 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             f'(> 4 px tolerance). For canonical-card / overview-card '
             'grids the cards should be equal-height; check `flex: 1` is '
             'applied or `align-items: stretch` is set on the container.')
+
+    for entry in report.get('overlap', [])[:20]:
+        iss.err('R-OVERLAP',
+            f'slide {entry["slide_idx"]} · siblings inside `{entry["container_sel"]}` '
+            f'physically overlap: `{entry["a_sel"]}` and `{entry["b_sel"]}` '
+            f'intersect by {entry["overlap_x"]}×{entry["overlap_y"]} px. '
+            'One sibling overflowed its allocated row/column and crashed '
+            'into another. Fix: tighten content (smaller padding/gap, fewer '
+            'items), expand the container (use `.stage.stage--tall` for 750 px '
+            'vs default 680 px height), or add `min-height: 0; overflow: hidden` '
+            'on the overflowing element so excess content is clipped instead of '
+            'bleeding into siblings.')
 
     for entry in report.get('label_floor', [])[:20]:
         iss.err('R-VIS-LABEL-FLOOR',
@@ -2355,7 +2371,7 @@ _VISUAL_AUDIT_JS = r"""
     return false;
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [] };
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [] };
   const slides = document.querySelectorAll('.slide');
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
@@ -2489,6 +2505,49 @@ _VISUAL_AUDIT_JS = r"""
         });
       }
     });
+
+    // ---- Overlap: sibling bbox intersection inside body containers ----
+    // 2026-05-18 · catches the P05 case where a flex column-grid child
+    // overflowed past its allocated row and visually crashed into the
+    // legend strip below it. R-OVERFLOW only catches slide-level
+    // (content > 1080); element-overlap-within-canvas needs its own check.
+    //
+    // Scope: direct children of .stage / .grid / each flex/grid container
+    // that's meant to vertical-stack siblings. Skip absolute/fixed-positioned
+    // siblings (those are intentional overlays — wordmark, decor, etc.).
+    const containers = slide.querySelectorAll('.stage, .grid, .flow, .nodes, .toc, .stack, .table-wrap');
+    const seenPairs = new Set();
+    containers.forEach(container => {
+      const kids = Array.from(container.children).filter(c => {
+        const cs = window.getComputedStyle(c);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+        if (cs.position === 'absolute' || cs.position === 'fixed') return false;
+        if (c.offsetWidth === 0 || c.offsetHeight === 0) return false;
+        return true;
+      });
+      for (let i = 0; i < kids.length; i++) {
+        for (let j = i + 1; j < kids.length; j++) {
+          const a = kids[i].getBoundingClientRect();
+          const b = kids[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          // 2 px tolerance — sub-pixel rounding can produce 0.5-1 px nominal overlap
+          if (overlapX > 2 && overlapY > 2) {
+            const key = `${slide_idx}::${shortSel(kids[i])}::${shortSel(kids[j])}`;
+            if (seenPairs.has(key)) continue;
+            seenPairs.add(key);
+            out.overlap.push({
+              slide_idx,
+              container_sel: shortSel(container),
+              a_sel: shortSel(kids[i]),
+              b_sel: shortSel(kids[j]),
+              overlap_x: Math.round(overlapX),
+              overlap_y: Math.round(overlapY),
+            });
+          }
+        }
+      }
+    });
   });
 
   return out;
@@ -2502,14 +2561,17 @@ def main():
     p.add_argument('html', help='Path to the assembled deck HTML file')
     p.add_argument('--strict', action='store_true',
                    help='Promote warnings to errors')
-    p.add_argument('--visual', action='store_true',
+    p.add_argument('--visual', action=argparse.BooleanOptionalAction,
+                   default=True,
                    help='Run the Playwright-based renderer-side audits: '
-                        'R-OVERFLOW (canvas overflow), R-VIS-TIER (computed '
-                        'fontSize on 4-tier ladder), R-VIS-HIER (meta ≤ body '
-                        'in each card), R-VIS-ALIGN (grid children equal '
-                        'height). ~5s for a 30-slide deck. Requires '
-                        '`pip install playwright && python -m playwright '
-                        'install chromium`.')
+                        'R-OVERFLOW (canvas overflow — catches the P05-style '
+                        '"column bleeds into legend" bug that static CSS '
+                        'analysis cannot), R-VIS-TIER (computed fontSize on '
+                        '4-tier ladder), R-VIS-HIER (meta ≤ body in each '
+                        'card), R-VIS-ALIGN (grid children equal height). '
+                        'DEFAULT: on (~1-5s extra per deck). Use --no-visual '
+                        'to skip (e.g. CI without Chromium). Gracefully '
+                        'skips when playwright is not installed.')
     p.add_argument('--screenshots', action='store_true',
                    help='In addition to --visual checks, archive PNG '
                         'screenshots of each slide to '
