@@ -41,8 +41,9 @@ FAMILIES = [
     ('演示模式 / 运行时',    ['R29-32']),
     ('texts.md 联动',        ['T00', 'T01', 'T02', 'T03']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
-    ('视觉 (Playwright)',    ['R-OVERFLOW', 'R-VIS-TIER', 'R-VIS-HIER',
-                              'R-VIS-LABEL-FLOOR', 'R-VIS-ALIGN', 'R-VISUAL']),
+    ('视觉 (Playwright)',    ['R-OVERFLOW', 'R-OVERLAP', 'R-VIS-TIER', 'R-VIS-HIER',
+                              'R-VIS-LABEL-FLOOR', 'R-VIS-BODY-FLOOR',
+                              'R-VIS-ALIGN', 'R-VISUAL']),
     ('交付物附件',           ['R-FEEDBACK']),
 ]
 
@@ -397,14 +398,14 @@ def _run_all_audits(html: str, slides: list, path: Path,
     V.audit_dom_integrity(html, iss)
     V.audit_structure(slides, iss)
     V.audit_titles_one_line(slides, iss)
-    V.audit_brand_chrome(slides, iss, strict)
+    V.audit_brand_chrome(slides, iss)
     V.audit_copy_rules(html, iss)
     V.audit_font_sizes(html, iss)
     V.audit_type_ladder(html, iss)
-    V.audit_white_text(html, iss, strict)
+    V.audit_white_text(html, iss)
     V.audit_no_drop_shadows(html, iss)
     V.audit_data_decor(slides, iss)
-    V.audit_hex_palette(html, iss, strict)
+    V.audit_hex_palette(html, iss)
     V.audit_runtime_chrome(html, iss, path)
     V.audit_centering_pattern(html, iss)
     V.audit_layout_integrity(html, iss)
@@ -415,8 +416,8 @@ def _run_all_audits(html: str, slides: list, path: Path,
     V.audit_no_cyan_accent(slides, iss)
     V.audit_header_minimal(slides, iss)
     V.audit_slide_keys(slides, iss)
-    V.audit_language_policy(html, slides, iss, strict)
-    V.audit_perf(html, iss, strict)
+    V.audit_language_policy(html, slides, iss)
+    V.audit_perf(html, iss)
     V.audit_text_ids(html, path, iss)
     V.audit_feedback_md(path, iss)
     if visual:
