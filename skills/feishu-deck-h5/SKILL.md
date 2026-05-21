@@ -25,7 +25,7 @@ Before reading anything else in this file, decide which mode the user is in:
 | Mode | Trigger phrases / signals | What to do |
 |---|---|---|
 | **CHECK-ONLY** | "帮我检查这份 HTML/deck" · "看看这个 deck 合不合规" · "审一下这个 HTML" · "validate this" · "check the deck" · "扫一遍合规问题" · "这个 HTML 哪里不对" · user hands over a path to an existing `.html` and asks for review WITHOUT asking to generate / modify content | **Jump to "CHECK-ONLY MODE" section below.** SKIP PREFLIGHT, SKIP `new-run.sh`, SKIP `copy-assets`, SKIP everything else in this file. |
-| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | Follow the rest of this file starting at PREFLIGHT, **then read DECK GENERATION POLICY** to pick DeckJSON-first (default) vs raw HTML authoring (escape hatch). |
+| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | Follow the rest of this file starting at PREFLIGHT, **then read DECK GENERATION POLICY** to pick DeckJSON-first (default) vs raw HTML authoring (escape hatch). **If input is a pure text brief** (主题列表 / Q&A 文案 / outline 描述), **also read DESIGN-FIRST POLICY** — produce the per-page layout plan and get user confirmation BEFORE touching any file. |
 
 If a request is genuinely ambiguous ("can you look at this HTML and improve it?"
 — check or rewrite?), ask the user once to clarify before branching.
@@ -523,6 +523,118 @@ If 1-2 specific slides won't fit the schema but everything else does:
 > server + browser UI) was retired in favor of this client-side
 > approach (no server to run; works on static hosts; one file flip
 > to enable/disable).
+
+---
+
+## DESIGN-FIRST POLICY (mandatory) — 给文案就先出设计方案,别直接动手
+
+When the user hands you **a text brief** (一串提示词 / 文案 / Q&A 大纲 /
+sections 描述 / 主题列表),**do NOT immediately create files**. First
+produce a per-page design plan in chat, get user confirmation, THEN
+generate.
+
+### Why design-first
+
+`feishu-deck-h5` 有 14 个 schema layouts + raw 逃生口。layout 选错的代价高:
+
+- 强行套标准 layout → 主问题被塞进 `.header .title-zh` 被 `white-space: nowrap`
+  单行截断 / 内容溢出 1080 / 留白尴尬
+- 默认全自定义 → 失去 schema 的 R20 / R06 / R-WHITE-TEXT 等防护,Path B 易踩坑
+- 用户 review 时 layout 选错要改一整页 = 改 CSS + DOM,比设计阶段 3 分钟
+  对齐贵 10 倍
+
+围炉夜话 Q&A 是个正面例子:design pass 阶段就识别"主问题需多行 + 原声列表"
+不在 schema 内,直接走自定义 `.qa-page`,避开 `.header h2.title-zh` 单行陷阱。
+反例是博裕&星巴克的第一次跑:silent 把 54 页压成 17 页,因为没设计阶段对齐
+"页数保持 1:1"。
+
+### When this applies (默认 ON)
+
+- 用户给 text brief / 主题列表 / Q&A 文案 / outline 描述
+- 用户说"做一份 deck about X" / "把这些做成 deck" / "围绕 X 主题做一个分享材料"
+- 用户描述了内容但没说视觉结构
+
+### When to skip (直接走生成流程)
+
+- 用户明说 "直接出 / 不用问设计 / 别问了就生成"
+- 用户给 PDF / PPT 让 Replica / Rewrite / per-page polish — 那些路径有自己的
+  conversion rules,设计在那里发生
+- One-pager case (4-beat 痛/冲/解/价值 是固定结构)
+- 用户在前文已经明确给出了 layout 选择
+- 用户在迭代已有 deck 的某一页(per-page polish 模式)
+
+### Design pass output — markdown table in chat
+
+| # | 页 / 主题 | Layout | 标准 / 自定义 | 为什么 |
+|---|---|---|---|---|
+| P0 | 封面 | `cover` | 标准 | 主标题 + 发起人 + 日期,master 封面 |
+| P1 | 客户三个核心痛点 | `content/3up` | 标准 | 3 个并列点,schema 正合适 |
+| P2 | 客户原话 | `quote` | 标准 | 单句引语 |
+| P3 | Q&A 大问题 + 原声列表 | `.qa-page` | **自定义** | 主问题需多行,schema 无匹配 |
+| P4 | 抽奖 / 礼品 | `end` + 自定义内容 | 半自定义 | 借 framework 花卉背景 + 自加 raffle 内容 |
+
+每行必须给:
+- **Layout**: 具体 layout 名(标准就是 `cover`/`content-3up`/...;自定义给 class 命名)
+- **标准 / 自定义**: 二选一,半自定义(借标准 layout 改内容)单独标
+- **为什么**: 1 句话依据(为什么标准 fit / 为什么必须自定义)
+
+### Decision rule — "标准 layout 优先" 判断逻辑
+
+按下表逐页判定。**第一个匹配的就是该页 layout**,不要往下找。
+
+| 内容形态 | 用 | 标准 fit 的理由 |
+|---|---|---|
+| 单标题 + 发起人 + 日期 | `cover` | Master 封面 |
+| 3-8 章节项的目录 | `agenda` | Pill stack |
+| 大章节号 + 章节标题 | `section` | Chapter divider |
+| **3 个并列要点**(title + 2-3 行 body) | `content/3up` | 最常见 content shape |
+| 1 个 narrative + 1 个 visual | `content/2col` | 文 + 图 |
+| 4 拍叙事(痛/冲突/解/价值)单客户 | `content/story-case` | One-pager 标准 |
+| 4 个 KPI 数字横排 | `stats/row` | KPI dashboard |
+| 1 个 hero 数字 + 解释 | `stats/hero` 或 `big-stat` | 大数字 |
+| 1 句客户原话 + attribution | `quote` | 单句证言 |
+| 全幅照片 + 角落文字 | `image-text` | Cinematic |
+| 2-6 行 × 2-5 列对比矩阵 | `table` | Comparison |
+| 时间轴 4-6 节点 | `flow/timeline` | Chronological |
+| 3-6 顺序流程步骤 | `flow/process` | Sequential |
+| 客户 logo 矩阵 | `logo-wall` | N × M 网格 |
+| 2-5 层架构(应用 / 平台 / AI / 数据) | `arch-stack` | Tech stack |
+| 结尾 slogan / 联系方式 | `end` | Master 封底 |
+| Designer-polished PDF 页保真 | `replica` | 整页贴图 |
+| **以上都不匹配** | 想想 → 还是不匹配 → **自定义** | 见下 |
+
+### 什么时候自定义 IS the right call
+
+自定义(Path B / `layout: raw`)**仅限**以下场景,设计 pass 中必须 explicit 标出:
+
+1. **schema-shape 结构性不匹配** — e.g. Q&A 页(大问题多行 + 原声列表);标准
+   `content-2col` 强制主问题进 `.header .title-zh` 被单行截断
+2. **schema 里没有但又是 recurring narrative-pattern** — two-hand-arch /
+   Iron 4-corners / 6-step pipeline — schema 没原生 DSL,但 CSS 已经有,
+   走 `raw` 块复用 CSS
+3. **用户明确给了 schema 无法表达的结构** — "6-beat case" / 竖版手机端 /
+   "case 没有冲突,只有 3 个发现"
+
+### Anti-patterns — DO NOT 自定义 for these
+
+- ❌ "想标题 18 px 不要 24" — R20 drift,不是 schema 不够;snap 回 ladder
+- ❌ "schema 有 3up 但我想 4 个 card" — `content/blocks` 自由 grid 也是标准
+- ❌ "看着 schema 我没把握选哪个" — 看 deck-json/MIGRATION-REPORT.md
+   Phase 0.2 的 4-proposal 评估流程,不要直接 raw
+- ❌ "想给每页换不同 accent 颜色" — `data-accent` 属性,不是 layout 改
+
+### Design pass 收尾 — 必须等用户确认
+
+设计方案 table 输出后,end with:
+
+> 设计方案确认?有要改的告诉我;OK 就开工(PREFLIGHT → new-run → 生成)。
+
+**用户回 OK 之前不要做任何文件 create / Edit**,也不要 pre-emptively 跑
+PREFLIGHT。PREFLIGHT 是 post-confirmation generation flow 的第一步。
+
+设计方案一旦 lock,生成时直接按那个方案走,**不需要再问一遍**。如果生成
+出来发现某页 layout 设计错了,先跟用户对齐切换 layout(走 SLIDE DELETION
+POLICY 的双确认 + 备份规则),不要静悄悄改设计。
 
 ---
 
