@@ -378,7 +378,7 @@ python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title
 python3 deck-json/deck-cli.py runs/<ts>/output/deck.json clone three-pillars three-pillars-v2
 python3 deck-json/deck-cli.py runs/<ts>/output/deck.json reorder 5 2
 python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set-variant kpi-4up hero
-# 13 subcommands total — see deck-json/DECK-CLI-README.md
+# 14 subcommands total — see deck-json/DECK-CLI-README.md
 
 # Option C · Visual editor (best for hand-off to non-technical user / iterative tweaks)
 python3 deck-json/deck-editor.py runs/<ts>/output/deck.json
@@ -496,7 +496,7 @@ If 1-2 specific slides won't fit the schema but everything else does:
 | Tool | Use case | Doc |
 |---|---|---|
 | `deck-json/render-deck.py` | Render deck.json → HTML (always runs first) | inline help: `--help` |
-| `deck-json/deck-cli.py` | 13 atomic ops on deck.json (set / clone / reorder / set-variant / delete / etc.) — for scripted / one-shot mutations | `deck-json/DECK-CLI-README.md` |
+| `deck-json/deck-cli.py` | 14 atomic ops on deck.json (set / set-accent / set-decor / set-variant / reorder / move-key / insert / delete / clone / render / list / get / show / lint) — auto-backup + revalidate + rollback | `deck-json/DECK-CLI-README.md` |
 | `deck-json/deck-editor.py` | Visual editor (HTTP server + browser UI). Drag-reorder slides, in-place text editing, image upload, PDF import, multi-deck switching | `deck-json/EDITOR-QUICKSTART.md` |
 | `deck-json/validate-deck.py` | Standalone schema lint of deck.json (called by render-deck.py + deck-cli.py automatically) | inline help |
 | `assets/check-only.sh` | Audit an EXISTING `.html` deck (Path A or B output) against all framework rules | see CHECK-ONLY MODE section above |

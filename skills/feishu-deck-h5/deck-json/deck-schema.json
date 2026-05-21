@@ -103,6 +103,14 @@
           "type": "string",
           "description": "Presenter notes / authoring intent. Not rendered."
         },
+        "_disabled": {
+          "type": "boolean",
+          "description": "If true, renderer skips this slide entirely. Escape hatch for 'this slide errors, let the rest render'. SKILL.md Troubleshooting section."
+        },
+        "_orig_layout": {
+          "type": "string",
+          "description": "Internal: used by `layout: raw` slides migrated from a legacy deck so framework CSS rules engage. Renderer-only; not authored by hand."
+        },
         "data": { "type": "object" }
       },
       "allOf": [

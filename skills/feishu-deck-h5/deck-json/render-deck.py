@@ -54,19 +54,25 @@ VALIDATE_HTML = ASSETS_DIR / "validate.py"
 EXTRACT_TEXTS = ASSETS_DIR / "extract-texts.py"
 COPY_ASSETS   = ASSETS_DIR / "copy-assets.py"
 
-# Fields rendered via {{{ raw }}} substitution where \n should become <br>.
-# Pre-processed in _normalize_data BEFORE template substitution.
-# Fields going through enrichers (subtitle, lede, body, ...) live OUTSIDE this
-# list — they use _esc_br() at HTML-generation time so the escape order is
-# escape-FIRST-then-br (otherwise html.escape would eat <br> into &lt;br&gt;).
-BR_FIELDS = ("title", "heading", "question", "thesis")
+# Phase 4 / post-review-medium-6: there's now ONE pathway for \n→<br>.
+# Every {{ field }} substitution goes through _esc_br (see render_template
+# sub_safe). Templates use {{ title }} not {{{ title }}}, so user text gets
+# both HTML-escaped AND newline-converted in one safe pass — no separate
+# BR_FIELDS pre-walk needed. Use {{{ raw }}} only when the renderer/enricher
+# itself built trusted HTML (e.g. enricher-composed `cards_html`).
 
 
 def _esc_br(s):
-    """HTML-escape AND convert \\n → <br>. For use in enrichers on any text
-    content that may carry user-typed newlines (lede / body / attribution /
-    card.body / label / caption / ...). Escape FIRST, then replace, so the
-    <br> tags survive the escape."""
+    """HTML-escape AND convert \\n → <br>. The single path for converting
+    user-typed text into HTML-safe markup with line breaks preserved.
+
+    Used by:
+      - render_template sub_safe (all {{ field }} substitutions, including
+        title/heading/lede/body/attribution/etc.)
+      - enrichers that compose HTML fragments inline (cards_html, cols_html...)
+
+    Escape FIRST, then \\n→<br>, so the <br> tags survive html.escape.
+    None → empty string. Non-string → str() then escaped."""
     if s is None:
         return ""
     return html.escape(str(s), quote=True).replace("\n", "<br>")
@@ -120,27 +126,6 @@ def render_template(template: str, data: dict) -> str:
 # ---------------------------------------------------------------------------
 # Slide rendering
 # ---------------------------------------------------------------------------
-
-def _normalize_breaks(value):
-    """\\n → <br> for fields where line breaks are semantically significant."""
-    if isinstance(value, str):
-        return value.replace("\n", "<br>")
-    return value
-
-
-def _normalize_data(data: dict) -> dict:
-    """Walk data dict, convert \\n → <br> on BR_FIELDS at top level + 1 level deep."""
-    out = {}
-    for k, v in data.items():
-        if k in BR_FIELDS:
-            out[k] = _normalize_breaks(v)
-        elif isinstance(v, dict):
-            out[k] = {kk: (_normalize_breaks(vv) if kk in BR_FIELDS else vv)
-                      for kk, vv in v.items()}
-        else:
-            out[k] = v
-    return out
-
 
 def _derive_screen_label(slide: dict) -> str:
     title = slide.get("data", {}).get("title", "")
@@ -983,8 +968,12 @@ def _enrich_replica(ctx, slide):
 
 
 def _enrich_raw(ctx, slide):
-    # Verbatim — template uses {{{ html }}}, no processing needed
-    pass
+    # Verbatim html — template uses {{{ html }}}, no processing.
+    # `_orig_layout` lets a raw slide claim a layout name so the framework
+    # CSS rules (e.g. `.slide[data-layout="content-2col"] .stage`) still
+    # engage. The template uses {{ effective_layout }} for the data-layout
+    # attribute; we default to "raw" if no override.
+    ctx["effective_layout"] = slide.get("_orig_layout") or "raw"
 
 
 ENRICHERS = {
@@ -1016,7 +1005,8 @@ def render_slide(slide: dict, slide_index: int, total: int, asset_path: str, dec
     tpl_path = _resolve_template_path(layout, variant)
 
     data = slide.get("data", {})
-    data = _normalize_data(data)
+    # Post-medium-6: no pre-normalization. \n → <br> happens inside _esc_br
+    # at substitute time (and inside enrichers that call _esc_br directly).
 
     ctx = {
         **data,
@@ -1051,22 +1041,7 @@ def render_slide(slide: dict, slide_index: int, total: int, asset_path: str, dec
     if enricher:
         enricher(ctx, slide)
 
-    rendered = render_template(tpl_path.read_text(encoding="utf-8"), ctx)
-
-    # Escape hatch for raw slides migrated from a legacy deck: if the slide
-    # carries `_orig_layout`, swap the hardcoded `data-layout="raw"` with the
-    # original layout so framework CSS rules engage (e.g. `.slide[data-layout=
-    # "content-2col"] .stage` keeps matching). The slide DOM is still verbatim
-    # raw HTML; only the layout attribute changes.
-    orig = slide.get("_orig_layout")
-    if layout == "raw" and orig and orig != "raw":
-        rendered = re.sub(
-            r'(<div\s+class="slide"\s+)data-layout="raw"',
-            rf'\1data-layout="{orig}"',
-            rendered, count=1,
-        )
-
-    return rendered
+    return render_template(tpl_path.read_text(encoding="utf-8"), ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -1127,15 +1102,29 @@ def main(argv=None) -> int:
     asset_path = relpath_from_to(args.output_dir, ASSETS_DIR)
 
     # 4. Render each slide
+    # Skip slides with `_disabled: true` (escape hatch for "this slide errors,
+    # let the rest of the deck render so I can keep working"). SKILL.md
+    # promises this; the renderer must honor it. Skipped slides don't count
+    # toward `total` (page numbers stay sane).
+    active_slides = [(i, s) for i, s in enumerate(deck["slides"])
+                     if not s.get("_disabled")]
+    n_skipped = len(deck["slides"]) - len(active_slides)
+    if n_skipped > 0:
+        print(f"  ⚠ skipped {n_skipped} slide(s) marked _disabled: true",
+              file=sys.stderr)
     slides_html = []
-    total = len(deck["slides"])
+    total = len(active_slides)
     deck_dir = args.deck.resolve().parent
-    for i, slide in enumerate(deck["slides"]):
+    for new_idx, (orig_idx, slide) in enumerate(active_slides):
         try:
-            slide_html = render_slide(slide, i, total, asset_path, deck_dir=deck_dir)
+            # Pass NEW index (post-skip) for page-number continuity, but include
+            # original index in error context for debugging.
+            slide_html = render_slide(slide, new_idx, total, asset_path, deck_dir=deck_dir)
         except SystemExit as e:
-            # Re-raise with slide context
-            raise SystemExit(f"slide[{i}] key='{slide.get('key')}' layout='{slide.get('layout')}': {e}")
+            raise SystemExit(
+                f"slide[{orig_idx}] key='{slide.get('key')}' "
+                f"layout='{slide.get('layout')}': {e}"
+            )
         slides_html.append(slide_html)
 
     # 5. Compose into shell
@@ -1211,11 +1200,23 @@ def main(argv=None) -> int:
         # (SKILL.md WORKSPACE LAYOUT). For other paths (smoke tests in /tmp/),
         # skip with warning rather than fatal-fail.
         if "/runs/" not in str(args.output_dir.resolve()):
-            print(f"render-deck: output {args.output_dir} not under "
-                  f"<repo>/runs/<ts>/output/ — skipping copy-assets. Output "
-                  f"references skill-relative paths and works only inside the repo.",
-                  file=sys.stderr)
-            print(f"\nOK  →  {out_html}  (linked mode, skill-relative paths)")
+            # FOOTGUN WARNING — output paths reference the skill via relative
+            # paths that only resolve inside the repo. Moving / emailing this
+            # HTML will break all CSS / JS / images. Use --inline for portable
+            # output, OR ALWAYS create output under <repo>/runs/<ts>/output/
+            # per the WORKSPACE LAYOUT convention.
+            print(file=sys.stderr)
+            print(f"  ⚠⚠⚠  WARNING — copy-assets skipped  ⚠⚠⚠", file=sys.stderr)
+            print(f"  Output dir is not under <repo>/runs/<ts>/output/:", file=sys.stderr)
+            print(f"    {args.output_dir.resolve()}", file=sys.stderr)
+            print(f"  The HTML's CSS/JS/image refs use skill-RELATIVE paths.", file=sys.stderr)
+            print(f"  They resolve ONLY while served from inside the repo tree.", file=sys.stderr)
+            print(f"  Moving / emailing this HTML will produce a broken deck.", file=sys.stderr)
+            print(f"  Fix options:", file=sys.stderr)
+            print(f"    · Re-run with --inline for a single-file portable deck, OR", file=sys.stderr)
+            print(f"    · Output under <repo>/runs/<ts>/output/ so assets get copied", file=sys.stderr)
+            print(file=sys.stderr)
+            print(f"\nOK  →  {out_html}  (linked mode, skill-relative paths · NOT PORTABLE)")
         else:
             rc = subprocess.run(
                 [sys.executable, str(COPY_ASSETS), str(args.output_dir),

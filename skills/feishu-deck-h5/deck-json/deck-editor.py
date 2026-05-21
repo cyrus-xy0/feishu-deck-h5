@@ -379,13 +379,21 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
         assets_dir.mkdir(parents=True, exist_ok=True)
 
         # Run pdftoppm. -scale-to-x 1920 → 1920px wide, height proportional.
+        # timeout=120s — a hostile PDF (poppler bug / pathological structure)
+        # can't hang the server indefinitely. 120s is generous: 1920px
+        # rasterization of a typical 50-page PDF finishes in ~10s.
         out_prefix = assets_dir / prefix
         try:
             _sp.run(
                 ["pdftoppm", "-jpeg", "-jpegopt", "quality=85",
                  "-scale-to-x", "1920", "-scale-to-y", "-1",
                  str(tmp_pdf), str(out_prefix)],
-                check=True, capture_output=True, text=True,
+                check=True, capture_output=True, text=True, timeout=120,
+            )
+        except _sp.TimeoutExpired:
+            return self._send_error_json(
+                "pdftoppm timed out after 120s — likely a pathological PDF "
+                "or poppler bug. Try a smaller PDF or pre-process locally.", 500,
             )
         except _sp.CalledProcessError as e:
             return self._send_error_json(
