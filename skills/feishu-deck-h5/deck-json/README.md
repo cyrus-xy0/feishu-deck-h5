@@ -14,10 +14,13 @@ Decouples *deck content* from *HTML/CSS rendering* so that:
 | 想做什么 | 文档 |
 |---|---|
 | **写一份新 deck** (作为 Claude / 作为人) | `../SKILL.md` § **DECK GENERATION POLICY** |
-| **可视化编辑 deck** (浏览器) | [`EDITOR-QUICKSTART.md`](./EDITOR-QUICKSTART.md) |
 | **脚本批量改 deck** (CLI) | [`DECK-CLI-README.md`](./DECK-CLI-README.md) |
 | **理解 schema 设计 / 历史 / 取舍** | [`MIGRATION-REPORT.md`](./MIGRATION-REPORT.md) |
 | **字段 ground truth** | [`deck-schema.json`](./deck-schema.json) |
+
+> **可视化编辑** 现在由独立的客户端 editor 负责(浏览器里直接编辑渲染好的
+> HTML),不在本目录范围。原服务端编辑器(`deck-editor.py` + 浏览器 UI)已于
+> **2026-05-21** 退役 —— 见 MIGRATION-REPORT.md。
 
 ---
 
@@ -26,18 +29,14 @@ Decouples *deck content* from *HTML/CSS rendering* so that:
 ```
 deck-json/
 ├── README.md             ← 你正在看
-├── EDITOR-QUICKSTART.md  ← 非技术同事友好的编辑器使用
 ├── DECK-CLI-README.md    ← 14 个原子命令的 reference
-├── MIGRATION-REPORT.md   ← Phase 0-3 设计取舍、Phase 0.3 评估
+├── MIGRATION-REPORT.md   ← Phase 0-4 设计取舍、Phase 4 退役笔记
 │
 ├── deck-schema.json      ← JSON Schema Draft 2020-12 · 单一字段源
 ├── validate-deck.py      ← stdlib 校验器(schema + 业务规则)
 ├── render-deck.py        ← 渲染器(triple-gate: schema → render → validate.py)
 ├── deck-cli.py           ← 14 个原子操作命令
-├── deck-editor.py        ← 可视化编辑器 HTTP server
-├── deck-editor.command   ← macOS 双击启动器
 │
-├── editor/               ← 编辑器前端 (index.html + editor.css + editor.js)
 ├── templates/            ← 渲染器使用的 24 个 layout/block 片段模板
 ├── examples/             ← sample-deck.json (14 slides 覆盖每个 layout)
 │                          + migrated-from-toml/ (历史 deck 迁移产物)
@@ -55,18 +54,10 @@ cp examples/sample-deck.json runs/<ts>/output/deck.json
 # 2. 渲染(triple-gate · schema → render → validate.py)
 python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 
-# 3. 起编辑器调内容
-python3 deck-editor.py runs/<ts>/output/deck.json
-# 浏览器自动打开,3 栏 UI: slide list / preview / inspector
-# 双击 preview 文字直接改 · 拖动 slide 重排
-```
-
-或者用 alias 一键:
-
-```bash
-echo "alias edit-deck='python3 ~/Documents/GitHub/feishu-deck-h5/skills/feishu-deck-h5/deck-json/deck-editor.py'" >> ~/.zshrc
-source ~/.zshrc
-edit-deck    # 自动找最近的 deck.json
+# 3. 改内容
+# - 直接编辑 deck.json (大改 / 结构性变动)
+# - 或 deck-cli.py 做原子操作 (clone / reorder / set / set-variant 等)
+# - 或在客户端 editor 里打开渲染后的 index.html (WYSIWYG)
 ```
 
 ---
@@ -109,7 +100,7 @@ edit-deck    # 自动找最近的 deck.json
 | `phone-iframe` | 手机预览(嵌 iframe) | iframe_src |
 | `principle-band` | 三色策略原则 | principles[] |
 
-字段精确定义见 [`deck-schema.json`](./deck-schema.json) `$defs/block_*`。Inspector 的 `BLOCK_TYPES` 镜像 schema,**测试** (`tests/test_editor_schema_parity.py`) 强制对齐。
+字段精确定义见 [`deck-schema.json`](./deck-schema.json) `$defs/block_*`。
 
 ---
 
@@ -156,20 +147,13 @@ triple-gate 序: 任何一道 fail → 整体失败 → backup 恢复。
 | **1** | 渲染器 (render-deck.py · 1230 行 · 18 enricher · 7 block partial) | ✅ shipped |
 | **2** | SKILL.md DECK GENERATION POLICY · Claude 默认走 Path A (DeckJSON-first) | ✅ shipped |
 | **3** | 14 个原子 CLI 操作 (deck-cli.py) | ✅ shipped |
-| **4.a** | Editor 基础: 3 栏 UI + 拖拽 + import + inspector 顶层字段 | ✅ shipped |
-| **4.b.1** | Preview in-place 文字编辑 | ✅ shipped |
-| **4.b.2** | Inspector 数组编辑(cards/cols/nodes/bars/...) | ✅ shipped |
-| **4.b.3** | 图片拖拽上传 | ✅ shipped |
-| **4.b.4** | body_blocks polymorphic 编辑 | ✅ shipped |
-| **4.b.5** | PDF → replica 导入 (需 `brew install poppler`) | ✅ shipped |
-| **4.b.6** | 嵌套字段(story-case / matrix / tree.leaves) | ✅ shipped |
-| **4.c** | AI 集成(写整页 / 重设计 / 图→deck / review) | 🟡 排队 |
+| **4.a-4.b.6** | 服务端 editor (3 栏 UI + 拖拽 + Inspector + 图片上传 + PDF 导入 + 嵌套字段) | ⚠️ **2026-05-21 退役** —— 改由独立客户端 editor 负责,见 MIGRATION-REPORT.md |
+| **4.c** | AI 集成(写整页 / 重设计 / 图→deck / review) | 🟢 不在本目录范围(留给客户端 editor) |
 
 ---
 
 ## 维护者备注
 
-- `deck-schema.json` 是字段唯一真理。**新增 layout = 先改 schema,再改 validator / renderer / editor map**。
-- 编辑器的 `BLOCK_TYPES` / `EXTRA_FIELDS` / `ARRAY_FIELDS` 是 schema 的镜像,**必须**通过 `tests/test_editor_schema_parity.py` 测试。
+- `deck-schema.json` 是字段唯一真理。**新增 layout = 先改 schema,再改 validator / renderer**。
 - validator 实现 JSON Schema Draft 2020-12 子集。如果需要新 keyword (`dependentRequired` / `format` / 跨文件 `$ref` 等),要在 `validate-deck.py` 加。
 - 加新 layout 时同步加 negative test 到 `tests/`,证明 schema 真的拒了 bad input。

@@ -534,3 +534,73 @@ Negative tests: 12 (Phase 0/0.1) + 8 (Phase 0.2: matrix_no_quadrants · matrix_m
 8. 例子 sample 更新 (sample-deck.json + migrated-from-toml/proposal-mvw.json)
 
 每个 layout ~半天到 1 天工作,4 个共 2-3 天。不阻塞当前 editor 收敛,作为下一波 schema 扩展专项执行。
+
+---
+
+# Phase 4 服务端 editor · 2026-05-21 退役
+
+(2026-05-21 决定)
+
+## 背景
+
+Phase 4.a-4.b.6 累计交付了一个基于 stdlib HTTP server + 浏览器 UI 的本地可视化编辑器(`deck-editor.py` + `editor/` frontend + `deck-editor.command`)。功能完整：
+
+- 3 栏 UI(slide 列表 / preview iframe / inspector)
+- 拖拽 reorder · 缝隙横线指示 · drop 到空白区
+- Preview 内 in-place 文字编辑(contenteditable)
+- Inspector 顶层标量 + 嵌套字段 + 数组编辑 + polymorphic body_blocks
+- 图片拖拽上传 / PDF → replica 导入(需 poppler) / multi-deck 切换
+- CSRF token / path containment / switch-deck allow-list 全套安全
+- 键盘 cheatsheet · QUICKSTART 文档 · macOS .command 双击启动器
+
+## 为什么退役
+
+用户决定改做**独立客户端 editor**(在渲染好的 HTML 网页里直接 WYSIWYG 编辑),不再需要服务端编辑器作为中间层。
+
+- 客户端 editor 更轻量(无 server / 无端口 / 无授权)
+- WYSIWYG 比 inspector 表单更直观
+- deck-editor.py 的 inspector 也只覆盖 schema 字段的一小部分,深度受限
+- "服务端 + 浏览器 + iframe" 三层架构对单用户单 deck 偏重
+
+## 删除的资产
+
+- `deck-editor.py` (754 行)
+- `deck-editor.command` (40 行,macOS 启动器)
+- `editor/index.html` (148 行)
+- `editor/editor.css` (520 行)
+- `editor/editor.js` (~1700 行,含 BLOCK_TYPES / ARRAY_FIELDS / EXTRA_FIELDS / In-place edit / CSRF / multi-deck switcher / image upload / PDF import)
+- `EDITOR-QUICKSTART.md` (235 行)
+- `tests/test_editor_schema_parity.py` (267 行 —— 没 editor 就不需要防 BLOCK_TYPES vs schema drift)
+
+总 ~3700 行删除。git 历史(commit `c327192`)永久保留;任何时候 `git show c327192:.../deck-editor.py` 即可恢复。
+
+## 保留的资产
+
+| 资产 | 在新方案中的角色 |
+|---|---|
+| `deck-schema.json` | 不变。Schema 仍是 deck.json 的字段单一来源 |
+| `render-deck.py` | 不变。客户端 editor 的输入是它产出的 HTML |
+| `validate-deck.py` | 不变。deck.json 生成阶段校验 |
+| `templates/` | 不变。renderer 用 |
+| `deck-cli.py` | 保留。客户端 editor 主管 in-line 编辑,deck-cli 管结构操作(clone / reorder / set-variant) |
+| `tests/test_validate_examples.py` | 保留。schema 回归 |
+| `tests/test_textid_roundtrip.py` | 保留。render-deck 产出的 data-text-id 格式契约 —— 客户端 editor 仍可能用 |
+| `tests/test_deck_cli_smoke.py` | 保留。CLI 回归 |
+| `SKILL.md DECK GENERATION POLICY` | 保留 + 微调。Option C 改成指向"客户端 editor",不再是 deck-editor.py |
+
+## DeckJSON 在新方案中的角色
+
+仍然是 **deck 生产线** —— Claude / 人写 deck.json → render-deck → HTML → **客户端 editor 接管** WYSIWYG 编辑。
+
+- DeckJSON: deck 生成 + 结构(slides 数组 / accent / decor / metadata)的契约
+- 客户端 editor: 渲染后的视觉编辑层
+- 当用户需要结构操作(clone / reorder)时,**回到 deck.json + deck-cli**,再 render → 新 HTML 进 editor
+
+参考之前讨论的 50/50 bespoke 场景:**重复 50% slide 走 schema fastpath,bespoke 50% slide 用 layout:raw + framework primitives**,客户端 editor 对两类一视同仁(都是 HTML 视觉编辑)。
+
+## 经验教训
+
+1. **Inspector 表单的天花板**:把 schema 字段一一映射到表单 = 永远追不上 schema 增长。BLOCK_TYPES drift 就是这问题(review 出 6 个字段 mismatch)
+2. **WYSIWYG > 字段表单**:对 90% 修改场景,用户想"看到怎么改",不是"填正确字段值"
+3. **HTTP server 对单用户偏重**:CSRF / path containment / 多 deck 切换 / 启动 alias —— 都是为了让 server 模式好用,但根本问题是"不需要 server"
+4. **schema + renderer 真核心**:删了 ~3700 行 editor,核心 deck 生产能力 0 损失。说明**Phase 0-3 才是 deck-json 的真本质**,Phase 4 是探索性 UI 实验

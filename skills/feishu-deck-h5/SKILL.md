@@ -380,12 +380,9 @@ python3 deck-json/deck-cli.py runs/<ts>/output/deck.json reorder 5 2
 python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set-variant kpi-4up hero
 # 14 subcommands total — see deck-json/DECK-CLI-README.md
 
-# Option C · Visual editor (best for hand-off to non-technical user / iterative tweaks)
-python3 deck-json/deck-editor.py runs/<ts>/output/deck.json
-# Browser opens · in-place text edit · drag reorder · slide list · inspector w/
-# array editors (cards/cols/nodes/bars/branches/quadrants/body_blocks) · image
-# drag-upload · PDF→replica import · multi-deck switcher · `?` for shortcuts
-# See deck-json/EDITOR-QUICKSTART.md for teammate-friendly setup
+# Option C · WYSIWYG · edit the rendered HTML directly in your browser
+# (separate client-side editor — opens the index.html and edits in-place.
+# Not part of this skill; lives in user's own tooling.)
 ```
 
 **Inline minimal example** (4 slides, every required field). Copy this verbatim, then iterate:
@@ -497,9 +494,14 @@ If 1-2 specific slides won't fit the schema but everything else does:
 |---|---|---|
 | `deck-json/render-deck.py` | Render deck.json → HTML (always runs first) | inline help: `--help` |
 | `deck-json/deck-cli.py` | 14 atomic ops on deck.json (set / set-accent / set-decor / set-variant / reorder / move-key / insert / delete / clone / render / list / get / show / lint) — auto-backup + revalidate + rollback | `deck-json/DECK-CLI-README.md` |
-| `deck-json/deck-editor.py` | Visual editor (HTTP server + browser UI). Drag-reorder slides, in-place text editing, image upload, PDF import, multi-deck switching | `deck-json/EDITOR-QUICKSTART.md` |
 | `deck-json/validate-deck.py` | Standalone schema lint of deck.json (called by render-deck.py + deck-cli.py automatically) | inline help |
 | `assets/check-only.sh` | Audit an EXISTING `.html` deck (Path A or B output) against all framework rules | see CHECK-ONLY MODE section above |
+
+> *Visual editing*: the previous server-side editor (`deck-editor.py` + browser
+> UI) was retired 2026-05-21. WYSIWYG editing now happens in a separate
+> client-side editor (lives outside this skill). The flow: render deck.json
+> → HTML → open that HTML in the client-side editor → edit in place. Schema
+> + renderer + CLI continue to handle generation, structural ops, validation.
 
 ---
 
