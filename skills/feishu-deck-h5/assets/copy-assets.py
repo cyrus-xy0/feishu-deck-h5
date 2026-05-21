@@ -50,7 +50,7 @@ RX_SKILL = re.compile(
     r'((?:\.\./)+)skills/feishu-deck-h5/(assets|examples|templates)/([^\'")\s?#]+)'
 )
 RX_INPUT = re.compile(
-    r'((?:\.\./)+)input/([^\'")\s?#]+)'
+    r'((?:\.\./)*)input/([^\'")\s?#]+)'
 )
 # AFTER first rewrite, HTMLs use assets/<file> or ../assets/<file>
 # (no skills/feishu-deck-h5 prefix). Both bare and ../-prefixed refs must
@@ -120,10 +120,18 @@ def resolve_asset(skill_root: Path, sub: str, rest: str) -> tuple[Path, str]:
     return direct, rest  # not found — caller will warn
 
 def find_run_root(out_dir: Path) -> Path:
-    """Find runs/<ts>/ root from any nested output path."""
+    """Find runs/<ts>/ root from any nested output path.
+
+    Canonical layout is `runs/<ts>/output/`. Also accept sibling output dirs
+    under the same run (`output-deckjson/`, `_preview/`, `output-foo/`) so
+    the editor's auto-render and ad-hoc compare renders can resolve assets."""
     for parent in [out_dir, *out_dir.parents]:
+        # canonical: runs/<ts>/output/
         if parent.name == "output" and parent.parent.parent.name == "runs":
-            return parent.parent  # runs/<ts>/
+            return parent.parent
+        # sibling under runs/<ts>/<anything>/  (output-deckjson, _preview, ...)
+        if parent.parent.parent and parent.parent.parent.name == "runs":
+            return parent.parent
     raise SystemExit(f"Cannot find run root from {out_dir}; expected runs/<ts>/output/.")
 
 def ensure_shared_symlink(local_assets: Path, skill_root: Path) -> Path:
@@ -242,22 +250,57 @@ def main():
         def replace_input(m):
             nonlocal bytes_copied
             rest = m.group(2)
-            origin = input_root / rest
             target = local_input / rest
             referenced.add(str(target.relative_to(out_dir)))
-            if origin.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if not target.exists() or target.stat().st_size != origin.stat().st_size:
-                    shutil.copy2(origin, target)
-                    bytes_copied += origin.stat().st_size
-                    files_copied.add(str(target.relative_to(out_dir)))
-                return f'{prefix}input/{rest}'
-            else:
-                print(f"  [WARN] missing input: {origin}")
-                return m.group(0)
+            # Try canonical runs/<ts>/input/ first, then fall back to other
+            # likely locations (covers legacy decks that put input/ inside
+            # output/ instead of at the run root, AND output-deckjson/ siblings
+            # that need to find input/ via runs/<ts>/output/input/).
+            candidates = [
+                input_root / rest,                          # canonical
+                out_dir.parent / "input" / rest,            # sibling-of-out_dir
+                out_dir.parent / "output" / "input" / rest, # cross-sibling via output/
+                run_root / "output" / "input" / rest,       # run-root → output/input/
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if not target.exists() or target.stat().st_size != candidate.stat().st_size:
+                        shutil.copy2(candidate, target)
+                        bytes_copied += candidate.stat().st_size
+                        files_copied.add(str(target.relative_to(out_dir)))
+                    return f'{prefix}input/{rest}'
+            print(f"  [WARN] missing input: {input_root / rest}")
+            return m.group(0)
 
         src = RX_SKILL.sub(replace_skill, src)
         src = RX_INPUT.sub(replace_input, src)
+
+        # `./<rel-path>` deck-local refs — for cases where the deck author
+        # dropped a PNG / prototype-html dir / asset directly into `output/`
+        # (not into input/ or assets/shared/). When rendering into a sibling
+        # dir like _preview/ or output-deckjson/, those need to be linked.
+        def link_deck_local(m):
+            rel = m.group(1).split('?')[0]
+            # Find source: try sibling-of-out_dir first, then cross-sibling
+            # via runs/<ts>/output/ (for output-deckjson/ rendering away from
+            # the canonical output/ where the deck-local PNGs / prototypes live).
+            src_candidates = [out_dir.parent / rel, out_dir.parent / "output" / rel]
+            src_path = next((p for p in src_candidates if p.exists()), None)
+            if src_path is None:
+                return m.group(0)
+            dst_path = out_dir / rel
+            # Track so the end-of-run prune doesn't delete it.
+            referenced.add(rel)
+            # already in place (e.g. shared/ symlink)
+            if dst_path.exists() or dst_path.is_symlink():
+                return m.group(0)
+            # symlink the FILE (or directory) directly
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(src_path.resolve(), dst_path)
+            return m.group(0)
+
+        re.sub(r"""(?:url\(|src=)['"]?\./([^'")\s?#]+)""", link_deck_local, src)
 
         # Process already-local refs (second+ runs OR pre-reorg legacy outputs):
         #  - track for prune so existing files aren't deleted

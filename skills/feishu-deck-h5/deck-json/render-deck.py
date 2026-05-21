@@ -1051,7 +1051,22 @@ def render_slide(slide: dict, slide_index: int, total: int, asset_path: str, dec
     if enricher:
         enricher(ctx, slide)
 
-    return render_template(tpl_path.read_text(encoding="utf-8"), ctx)
+    rendered = render_template(tpl_path.read_text(encoding="utf-8"), ctx)
+
+    # Escape hatch for raw slides migrated from a legacy deck: if the slide
+    # carries `_orig_layout`, swap the hardcoded `data-layout="raw"` with the
+    # original layout so framework CSS rules engage (e.g. `.slide[data-layout=
+    # "content-2col"] .stage` keeps matching). The slide DOM is still verbatim
+    # raw HTML; only the layout attribute changes.
+    orig = slide.get("_orig_layout")
+    if layout == "raw" and orig and orig != "raw":
+        rendered = re.sub(
+            r'(<div\s+class="slide"\s+)data-layout="raw"',
+            rf'\1data-layout="{orig}"',
+            rendered, count=1,
+        )
+
+    return rendered
 
 
 # ---------------------------------------------------------------------------

@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hmac
 import http.server
 import json
 import os
+import secrets
 import socket
 import socketserver
 import subprocess
@@ -45,8 +47,10 @@ RENDER_DECK = HERE / "render-deck.py"
 
 # Server state (single-deck per editor instance — simple)
 STATE = {
-    "deck_path":    None,   # Path to deck.json being edited
-    "preview_dir":  None,   # Path to _preview/ render output
+    "deck_path":    None,    # Path to deck.json being edited
+    "preview_dir":  None,    # Path to _preview/ render output
+    "csrf_token":   None,    # 32-byte hex random per-launch; binds GET/POST sessions
+    "allowed_decks": set(),  # snapshot of decks discoverable at launch; switch-deck enforces this
 }
 
 
@@ -75,8 +79,12 @@ def run_deck_cli(args: list[str]) -> tuple[int, str, str]:
 
 def re_render() -> tuple[bool, str]:
     """Re-render preview into _preview/ dir. Returns (success, log)."""
+    # Drop --skip-copy-assets so asset refs in raw slides (assets/shared/*,
+    # input/*, ./scene.png) resolve correctly under _preview/. copy-assets
+    # now accepts sibling output dirs (output-deckjson, _preview) via the
+    # find_run_root sibling fallback.
     cmd = [sys.executable, str(RENDER_DECK), str(STATE["deck_path"]),
-           str(STATE["preview_dir"]), "--skip-copy-assets"]
+           str(STATE["preview_dir"])]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     return proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -107,10 +115,33 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # Loopback-only single-user editor — no cross-origin use case. Default
+        # to same-origin (omit Access-Control-Allow-Origin) so cross-tab fetch()
+        # is blocked at the browser. Combined with the per-launch CSRF token
+        # this is defense-in-depth against malicious-tab CSRF attacks.
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.end_headers()
         self.wfile.write(body)
+
+    def _check_csrf(self) -> bool:
+        """Verify the per-launch token. Accept it either from `X-Editor-Token`
+        header (POST default) or `?token=` query (used by the initial GET that
+        loads index.html and bootstraps the token into the SPA)."""
+        token = STATE.get("csrf_token")
+        if not token:                                # token not initialized — fail closed
+            return False
+        # Header form
+        hdr = self.headers.get("X-Editor-Token") or ""
+        if hdr and hmac.compare_digest(hdr, token):
+            return True
+        # Query form
+        qs  = parse_qs(urlparse(self.path).query)
+        qtok = (qs.get("token") or [""])[0]
+        if qtok and hmac.compare_digest(qtok, token):
+            return True
+        return False
 
     def _send_json(self, obj, status: int = 200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -134,30 +165,44 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
         url = urlparse(self.path)
         path = url.path
 
-        # / → editor index
+        # Public root: serves index.html. The HTML embeds the token via the
+        # query string of its own URL, so the SPA can read it from
+        # location.search and attach it to subsequent /api/* calls.
+        # Note: a request without ?token= still gets index.html, but it can't
+        # do anything useful — every /api/* requires the token.
         if path in ("/", "/index.html"):
-            return self._serve_static(EDITOR_DIR / "index.html", "text/html; charset=utf-8")
+            return self._serve_static(EDITOR_DIR / "index.html", EDITOR_DIR,
+                                      "text/html; charset=utf-8")
 
-        # /editor/* → static frontend assets
+        # /editor/* → frontend assets (JS / CSS). Public; no secrets here.
         if path.startswith("/editor/"):
             rel = path[len("/editor/"):]
-            return self._serve_static(EDITOR_DIR / rel)
+            return self._serve_static(EDITOR_DIR / rel, EDITOR_DIR)
 
-        # /preview/* → rendered HTML output (+ assets via skill-relative paths)
+        # /preview/* → rendered HTML. NOT token-gated for GET — the iframe
+        # loads CSS/JS via relative URLs that wouldn't inherit the token,
+        # breaking the preview. Defense against cross-origin read: we omit
+        # Access-Control-Allow-Origin (see _send) so the browser blocks
+        # cross-origin fetch from reading the body via Same-Origin Policy.
         if path.startswith("/preview/"):
-            rel = path[len("/preview/"):]
-            if not rel:
-                rel = "index.html"
-            target = STATE["preview_dir"] / rel
-            return self._serve_static(target)
+            rel = path[len("/preview/"):] or "index.html"
+            return self._serve_static(STATE["preview_dir"] / rel, STATE["preview_dir"])
 
-        # /skills/feishu-deck-h5/* → serve the real skill assets so the preview
-        # iframe's relative CSS/JS/image links resolve correctly. Skill root
-        # is HERE.parent (deck-json's parent = skills/feishu-deck-h5/).
+        # /skills/feishu-deck-h5/* → skill assets (CSS / JS / images the
+        # preview iframe needs). Strict prefix match (was substring `in path`
+        # — fixed H2). Not token-gated for the same reason as /preview/*
+        # (relative URLs in preview HTML can't propagate token).
         skill_root = HERE.parent
-        if "/skills/feishu-deck-h5/" in path:
-            rel = path.split("/skills/feishu-deck-h5/", 1)[1]
-            return self._serve_static(skill_root / rel)
+        if path.startswith("/skills/feishu-deck-h5/"):
+            rel = path[len("/skills/feishu-deck-h5/"):]
+            return self._serve_static(skill_root / rel, skill_root)
+
+        # /api/* GET endpoints — token-gated. /api/deck returns user content;
+        # /api/decks lists deck.json files. Without token, cross-tab attacker
+        # can't enumerate.
+        if path.startswith("/api/"):
+            if not self._check_csrf():
+                return self._send_error_json("forbidden — missing or invalid token", 403)
 
         # /api/deck → current deck.json
         if path == "/api/deck":
@@ -167,7 +212,9 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
                 return self._send_error_json(f"failed to read deck: {e}", 500)
             return self._send_json({"ok": True, "deck": deck, "path": str(STATE["deck_path"])})
 
-        # /api/decks → list all discoverable deck.json files (for switcher)
+        # /api/decks → list all discoverable deck.json files (for switcher).
+        # Also refreshes STATE["allowed_decks"] — /api/switch-deck consults
+        # this allow-list, plugging C2 (arbitrary-path read).
         if path == "/api/decks":
             cands: list[Path] = []
             for parent in [Path.cwd(), HERE, *HERE.parents]:
@@ -175,6 +222,7 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
                     cands.extend((parent / "runs").glob("*/output/deck.json"))
             cands = sorted({c.resolve() for c in cands if c.is_file()},
                            key=lambda p: p.stat().st_mtime, reverse=True)
+            STATE["allowed_decks"] = {str(c) for c in cands}
             out = []
             for c in cands:
                 try:
@@ -194,9 +242,28 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
 
         return self._send_error_json(f"not found: {path}", 404)
 
-    def _serve_static(self, path: Path, ctype: str | None = None):
-        if not path.is_file():
-            return self._send_error_json(f"static not found: {path}", 404)
+    def _serve_static(self, path: Path, base: Path, ctype: str | None = None):
+        """Serve a file from disk, with a strict containment check.
+
+        `base` is the legal directory tree this route is allowed to read from
+        (e.g. EDITOR_DIR for /editor/*, STATE['preview_dir'] for /preview/*,
+        skill_root for /skills/feishu-deck-h5/*). The resolved target must be
+        a descendant of `base`, else 403. Plugs H1 — without this an attacker
+        could `GET /editor/../../etc/passwd` and read arbitrary readable files
+        (because urlparse doesn't collapse `..`).
+        """
+        try:
+            target = path.resolve(strict=False)
+            base_r = base.resolve(strict=False)
+        except Exception:
+            return self._send_error_json("invalid path", 400)
+        # Use is_relative_to (Py 3.9+) — explicit, no string-prefix tricks
+        try:
+            target.relative_to(base_r)
+        except ValueError:
+            return self._send_error_json("forbidden — path outside route base", 403)
+        if not target.is_file():
+            return self._send_error_json(f"static not found: {target}", 404)
         if ctype is None:
             ctype = {
                 ".html": "text/html; charset=utf-8",
@@ -208,12 +275,16 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
                 ".jpeg": "image/jpeg",
                 ".svg":  "image/svg+xml",
                 ".md":   "text/markdown; charset=utf-8",
-            }.get(path.suffix.lower(), "application/octet-stream")
-        return self._send(200, path.read_bytes(), ctype)
+            }.get(target.suffix.lower(), "application/octet-stream")
+        return self._send(200, target.read_bytes(), ctype)
 
     # ---- POST ----
     def do_POST(self):
         path = urlparse(self.path).path
+
+        # ALL POST endpoints require the per-launch CSRF token — plugs C1.
+        if not self._check_csrf():
+            return self._send_error_json("forbidden — missing or invalid token", 403)
 
         if path == "/api/op":
             return self._handle_op()
@@ -402,15 +473,28 @@ class EditorHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_switch_deck(self):
         """Switch the editor to a different deck.json.
+
         Body: {"path": "/abs/path/to/another/deck.json"}
         Updates STATE.deck_path + STATE.preview_dir, re-renders, returns ok.
         Frontend should then reload the page to fetch new deck.
+
+        Security: target path MUST be in STATE['allowed_decks'] — populated
+        each time /api/decks is called (which the frontend hits when opening
+        the deck-switcher modal). This plugs C2 (arbitrary-file read) — an
+        attacker can't switch to /etc/passwd / SSH key paths even with the
+        CSRF token, because they weren't surveyed at deck-discovery time.
         """
         body = self._read_body()
         new_path = body.get("path")
         if not new_path:
             return self._send_error_json("missing 'path' field")
         target = Path(new_path).resolve()
+        target_s = str(target)
+        if target_s not in STATE["allowed_decks"]:
+            return self._send_error_json(
+                "forbidden — target not in deck allow-list. Use /api/decks "
+                "first to refresh the survey set.", 403,
+            )
         if not target.is_file():
             return self._send_error_json(f"file not found: {target}", 404)
         try:
@@ -617,6 +701,15 @@ def main(argv=None) -> int:
     STATE["preview_dir"] = args.deck.resolve().parent / "_preview"
     STATE["preview_dir"].mkdir(parents=True, exist_ok=True)
 
+    # Per-launch CSRF token — bound into the URL passed to the browser. Every
+    # /api/* request must echo it via X-Editor-Token header or ?token=. Plugs
+    # C1 (cross-tab fetch hijack). secrets.token_urlsafe → 32 random bytes,
+    # ~256 bits of entropy, URL-safe characters.
+    STATE["csrf_token"] = secrets.token_urlsafe(32)
+    # Seed allowed_decks with the currently-opened deck — so switch-deck back
+    # to self always works even before /api/decks is called.
+    STATE["allowed_decks"] = {str(STATE["deck_path"])}
+
     # Initial render so iframe has something to show
     print("→ Initial render...", file=sys.stderr)
     ok, log = re_render()
@@ -627,13 +720,14 @@ def main(argv=None) -> int:
 
     port = find_free_port(args.port)
     addr = ("127.0.0.1", port)
-    print(f"\n  deck-editor · http://127.0.0.1:{port}/", file=sys.stderr)
+    url  = f"http://127.0.0.1:{port}/?token={STATE['csrf_token']}"
+    print(f"\n  deck-editor · {url}", file=sys.stderr)
     print(f"  editing:  {STATE['deck_path']}", file=sys.stderr)
     print(f"  preview:  {STATE['preview_dir']}/index.html", file=sys.stderr)
     print(f"  ^C to stop\n", file=sys.stderr)
 
     if not args.no_browser:
-        threading.Timer(0.5, lambda: webbrowser.open(f"http://127.0.0.1:{port}/")).start()
+        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
 
     httpd = socketserver.TCPServer(addr, EditorHandler)
     try:

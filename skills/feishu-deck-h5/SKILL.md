@@ -396,7 +396,9 @@ python3 deck-json/deck-editor.py runs/<ts>/output/deck.json
   "deck":  { "title": "Q2 OKR 复盘", "author": "团队 A", "date": "2026-05" },
   "slides": [
     { "key": "cover",  "layout": "cover",   "accent": "blue",
-      "data": { "title": "Q2 OKR 复盘\n5 个关键判断" } },
+      "data": { "title":  "Q2 OKR 复盘\n5 个关键判断",
+                "author": "团队 A",
+                "date":   "2026-05" } },
     { "key": "agenda", "layout": "agenda",  "accent": "blue",
       "data": { "items": [
         { "title_zh": "目标回顾" },

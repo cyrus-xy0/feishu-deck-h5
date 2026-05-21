@@ -15,12 +15,36 @@ const state = {
 
 // ---------------------------------------------------------------- network
 
+// Per-launch CSRF token — embedded into the launch URL by deck-editor.py as
+// ?token=XXX. Every /api/* call attaches it as X-Editor-Token. Without this
+// header, the server returns 403. Reading from `URLSearchParams(location.search)`
+// because the token IS in the visible URL (single-user loopback editor — the
+// threat model is cross-tab fetch hijack, not URL bar visibility).
+const CSRF_TOKEN = (() => {
+  const t = new URLSearchParams(location.search).get("token") || "";
+  if (!t) {
+    console.warn("[deck-editor] no ?token= in URL — API calls will 403");
+  }
+  return t;
+})();
+
+// Asset URLs that need to load *through* the server (preview iframe, etc.)
+// must include the token too — they're token-gated server-side. Helper:
+function withToken(url) {
+  if (!CSRF_TOKEN) return url;
+  return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(CSRF_TOKEN);
+}
+
 async function api(path, opts = {}) {
   setStatus("busy", "请求中…");
   try {
     const res = await fetch(path, {
       ...opts,
-      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+      headers: {
+        "Content-Type":    "application/json",
+        "X-Editor-Token":  CSRF_TOKEN,
+        ...(opts.headers || {}),
+      },
     });
     const data = await res.json();
     if (!data.ok && data.error) {
@@ -223,24 +247,27 @@ function renderSlideList() {
 // top-level scalar fields per type — complex nested arrays (kpis / rows /
 // verdicts) can still be edited in-place inside the preview iframe (each
 // inner cell has its own data-text-id) or by editing deck.json directly.
+// Source of truth: deck-schema.json $defs/block_*. Field names + enums
+// MUST match what the schema accepts (additionalProperties:false), otherwise
+// every "add block" op will schema-fail and rollback. Tests in
+// deck-json/tests/test_editor_schema_parity.py guard this map against drift.
 const BLOCK_TYPES = {
   "pullquote": {
     label: "Pullquote · 引言块",
     defaults: () => ({ type: "pullquote", text: "新的引言文字..." }),
     fields: [
-      { key: "text",        label: "Text",        multi: true },
-      { key: "attribution", label: "Attribution (出处)" },
-      { key: "tone",        label: "Tone", select: ["default", "teal", "violet", "orange"] },
+      { key: "text", label: "Text", multi: true },
+      { key: "tone", label: "Tone", select: ["default", "orange", "blue", "violet"] },
     ],
   },
   "cta-box": {
     label: "CTA Box · 行动召唤",
-    defaults: () => ({ type: "cta-box", title: "标题", body: "正文..." }),
+    defaults: () => ({ type: "cta-box", heading: "标题", body: "正文..." }),
     fields: [
-      { key: "title",        label: "Title" },
+      { key: "heading",      label: "Heading (标题)" },
       { key: "body",         label: "Body", multi: true },
       { key: "button_label", label: "Button label" },
-      { key: "tone",         label: "Tone", select: ["default", "teal", "violet", "orange"] },
+      { key: "tone",         label: "Tone", select: ["default", "teal"] },
     ],
   },
   "kpi-strip": {
@@ -249,11 +276,7 @@ const BLOCK_TYPES = {
                        kpis: [{ value: "0", label: "新指标" },
                               { value: "0", label: "新指标" },
                               { value: "0", label: "新指标" }] }),
-    fields: [
-      // Note: kpis[] is complex (objects with tone) — edit each value/label
-      // in-place inside the preview iframe (data-text-id present), OR edit
-      // deck.json. Inspector does not yet expose a kpis-mini-array editor.
-    ],
+    fields: [],
     hint: "kpis[] 内容请在 preview 里双击数字 / 标签编辑,或直接改 deck.json",
   },
   "data-panel": {
@@ -263,36 +286,38 @@ const BLOCK_TYPES = {
                               { lbl: "标签 2", val: "0" }] }),
     fields: [
       { key: "title", label: "Title" },
-      { key: "tone",  label: "Tone", select: ["default", "teal", "violet", "orange"] },
+      { key: "tone",  label: "Tone", select: ["default", "teal", "violet"] },
     ],
     hint: "rows[] 内容请在 preview 里双击编辑",
   },
   "verdict-grid": {
     label: "Verdict Grid · 判断卡组",
     defaults: () => ({ type: "verdict-grid",
-                       verdicts: [{ badge: "好", title: "标题", body: "正文" },
-                                  { badge: "好", title: "标题", body: "正文" },
-                                  { badge: "好", title: "标题", body: "正文" }] }),
+                       cards: [
+                         { verdict: "go",          badge: "GO",    title: "标题", body: "正文" },
+                         { verdict: "conditional", badge: "条件",  title: "标题", body: "正文" },
+                         { verdict: "nogo",        badge: "NO-GO", title: "标题", body: "正文" } ] }),
     fields: [],
-    hint: "verdicts[] (3-4 个) 请在 preview 里双击编辑",
+    hint: "cards[] (verdict: go/conditional/nogo) 请在 preview 里双击编辑",
   },
   "phone-iframe": {
     label: "Phone iFrame · 手机预览",
-    defaults: () => ({ type: "phone-iframe", screen: "assets/phone-screen.png" }),
+    defaults: () => ({ type: "phone-iframe", iframe_src: "assets/phone-screen.html" }),
     fields: [
-      { key: "screen",    label: "Screen src (图片路径)" },
-      { key: "hint",      label: "Hint text" },
+      { key: "iframe_src", label: "iFrame src (页面路径)" },
+      { key: "title",      label: "Title (顶部标题)" },
+      { key: "hint",       label: "Hint (底部提示)" },
     ],
   },
   "principle-band": {
     label: "Principle Band · 原则横条",
     defaults: () => ({ type: "principle-band",
-                       left:  { title: "左原则" },
-                       right: { title: "右原则" } }),
-    fields: [
-      { key: "left.title",  label: "Left · title",  multi: true },
-      { key: "right.title", label: "Right · title", multi: true },
-    ],
+                       principles: [
+                         { text: "原则 1", color: "teal"  },
+                         { text: "原则 2", color: "blue"  },
+                         { text: "原则 3", color: "purple" } ] }),
+    fields: [],
+    hint: "principles[] (text + color: teal/blue/purple) 请在 preview 里双击编辑",
   },
 };
 
@@ -343,6 +368,21 @@ const ARRAY_FIELDS = {
       label: "Body blocks (页面块组件)",
       titleField: "type",
       minItems: 1, maxItems: 6,
+      isPolymorphic: true,
+    },
+  },
+  // content/2col: left-text column has lede + feature_list[] + body_blocks[]
+  "content:2col": {
+    "text.feature_list": {
+      label: "Feature list (左列要点)",
+      isStringArray: true,
+      minItems: 0, maxItems: 6,
+      newItem: () => "新要点",
+    },
+    "text.body_blocks": {
+      label: "Body blocks (左列块组件)",
+      titleField: "type",
+      minItems: 0, maxItems: 4,
       isPolymorphic: true,
     },
   },
@@ -464,6 +504,15 @@ const EXTRA_FIELDS = {
   "section":            [{key: "lede",          label: "Lede"}],
   "end":                [{key: "contact",       label: "Contact"}],
   "content:3up":        [{key: "lede",          label: "Lede (可选引言)", multi: true}],
+  "content:2col":       [
+    {key: "text.lede",         label: "Lede (左列引言)", multi: true,  group: "Text 列"},
+    {key: "visual.type",       label: "Visual · type",
+     select: ["image", "panel", "svg", "placeholder"],                  group: "Visual 列"},
+    {key: "visual.image.src",  label: "Visual · image src",             group: "Visual 列 (type=image)"},
+    {key: "visual.image.alt",  label: "Visual · image alt",             group: "Visual 列 (type=image)"},
+    {key: "visual.min_height", label: "Visual · min-height (CSS)",      group: "Visual 列 (type=image)"},
+    {key: "visual.label",      label: "Visual · placeholder label",     group: "Visual 列 (type=placeholder)"},
+  ],
   "content:blocks":     [{key: "lede",          label: "Lede", multi: true},
                          {key: "source_footer", label: "Source footer"}],
   "content:story-case": [
@@ -488,15 +537,21 @@ const EXTRA_FIELDS = {
     {key: "stat.label",       label: "Stat · 标签",                group: "Stat · 数据点(可选)"},
   ],
   "content:matrix":     [
-    {key: "lede",                label: "Lede (可选引言)", multi: true},
-    {key: "y_axis.label",        label: "Y 轴 · 上",                 group: "坐标轴标签"},
-    {key: "y_axis.name",         label: "Y 轴 · 名称",                group: "坐标轴标签"},
-    {key: "x_axis.label",        label: "X 轴 · 右",                 group: "坐标轴标签"},
-    {key: "x_axis.name",         label: "X 轴 · 名称",                group: "坐标轴标签"},
-    {key: "quadrants.tl.title",  label: "TL · title",                group: "四象限标题"},
-    {key: "quadrants.tr.title",  label: "TR · title",                group: "四象限标题"},
-    {key: "quadrants.bl.title",  label: "BL · title",                group: "四象限标题"},
-    {key: "quadrants.br.title",  label: "BR · title",                group: "四象限标题"},
+    {key: "lede",                  label: "Lede (可选引言)", multi: true},
+    {key: "axes.y.name",           label: "Y 轴 · 名称",                       group: "坐标轴标签"},
+    {key: "axes.y.high_label",     label: "Y 轴 · 上 high label",              group: "坐标轴标签"},
+    {key: "axes.y.low_label",      label: "Y 轴 · 下 low label",               group: "坐标轴标签"},
+    {key: "axes.x.name",           label: "X 轴 · 名称",                       group: "坐标轴标签"},
+    {key: "axes.x.high_label",     label: "X 轴 · 右 high label",              group: "坐标轴标签"},
+    {key: "axes.x.low_label",      label: "X 轴 · 左 low label",               group: "坐标轴标签"},
+    {key: "quadrants.tl.ord",      label: "TL · ord (01 等)",                  group: "四象限"},
+    {key: "quadrants.tl.title",    label: "TL · title",                         group: "四象限"},
+    {key: "quadrants.tr.ord",      label: "TR · ord",                           group: "四象限"},
+    {key: "quadrants.tr.title",    label: "TR · title",                         group: "四象限"},
+    {key: "quadrants.bl.ord",      label: "BL · ord",                           group: "四象限"},
+    {key: "quadrants.bl.title",    label: "BL · title",                         group: "四象限"},
+    {key: "quadrants.br.ord",      label: "BR · ord",                           group: "四象限"},
+    {key: "quadrants.br.title",    label: "BR · title",                         group: "四象限"},
   ],
   "quote":              [{key: "attribution",   label: "Attribution"}],
   "stats:row":          [{key: "footnote",      label: "Footnote"}],
@@ -675,6 +730,12 @@ function renderImageField(slide, slideIdx) {
   } else if (slide.layout === "content" && slide.variant === "story-case") {
     path = `slides.${slideIdx}.data.scene.image`;
     current = (slide.data && slide.data.scene && slide.data.scene.image) || "";
+  } else if (slide.layout === "content" && slide.variant === "2col") {
+    // Only show dropzone when visual is configured as image
+    const vtype = (slide.data && slide.data.visual && slide.data.visual.type);
+    if (vtype !== "image") return "";
+    path = `slides.${slideIdx}.data.visual.image.src`;
+    current = (slide.data && slide.data.visual && slide.data.visual.image && slide.data.visual.image.src) || "";
   } else if (slide.layout === "replica") {
     path = `slides.${slideIdx}.data.page_image`;
     current = (slide.data && slide.data.page_image) || "";
@@ -1203,6 +1264,9 @@ function reloadPreview() {
   try {
     hash = iframe.contentWindow ? iframe.contentWindow.location.hash : "";
   } catch (e) { /* cross-origin or not loaded */ }
+  // /preview/* is not token-gated (relative URLs in preview HTML can't
+  // carry tokens, see deck-editor.py do_GET) — Same-Origin Policy + no
+  // CORS allow-origin already blocks cross-origin reads.
   iframe.src = `/preview/index.html?mode=present&t=${Date.now()}${hash}`;
   iframe.addEventListener("load", setupPreviewInPlaceEdit, { once: true });
 }
@@ -1239,17 +1303,18 @@ function textIdToSlidePath(textId) {
   // Single-array structures. Most are a simple "name-NN.<X>" → "names.<NN-1>.<X>".
   // card-NN.title is a naming alias: id says "title", schema says "title_zh".
   const ITEM_TRANSFORMS = [
-    [/^card-(\d+)\.title$/,    (m) => `cards.${dec(m[1])}.title_zh`],
-    [/^card-(\d+)\.(.+)$/,     (m) => `cards.${dec(m[1])}.${m[2]}`],
-    [/^col-(\d+)\.(.+)$/,      (m) => `cols.${dec(m[1])}.${m[2]}`],
-    [/^node-(\d+)\.(.+)$/,     (m) => `nodes.${dec(m[1])}.${m[2]}`],
-    [/^step-(\d+)\.(.+)$/,     (m) => `steps.${dec(m[1])}.${m[2]}`],
-    [/^bar-(\d+)\.(.+)$/,      (m) => `bars.${dec(m[1])}.${m[2]}`],
-    [/^branch-(\d+)\.(.+)$/,   (m) => `branches.${dec(m[1])}.${m[2]}`],
-    [/^head-(\d+)$/,           (m) => `headers.${dec(m[1])}`],
-    [/^item-(\d+)$/,           (m) => `items.${dec(m[1])}.title_zh`],   // agenda
-    [/^pill-(\d+)$/,           (m) => `pills.${dec(m[1])}`],            // section
-    [/^(tl|tr|bl|br)\.(.+)$/,  (m) => `quadrants.${m[1]}.${m[2]}`],     // matrix
+    [/^card-(\d+)\.title$/,          (m) => `cards.${dec(m[1])}.title_zh`],
+    [/^card-(\d+)\.(.+)$/,           (m) => `cards.${dec(m[1])}.${m[2]}`],
+    [/^col-(\d+)\.(.+)$/,            (m) => `cols.${dec(m[1])}.${m[2]}`],
+    [/^node-(\d+)\.(.+)$/,           (m) => `nodes.${dec(m[1])}.${m[2]}`],
+    [/^step-(\d+)\.(.+)$/,           (m) => `steps.${dec(m[1])}.${m[2]}`],
+    [/^bar-(\d+)\.(.+)$/,            (m) => `bars.${dec(m[1])}.${m[2]}`],
+    [/^branch-(\d+)\.(.+)$/,         (m) => `branches.${dec(m[1])}.${m[2]}`],
+    [/^head-(\d+)$/,                 (m) => `headers.${dec(m[1])}`],
+    [/^item-(\d+)$/,                 (m) => `items.${dec(m[1])}.title_zh`],   // agenda
+    [/^pill-(\d+)$/,                 (m) => `pills.${dec(m[1])}`],            // section
+    [/^(tl|tr|bl|br)\.(.+)$/,        (m) => `quadrants.${m[1]}.${m[2]}`],     // matrix
+    [/^text\.feature-(\d+)$/,        (m) => `text.feature_list.${dec(m[1])}`], // content/2col bullets
   ];
   for (const [re, fn] of ITEM_TRANSFORMS) {
     const mm = field.match(re);
@@ -1620,9 +1685,12 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#importDo").addEventListener("click", doImport);
 
   // Wire in-place edit for the initial iframe load too (not just reloads).
+  // Also: set initial src here (not in HTML) so the CSRF token can be
+  // attached — the iframe src goes through the token-gated /preview/* route.
   const initialFrame = $("#previewIframe");
   if (initialFrame) {
     initialFrame.addEventListener("load", setupPreviewInPlaceEdit, { once: true });
+    initialFrame.src = "/preview/index.html?mode=present";
   }
 
   // Global keyboard shortcuts. Skip when typing in input/textarea/select
