@@ -207,6 +207,14 @@
   }
 
   // ── drag-reorder slide-frames ─────────────────────────────────────────
+  // Drop indicator is a horizontal line BETWEEN slides (drop-above /
+  // drop-below class on the hovered target), not an outline AROUND the
+  // target. That way the user sees exactly which gap the slide will land in.
+  function clearDropMarkers() {
+    document.querySelectorAll('.drop-above, .drop-below').forEach((el) => {
+      el.classList.remove('drop-above', 'drop-below');
+    });
+  }
   function onDragStart(e) {
     dragSrc = e.currentTarget;
     dragSrc.classList.add('dragging');
@@ -216,24 +224,31 @@
   }
   function onDragEnd() {
     if (dragSrc) dragSrc.classList.remove('dragging');
-    document.querySelectorAll('.drop-target').forEach((el) => el.classList.remove('drop-target'));
+    clearDropMarkers();
     dragSrc = null;
   }
   function onDragOver(e) {
     if (!dragSrc || e.currentTarget === dragSrc) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    document.querySelectorAll('.drop-target').forEach((el) => el.classList.remove('drop-target'));
-    e.currentTarget.classList.add('drop-target');
+    const target = e.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const above = e.clientY < rect.top + rect.height / 2;
+    clearDropMarkers();
+    target.classList.add(above ? 'drop-above' : 'drop-below');
   }
   function onDrop(e) {
     e.preventDefault();
     if (!dragSrc) return;
     const target = e.currentTarget;
-    if (target === dragSrc) return;
+    if (target === dragSrc) {
+      clearDropMarkers();
+      return;
+    }
     const rect = target.getBoundingClientRect();
     const before = e.clientY < rect.top + rect.height / 2;
     target.parentNode.insertBefore(dragSrc, before ? target : target.nextSibling);
+    clearDropMarkers();
   }
 
   // ── undo stack ─────────────────────────────────────────────────────────
@@ -267,8 +282,8 @@
     clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
     clone.querySelectorAll('[spellcheck]').forEach((el) => el.removeAttribute('spellcheck'));
     clone.querySelectorAll('[draggable]').forEach((el) => el.removeAttribute('draggable'));
-    clone.querySelectorAll('.dragging, .drop-target').forEach((el) => {
-      el.classList.remove('dragging', 'drop-target');
+    clone.querySelectorAll('.dragging, .drop-target, .drop-above, .drop-below').forEach((el) => {
+      el.classList.remove('dragging', 'drop-target', 'drop-above', 'drop-below');
     });
     clone.querySelectorAll('.edit-bar, .edit-toast, .edit-sidebar').forEach((el) => el.remove());
     clone.classList.remove('deck-edit-mode');
@@ -573,21 +588,24 @@
   }
   function onSidebarDragEnd() {
     if (sbDragSrc) sbDragSrc.classList.remove('dragging');
-    document.querySelectorAll('.es-item.drop-target').forEach((el) => el.classList.remove('drop-target'));
+    clearDropMarkers();
     sbDragSrc = null;
   }
   function onSidebarDragOver(e) {
     if (!sbDragSrc || e.currentTarget === sbDragSrc) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    document.querySelectorAll('.es-item.drop-target').forEach((el) => el.classList.remove('drop-target'));
-    e.currentTarget.classList.add('drop-target');
+    const target = e.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const above = e.clientY < rect.top + rect.height / 2;
+    clearDropMarkers();
+    target.classList.add(above ? 'drop-above' : 'drop-below');
   }
   function onSidebarDrop(e) {
     e.preventDefault();
     if (!sbDragSrc) return;
     const target = e.currentTarget;
-    if (target === sbDragSrc) return;
+    if (target === sbDragSrc) { clearDropMarkers(); return; }
     const rect = target.getBoundingClientRect();
     const before = e.clientY < rect.top + rect.height / 2;
     // Move both: the sidebar <li> AND the corresponding .slide-frame
@@ -603,6 +621,7 @@
     [...sidebar.querySelectorAll('.es-item')].forEach((li, i) => {
       li.querySelector('.es-num').textContent = String(i + 1).padStart(2, '0');
     });
+    clearDropMarkers();
   }
 
   function escapeHtml(s) {

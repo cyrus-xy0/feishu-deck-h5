@@ -60,6 +60,7 @@
 
 /* In edit mode: dashed outline on slide-frames to signal draggability */
 body.deck-edit-mode .slide-frame {
+  position: relative;           /* anchor for drop-indicator pseudos */
   outline: 1px dashed rgba(60, 127, 255, 0.35);
   outline-offset: -1px;
   cursor: grab;
@@ -72,10 +73,25 @@ body.deck-edit-mode .slide-frame.dragging {
   opacity: 0.5;
   cursor: grabbing;
 }
-body.deck-edit-mode .slide-frame.drop-target {
-  outline: 2px solid rgba(51, 214, 192, 0.85);
-  outline-offset: -2px;
+/* Insertion-point indicator: a horizontal line in the GAP between two
+ * frames showing exactly where the dragged slide will land. The line sits
+ * just above (drop-above) or just below (drop-below) the hovered frame,
+ * with a centered "↳" badge labelling the gap. */
+body.deck-edit-mode .slide-frame.drop-above::before,
+body.deck-edit-mode .slide-frame.drop-below::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 4px;
+  background: #33D6C0;
+  border-radius: 2px;
+  box-shadow: 0 0 12px rgba(51, 214, 192, 0.85),
+              0 0 0 1px rgba(51, 214, 192, 0.35);
+  z-index: 100;
+  pointer-events: none;
 }
+body.deck-edit-mode .slide-frame.drop-above::before { top: -14px; }
+body.deck-edit-mode .slide-frame.drop-below::after  { bottom: -14px; }
 
 /* Editable text feedback */
 body.deck-edit-mode [contenteditable="true"] {
@@ -183,10 +199,23 @@ body.deck-edit-mode .deck[data-mode="scroll"] {
   border-left-color: var(--fs-blue, #3C7FFF);
 }
 .es-item.dragging { opacity: 0.45; cursor: grabbing; }
-.es-item.drop-target {
-  outline: 2px solid rgba(51, 214, 192, 0.85);
-  outline-offset: -2px;
+/* Sidebar drop indicator — horizontal line in the gap, mirrors the
+ * slide-frame indicator on the main canvas. */
+.es-item.drop-above::before,
+.es-item.drop-below::after {
+  content: '';
+  position: absolute;
+  left: 8px; right: 8px;
+  height: 3px;
+  background: #33D6C0;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(51, 214, 192, 0.75);
+  z-index: 100;
+  pointer-events: none;
 }
+.es-item.drop-above::before { top: -1px; }
+.es-item.drop-below::after  { bottom: -1px; }
+.es-item { position: relative; }     /* anchor for pseudo indicators */
 .es-num {
   color: rgba(255, 255, 255, 0.45);
   font: 600 11px/1 inherit;
