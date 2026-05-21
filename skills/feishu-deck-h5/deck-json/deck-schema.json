@@ -347,8 +347,49 @@
         { "$ref": "#/$defs/block_data_panel" },
         { "$ref": "#/$defs/block_verdict_grid" },
         { "$ref": "#/$defs/block_phone_iframe" },
-        { "$ref": "#/$defs/block_testimonial_card" }
+        { "$ref": "#/$defs/block_testimonial_card" },
+        { "$ref": "#/$defs/block_mockup_card" },
+        { "$ref": "#/$defs/block_persona_card" }
       ]
+    },
+
+    "block_mockup_card": {
+      "description": "UI mockup card · 4 visual kinds (past/now/callout/compare). PPT slide 6. Use inside content/3up.body_blocks or content/blocks to showcase before/after product UI states.",
+      "type": "object",
+      "required": ["type", "kind", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "type":     { "const": "mockup-card" },
+        "kind":     { "enum": ["past", "now", "callout", "compare"], "description": "past=灰底过去态, now=蓝底现状, callout=带箭头/指示线突出, compare=对比左右两栏" },
+        "title":    { "type": "string", "minLength": 1, "description": "Card heading, e.g. '工作协同'." },
+        "body":     { "type": "string", "description": "Card body text. \\n supported." },
+        "label":    { "type": "string", "description": "Top eyebrow label (e.g. '过去' / '现在' / '突出指示')." },
+        "image":    { "type": "string", "description": "Optional UI screenshot path (relative to deck.json dir)." },
+        "compare_pair": {
+          "description": "For kind='compare': left/right pair labels.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "left":  { "type": "string", "minLength": 1 },
+            "right": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+
+    "block_persona_card": {
+      "description": "User persona intro · PPT slide 35. name + role + generation + summary.",
+      "type": "object",
+      "required": ["type", "name", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "type":       { "const": "persona-card" },
+        "name":       { "type": "string", "minLength": 1 },
+        "role":       { "type": "string", "minLength": 1, "description": "Job role, e.g. 'IT 总监'." },
+        "generation": { "type": "string", "description": "Optional generation tag, e.g. '70 后' / '90 后'." },
+        "summary":    { "type": "string", "description": "Optional 1-line description. \\n supported." },
+        "portrait":   { "type": "string", "description": "Optional headshot image path." }
+      }
     },
 
     "block_testimonial_card": {
@@ -560,7 +601,8 @@
       "required": ["chapter_num", "title"],
       "additionalProperties": false,
       "properties": {
-        "chapter_num": { "type": "string", "pattern": "^\\d{2}\\.$", "description": "E.g. '02.' (with trailing period per master spec)." },
+        "chapter_num": { "type": "string", "pattern": "^\\d{2}(?:\\.\\d+)?\\.$", "description": "E.g. '02.' (top-level) or '02.1.' (subsection · PPT layout 3 '二级章节页'). Trailing period required per master spec." },
+        "parent_label": { "type": "string", "description": "Optional parent-chapter label, e.g. '02. 业务挑战 > 02.1 客户视角'. Shown above the title when this is a subsection." },
         "title": { "type": "string", "minLength": 1, "description": "Chapter title. Hero layout — <br>/\\n allowed." },
         "lede":  { "type": "string", "description": "One-line sub-lede." },
         "pills": {
@@ -1023,7 +1065,8 @@
       "additionalProperties": false,
       "properties": {
         "title":   { "type": "string", "description": "Optional, for screen_label only." },
-        "contact": { "type": "string", "description": "Optional contact line, off-master but allowed." }
+        "contact": { "type": "string", "description": "Optional contact line, off-master but allowed." },
+        "slogan":  { "type": "string", "description": "Optional brand slogan, rendered as big closing line below title. Mirrors PPT '封底(带 slogan)' layout master." }
       }
     },
 

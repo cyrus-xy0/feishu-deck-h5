@@ -64,29 +64,31 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 
 ## Schema 一览
 
-### 10 base layouts + 2 specials
+### 12 base layouts + 2 specials
 
 | Layout | Variants | 用于 |
 |---|---|---|
 | `cover` | — | 标题页 |
 | `agenda` | — | 目录 / TOC pills |
-| `section` | — | 章节分隔 + 大编号 |
-| `content` | `3up` / `2col` / `story-case` / `blocks` / `matrix` | 3 卡片 / 左文右图 / 一页纸案例 / 全宽 body / 2×2 矩阵 |
+| `section` | — | 章节分隔 + 大编号(可选 `parent_label` 子章节) |
+| `content` | `3up` / `2col` / `story-case` / `blocks` / `matrix` / **`before-after`** | 3 卡片 / 左文右图 / 一页纸案例 / 全宽 body / 2×2 矩阵 / 痛点-方案对比 |
 | `stats` | `row` / `hero` / `waterfall` | 3-4 KPI 列 / 1 个 hero 数字 / 桥图 |
 | `quote` | — | 客户/专家引言单页 |
 | `image-text` | — | 全屏图片 + 浮层文字 |
 | `table` | — | 对比表格 |
-| `flow` | `timeline` / `process` / `tree` | 时间轴 / 步骤 / MECE 拆解树 |
-| `end` | — | 结束页 |
+| `flow` | `timeline` / `process` / `tree` / **`swim`** | 时间轴 / 步骤 / MECE 拆解树 / 多泳道 roadmap |
+| **`logo-wall`** | — | N 行业 × M 客户 logo 矩阵 |
+| **`arch-stack`** | — | 4 层架构图(应用/平台/AI/数据底座) |
+| `end` | — | 结束页(可选 `slogan` 字段) |
 | **specials** | | |
 | `replica` | — | 全屏 PDF 页图 |
 | `raw` | — | 单页 HTML 自由发挥(escape hatch) |
 
-= **10 base + 2 specials = 12 layout enum values**。多 variant 层叠出 **18 个实际可用版式**。
+= **12 base + 2 specials = 14 layout enum values**。多 variant 层叠出 **~20 个实际可用版式**。
 
-**10-base 不变量是有意的** — 加新 pattern 优先考虑做 existing layout 的 variant,只有结构性完全不同才加新 base。见 MIGRATION-REPORT.md Phase 0.2 的 4-proposal 评估过程。
+**12-base 不变量** — 加新 pattern 优先考虑做 existing layout 的 variant,只有结构性完全不同才加新 base。见 MIGRATION-REPORT.md 各 Phase 评估过程。
 
-### 7 个 embeddable blocks
+### 10 个 embeddable blocks
 
 可嵌入到 `content/3up.body_blocks[]` / `content/2col.text.body_blocks[]` / `content/blocks.body_blocks[]`:
 
@@ -99,6 +101,9 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 | `verdict-grid` | 判断卡 (go/conditional/nogo) | cards[] |
 | `phone-iframe` | 手机预览(嵌 iframe) | iframe_src |
 | `principle-band` | 三色策略原则 | principles[] |
+| **`testimonial-card`** | 客户证言(姓名+职位+引言+头像+logo) | name, title, quote |
+| **`mockup-card`** | UI mockup 4 风格(past/now/callout/compare) | kind, title |
+| **`persona-card`** | 用户画像(姓名+角色+世代+简介) | name, role |
 
 字段精确定义见 [`deck-schema.json`](./deck-schema.json) `$defs/block_*`。
 
@@ -141,6 +146,7 @@ triple-gate 序: 任何一道 fail → 整体失败 → backup 恢复。
 | Phase | 内容 | 状态 |
 |---|---|---|
 | **0** | 10 base layouts + 7 blocks + schema + validator + sample-deck | ✅ shipped |
+| **0.3 实施** | logo-wall + arch-stack + content/before-after + flow/swim + 3 blocks(testimonial/mockup/persona) + deck-level title_style+logo_position | ✅ shipped (Phase 0.3 评估时定的 4 layout 全落地) |
 | **0.1** | embeddable block 5→7 (加 `verdict-grid`, `phone-iframe`) | ✅ shipped |
 | **0.2** | proposal-mvw.json 4 个 consulting 模式 (matrix/exec-summary/waterfall/tree) → variant 扩展通过 | ✅ shipped |
 | **0.3** | 评估剩 4 proposal (arch-stack / logo-wall / roadmap-swim / before-after) | 📝 评估完毕(见 MIGRATION-REPORT.md),实施暂缓 |

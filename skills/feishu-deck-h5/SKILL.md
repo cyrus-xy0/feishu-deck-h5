@@ -340,7 +340,7 @@ are non-persistent and equally broken for this skill's purpose.
 
 | Path | When | What you write | What renders |
 |---|---|---|---|
-| **A · DeckJSON-first** *(RECOMMENDED, default)* | The deck fits one of the 12 layouts in `deck-json/deck-schema.json` (10 base + 2 specials) — covers ~95% of real decks | `runs/<ts>/output/deck.json` per schema | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + texts.md + assets/` automatically |
+| **A · DeckJSON-first** *(RECOMMENDED, default)* | The deck fits one of the 14 layouts in `deck-json/deck-schema.json` (12 base + 2 specials) — covers ~95% of real decks | `runs/<ts>/output/deck.json` per schema | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + texts.md + assets/` automatically |
 | **B · Raw HTML authoring** *(legacy / escape hatch)* | A pattern genuinely doesn't fit any schema layout AND can't be expressed as `raw` block embed | Hand-author `index.html` per the R02 / R06 / R20 / L1-L4 / BF1-BF12 rules below | Skill's existing `validate.py` HARD GATE before delivery |
 
 **Why Path A is the default**:
@@ -424,18 +424,22 @@ Use DeckJSON whenever the deck consists of slides matching any of:
 |---|---|---|
 | `cover` | — | Title page |
 | `agenda` | — | TOC, pill stack |
-| `section` | — | Chapter divider with big numeral |
-| `content` | `3up` / `2col` / `story-case` / `blocks` / `matrix` | 3 cards / 左文右图 / 一页纸案例 / 全宽 body / 2×2 矩阵 |
+| `section` | — | Chapter divider with big numeral (optional `parent_label` for subsection) |
+| `content` | `3up` / `2col` / `story-case` / `blocks` / `matrix` / `before-after` | 3 cards / 左文右图 / 一页纸案例 / 全宽 body / 2×2 矩阵 / 痛点→解决方案对比 |
 | `stats` | `row` / `hero` / `waterfall` | 3-4 KPI row / 1 hero number / 桥图 |
 | `quote` | — | Single customer quote |
 | `image-text` | — | Full-bleed photo + overlay text |
 | `table` | — | Comparison matrix |
-| `flow` | `timeline` / `process` / `tree` | Roadmap / steps / MECE issue tree |
-| `end` | — | Closing slide |
+| `flow` | `timeline` / `process` / `tree` / `swim` | Timeline / process steps / MECE tree / multi-lane roadmap |
+| `logo-wall` | — | N industries × M client-logo grid |
+| `arch-stack` | — | 2-5 layer architecture diagram (apps / platform / AI / data) |
+| `end` | — | Closing slide (optional `slogan` for branded sign-off) |
 | `replica` | — | PDF page-as-image (for PDF→HTML conversion) |
 | `raw` | — | Escape hatch for one-off custom slides |
 
-Plus 7 embeddable blocks (pullquote / cta-box / kpi-strip / data-panel / principle-band / verdict-grid / phone-iframe) that compose inside `content/3up` / `content/2col` / `content/blocks`.
+Plus 10 embeddable blocks (pullquote / cta-box / kpi-strip / data-panel / principle-band / verdict-grid / phone-iframe / testimonial-card / mockup-card / persona-card) that compose inside `content/3up` / `content/2col` / `content/blocks`.
+
+Deck-level theme: `deck.title_style` (4 styles · center-single/center-double/left-double/left) × `deck.logo_position` (front/back) = 8 master-variant combinations. Per-slide override via `slide.title_style` / `slide.logo_position`.
 
 **Full schema + field reference**: `deck-json/deck-schema.json`
 **Worked examples**: `deck-json/examples/sample-deck.json` (14 slides, every layout)

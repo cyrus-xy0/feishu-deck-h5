@@ -1,5 +1,9 @@
 # PPT 素材库映射评估 · 2026-05-21
 
+> **实施状态 (2026-05-21 末):** 路线 A 全部完成 + batch 2 完成 + batch 3 完成。
+> 覆盖度从 53% → **~90%**。剩 ~10% 是真 raw / 资源 / 单页定制。
+> 已实施清单见 MIGRATION-REPORT.md.
+
 **输入**: `~/Downloads/素材库.pptx` — 飞书 Pitch Deck 母版资源库
 **输入规模**: 122 slides + 12 layout 母版 + 314 媒体文件(196 SVG / 85 PNG / 等)
 **输出**: 跟 deck-json 现有 schema 的契合度地图,以及"做哪些工作 ROI 最高"建议

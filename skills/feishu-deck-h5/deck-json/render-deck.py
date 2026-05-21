@@ -298,6 +298,59 @@ def _enrich_principle_band(block):
     block["principles_html"] = "\n".join(parts)
 
 
+def _enrich_mockup_card(block):
+    """mockup-card — UI mockup card · 4 kinds (past/now/callout/compare).
+    Kind gets a CSS class modifier; optional fields (image, label,
+    compare_pair) gate their respective HTML chunks."""
+    kind = block.get("kind", "now")
+    block["kind_modifier"] = f" is-{kind}"
+    block["label_html"] = (
+        f'              <div class="eyebrow">{_esc_br(block.get("label", ""))}</div>'
+        if block.get("label") else ""
+    )
+    body = block.get("body")
+    block["body_html"] = (
+        f'              <p class="body">{_esc_br(body)}</p>' if body else ""
+    )
+    img = block.get("image")
+    block["image_html"] = (
+        f'              <div class="ui-shot" '
+        f'style="background-image:url(\'{img}\')"></div>'
+        if img else ""
+    )
+    cp = block.get("compare_pair") or {}
+    if kind == "compare" and cp:
+        block["compare_html"] = (
+            f'              <div class="compare-pair">'
+            f'<span class="left">{_esc_br(cp.get("left", ""))}</span>'
+            f'<span class="vs">vs</span>'
+            f'<span class="right">{_esc_br(cp.get("right", ""))}</span>'
+            f'</div>'
+        )
+    else:
+        block["compare_html"] = ""
+
+
+def _enrich_persona_card(block):
+    """persona-card — name + role + generation + summary + optional portrait."""
+    gen = block.get("generation")
+    block["generation_html"] = (
+        f'              <span class="generation">{_esc_br(gen)}</span>'
+        if gen else ""
+    )
+    summary = block.get("summary")
+    block["summary_html"] = (
+        f'              <p class="summary">{_esc_br(summary)}</p>'
+        if summary else ""
+    )
+    portrait = block.get("portrait")
+    block["portrait_html"] = (
+        f'              <div class="portrait" '
+        f'style="background-image:url(\'{portrait}\')"></div>'
+        if portrait else ""
+    )
+
+
 def _enrich_testimonial_card(block):
     """testimonial-card — customer testimonial with name/title/quote + optional
     portrait + company_logo. block.get("_block_path") is used by render_slide
@@ -338,6 +391,8 @@ BLOCK_ENRICHERS = {
     "verdict-grid":     _enrich_verdict_grid,
     "phone-iframe":     _enrich_phone_iframe,
     "testimonial-card": _enrich_testimonial_card,
+    "mockup-card":      _enrich_mockup_card,
+    "persona-card":     _enrich_persona_card,
     "principle-band": _enrich_principle_band,
 }
 
@@ -601,13 +656,23 @@ def _render_visual(visual, slide_no_padded):
 
 
 def _enrich_end(ctx, slide):
+    snp = ctx["slide_no_padded"]
     ctx["contact_html"] = _optional_text_node(
-        ctx.get("contact"), ctx["slide_no_padded"], "contact",
+        ctx.get("contact"), snp, "contact",
         tag="div", classes="contact", indent="        ")
+    # Optional slogan — mirrors PPT '封底(带 slogan)' layout master.
+    ctx["slogan_html"] = _optional_text_node(
+        ctx.get("slogan"), snp, "slogan",
+        tag="div", classes="slogan", indent="        ")
 
 
 def _enrich_section(ctx, slide):
     snp = ctx["slide_no_padded"]
+    # Optional parent_label — when present, marks this as a subsection
+    # (PPT layout 3 '二级章节页'). Renders above the title.
+    ctx["parent_label_html"] = _optional_text_node(
+        ctx.get("parent_label"), snp, "parent_label",
+        tag="div", classes="parent-label", indent="        ")
     ctx["lede_html"] = _optional_text_node(
         ctx.get("lede"), snp, "lede", classes="lede", indent="        ")
 
