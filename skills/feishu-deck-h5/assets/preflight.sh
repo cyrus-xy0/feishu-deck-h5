@@ -67,6 +67,7 @@ REQUIRED=(
   "assets/feishu-deck.css"
   "assets/feishu-deck.js"
   "assets/validate.py"
+  "assets/visual-audit.js"
   "assets/lark-logo.png"
   "assets/lark-cover-bg.jpg"
   "_body.partial.html"
@@ -242,6 +243,23 @@ if command -v git >/dev/null 2>&1 && [ -d "$SKILL_ROOT/.git" ]; then
         echo "  (cached result, refreshes every 24h; set FS_DECK_NOCACHE=1 to force)"
       fi
     fi
+  fi
+fi
+
+# ---- Check 6: visual-audit.js syntax (gate before Playwright runs) ----
+# 2026-05-24 · audit JS was extracted from validate.py r"""...""" string.
+# Catch syntax errors at preflight time, not 30s later inside Chromium.
+# `node --check` is a parse-only check (no execution), takes ~50ms.
+# Skip silently if node isn't installed — the audit still works via
+# Playwright (which has its own JS engine), the gate is just a nice-to-have.
+if command -v node >/dev/null 2>&1; then
+  if ! node --check "$SKILL_ROOT/assets/visual-audit.js" >/dev/null 2>&1; then
+    echo "PREFLIGHT FAIL · exit 4 · visual-audit.js has JS syntax errors"
+    echo
+    echo "  Run for details:"
+    echo "    node --check $SKILL_ROOT/assets/visual-audit.js"
+    echo
+    exit 4
   fi
 fi
 

@@ -25,7 +25,7 @@ Usage:
 """
 
 import argparse
-import re
+import json
 import subprocess
 import sys
 from collections import defaultdict
@@ -46,13 +46,6 @@ VALIDATOR = SKILL_ROOT / 'assets' / 'validate.py'
 DEFAULT_FIXTURES = SKILL_ROOT / 'tests' / 'regression-fixtures.yaml'
 
 
-# Parses lines like:
-#   ✗ [R-VIS-LABEL-FLOOR] slide 9 · card `article.script-card.is-orange` ...
-AUDIT_LINE = re.compile(
-    r'[✗!]\s+\[(?P<rule>[A-Z0-9][\w-]*)\]\s+slide\s+(?P<slide>\d+)\b[^\n]*'
-)
-
-
 def load_fixtures(path: Path) -> list:
     with path.open() as fh:
         data = yaml.safe_load(fh)
@@ -61,33 +54,48 @@ def load_fixtures(path: Path) -> list:
     return data['fixtures']
 
 
-def run_validator(deck: Path) -> str:
-    """Run validate.py --visual on the deck; return combined stdout+stderr.
+def run_validator(deck: Path) -> dict:
+    """Run validate.py --visual --json on the deck; return parsed JSON payload.
 
     Timeout 420s — handles 50-slide decks comfortably.
+
+    Uses --json since 2026-05-24 (previously regex-parsed human-readable
+    stdout, which silently broke whenever the output format was tweaked).
     """
     if not deck.exists():
         raise FileNotFoundError(f'deck not found: {deck}')
     proc = subprocess.run(
-        ['python3', str(VALIDATOR), str(deck), '--visual'],
+        ['python3', str(VALIDATOR), str(deck), '--visual', '--json'],
         capture_output=True, text=True, timeout=420,
     )
-    return proc.stdout + proc.stderr
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        # Surface the first non-JSON line — usually a Python traceback
+        first_line = next((l for l in proc.stdout.split('\n') if l.strip()), '')
+        raise SystemExit(
+            f'FATAL: validator --json did not return JSON for {deck}\n'
+            f'  first stdout line: {first_line[:120]}\n'
+            f'  stderr (tail):     {proc.stderr[-300:].strip()}\n'
+            f'  parse error:       {e}'
+        )
 
 
-def parse_audit_hits(output: str) -> dict:
-    """Return { (rule_code, slide_idx): [full_line, ...] } from validator output.
+def parse_audit_hits(payload: dict) -> dict:
+    """Return { (rule_code, slide_idx): [issue_dict, ...] } from JSON payload.
 
-    The full_line is kept so selector_hint matching can scan it.
+    Each issue_dict has keys: code, severity, msg, slide, selector_hint.
+    Errors and warnings are merged — the fixture's audit-code lookup
+    doesn't care about severity (an audit that fires as 'warn' still
+    proves coverage).
     """
     hits = defaultdict(list)
-    for line in output.split('\n'):
-        m = AUDIT_LINE.search(line)
-        if not m:
+    for item in payload.get('errors', []) + payload.get('warnings', []):
+        code = item.get('code')
+        slide = item.get('slide')
+        if code is None or slide is None:
             continue
-        rule = m.group('rule')
-        slide = int(m.group('slide'))
-        hits[(rule, slide)].append(line.strip())
+        hits[(code, int(slide))].append(item)
     return hits
 
 
@@ -100,12 +108,21 @@ def evaluate_fixture(fixture: dict, hits: dict) -> tuple:
 
     matches = hits.get((rule, slide), [])
     if hint:
-        matches = [m for m in matches if hint in m]
+        # Match against selector_hint OR raw message (some audits put
+        # the discriminating substring in msg body, not the backtick token)
+        matches = [
+            m for m in matches
+            if (m.get('selector_hint') and hint in m['selector_hint'])
+            or hint in m.get('msg', '')
+        ]
+
+    def _sample(m):
+        body = m.get('msg', '')[:120]
+        return f'[{m.get("code")}] {body}' + ('...' if len(m.get('msg', '')) > 120 else '')
 
     if typ == 'must_fire':
         if matches:
-            sample = matches[0][:140] + ('...' if len(matches[0]) > 140 else '')
-            return True, f'{len(matches)} hit(s); sample: {sample}'
+            return True, f'{len(matches)} hit(s); sample: {_sample(matches[0])}'
         return False, (
             f'expected {rule} to fire on slide {slide}'
             + (f' with selector containing `{hint}`' if hint else '')
@@ -114,11 +131,10 @@ def evaluate_fixture(fixture: dict, hits: dict) -> tuple:
     if typ == 'must_not_fire':
         if not matches:
             return True, f'no {rule} hits on slide {slide} (as expected)'
-        sample = matches[0][:140] + ('...' if len(matches[0]) > 140 else '')
         return False, (
             f'expected {rule} to NOT fire on slide {slide}'
             + (f' with selector containing `{hint}`' if hint else '')
-            + f' — got {len(matches)} hit(s); sample: {sample}'
+            + f' — got {len(matches)} hit(s); sample: {_sample(matches[0])}'
         )
     return False, f'unknown fixture type `{typ}` (must_fire | must_not_fire)'
 
@@ -146,7 +162,7 @@ def main():
         deck_path = REPO_ROOT / deck_rel
         print(f'== {deck_rel}  ({len(deck_fixtures)} fixtures) ==')
         try:
-            output = run_validator(deck_path)
+            payload = run_validator(deck_path)
         except FileNotFoundError as e:
             print(f'  ✗ DECK MISSING — {e}')
             fail_count += len(deck_fixtures)
@@ -155,7 +171,7 @@ def main():
             print('  ✗ VALIDATOR TIMEOUT (>420s) — visual audit likely stuck')
             fail_count += len(deck_fixtures)
             continue
-        hits = parse_audit_hits(output)
+        hits = parse_audit_hits(payload)
         for fx in deck_fixtures:
             ok, reason = evaluate_fixture(fx, hits)
             mark = '✓' if ok else '✗'

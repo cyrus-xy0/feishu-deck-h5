@@ -1115,21 +1115,57 @@ removal operations without surfacing exactly what was being lost. Slide-
 level deletion is in the same risk tier as `git push --force` or
 `rm -rf` — destructive on shared, slow-to-reproduce work.
 
-### Backup naming convention
+### Backup helper: `bak-and-log.sh` (recommended)
+
+Use the shipped helper instead of hand-rolling `cp` + filename — it
+backs up, logs the change to `CHANGES.md`, AND prunes old backups so
+the output dir doesn't accumulate 50+ stale `.bak` files:
+
+```bash
+bash skills/feishu-deck-h5/assets/bak-and-log.sh \
+    <file> <short-tag> "<one-line description>"
+```
+
+Example:
+
+```bash
+bash skills/feishu-deck-h5/assets/bak-and-log.sh \
+    runs/<ts>/output/index.html delete-slide-7 \
+    "Drop slide 7 (taste-shifts-3pains, redundant with slide 8)"
+```
+
+Effects:
+- Creates `<file>.bak-pre-<tag>-<YYYYMMDD-HHMMSS>` (`.N` suffix if
+  same-second collision)
+- Prepends an entry to `<dir>/CHANGES.md` (creates if absent)
+- Prunes `.bak-pre-<tag>-*` keeping only the **3 most recent** per
+  (file, tag) pair — different tags get separate retention slots
+
+Tags scope retention. Use one tag per edit class (`delete-slide-7`,
+`iframe-fix`, `p20-rewrite`) so unrelated edits don't compete for the
+3-slot quota.
+
+For paired files (`index.html` + `texts.md`), run the helper TWICE
+with the SAME tag and similar descriptions — both files get backed
+up under the same retention slot, and both edits get one CHANGES.md
+entry per call (consider consolidating description in the second
+call: "(paired with index.html backup above)").
+
+### Backup naming convention (legacy, prefer the helper above)
+
+If you must hand-roll without the helper, follow the format the
+helper produces so retention logic still recognises the files:
 
 ```
-<file>.bak-pre-delete-<YYYYMMDD-HHMMSS>
+<file>.bak-pre-<short-tag>-<YYYYMMDD-HHMMSS>
 ```
 
 Examples:
-- `runs/20260518-151159-tongrentang/output/index.html.bak-pre-delete-20260518-160000`
-- `runs/20260518-151159-tongrentang/output/texts.md.bak-pre-delete-20260518-160000`
+- `runs/.../output/index.html.bak-pre-delete-slide-7-20260518-160000`
+- `runs/.../output/texts.md.bak-pre-delete-slide-7-20260518-160000`
 
-Both `index.html` and `texts.md` (if it exists) MUST be backed up
-together — they form a paired editing unit. If the user accepts the
-default, the agent creates both `.bak-pre-delete-*` files in the same
-`output/` folder. The user can move them elsewhere later; default is
-in-place so they're easy to discover and roll back from.
+Without the helper you don't get the CHANGES.md entry or pruning —
+which is how the historical 53-bak pile-up happened. Use the helper.
 
 ---
 
