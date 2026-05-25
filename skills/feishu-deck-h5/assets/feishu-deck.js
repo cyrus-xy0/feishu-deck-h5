@@ -180,6 +180,26 @@
     // first-frame fallback so the cover cannot bleed through later fades.
     deck.setAttribute('data-js-ready', '');
 
+    // ---- Restart slide media on enter + fs-slide-enter/leave events ----
+    // One observer covers EVERY .is-current toggle path: present-mode goTo,
+    // hash nav, prev/next buttons, AND the mobile patch's direct toggles
+    // (separate IIFE below). Initial pass pauses hidden autoplay videos and
+    // starts the current slide's video.
+    const mediaState = frames.map((f) => f.classList.contains('is-current'));
+    frames.forEach((f, i) => syncFrameMedia(f, mediaState[i]));
+    const mediaObserver = new MutationObserver((muts) => {
+      for (const m of muts) {
+        const i = frames.indexOf(m.target);
+        if (i < 0) continue;
+        const now = m.target.classList.contains('is-current');
+        if (now === mediaState[i]) continue;   // class changed but is-current didn't
+        mediaState[i] = now;
+        syncFrameMedia(m.target, now);
+      }
+    });
+    frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
+    signal.addEventListener('abort', () => mediaObserver.disconnect());
+
     // ---- Auto-idle (chrome fades after 2.5s of no input) ----
     let idleTimer;
     function nudgeIdle() {
@@ -291,6 +311,38 @@
       if (frames[i].classList.contains('is-current')) return i;
     }
     return 0;
+  }
+
+  // Restart-on-enter for slide media (2026-05-24).
+  // Present mode keeps EVERY slide in the DOM at once, so a <video autoplay
+  // loop> starts on page load while its slide is still hidden and is mid-loop
+  // by the time the presenter navigates to it. Entering a frame resets its
+  // <video>s to the start (and plays them if marked autoplay); leaving a
+  // frame pauses them. Also fires fs-slide-enter / fs-slide-leave on the
+  // .slide so CSS-keyframe decks can re-trigger animations on revisit.
+  // Opt out per element with data-no-restart. Driven by a single
+  // MutationObserver on frame .class (see init) so it catches every nav path.
+  function syncFrameMedia(frame, isCurrent) {
+    if (!frame) return;
+    const slide = frame.querySelector('.slide');
+    const vids = frame.querySelectorAll('video');
+    if (isCurrent) {
+      vids.forEach((v) => {
+        if (v.hasAttribute('data-no-restart')) return;
+        try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
+        if (v.autoplay) {
+          const p = v.play();
+          if (p && p.catch) p.catch(() => {});   // ignore autoplay-policy rejection
+        }
+      });
+      if (slide) slide.dispatchEvent(new CustomEvent('fs-slide-enter', { bubbles: true }));
+    } else {
+      vids.forEach((v) => {
+        if (v.hasAttribute('data-no-restart')) return;
+        try { v.pause(); } catch (e) { /* noop */ }
+      });
+      if (slide) slide.dispatchEvent(new CustomEvent('fs-slide-leave', { bubbles: true }));
+    }
   }
 
   function goTo(deck, frames, idx, updateHash) {
