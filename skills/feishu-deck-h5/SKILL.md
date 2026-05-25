@@ -191,7 +191,7 @@ Either dump it in the chat (default) or write to a file the user names.
 | 演示模式 / 运行时 | R29-32 | `.deck-progress`, `.deck-controls`, prev/next/fs buttons, `requestFullscreen`, `fullscreenchange`, idle fade |
 | texts.md 联动 | T00 / T01 / T02 / T03 | data-text-id present; valid `slide-NN.field` shape; unique; paired `texts.md` synced |
 | 性能预算 | P50-P55 | base64 budget; blur radius; single ResizeObserver; AbortController; GPU layers |
-| 视觉 (Playwright, default-on since 2026-05-18) | R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-BODY-FLOOR / R-VIS-ALIGN / **R-VIS-ABSPOS-DUAL-ANCHOR** | canvas overflow; **sibling bbox overlap** (catches "column bleeds into legend" — internal overlap within canvas); computed `fontSize` on ladder; meta ≤ body; **renderer-aware body-content < 24 px detection** (R-VIS-BODY-FLOOR · 2026-05-19 · catches ambiguous short class names like `.rt` / `.d` / `.ind-tag` that pass static R20/R06 because 16 is on the ladder and short class names match neither chrome nor body heuristic — checks actual rendered fontSize + ≥ 8 chars of direct text + not inside mockup containers; opt out per element with `data-allow-body-floor`); grid-children equal height; **dual-anchor pill stretch** (R-VIS-ABSPOS-DUAL-ANCHOR · 2026-05-23 · catches the cascade footgun where an override declares `top:` on a `position: absolute` chrome element without resetting an inherited `bottom:`, so the pill / badge / hint stretches to most of the parent height — see BF14 below; mutation-tests every absolutely-positioned non-layout-container element by temporarily setting `style.bottom = 'auto'` and checking if height collapses; layout shells like `.stage / .stack / .iframe-wrap / .panel` are excluded by class denylist; opt-out per element with `data-allow-dual-anchor`). ~2 s overhead. Use `--no-visual` to skip (CI without Chromium); gracefully skips if playwright is not installed |
+| 视觉 (Playwright, default-on since 2026-05-18) | R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-BODY-FLOOR / R-VIS-ALIGN / **R-VIS-ABSPOS-DUAL-ANCHOR** / **R-VIS-ORPHAN** | canvas overflow; **sibling bbox overlap** (catches "column bleeds into legend" — internal overlap within canvas); computed `fontSize` on ladder; meta ≤ body; **renderer-aware body-content < 24 px detection** (R-VIS-BODY-FLOOR · 2026-05-19 · catches ambiguous short class names like `.rt` / `.d` / `.ind-tag` that pass static R20/R06 because 16 is on the ladder and short class names match neither chrome nor body heuristic — checks actual rendered fontSize + ≥ 8 chars of direct text + not inside mockup containers; opt out per element with `data-allow-body-floor`); grid-children equal height; **dual-anchor pill stretch** (R-VIS-ABSPOS-DUAL-ANCHOR · 2026-05-23 · catches the cascade footgun where an override declares `top:` on a `position: absolute` chrome element without resetting an inherited `bottom:`, so the pill / badge / hint stretches to most of the parent height — see BF14 below; mutation-tests every absolutely-positioned non-layout-container element by temporarily setting `style.bottom = 'auto'` and checking if height collapses; layout shells like `.stage / .stack / .iframe-wrap / .panel` are excluded by class denylist; opt-out per element with `data-allow-dual-anchor`); **CJK orphan / 上长下短 wrap** (R-VIS-ORPHAN · 2026-05-25 · WARN · CJK leaf text wrapping to a lonely ~1-char last line, or a short ≤14-CJK label whose last line < 38% of the widest — the residue `text-wrap: balance` can't fix in fixed-width / `<br>`-broken containers; skips block-child sub-labels / SVG / mockup / nowrap; deck slides only, not iframe prototypes — see "CJK 换行平衡 / 末行孤字防治"). ~2 s overhead. Use `--no-visual` to skip (CI without Chromium); gracefully skips if playwright is not installed |
 | 交付物附件 | R-FEEDBACK | `FEEDBACK.md` sidecar present (relevant ONLY for new-run flow) |
 
 When the user asks "what does [Rxx] mean", look up the rule in `validate.py`
@@ -6424,6 +6424,43 @@ item below has bitten us before:
    timestamp chrome. Without it the prototype receives clicks but nothing
    happens — and the user thinks the prototype is broken.
 
+8. **JSX / React prototypes MUST be pre-compiled — never Babel-runtime on
+   `file://`.** A prototype whose `index.html` uses
+   `<script type="text/babel" src="app.jsx">` + a CDN `@babel/standalone`
+   renders **completely BLANK when the deck is opened via `file://`** (the
+   normal way the user views a deck). Two reasons, either fatal:
+   - Babel-standalone fetches each `.jsx` via XHR; on `file://` the browser
+     blocks that as a cross-origin request (origin is `null`) → the JSX
+     never transpiles → empty `#root`.
+   - The CDN `<script src="https://unpkg.com/...">` needs live internet; an
+     offline presentation gets nothing.
+
+   **Symptom**: the slide shows the title + the iframe's bordered frame, but
+   the frame is empty/black. The screenshot looks like a hollow box. Check
+   the prototype's `index.html` for `type="text/babel"` and `unpkg.com`/CDN
+   `src`s — that combination is the tell.
+
+   **Fix (make it self-contained + file://-safe + offline)**:
+   1. Pre-transpile every `.jsx` → plain `.js`. Babel-standalone runs fine in
+      Node: `global.Babel = require('./babel.min.js');
+      Babel.transform(src, { presets: ['react'] }).code`. Also transpile any
+      inline `<script type="text/babel">` boot block.
+   2. Vendor `react` + `react-dom` locally (`vendor/*.production.min.js`,
+      ~140 KB total) instead of unpkg.
+   3. Rewrite `index.html` so every script is a plain local
+      `<script src="vendor/react.min.js">` / `<script src="compiled/app.js">`
+      — no `type="text/babel"`, no CDN, no runtime Babel (drop the ~3 MB
+      `babel.min.js` from the runtime entirely).
+   4. Keep the `.jsx` as source; regenerate `compiled/*.js` whenever you edit
+      one (and remember the rendered text now comes from `compiled/*.js`, so
+      a copy change means: edit `.jsx` → recompile → the `.js` updates).
+
+   Regular `<script src="x.js">` (and `data.js`, plain CSS `<link>`) load fine
+   on `file://` — only Babel's XHR fetch of `.jsx` is blocked. So the cure is
+   to remove JSX-at-runtime, not to inline cleverly. (Surfaced 2026-05-25 on
+   the kangshifu `dealer-five-maps` five-maps demo — it shipped Babel-runtime
+   and was blank on `file://`.)
+
 ---
 
 ## Narrative patterns (DESIGN.md §9 — A through K)
@@ -7094,6 +7131,68 @@ keep its position across slide visits — rare).
 Decks that shipped their OWN `output/assets/feishu-deck.js` (copy-assets
 snapshot) or are already published (e.g. `feishusolution/<deck>/assets/`)
 keep their old copy until re-run through `copy-assets.py` / re-deployed.
+
+---
+
+## CJK 换行平衡 / 末行孤字防治 (2026-05-25)
+
+**Problem**: CJK 文本换行后,末行只剩一两个字("市场传媒"→市场/传媒、
+"渠道适配感知"→渠道适配感/知),或两行上长下短(第一行很长、第二行很短)。
+投影上很碎、不像一个整体。用户明确不接受这种孤字/失衡。
+
+**两层防护:预防(CSS) + 检测(validator),不是二选一。**
+
+### 1 · 预防 — `text-wrap: balance`(框架已默认开一批)
+
+`feishu-deck.css` 有一条 **skill-level baseline**(`/* text-wrap baseline */`),
+给常见标题/卡名类(`.ctitle / .card-name / .role-name / .ns-card h4 /
+.scene-card .sc-name / .feat-label / .bot-name / .arch-label / .dir-name`)
+开了 `text-wrap: balance`。balance 让换行后各行字数尽量相等,把 5+1 重排成
+3+3,孤字自然消失,**纯 CSS、零 JS、零成本**。
+
+- 如果某页用的是 **deck 专有类**(渲染器/手写产生的 `.meta-value / .slogan /
+  `.ctx / .ts-time` 之类),baseline 没覆盖到 → 在该 deck 的 `<style>` 里补一条
+  `.deck .slide-frame .slide :is(.类A,.类B) { text-wrap: balance; }` 即可。
+- **balance 的硬限制(必须知道)**:
+  - 元素里有 `<br>` 强制换行 → **balance 整体失效**(Chromium 行为)。别在会
+    换行的标签里用 `<br>` 拼副标题;要副标题就用 `display:block` 子元素。
+  - 容器是**固定宽 / 被 flex 夹窄**且文本本身就超出可用宽 → balance 也救不了
+    (它只能重排、不能变出空间)。
+
+### 2 · 检测 — `R-VIS-ORPHAN`(`--visual`,WARN)
+
+`visual-audit.js` + `validate.py` 新增 `R-VIS-ORPHAN`:present 模式下用 Range
+量每个 CJK 叶子文本元素的行盒,命中两类:
+
+- **orphan**:换 ≥2 行且末行 ≤ ~1.45 字宽(末行单字)。
+- **imbalanced**:短标签/标题(CJK ≤ 14 字)换 2-3 行,且末行 < 最宽行的 38%。
+
+**跳过**(避免误报):有 block 级子元素的(`.role` 这类故意拆行的副标)、SVG
+`<text>`、mockup 容器内文字、`white-space: nowrap` 的。**只审 deck slide
+本身——`<iframe>` 里的原型是独立文档,审计够不着**(原型要手改,见下)。
+长正文 2 行末行天然短,不算缺陷,已被 CJK≤14 闸挡掉。
+
+### 3 · 被 R-VIS-ORPHAN 点名后的修复阶梯
+
+1. **该类没 balance** → 加 `text-wrap: balance`(报告里 `bal != 'balance'` 即此情形;
+   若加了仍不生效,多半被更具体的选择器/另一条 `!important` 压住,提级覆盖)。
+2. **已 balance 仍孤字 = 容器约束**(报告里 `bal == 'balance'`):
+   - 首选**加宽容器**。例:`senior-tour-leader-day` 时间轴首列固定 `200px`,
+     最长活动名 "下午拜访 · 收单回办公室" 18px 要 206px、内容区只有 178px →
+     必溢出。把 `grid-template-columns: 200px 1fr 1fr` 改成 `236px 1fr 1fr`
+     就全单行了。**别靠缩字号**:缩字号只是把溢出在各行间搬家(whack-a-mole,
+     这行修好那行又冒),且常踩 R20/R-VIS-TIER 的 off-tier。
+   - ≤4 字主标签放不下 → `white-space: nowrap` 逼单行 + 把尾词用 `display:block`
+     拆成副标行(见原型例子)。
+   - 实在无解再考虑改文案让上下两行字数接近(内容是甲方的,慎改)。
+
+### 4 · 原型 `<iframe>` 里的标签(检测够不着,手动按同款规则)
+
+原型是独立 HTML,R-VIS-ORPHAN 审不到,得手写时就避坑。典型:`sps-coord-pain`
+原型的 `.hub-node`(固定 148px,内含 avatar + `.hub-label`)里 "市场传媒" 4 字
+被 avatar 挤到换行。修法 = 同款阶梯:**缩小 avatar 腾宽 + 主标签 `white-space:
+nowrap` 逼单行**(`.role`"企划"本就 `display:block` 落副标行),量出可用宽再定
+字号(量 → 定 → 验,别拍脑袋)。
 
 ---
 

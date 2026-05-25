@@ -8,7 +8,7 @@
 //   { overflow: [...], tier: [...], hier: [...], align: [...],
 //     label_floor: [...], overlap: [...], body_floor: [...],
 //     card_overflow: [...], opt_out_abuse: [...],
-//     title_position: [...], abspos_dual_anchor: [...] }
+//     title_position: [...], abspos_dual_anchor: [...], orphan: [...] }
 //
 // Why on disk (not embedded in validate.py): JS in a Python r"""..."""
 // string is invisible to syntax highlight, gets no `node --check`,
@@ -131,7 +131,7 @@
     return false;
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [] };
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [] };
   const slides = document.querySelectorAll('.slide');
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
@@ -643,6 +643,65 @@
         actual_h: Math.round(h1),
         content_h: Math.round(h2),
         parent_h: Math.round(parentH),
+      });
+    });
+
+    // ---- R-VIS-ORPHAN · CJK 孤字 / 上长下短 失衡换行 (2026-05-25) ----
+    // For each leaf CJK text element, measure its line boxes. Flag when it
+    // wraps to >=2 lines AND either (a) the last line is a lonely ~1-char
+    // orphan, or (b) it is a short 2-3 line label whose last line is < 38%
+    // of the widest line (the "上面长下面短" imbalance). `text-wrap: balance`
+    // in the framework CSS prevents most of these; this catches the residue
+    // (fixed-width / flex-clamped containers where balance can't help — fix
+    // with a wider container, `white-space: nowrap`, or a smaller font, or
+    // by splitting a trailing word into a `display:block` sub-label).
+    // Skip: elements with block-level children (intentional sub-label
+    // breaks like .role), SVG text, mockup-internal text, nowrap elements.
+    const seenOrphan = new Set();
+    slide.querySelectorAll('*').forEach(el => {
+      if (!hasOwnText(el)) return;
+      if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+      const hasBlockChild = [...el.children].some(c => {
+        const d = window.getComputedStyle(c).display;
+        return d === 'block' || d === 'flex' || d === 'grid' || d === 'list-item' || d === 'table';
+      });
+      if (hasBlockChild) return;
+      const cjk = ((el.textContent || '').match(/[一-鿿]/g) || []).length;
+      if (cjk < 4) return;
+      let inMock = false;
+      for (let n = el; n && n !== slide; n = n.parentElement) {
+        if (hasAnyClass(n, TIER_MOCK)) { inMock = true; break; }
+      }
+      if (inMock) return;
+      const cs = window.getComputedStyle(el);
+      if (cs.whiteSpace === 'nowrap' || cs.whiteSpace === 'pre') return;
+      const fs = parseFloat(cs.fontSize) || 16;
+      const rng = document.createRange(); rng.selectNodeContents(el);
+      const byTop = new Map();
+      [...rng.getClientRects()].forEach(r => {
+        if (r.width < 1 || r.height < 1) return;
+        let key = Math.round(r.top);
+        for (const k of byTop.keys()) { if (Math.abs(k - key) < 4) { key = k; break; } }
+        byTop.set(key, Math.max(byTop.get(key) || 0, r.width));
+      });
+      const widths = [...byTop.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
+      if (widths.length < 2) return;
+      const last = widths[widths.length - 1];
+      const maxw = Math.max(...widths);
+      const isOrphan = last <= fs * 1.45;
+      // imbalance 只针对短标签/标题(CJK<=14):长正文 2 行末行天然短,不是缺陷
+      const isImbalanced = widths.length <= 3 && last < maxw * 0.38 && cjk <= 14;
+      if (!isOrphan && !isImbalanced) return;
+      const sel = shortSel(el);
+      if (seenOrphan.has(sel)) return;
+      seenOrphan.add(sel);
+      out.orphan.push({
+        slide_idx, selector: sel, lines: widths.length,
+        line_px: widths.map(w => Math.round(w)),
+        last_px: Math.round(last), max_px: Math.round(maxw), font_px: Math.round(fs),
+        kind: isOrphan ? 'orphan' : 'imbalanced',
+        balance: cs.textWrap || '',
+        preview: (el.textContent || '').trim().slice(0, 16),
       });
     });
   });

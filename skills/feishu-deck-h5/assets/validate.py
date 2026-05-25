@@ -2274,6 +2274,16 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                          heuristic). Renderer-aware: looks at actual
                          content length + container. Opt out per element
                          with `data-allow-body-floor`.
+      R-VIS-ORPHAN     · 2026-05-25 · CJK leaf text that wraps to ≥2 lines
+                         with a lonely ~1-char last line (orphan) OR a short
+                         2-3 line label whose last line is < 38% of the
+                         widest (上长下短 imbalance). `text-wrap: balance` in
+                         feishu-deck.css prevents most; this WARNs on the
+                         residue (fixed-width / flex-clamped containers where
+                         balance can't help). Skips block-child sub-labels
+                         (.role), SVG text, mockup-internal, nowrap. Note:
+                         only audits deck slides — text inside prototype
+                         <iframe>s is a separate document and not reached.
 
     Optionally archives PNG screenshots when want_screenshots=True.
 
@@ -2512,6 +2522,22 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'anchor; OR use `inset:` shorthand to redeclare all four; OR '
             'set `data-allow-dual-anchor` on the element if it is a real '
             'fill-parent overlay (rare for slide content).')
+
+    for entry in report.get('orphan', [])[:25]:
+        kind = '末行孤字 orphan' if entry['kind'] == 'orphan' else '上长下短 imbalanced'
+        no_bal = '' if entry.get('balance') == 'balance' else \
+            ' (该元素当前没有 text-wrap:balance)'
+        iss.warn('R-VIS-ORPHAN',
+            f'slide {entry["slide_idx"]} · `{entry["selector"]}` CJK 换行不平衡 '
+            f'— {kind}: {entry["lines"]} 行 {entry["line_px"]}px,末行仅 '
+            f'{entry["last_px"]}px (最宽行 {entry["max_px"]}px / 字号 '
+            f'{entry["font_px"]}px) ("{entry["preview"]}"). 文字换行后末行只剩一两个字 '
+            '或上面长下面短,投影上很碎。Fix 优先级: (1) 给元素加 '
+            '`text-wrap: balance`(框架对常见标题/卡名类已默认开 — 若这里没生效,'
+            '多半被更具体的选择器/另一条 !important 压住了,提级覆盖即可);'
+            '(2) 容器固定宽 / 被 flex 夹窄,balance 也救不了 → 加宽容器,或 4 字以内'
+            '主标签用 `white-space: nowrap` 逼单行,或把尾词(「企划」「部」等)用 '
+            '`display:block` 拆成副标行;(3) 改文案让上下两行字数接近。' + no_bal)
 
     # (screenshot archival happens inside the Playwright block above; no
     # post-step needed. The previous `if 'shots_dir' in dir(): pass` was

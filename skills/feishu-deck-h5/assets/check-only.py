@@ -43,7 +43,9 @@ FAMILIES = [
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
     ('视觉 (Playwright)',    ['R-OVERFLOW', 'R-OVERLAP', 'R-VIS-TIER', 'R-VIS-HIER',
                               'R-VIS-LABEL-FLOOR', 'R-VIS-BODY-FLOOR',
-                              'R-VIS-ALIGN', 'R-VISUAL']),
+                              'R-VIS-ALIGN', 'R-VIS-ABSPOS-DUAL-ANCHOR',
+                              'R-VIS-CARD-OVERFLOW', 'R-VIS-OPT-OUT-ABUSE',
+                              'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL']),
     ('交付物附件',           ['R-FEEDBACK']),
 ]
 
