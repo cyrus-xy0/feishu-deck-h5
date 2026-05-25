@@ -200,6 +200,28 @@
     frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
     signal.addEventListener('abort', () => mediaObserver.disconnect());
 
+    // Browsers block unmuted autoplay until the first user gesture. If the
+    // deck opens directly on a video slide, that video falls back to muted on
+    // load; upgrade it to sound on the first input — WITHOUT resetting its
+    // playhead (so the click that enables sound doesn't restart the clip).
+    let mediaGestureDone = false;
+    const upgradeMediaSound = () => {
+      if (mediaGestureDone) return;
+      mediaGestureDone = true;
+      const cur = frames.find((f) => f.classList.contains('is-current'));
+      if (!cur) return;
+      cur.querySelectorAll('video').forEach((v) => {
+        if (v.autoplay && !v.hasAttribute('data-keep-muted')
+            && !v.hasAttribute('muted') && v.muted) {
+          v.muted = false;
+          const p = v.play();
+          if (p && p.catch) p.catch(() => {});
+        }
+      });
+    };
+    ['pointerdown', 'keydown', 'touchstart'].forEach((ev) =>
+      document.addEventListener(ev, upgradeMediaSound, { signal }));
+
     // ---- Auto-idle (chrome fades after 2.5s of no input) ----
     let idleTimer;
     function nudgeIdle() {
@@ -320,8 +342,17 @@
   // <video>s to the start (and plays them if marked autoplay); leaving a
   // frame pauses them. Also fires fs-slide-enter / fs-slide-leave on the
   // .slide so CSS-keyframe decks can re-trigger animations on revisit.
-  // Opt out per element with data-no-restart. Driven by a single
-  // MutationObserver on frame .class (see init) so it catches every nav path.
+  // Opt out of restart per element with data-no-restart.
+  //
+  // Sound (2026-05-25): autoplay videos play WITH SOUND by default. Slide nav
+  // is itself a user gesture, so unmuting succeeds on every navigated-to
+  // slide; on the very first frame (pre-gesture) the unmuted play rejects and
+  // we fall back to muted — upgradeMediaSound() (see init) then turns sound on
+  // at the first input. Keep a video silent (decorative loop backgrounds,
+  // secondary clips that would overlap audio) with data-keep-muted.
+  //
+  // Driven by a single MutationObserver on frame .class (see init) so it
+  // catches every nav path.
   function syncFrameMedia(frame, isCurrent) {
     if (!frame) return;
     const slide = frame.querySelector('.slide');
@@ -330,10 +361,7 @@
       vids.forEach((v) => {
         if (v.hasAttribute('data-no-restart')) return;
         try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
-        if (v.autoplay) {
-          const p = v.play();
-          if (p && p.catch) p.catch(() => {});   // ignore autoplay-policy rejection
-        }
+        if (v.autoplay) playWithSound(v);
       });
       if (slide) slide.dispatchEvent(new CustomEvent('fs-slide-enter', { bubbles: true }));
     } else {
@@ -343,6 +371,24 @@
       });
       if (slide) slide.dispatchEvent(new CustomEvent('fs-slide-leave', { bubbles: true }));
     }
+  }
+
+  // Play an autoplay <video>, unmuting it UNLESS the author asked for silence.
+  // Conservative (2026-05-25): an authored `muted` attribute is respected as
+  // "keep silent" (so already-shipped `autoplay muted loop` decks don't
+  // suddenly blare), same as data-keep-muted. Only videos authored WITHOUT
+  // muted get sound. Unmuted play falls back to muted if the browser blocks
+  // it (no user gesture yet); upgradeMediaSound() retries on first input.
+  function playWithSound(v) {
+    const keepSilent = v.hasAttribute('data-keep-muted') || v.hasAttribute('muted');
+    if (!keepSilent) v.muted = false;
+    const p = v.play();
+    if (p && p.catch) p.catch(() => {
+      if (keepSilent) return;                 // already muted, or couldn't play
+      v.muted = true;                         // unmuted autoplay blocked → retry muted
+      const p2 = v.play();
+      if (p2 && p2.catch) p2.catch(() => {});
+    });
   }
 
   function goTo(deck, frames, idx, updateHash) {

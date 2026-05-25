@@ -7086,7 +7086,7 @@ top-bright decors need the per-slide `:has()` override above.
 
 ---
 
-## Slide media auto-restart on enter (framework behavior, 2026-05-24)
+## Slide media auto-restart + auto-sound on enter (framework behavior, 2026-05-24 · sound 2026-05-25)
 
 **Problem**: present mode keeps EVERY `.slide-frame` in the DOM at once
 (only `.is-current` toggles visibility). So a `<video autoplay loop>` on a
@@ -7104,11 +7104,11 @@ EVERY navigation path (present-mode `goTo`, hash nav, prev/next buttons,
 and the separate mobile-patch IIFE's direct `.is-current` toggles).
 
 - **Enter** a frame → each `<video>` is reset to `currentTime = 0`, and
-  if it carries the `autoplay` attribute it is `.play()`ed (muted videos
-  are allowed to play programmatically; non-muted rejections are caught
-  and ignored).
+  if it carries the `autoplay` attribute it is `.play()`ed — **with sound
+  unless it was authored `muted`** (`muted = false` only for un-muted
+  videos). See the sound paragraph below.
 - **Leave** a frame → its `<video>`s are `.pause()`d (stops hidden
-  background looping).
+  background looping AND any sound).
 - On both transitions a `CustomEvent` is dispatched on the `.slide`:
   **`fs-slide-enter`** / **`fs-slide-leave`** (bubbling). CSS-keyframe
   decks that need to re-trigger an animation on revisit can listen for
@@ -7116,13 +7116,37 @@ and the separate mobile-patch IIFE's direct `.is-current` toggles).
   animation to `.slide-frame.is-current .x { animation: … }` so re-adding
   `.is-current` re-applies (and thus restarts) the animation.
 
-**Opt out** per element with `data-no-restart` (e.g. a video that should
-keep its position across slide visits — rare).
+**Sound (2026-05-25 · conservative default)**: an autoplay video plays
+**with sound** when its slide is entered **only if it was authored WITHOUT
+a `muted` attribute**. The framework sets `muted = false` before `.play()`
+for those. An authored `muted` attribute is **respected as "keep silent"**
+(same as `data-keep-muted`) — so already-shipped decks written per the old
+"`autoplay muted` to enable autoplay" guidance keep playing silently and
+do NOT suddenly blare audio when they pick up the updated `feishu-deck.js`.
+
+Browsers block unmuted autoplay until a user gesture — but in present mode
+**slide navigation is itself a gesture**, so unmuting succeeds on every
+navigated-to slide. The one pre-gesture case (deck opens directly on a
+video slide, before the viewer clicks/keys anything) gracefully falls back
+to muted; a one-shot `pointerdown`/`keydown`/`touchstart` listener
+(`upgradeMediaSound`) then turns sound on at the first input **without
+resetting the playhead** (so the enabling click doesn't restart the clip).
+Leaving a slide pauses its videos, so no two slides' audio overlap.
+
+**Opt out**:
+- `data-no-restart` — don't reset/pause this video on slide enter/leave
+  (keeps its position across visits — rare).
+- `data-keep-muted` — keep this video **silent** even though it has no
+  `muted` attribute. Mostly redundant now that authored `muted` is also
+  honored, but useful as an explicit-intent marker on a clip you author
+  without `muted` but still want silent.
 
 **Authoring guidance**:
-- Want a video to play from the top each time the slide is shown → just
-  give it `autoplay muted` (keep `loop` if you want it to repeat while the
-  slide is on screen). The framework handles the reset.
+- Want a video that plays from the top WITH SOUND each time the slide is
+  shown → give it `autoplay` **without `muted`** (add `loop` to repeat
+  while on screen). The framework resets the playhead and unmutes it.
+- Want a silent / decorative / ambient background loop → keep the `muted`
+  attribute: `autoplay loop muted`. The framework leaves it alone.
 - Want a CSS animation to replay on revisit → scope it to
   `.slide-frame.is-current` (preferred) or hook `fs-slide-enter`.
 
