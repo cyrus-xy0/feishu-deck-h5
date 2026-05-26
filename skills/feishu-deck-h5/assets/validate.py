@@ -334,6 +334,21 @@ _CHROME_CLASS_RE = re.compile(
 )
 
 
+def _lifted_slide_keys(html: str) -> set:
+    """Slide-keys of slides carrying data-lifted (Native slide lift). Their
+    CONTENT-STYLE violations (R06 / R-WHITE-TEXT) get downgraded err→warn —
+    the slide is verbatim from another deck, so the human CHOOSES whether to
+    bump fonts; it's surfaced, not blocking. Geometry/overflow stays error."""
+    keys = set()
+    for m in re.finditer(r'<div class="slide"[^>]*>', html):
+        tag = m.group(0)
+        if 'data-lifted' in tag:
+            km = re.search(r'data-slide-key="([^"]+)"', tag)
+            if km:
+                keys.add(km.group(1))
+    return keys
+
+
 def audit_font_sizes(html: str, iss: Issues):
     """R06: font-size minimums on slide content.
 
@@ -405,20 +420,31 @@ def audit_font_sizes(html: str, iss: Issues):
                 elif size < FLOOR_CHROME_PX:
                     chrome_violations.append((size, selector))
 
+    lifted_keys = _lifted_slide_keys(html)
+    def _lev(sel):
+        """Pick severity for an R06 violation: lifted-slide selectors warn
+        (human chooses to bump), everything else errors. Returns (fn, note)."""
+        if any(f'data-slide-key="{k}"' in sel for k in lifted_keys):
+            return iss.warn, (' — LIFTED slide (verbatim from another deck); '
+                'downgraded to WARNING, you choose whether to bump the font')
+        return iss.err, ''
+
     for size, sel in chrome_violations[:10]:
-        iss.err('R06',
+        lev, note = _lev(sel)
+        lev('R06',
             f'font-size {size}px on `{sel.strip()}` below '
-            f'{FLOOR_CHROME_PX}px chrome floor')
+            f'{FLOOR_CHROME_PX}px chrome floor{note}')
 
     for size, sel in body_violations[:10]:
-        iss.err('R06',
+        lev, note = _lev(sel)
+        lev('R06',
             f'font-size {size}px on `{sel.strip()}` below '
             f'{FLOOR_BODY_PX}px BODY floor — selector looks like body content '
             '(card body / description / caption / list / cell / arch-* / etc.) '
             'and projector readability requires ≥ 22 px. Bump to 22, OR if '
             'this is genuinely chrome, rename to a chrome class '
             '(.eyebrow / .footnote / .source / .pill / .tag / etc.), OR '
-            'add /* allow:body-floor */ in the rule for a documented exception.')
+            f'add /* allow:body-floor */ in the rule for a documented exception.{note}')
 
     # Inline styles on slide markup — apply chrome floor only (body classes
     # rarely show up as inline `style=""`; we don't try to parse the element's
@@ -2397,12 +2423,15 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'cards/rows, increase column count, or shorten body copy.')
 
     for entry in report.get('tier', [])[:20]:
-        iss.err('R-VIS-TIER',
+        _lev = iss.warn if entry.get('lifted') else iss.err
+        _note = (' — LIFTED slide (verbatim from another deck); downgraded '
+                 'to WARNING, you choose whether to fix.' if entry.get('lifted') else '')
+        _lev('R-VIS-TIER',
             f'slide {entry["slide_idx"]} · `{entry["selector"]}` renders '
             f'at {entry["computed_px"]}px (off the 4-tier ladder '
             '{16, 24, 28, 48} + hero whitelist). Snap to nearest tier, OR '
             'add `/* allow:typescale */` if this is a documented hero '
-            'exception (cover hero / section chapter-num / big-stat / etc.).')
+            f'exception (cover hero / section chapter-num / big-stat / etc.).{_note}')
 
     for entry in report.get('hier', [])[:20]:
         iss.err('R-VIS-HIER',
@@ -2464,6 +2493,17 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'or being silently clipped. Fix: shorten child text, move one '
                 'child to a separate line (display:block sibling), set '
                 '`flex-wrap: wrap`, or widen the container.')
+        elif direction == 'vertical-visible':
+            iss.err('R-VIS-CARD-OVERFLOW',
+                f'slide {entry["slide_idx"]} · `{entry["selector"]}` content '
+                f'({entry["content_h"]} px) is {entry["overflow_px"]} px taller '
+                f'than its box ({entry["card_h"]} px) and overflow is NOT hidden '
+                '— text is spilling visibly out the bottom past the border / '
+                'background. The slide still fits the 1920×1080 canvas, so '
+                'R-OVERFLOW misses it; the clip-only check missed it too because '
+                'overflow is visible. Fix: shorten body copy, drop a row / item, '
+                'tighten padding / gap, or give the box more height. (Geometry — '
+                'stays ERROR even on lifted slides; a visible spill is a real defect.)')
         else:
             iss.err('R-VIS-CARD-OVERFLOW',
                 f'slide {entry["slide_idx"]} · `{entry["selector"]}` has '
@@ -2499,7 +2539,10 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'color, not by shrinking the size.')
 
     for entry in report.get('body_floor', [])[:20]:
-        iss.err('R-VIS-BODY-FLOOR',
+        _lev = iss.warn if entry.get('lifted') else iss.err
+        _lev('R-VIS-BODY-FLOOR',
+            (('LIFTED slide (verbatim from another deck) — downgraded to '
+              'WARNING, you choose whether to bump. ') if entry.get('lifted') else '') +
             f'slide {entry["slide_idx"]} · `{entry["selector"]}` renders at '
             f'{entry["rendered_px"]}px but its direct text is '
             f'{entry["char_count"]} chars ("{entry["preview"]}"). '

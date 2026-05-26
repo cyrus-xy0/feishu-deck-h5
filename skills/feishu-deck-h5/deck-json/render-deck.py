@@ -260,6 +260,13 @@ def _build_data_attrs(slide: dict) -> str:
         parts.append(f'data-title-style="{_esc_br(slide["title_style"])}"')
     if slide.get("logo_position"):
         parts.append(f'data-logo-position="{_esc_br(slide["logo_position"])}"')
+    if slide.get("lifted"):
+        # Native slide lift: mark the slide so validate.py / visual-audit.js
+        # downgrade its CONTENT-STYLE violations (R06 / R-WHITE-TEXT /
+        # R-VIS-BODY-FLOOR / R-VIS-TIER) from error → warning. Geometry /
+        # overflow rules stay full severity. Value = source ref string.
+        val = slide["lifted"] if isinstance(slide["lifted"], str) else "1"
+        parts.append(f'data-lifted="{_esc_br(val)}"')
     return " ".join(parts)
 
 

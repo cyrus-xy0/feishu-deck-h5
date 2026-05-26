@@ -173,6 +173,39 @@
             direction: 'vertical',
           });
         }
+      } else {
+        // (a') Visible vertical spill (added 2026-05-27) — overflow NOT hidden,
+        // but a CHILD element extends below the box's border-box bottom, i.e.
+        // content is bleeding out past border/background (visible, not clipped).
+        // Slide-level R-OVERFLOW misses it (spill stays within the 1920×1080
+        // canvas) and the clip-only branch (a) ignored overflow:visible — the
+        // gap that let a lifted content-3up hero card spill 61px unflagged.
+        //
+        // We require an actual CHILD-element bottom past the parent box, NOT
+        // just scrollHeight > clientHeight: a large-font leaf (e.g. big-stat
+        // `.num` at 132px) has a line-box taller than its glyph, so
+        // scrollHeight - clientHeight > 0 without any VISIBLE spill. Comparing
+        // child rects to the parent's border-box bottom avoids that false
+        // positive. GEOMETRY → stays error even on lifted slides.
+        const dh = el.scrollHeight - el.clientHeight;
+        if (dh > 8 && el.clientHeight > 0 && el.children.length > 0) {
+          const elBottom = el.getBoundingClientRect().bottom;
+          let spill = 0;
+          for (const ch of el.children) {
+            if (ch.tagName === 'SCRIPT' || ch.tagName === 'STYLE') continue;
+            spill = Math.max(spill, ch.getBoundingClientRect().bottom - elBottom);
+          }
+          if (spill > 8) {
+            out.card_overflow.push({
+              slide_idx,
+              selector: shortSel(el),
+              content_h: el.scrollHeight,
+              card_h: el.clientHeight,
+              overflow_px: Math.round(spill),
+              direction: 'vertical-visible',
+            });
+          }
+        }
       }
       // (b) Horizontal overflow on flex/grid container with nowrap children
       // (added 2026-05-22) — catches "flex row children too wide for parent,
@@ -326,7 +359,7 @@
       const key = `${sel}::${px}`;
       if (seenTierViolations.has(key)) return;
       seenTierViolations.add(key);
-      out.tier.push({ slide_idx, selector: sel, computed_px: px });
+      out.tier.push({ slide_idx, selector: sel, computed_px: px, lifted: !!el.closest('[data-lifted]') });
     });
 
     // ---- Hierarchy: within each card, meta should be ≤ body ----
@@ -490,6 +523,7 @@
         slide_idx, selector: sel, rendered_px: px,
         char_count: directText.length,
         preview: directText.length > 40 ? directText.slice(0, 40) + '…' : directText,
+        lifted: !!el.closest('[data-lifted]'),
       });
     });
 

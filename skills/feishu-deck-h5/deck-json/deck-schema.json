@@ -129,6 +129,10 @@
           "type": "string",
           "description": "Internal: used by `layout: raw` slides migrated from a legacy deck so framework CSS rules engage. Renderer-only; not authored by hand."
         },
+        "lifted": {
+          "type": ["string", "boolean"],
+          "description": "Native slide lift marker. Set when a slide is lifted VERBATIM from another deck (value = source ref, e.g. 'opple-ai-lecture#2'). Renderer emits data-lifted; validate.py / visual-audit.js then downgrade this slide's CONTENT-STYLE violations (R06 / R-WHITE-TEXT / R-VIS-BODY-FLOOR / R-VIS-TIER) from error -> WARNING — surfaced so a human chooses to fix, not blocking. GEOMETRY / OVERFLOW rules stay full-severity error (a real overflow is a real failure regardless of lift)."
+        },
         "data": { "type": "object" }
       },
       "allOf": [
