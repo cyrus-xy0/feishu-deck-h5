@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 copy-assets.py — Make a per-run output self-contained.
 
@@ -47,7 +49,7 @@ from pathlib import Path
 # Path char class excludes ? and # so cache-busting query strings (e.g.
 # `assets/foo.png?v=3`) don't get glued onto the captured rest.
 RX_SKILL = re.compile(
-    r'((?:\.\./)+)skills/feishu-deck-h5/(assets|examples|templates)/([^\'")\s?#]+)'
+    r'((?:\.\./)+)skills/feishu-deck-h5/(assets|examples|templates|deck-json/templates)/([^\'")\s?#]+)'
 )
 RX_INPUT = re.compile(
     r'((?:\.\./)*)input/([^\'")\s?#]+)'
@@ -195,6 +197,7 @@ def main():
     referenced = set()      # files that exist (or should exist) in output/ — protects from prune
     shared_refs = set()     # all assets/shared/* logical refs (for manifest, regardless of mode)
     shared_skipped = 0      # count of shared/* refs left as skill-relative under --shared=skip
+    css_origins = {}        # copied CSS path -> original skill CSS path, for internal url(...) rewrites
 
     for html_path in out_dir.rglob("*.html"):
         # Compute relative depth for new local paths
@@ -237,6 +240,8 @@ def main():
                     shutil.copy2(origin, target)
                     bytes_copied += origin.stat().st_size
                     files_copied.add(str(target.relative_to(out_dir)))
+                if target.suffix == ".css":
+                    css_origins[str(target.resolve())] = origin.resolve()
                 # New ref: prefix + assets/rest (or assets/<sub>/rest)
                 if sub == "assets":
                     return f'{prefix}assets/{rest}'
@@ -404,46 +409,104 @@ def main():
     # Pass 2: scan copied CSS files for internal url() refs (e.g.
     # feishu-deck.css uses url("lark-logo.png") with no ../ prefix). These
     # would-be-broken refs need their target files alongside the CSS.
-    # We resolve each ref relative to the CSS file's location; if it isn't
-    # already in output, copy from skill_root/assets/ (or skill_root sibling).
+    # We resolve each ref relative to the CSS file's original skill location
+    # first. This matters for CSS copied from non-assets trees such as
+    # deck-json/templates: `../../assets/foo` is correct in the skill tree but
+    # would become `output/assets/assets/foo` after the CSS is bundled.
     rx_css_url = re.compile(r'url\(["\']?([^"\')\s]+)["\']?\)')
     css_files = []
     for dirpath, _dirnames, filenames in os.walk(local_assets, followlinks=False):
         for name in filenames:
             if name.endswith(".css"):
                 css_files.append(Path(dirpath) / name)
+
+    def infer_css_origin(css_path: Path) -> Path | None:
+        """Infer a copied CSS file's original skill path on second+ runs."""
+        try:
+            rel = css_path.relative_to(local_assets)
+        except ValueError:
+            return None
+        parts = rel.parts
+        candidates = []
+        if len(parts) >= 2 and parts[0] == "deck-json" and parts[1] == "templates":
+            candidates.append(skill_root / "deck-json" / "templates" / Path(*parts[2:]))
+        if parts and parts[0] in ("examples", "templates"):
+            candidates.append(skill_root / parts[0] / Path(*parts[1:]))
+        candidates.append(skill_root / "assets" / rel)
+        return next((p.resolve() for p in candidates if p.exists()), None)
+
+    def local_target_for_skill_origin(origin: Path) -> Path | None:
+        """Map a resolved skill-tree asset back into output/assets/."""
+        asset_root = (skill_root / "assets").resolve()
+        deck_json_templates = (skill_root / "deck-json" / "templates").resolve()
+        templates_root = (skill_root / "templates").resolve()
+        examples_root = (skill_root / "examples").resolve()
+        if origin.is_relative_to(asset_root):
+            return local_assets / origin.relative_to(asset_root)
+        if origin.is_relative_to(deck_json_templates):
+            return local_assets / "deck-json" / "templates" / origin.relative_to(deck_json_templates)
+        if origin.is_relative_to(templates_root):
+            return local_assets / "templates" / origin.relative_to(templates_root)
+        if origin.is_relative_to(examples_root):
+            return local_assets / "examples" / origin.relative_to(examples_root)
+        return None
+
     for css_path in css_files:
         css_dir = css_path.parent
         css_src = css_path.read_text(encoding="utf-8")
-        for m in rx_css_url.finditer(css_src):
+        css_origin = css_origins.get(str(css_path.resolve())) or infer_css_origin(css_path)
+
+        def replace_css_url(m):
+            nonlocal bytes_copied
             ref = m.group(1)
             # Skip data: URIs, absolute URLs, SVG fragment ids (#…), and bare punctuation
             if ref.startswith(("data:", "http:", "https:", "//", "#", "%23")):
-                continue
+                return m.group(0)
             if ref in ("...", ""):
-                continue
+                return m.group(0)
             if "/" not in ref and "." not in ref:
-                continue       # not a file path
+                return m.group(0)       # not a file path
             # Resolve target relative to CSS location
             target = (css_dir / ref).resolve()
-            if not target.is_relative_to(out_dir):
-                continue       # ref escapes output/, skip
-            referenced.add(str(target.relative_to(out_dir)))
-            if target.exists():
-                continue
+            if target.is_relative_to(out_dir) and target.exists():
+                referenced.add(str(target.relative_to(out_dir)))
+                return m.group(0)
+
             # Find the source: assume CSS lives at output/assets/* and the
             # corresponding file lives at skill_root/assets/<ref-relative>.
-            # Compute the path inside skill assets that matches.
-            rel_in_assets = target.relative_to(local_assets) if target.is_relative_to(local_assets) else None
-            if rel_in_assets:
-                origin = skill_root / "assets" / rel_in_assets
-                if origin.exists():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(origin, target)
-                    bytes_copied += origin.stat().st_size
-                    files_copied.add(str(target.relative_to(out_dir)))
-                else:
-                    print(f"  [WARN] CSS-referenced asset not found in skill: {origin}")
+            origin = None
+            if css_origin:
+                origin_candidate = (css_origin.parent / ref).resolve()
+                if origin_candidate.exists():
+                    origin = origin_candidate
+                    target = local_target_for_skill_origin(origin) or target
+            if origin is None and target.is_relative_to(local_assets):
+                rel_in_assets = target.relative_to(local_assets)
+                origin_candidate = (skill_root / "assets" / rel_in_assets).resolve()
+                if origin_candidate.exists():
+                    origin = origin_candidate
+
+            if origin is None:
+                if target.is_relative_to(out_dir):
+                    print(f"  [WARN] CSS-referenced asset not found in skill: {target}")
+                return m.group(0)
+
+            if not target.is_relative_to(out_dir):
+                return m.group(0)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists() or target.stat().st_size != origin.stat().st_size:
+                shutil.copy2(origin, target)
+                bytes_copied += origin.stat().st_size
+                files_copied.add(str(target.relative_to(out_dir)))
+            referenced.add(str(target.relative_to(out_dir)))
+            new_ref = os.path.relpath(target, css_dir).replace(os.sep, "/")
+            if new_ref != ref:
+                return f'url("{new_ref}")'
+            return m.group(0)
+
+        rewritten_css = rx_css_url.sub(replace_css_url, css_src)
+        if rewritten_css != css_src:
+            css_path.write_text(rewritten_css, encoding="utf-8")
 
     # Prune: remove files in output/assets/ and output/input/ that are no
     # longer referenced (e.g. left over from previous runs). Uses os.walk
