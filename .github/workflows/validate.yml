@@ -78,6 +78,9 @@ jobs:
       - name: Validate inlined deck (--strict)
         run: python3 assets/validate.py examples/sample-deck-inline.html --strict
 
+      - name: DeckJSON unit tests
+        run: python3 -m unittest discover -s deck-json/tests -p 'test_*.py'
+
       - name: Summary
         if: always()
         run: |
