@@ -6224,24 +6224,79 @@ write. The authoring rule + manual check on every quote slide is enough.
 
 ## Prototype / standalone-page embed modes (mandatory) — pick BEFORE you write any code
 
-When the user gives you a standalone HTML page (a prototype, a demo, a designer-built
-H5, a slide ported from another deck) and asks to "put it in the deck", there are
-exactly **THREE** correct ways. Pick by intent BEFORE touching deck.json — picking
-wrong here causes 30+ minutes of doom-loop ("乱了", "字小了", "重叠了", "再试试").
+When the user gives you existing HTML(**通常是本地路径**)and asks to "把它加进来 /
+搬过来 / 拼进来 / 做成一页",**先按「源是什么」分流** —— 这一步分错就是 30 分钟
+doom-loop("乱了""字小了""重叠了")。这是历史重灾区:旧版把"搬过来/原封不动"
+默认导去 iframe,而用户要的常常是**原生拼接**。
 
-| # | Mode | When the user wants this | Layout in deck.json | Deck chrome (title / wordmark) |
+| 源是什么 | 用哪种 | 为什么 |
+|---|---|---|
+| **一份 feishu-deck-h5 写的 slide**(或 slide 形态静态 HTML),要它**原样当一张 slide** | **Native slide lift**(原生拼接 · **非 iframe**) | 源与新 deck 共享 `feishu-deck.css`,直接 splice 就对齐,iframe 反而多此一举 |
+| **外来的、自带 layout/缩放/chrome 的独立 demo / 原型 / H5**,要它当**"活的"嵌进来** | **iframe · Mode A / B** | 它有自己的世界,iframe 边界才能避免 CSS/JS 互相打架 |
+| 一段简单内容(文档/截图/卡片列表),想用框架原语**重画** | **Mode C · re-author** | 想要 texts.md / brand token / 4-tier 接管 |
+
+> **判不准就一句话问**:"这页你要它当**原生 slide 原样拼进来**,还是当**活的 demo 嵌进来(iframe)**?" —— **别默认 iframe**(历史上这里一直默认错)。
+
+下面先讲 **Native slide lift**,再讲 iframe 的 Mode A / B / C:
+
+| # | iframe Mode | When(源都是**外来独立页**) | Layout in deck.json | Deck chrome |
 |---|---|---|---|---|
-| **A** | **Full-bleed slide** · prototype IS the entire slide | "直接插入不改" · "原封不动一页" · "这页搬过来" · standalone H5/prototype that has its OWN internal title + logo + layout | `raw` (with `_orig_layout: "image-text"`) | **HIDDEN** — prototype carries its own; deck adds nothing |
-| **B** | **Framed embed** · deck adds title bar + 飞书 wordmark, prototype fills the area below | "嵌入到当前页面" · "做一页 demo,标题是 X" · standalone prototype that needs deck-level framing (a chapter title, a brand frame) | `iframe-embed` (schema-native) | **VISIBLE** — deck shows title + wordmark; iframe gets ~85% of slide height |
-| **C** | **Native HTML re-author** · rebuild the content using framework primitives | The page is simple (a card grid, a list, some text) and you want texts.md / data-text-id / brand tokens / 4-tier typography | `raw` (with `_orig_layout: "content-2col"` etc.) or schema `content/2col` etc. | VISIBLE per layout |
+| **A** | **Full-bleed** · 外来 demo 占满整页 | 独立 H5/原型,自带 title+logo+layout,要当"活的" | `raw` (with `_orig_layout: "image-text"`) | **HIDDEN** |
+| **B** | **Framed** · deck 给标题栏+wordmark,demo 填下方 | "嵌入到当前页面" / "做一页 demo,标题是 X" | `iframe-embed` (schema-native) | **VISIBLE** |
+| **C** | **Native re-author** · 用框架原语重画(非 verbatim) | 简单内容,想要 texts.md/brand token/4-tier | `raw` / schema `content/2col` 等 | VISIBLE per layout |
 
-### Mode A · Full-bleed slide (verbatim port)
+### Native slide lift (原生拼接 · 非 iframe · 从本地路径搬现成 feishu slide)
 
-This is the "**original-deck slide-13 → my-deck slide-13**" case. The prototype HTML
-file is self-contained: it has its own `<title>`, internal logo, internal scale-to-fit
-JS, its own background. Deck framework chrome would **collide** with it. The correct
-move is to give the prototype the entire `1920×1080` canvas and tell the deck to add
-nothing.
+**触发**:用户给一个**本地路径**(一份 feishu-deck-h5 deck 的 `index.html`,或 slide
+形态的 HTML)+ "把第 N 页 / 这几页 / 这个 slide **搬过来 / 原样拼进来 / 加进来**"。
+这是用户的常用工作流——**他发路径,你就基于路径把对应 slide 原样加进当前 deck,
+不反问"拿来干嘛"**。典型场景:"我以前写了 50 页,这次从里面挑 3 页讲,拼起来,
+一点都不能动。"
+
+**为什么不用 iframe**:源 slide 本来就是 feishu-deck-h5 写的,和新 deck 共享同一套
+`feishu-deck.css` + present-mode JS。直接把它的 `.slide-frame` splice 进来就**逐像素
+对齐**——不需要 iframe 隔离、不需要 scope CSS、不需要重画。iframe 在这里是**错的工具**
+(那是给"外来自带壳的 demo"的,见 Mode A)。这是它和 Mode A 的根本区别。
+
+**手工流程**(没有也不需要一键工具,手工拼):
+
+1. 打开源路径 `index.html`,按 `data-slide-key` / `data-screen-label` / 第几个
+   `.slide-frame` 定位目标 slide。
+2. 整块剪出 `<div class="slide-frame"> … </div>`(到配对的 `</div>`)**verbatim**。
+   **别用正则吃 DOM** —— 手工读 + 整块复制(见 EDITING DISCIPLINE E2 / R-DOM)。
+3. **带上它依赖的 per-page 样式**:源 `<head>` 里 scope 到这张的
+   `<style>[data-page="NN"] …</style>` / `[data-slide-key="KEY"] …` 块,一起搬。
+4. **拷它引用的资源**:`background-image:url(...)` / `<img src>` / iframe `src` 指向的
+   `input/*`、`assets/shared/*`、`prototypes/*`,复制进新 deck 并保持相对路径解析。
+5. splice 进新 deck 的 `.deck` 容器,顺序随你排。
+6. **de-collision(只动管线,不动设计)**:
+   - `data-page` 撞车(两张都用 `03` 但 scoped CSS 不同)→ 把搬进来这张的 `data-page`
+     连同它的 `[data-page="03"]` 选择器一起改成唯一值。
+   - `data-slide-key` 撞 → 改唯一 key;`data-text-id` 撞 → 改(或拼接型直接不管,
+     present-mode 页码看 DOM 顺序不看它)。
+   - 资源重名(都叫 `input/scene.png` 但不同图)→ 改文件名 + 同步引用。
+   - **以上全是编号 / 文件名层面,不改你看到的任何内容 / 设计。**
+7. 内容**逐字不动**;**校验可跳**(verbatim 现成 slide,validate 没意义 ——
+   纯拼接时手工 `index.html` 根本不走 render;走 deck.json 时 `--skip-validate-html`)。
+
+**两种装配方式**:
+- **纯拼接**(只搬现成页、不混新页)→ **直接手工组装 `index.html`**(标准 shell +
+  搬来的 slide-frames),最"一点不动",不走 deck.json / render。
+- **混装**(搬来的页 + 新设计的页同处一 deck)→ 每张搬来的 slide 作为
+  `layout: "raw"` 放进 deck.json(`.slide` 的 inner 塞进 `data.html`),新页走 schema,
+  一起 render。
+
+**和 DESIGN PHASE 的关系**:lift 进来的页在设计方案表里标「**源自 `<path>` 第 N 页 ·
+原样未改**」,DESIGN PHASE 对它们**不做角色判断 / 不补内容 / 不写六维** —— 它们已是
+成品。设计只作用于新加的框架页(封面/章节/结尾)和整体顺序。
+
+### Mode A · Full-bleed slide (verbatim port · iframe)
+
+This is for a **foreign, self-contained** prototype / H5 / demo: it has its own
+`<title>`, internal logo, internal scale-to-fit JS, its own background. Deck framework
+chrome would **collide** with it, so give it the entire `1920×1080` canvas via an
+**iframe** and tell the deck to add nothing. **A feishu-deck slide from another deck
+does NOT belong here** —— 那走上面的 **Native slide lift**(原样 splice,不套 iframe)。
 
 ```json
 {
@@ -6311,12 +6366,16 @@ DOM tree and fighting every collision by hand.
 
 ### Decision recipe (90% of cases)
 
-| User says | Mode |
+| 用户给的 + 说的 | 用哪种 |
 |---|---|
-| "把这一页搬过来" / "复制这页" / "原封不动" / "直接插入" / "什么都不改" | **A** |
-| "做一页 demo · 标题是 X" / "嵌入到当前页面" / "加个 demo,deck 给标题" | **B** |
-| "把这个文档/PDF/截图 重新用 native 组件画" / "用 .card / .kpi-strip 重做" | **C** |
-| User gives a URL/HTML file with no other instruction | **Ask**: "整页搬(A)还是 deck 加标题嵌入(B)?" — don't guess |
+| **本地路径 + feishu slide** · "把(第N页/这几页/这个 slide)搬过来 / 复制这页 / 原样拼进来 / 加进来 / 一点不动" | **Native lift**(splice · 非 iframe) |
+| **外来独立 demo/原型** · "原封不动嵌这个 demo / 直接插入这个原型 / 把这个交互页放进来" | **A**(iframe 全幅) |
+| "做一页 demo · 标题是 X" / "嵌入到当前页面" / "加个 demo,deck 给标题" | **B**(iframe framed) |
+| "把这个文档/PDF/截图 重新用 native 组件画" / "用 .card / .kpi-strip 重做" | **C**(re-author) |
+| 只给 URL/HTML 没说要干嘛 | **问**:"当**原生 slide 拼**(Native lift)还是当**活 demo 嵌**(iframe)?" — 别猜、**别默认 iframe** |
+
+> 区分关键不在"搬/插入/原封不动"这些词(两类都这么说),而在**源是什么**:
+> 一份 **feishu slide** → Native lift;一个**自带壳的独立 demo/原型** → iframe。
 
 ---
 
