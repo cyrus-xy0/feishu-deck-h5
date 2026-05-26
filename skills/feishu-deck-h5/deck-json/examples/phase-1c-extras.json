@@ -270,6 +270,18 @@
     },
 
     {
+      "key": "iframe-demo",
+      "layout": "iframe-embed",
+      "screen_label": "11 iframe-embed",
+      "data": {
+        "title": "嵌入式原型 · iframe-embed",
+        "src": "../iframe-demo/index.html",
+        "iframe_title": "区域运营周报原型 demo",
+        "hint": "原型可滚动查阅"
+      }
+    },
+
+    {
       "key": "end",
       "layout": "end",
       "data": {}
