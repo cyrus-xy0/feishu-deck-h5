@@ -221,7 +221,7 @@
   letter-spacing: -0.01em;
 }
 .slide[data-layout="waterfall"] .bar .delta {
-  font: 700 16px/1 var(--fs-font-latin);
+  font: 700 24px/1.1 var(--fs-font-latin);   /* 16 → 24 body floor (R-VIS-BODY-FLOOR) 2026-05-26 — the Δ% is the waterfall's key number */
   color: var(--fs-teal);
 }
 .slide[data-layout="waterfall"] .bar.is-neg .delta { color: var(--fs-orange); }
@@ -502,9 +502,9 @@
   color: #fff;
 }
 .slide[data-layout="content-before-after"] .pivot .caption {
-  /* allow:body-floor — 1-line chrome pill below the arrow,
-     not body content. */
-  font: 700 16px/1.3 var(--fs-font-cjk);
+  /* 16 → 24 body floor (R-VIS-BODY-FLOOR) 2026-05-26 — standalone pivot
+     pill, the audience reads it; 24 fits the centered pill cleanly. */
+  font: 700 24px/1.3 var(--fs-font-cjk);
   color: #fff;
   text-align: center;
   padding: 8px 16px;

@@ -952,7 +952,10 @@ def _enrich_arch_stack(ctx, slide):
         name = layer.get("name") or {}
         title = _esc_br(name.get("title", ""))
         sub = name.get("sub")
-        sub_html = (f'              <div class="sub" data-text-id="slide-{snp}.layer-{ln}.name.sub">{_esc_br(sub)}</div>'
+        # data-allow-body-floor: layer subtitle is a by-design Latin eyebrow
+        # under the 28px .title (chrome, not body) — honors the CSS
+        # /* allow:body-floor */ at the runtime R-VIS-BODY-FLOOR audit too.
+        sub_html = (f'              <div class="sub" data-allow-body-floor data-text-id="slide-{snp}.layer-{ln}.name.sub">{_esc_br(sub)}</div>'
                     if sub else "")
         modules = layer.get("modules") or []
         modules_html = "\n".join(
@@ -1171,8 +1174,11 @@ def _enrich_stats_waterfall(ctx, slide):
         )
         label = _esc_br(bar.get("label", ""))
         sublabel = bar.get("sublabel")
+        # data-allow-body-floor: sublabel is a by-design secondary annotation
+        # under the 24px .label — keep 16 to preserve the label/sublabel
+        # hierarchy (bumping to 24 would flatten it). Honors the audit per-element.
         sublabel_html = (
-            f'              <div class="sublabel" data-text-id="slide-{snp}.bar-{bn}.sublabel">'
+            f'              <div class="sublabel" data-allow-body-floor data-text-id="slide-{snp}.bar-{bn}.sublabel">'
             f'{_esc_br(sublabel)}</div>\n'
             if sublabel else ""
         )
