@@ -451,6 +451,11 @@
     textEls.forEach(el => {
       // Skip SVG (different size semantics)
       if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+      // Skip non-rendered text holders — a <style>/<script> in body (common in
+      // raw-layout slides per SKILL.md Mode A) carries its CSS/JS source as
+      // textContent at the default 16px and would false-positive. R-VIS-TIER
+      // already skips these (line ~157); body-floor must match.
+      if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
       const cs = window.getComputedStyle(el);
       const px = Math.round(parseFloat(cs.fontSize));
       if (!px || px >= 24) return;
