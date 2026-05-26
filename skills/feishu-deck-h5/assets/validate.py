@@ -2527,7 +2527,10 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'bleeding into siblings.')
 
     for entry in report.get('label_floor', [])[:20]:
-        iss.err('R-VIS-LABEL-FLOOR',
+        _lev = iss.warn if entry.get('lifted') else iss.err
+        _lev('R-VIS-LABEL-FLOOR',
+            (('LIFTED slide (verbatim) — downgraded to WARNING, you choose whether to bump. ')
+             if entry.get('lifted') else '') +
             f'slide {entry["slide_idx"]} · card `{entry["card_sel"]}` '
             f'contains content-tier text (≥28px) but label '
             f'`{entry["label_sel"]}` is {entry["label_px"]}px — '

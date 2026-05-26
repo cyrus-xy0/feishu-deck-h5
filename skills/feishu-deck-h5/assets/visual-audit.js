@@ -449,6 +449,7 @@
             card_sel: shortSel(card),
             label_sel: sel,
             label_px: px,
+            lifted: !!el.closest('[data-lifted]'),
           });
         });
       }
