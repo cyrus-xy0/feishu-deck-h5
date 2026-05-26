@@ -103,6 +103,26 @@ new-run 之后立即写 `runs/<ts>/output/DESIGN-PLAN.md`,内容:
 (2) 用户 / 维护者事后能复盘"这份 deck 当初是怎么设计的";(3) 二次迭代时是 diff 基线。
 随 run 一起走(`package-deliverable.sh` 已含 `*.md`)。
 
+### 批量 vs 增量:一页一页喂时,设计一页就执行一页(别拖延)
+
+DESIGN PHASE 有两种节奏,**按用户怎么喂内容自动选**:
+
+- **批量模式**(用户一次性给齐主题 / outline / 全部素材):四步走完整 —— 全 deck
+  方案表在 chat 出 → 确认 → 一次 new-run + 落 `DESIGN-PLAN.md` + 生成全 deck。
+- **增量模式**(用户一页一页喂:"第一页…""第二页…""下一页" / 逐页发路径):
+  **设计一页就立刻执行一页,不要攒**。
+  1. **第一页就 new-run**:别等方案攒齐。第一页一来就 PREFLIGHT → new-run 建好
+     `runs/<ts>-<slug>/`,初始化 `deck.json` + `DESIGN-PLAN.md`。这样 deck 从第一页
+     起就在磁盘上、随时能打开。
+  2. **每页:设计 → 立即 render / append → 下一页**。该页是 hero / beyond-default
+     就先过确认门;是 schema / lift 就直接落。`deck.json` 和 `DESIGN-PLAN.md` 逐页增长。
+  3. **不要把已设计好的页只留在 chat 里等"全部齐了再生成"** —— 那是拖延,用户会问
+     "怎么没在本地目录"。**设计完一页 = 落盘一页。**
+
+判据:看用户喂法。逐页喂 → 增量(边设计边落盘);一次性给全 → 批量。拿不准就增量
+(对用户更可见、可中途调整)。增量模式下确认门不变:schema / lift 页直接落,
+hero / beyond-default 页仍先停下确认那一页再落。
+
 ---
 
 ## CHECK-ONLY MODE
