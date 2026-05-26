@@ -45,6 +45,7 @@ from pathlib import Path
 
 HERE          = Path(__file__).resolve().parent       # deck-json/
 SKILL_ROOT    = HERE.parent                            # skills/feishu-deck-h5/
+REPO_ROOT     = SKILL_ROOT.parent.parent
 ASSETS_DIR    = SKILL_ROOT / "assets"
 TEMPLATES_DIR = HERE / "templates"
 BLOCKS_DIR    = TEMPLATES_DIR / "blocks"
@@ -53,6 +54,7 @@ VALIDATE_DECK = HERE / "validate-deck.py"
 VALIDATE_HTML = ASSETS_DIR / "validate.py"
 EXTRACT_TEXTS = ASSETS_DIR / "extract-texts.py"
 COPY_ASSETS   = ASSETS_DIR / "copy-assets.py"
+BASE_LIBRARY  = REPO_ROOT / "scripts" / "base_library.py"
 
 # Phase 4 / post-review-medium-6: there's now ONE pathway for \n→<br>.
 # Every {{ field }} substitution goes through _esc_br (see render_template
@@ -118,6 +120,42 @@ def get_path(d, dotted: str):
 
 def relpath_from_to(src_dir: Path, dst_dir: Path) -> str:
     return os.path.relpath(dst_dir, start=src_dir).replace(os.sep, "/")
+
+
+def sync_base_shared_assets(identity: str, offline_cache: bool) -> int:
+    """Base is the source of truth; assets/shared is only the local cache copy."""
+    if not BASE_LIBRARY.exists():
+        print(f"render-deck: Base library provider missing: {BASE_LIBRARY}", file=sys.stderr)
+        return 6
+    rc = subprocess.run(
+        [
+            sys.executable,
+            str(BASE_LIBRARY),
+            "--as",
+            identity,
+            "sync-shared-assets",
+            "--quiet",
+            "--export-index",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if rc.returncode == 0:
+        if rc.stdout.strip():
+            print(rc.stdout.strip())
+        return 0
+    if offline_cache:
+        print("render-deck: WARN Base sync failed; using explicit offline local cache.", file=sys.stderr)
+        if rc.stderr.strip():
+            print(rc.stderr.strip(), file=sys.stderr)
+        return 0
+    print("render-deck: Base sync failed. Local shared assets are cache-only; fix Base access or rerun with --offline-cache.", file=sys.stderr)
+    if rc.stdout.strip():
+        print(rc.stdout, file=sys.stderr)
+    if rc.stderr.strip():
+        print(rc.stderr, file=sys.stderr)
+    return 6
 
 
 def render_template(template: str, data: dict) -> str:
@@ -1354,6 +1392,10 @@ def main(argv=None) -> int:
     ap.add_argument("--skip-copy-assets", action="store_true",
                     help="skip copy-assets step — output will reference skill-relative paths "
                          "(works only while output sits in <repo>/runs/<ts>/output/)")
+    ap.add_argument("--offline-cache", action="store_true",
+                    help="emergency/maintenance only: render from existing local Base cache if Base is unreachable")
+    ap.add_argument("--base-as", choices=["user", "bot"], default=os.environ.get("LARK_LIBRARY_AS", "user"),
+                    help="identity for Base-backed asset sync (default: env LARK_LIBRARY_AS or user)")
     ap.add_argument("--shared", choices=["link", "copy", "skip"], default="link",
                     help="copy-assets mode for shared/* files (default link, see SKILL.md)")
     ap.add_argument("--inline", action="store_true",
@@ -1368,6 +1410,10 @@ def main(argv=None) -> int:
     if args.inline and not args.skip_copy_assets:
         # --inline supersedes copy-assets
         args.skip_copy_assets = True
+
+    sync_rc = sync_base_shared_assets(args.base_as, args.offline_cache)
+    if sync_rc != 0:
+        return sync_rc
 
     # 1. Validate deck.json against schema
     if not args.skip_validate_json:

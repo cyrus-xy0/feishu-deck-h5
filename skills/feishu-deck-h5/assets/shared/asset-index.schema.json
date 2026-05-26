@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://feishu-deck-h5/asset-index.schema.json",
+  "title": "Shared Asset Index",
+  "type": "object",
+  "required": ["version", "root", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.0" },
+    "root": { "const": "assets/shared" },
+    "source": { "enum": ["feishu-base", "local"] },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["id", "path", "collection", "kind", "display_name", "mime", "size_bytes", "sha256", "tags"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9\\u4e00-\\u9fff][a-z0-9._\\-\\u4e00-\\u9fff]*$"
+        },
+        "path": { "type": "string", "minLength": 1 },
+        "collection": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["image", "video", "icon", "logo", "avatar", "demo", "data", "other"] },
+        "display_name": { "type": "string", "minLength": 1 },
+        "mime": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

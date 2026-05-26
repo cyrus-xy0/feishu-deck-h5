@@ -1,7 +1,7 @@
 {
   "name": "feishu-deck-h5",
-  "version": "1.0.0",
-  "description": "飞书风格 HTML deck 生成技能 — 单文件 16:9 网页演示，深色商务汇报",
+  "version": "1.2.0",
+  "description": "场景规划 + 飞书风格 HTML deck 生成 + pitch 预演技能 — outline planner、素材库、DeckJSON、H5 渲染、客户反应模拟",
   "author": {
     "name": "FuQiang",
     "url": "https://github.com/FuQiang"

@@ -33,6 +33,7 @@ deck-json/
 ├── MIGRATION-REPORT.md   ← Phase 0-4 设计取舍、Phase 4 退役笔记
 │
 ├── deck-schema.json      ← JSON Schema Draft 2020-12 · 单一字段源
+├── compile-outline.py    ← outline.json → deck.json + compile report
 ├── validate-deck.py      ← stdlib 校验器(schema + 业务规则)
 ├── render-deck.py        ← 渲染器(triple-gate: schema → render → validate.py)
 ├── deck-cli.py           ← 14 个原子操作命令
@@ -60,11 +61,26 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 # - 或在客户端 editor 里打开渲染后的 index.html (WYSIWYG)
 ```
 
+### 从 outline 编译
+
+如果上游已经有 `deck-outline-planner` 的 `outline.json`,先让 H5 侧的
+compiler 生成 DeckJSON,再渲染:
+
+```bash
+python3 deck-json/compile-outline.py \
+  runs/<ts>/input/outline.json \
+  runs/<ts>/output/deck.json \
+  --report runs/<ts>/output/compile-report.json \
+  --feedback runs/<ts>/output/FEEDBACK.md
+
+python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
+```
+
 ---
 
 ## Schema 一览
 
-### 12 base layouts + 2 specials
+### 13 regular layouts + 2 specials
 
 | Layout | Variants | 用于 |
 |---|---|---|
@@ -84,9 +100,9 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 | `replica` | — | 全屏 PDF 页图 |
 | `raw` | — | 单页 HTML 自由发挥(escape hatch) |
 
-= **12 base + 2 specials = 14 layout enum values**。多 variant 层叠出 **~20 个实际可用版式**。
+= **13 regular + 2 specials = 15 layout enum values**。多 variant 层叠出 **~20 个实际可用版式**。
 
-**12-base 不变量** — 加新 pattern 优先考虑做 existing layout 的 variant,只有结构性完全不同才加新 base。见 MIGRATION-REPORT.md 各 Phase 评估过程。
+**13-regular 不变量** — 加新 pattern 优先考虑做 existing layout 的 variant,只有结构性完全不同才加新 regular layout。见 MIGRATION-REPORT.md 各 Phase 评估过程。
 
 ### 10 个 embeddable blocks
 
@@ -114,7 +130,7 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `key` | kebab-case string, **unique** | 语义 locator (`data-slide-key`),slide-library ingest 必需 |
-| `layout` | enum (12 个值) | 主鉴别字段 |
+| `layout` | enum (15 个值: 13 regular + 2 specials) | 主鉴别字段 |
 | `variant` | string (content/stats/flow **必须**) | 子鉴别字段,单 variant layout 上忽略 |
 | `screen_label` | string (optional) | 上下页 UI 显示文字。默认从 title 派生 |
 | `accent` | enum: blue/teal/violet/purple/orange | **无 cyan** (规则 R49 编码在 schema) |

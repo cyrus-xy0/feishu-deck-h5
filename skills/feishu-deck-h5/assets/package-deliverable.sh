@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # feishu-deck-h5  ·  package the per-run output into a self-contained zip.
 #
-# Bundles index.html + texts.md + the apply-texts engine + macOS/Windows
-# launchers + a user-facing README into `deck-editable.zip`. The recipient
-# just unzips, edits texts.md, and double-clicks apply.command/apply.bat —
-# no Claude Code / OpenClaw / pip install required (only python3, which
-# ships on macOS by default and is a one-time install on Windows).
+# Bundles index.html + assets/ + texts.md + the apply-texts engine +
+# macOS/Windows launchers + source/metadata sidecars into `deck-editable.zip`.
+# The recipient just unzips, edits texts.md, and double-clicks
+# apply.command/apply.bat — no Claude Code / OpenClaw / pip install required
+# (only python3, which ships on macOS by default and is a one-time install on
+# Windows).
 #
 # Usage:
 #     bash assets/package-deliverable.sh runs/<timestamp>/output
@@ -90,17 +91,39 @@ cp "$SKILL_DIR/templates/apply.command"      "$STAGE/apply.command"
 cp "$SKILL_DIR/templates/apply.bat"          "$STAGE/apply.bat"
 cp "$SKILL_DIR/templates/README-deliverable.txt" "$STAGE/README.txt"
 
+# Copy portable runtime assets. `copy-assets.py --shared=link` may leave
+# output/assets/shared as a symlink to the canonical shared pool during local
+# iteration; dereference it here so the zip is truly self-contained.
+if [ -d "$OUT_DIR/assets" ]; then
+  cp -R -L "$OUT_DIR/assets" "$STAGE/assets"
+fi
+
+# Include source and handoff metadata when present. These files make the zip
+# useful as an editable source package, not just a text patch kit.
+OPTIONAL_FILES=()
+for f in deck.json FEEDBACK.md assets-manifest.yaml pitch-rehearsal.json PITCH_REHEARSAL.md; do
+  if [ -f "$OUT_DIR/$f" ]; then
+    cp "$OUT_DIR/$f" "$STAGE/$f"
+    OPTIONAL_FILES+=("$f")
+  fi
+done
+
 # launchers must be executable on extract; zip preserves the +x bit
 chmod +x "$STAGE/apply.command"
 
 ZIP_PATH="$OUT_DIR/${NAME}.zip"
 rm -f "$ZIP_PATH"
 
-# -X strips extra timestamps; -j flattens (no parent dir) so users see
-# files at the top of the zip when they unpack
-( cd "$STAGE" && zip -q -X "$ZIP_PATH" \
-    index.html texts.md apply-texts.py texts_common.py \
-    apply.command apply.bat README.txt )
+# -X strips extra timestamps. Keep top-level files flat, but preserve assets/
+# because linked HTML expects `assets/...` paths.
+ZIP_ITEMS=(index.html texts.md apply-texts.py texts_common.py apply.command apply.bat README.txt)
+if [ -d "$STAGE/assets" ]; then
+  ZIP_ITEMS+=(assets)
+fi
+if [ "${#OPTIONAL_FILES[@]}" -gt 0 ]; then
+  ZIP_ITEMS+=("${OPTIONAL_FILES[@]}")
+fi
+( cd "$STAGE" && zip -q -X -r "$ZIP_PATH" "${ZIP_ITEMS[@]}" )
 
 if [ ! -f "$ZIP_PATH" ]; then
   echo "ERROR: zip step failed"

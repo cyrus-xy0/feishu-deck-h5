@@ -55,6 +55,24 @@ jobs:
           print(f'CSS balanced: {o}/{n}')
           "
 
+      - name: Asset catalog is fresh
+        run: |
+          python3 assets/catalog-assets.py --check
+
+      - name: Outline planner JSON sanity
+        run: |
+          python3 -m json.tool ../deck-outline-planner/schema/deck-outline.schema.json >/dev/null
+          python3 -m json.tool ../deck-outline-planner/examples/retail-agent-outline.json >/dev/null
+          python3 ../deck-outline-planner/validate-outline.py ../deck-outline-planner/examples/retail-agent-outline.json
+
+      - name: Product H5 evals (no screenshots)
+        run: |
+          python3 ../../evals/run-product-h5-evals.py --run-id ci --skip-screenshots
+
+      - name: Generator wrapper contract
+        run: |
+          python3 ../../evals/run-generator-contract.py
+
       - name: Preflight self-test (CI environment is non-Cowork — should still pass)
         run: |
           # CI runs in a fresh GitHub runner, not a Cowork session. The preflight

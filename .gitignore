@@ -46,3 +46,6 @@ package-lock.json
 
 # Preflight cache (per-machine cross-clone search results)
 .feishu-deck-h5-preflight-cache
+
+# Base-backed local cache copies. Feishu Base is the source of truth.
+.base-cache/

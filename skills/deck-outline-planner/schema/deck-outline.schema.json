@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lark-deck-cyrus/deck-outline.schema.json",
+  "title": "Deck Outline Plan",
+  "type": "object",
+  "required": ["version", "brief", "scene", "thesis", "outline", "asset_plan", "claim_discipline", "handoff"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.0" },
+    "brief": { "$ref": "#/$defs/brief" },
+    "scene": { "$ref": "#/$defs/scene" },
+    "thesis": { "$ref": "#/$defs/thesis" },
+    "knowledge_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/knowledge_ref" }
+    },
+    "outline": { "$ref": "#/$defs/outline" },
+    "asset_plan": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset_request" }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "claim_discipline": { "$ref": "#/$defs/claim_discipline" },
+    "handoff": { "$ref": "#/$defs/handoff" }
+  },
+  "$defs": {
+    "brief": {
+      "type": "object",
+      "required": ["title", "audience", "objective", "delivery_mode"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "audience": { "type": "string", "minLength": 1 },
+        "requester_context": { "type": "string" },
+        "objective": { "type": "string", "minLength": 1 },
+        "success_metric": { "type": "string" },
+        "delivery_mode": { "enum": ["local-agent", "feishu-bot", "unknown"] },
+        "constraints": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "required": ["industry", "business_moment", "core_tension", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "industry": { "type": "string", "minLength": 1 },
+        "segment": { "type": "string" },
+        "user_role": { "type": "string" },
+        "business_moment": { "type": "string", "minLength": 1 },
+        "core_tension": { "type": "string", "minLength": 1 },
+        "confidence": { "enum": ["high", "medium", "low"] }
+      }
+    },
+    "thesis": {
+      "type": "object",
+      "required": ["one_sentence", "pain_points", "solution_angle"],
+      "additionalProperties": false,
+      "properties": {
+        "one_sentence": { "type": "string", "minLength": 1 },
+        "pain_points": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/pain_point" }
+        },
+        "solution_angle": { "type": "string", "minLength": 1 },
+        "differentiation": { "type": "string" }
+      }
+    },
+    "pain_point": {
+      "type": "object",
+      "required": ["name", "why_now", "impact", "evidence_level"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "why_now": { "type": "string", "minLength": 1 },
+        "impact": { "type": "string", "minLength": 1 },
+        "evidence_level": { "enum": ["user-provided", "approved-story", "public-pattern", "hypothesis"] },
+        "evidence_needed": { "type": "string" }
+      }
+    },
+    "knowledge_ref": {
+      "type": "object",
+      "required": ["source", "used_for"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "const": "feishu-base" },
+        "table": { "type": "string" },
+        "record_id": { "type": "string" },
+        "doc_id": { "type": "string" },
+        "query": { "type": "string" },
+        "cache_path": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "used_for": { "type": "string", "minLength": 1 }
+      }
+    },
+    "outline": {
+      "type": "object",
+      "required": ["arc", "slides"],
+      "additionalProperties": false,
+      "properties": {
+        "arc": { "type": "string", "minLength": 1 },
+        "slides": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/slide_plan" }
+        }
+      }
+    },
+    "slide_plan": {
+      "type": "object",
+      "required": ["key", "title", "role", "message", "layout_candidate"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "role": {
+          "enum": ["cover", "agenda", "context", "pain", "insight", "solution", "demo", "evidence", "case", "roadmap", "decision", "closing"]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "content_beats": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "layout_candidate": { "$ref": "#/$defs/layout_candidate" },
+        "visual_intent": { "type": "string" },
+        "assets": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "risk_flags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "layout_candidate": {
+      "type": "object",
+      "required": ["layout"],
+      "additionalProperties": false,
+      "properties": {
+        "layout": {
+          "enum": ["cover", "agenda", "section", "content", "stats", "quote", "image-text", "table", "flow", "logo-wall", "arch-stack", "iframe-embed", "replica", "raw", "end"]
+        },
+        "variant": { "type": "string" },
+        "rationale": { "type": "string" }
+      }
+    },
+    "asset_request": {
+      "type": "object",
+      "required": ["id", "type", "need", "preferred_source"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "type": { "enum": ["image", "video", "icon", "logo", "avatar", "demo", "data", "other"] },
+        "need": { "type": "string", "minLength": 1 },
+        "query": { "type": "string" },
+        "preferred_source": { "enum": ["feishu-base", "user-provided", "generated", "external", "none"] },
+        "fallback": { "type": "string" },
+        "required": { "type": "boolean", "default": false }
+      }
+    },
+    "claim_discipline": {
+      "type": "object",
+      "required": ["unsupported_claims", "needs_user_confirmation"],
+      "additionalProperties": false,
+      "properties": {
+        "unsupported_claims": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "needs_user_confirmation": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "required": ["target_skill", "deckjson_strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "target_skill": { "const": "feishu-deck-h5" },
+        "deckjson_strategy": { "enum": ["direct", "needs-user-confirmation", "needs-more-input"] },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

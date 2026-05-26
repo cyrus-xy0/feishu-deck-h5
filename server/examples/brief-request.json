@@ -1,0 +1,14 @@
+{
+  "brief": {
+    "title": "连锁零售 AI 知识库 pitch",
+    "customer_name": "示例客户",
+    "industry": "消费零售",
+    "audience": "COO、运营负责人和信息化负责人",
+    "objective": "推动客户确认一个门店 SOP 试点",
+    "success_metric": "确认试点门店、流程素材和双方负责人",
+    "business_moment": "新品上市和门店巡检",
+    "core_tension": "总部策略到门店动作不可追踪,一线问题也没有稳定回流",
+    "product_scope": ["飞书 AI", "知识问答", "多维表格", "飞书任务"],
+    "delivery_mode": "feishu-bot"
+  }
+}

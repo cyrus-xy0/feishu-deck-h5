@@ -1,0 +1,168 @@
+{
+  "version": "1.0",
+  "brief": {
+    "title": "连锁餐饮门店执行 AI agent 方案",
+    "audience": "连锁餐饮 COO 和门店运营负责人",
+    "requester_context": "售前客户提案",
+    "objective": "让客户同意进入 2 周试点,验证飞书 bot + 本地 agent 的门店执行闭环",
+    "success_metric": "客户确认试点门店、试点场景和数据素材清单",
+    "delivery_mode": "feishu-bot",
+    "constraints": ["默认中文", "不能编造客户数据", "demo 只能作为证据,不能只做 demo"]
+  },
+  "scene": {
+    "industry": "消费零售 / 连锁餐饮",
+    "segment": "全国连锁门店",
+    "user_role": "门店运营负责人",
+    "business_moment": "新品上市和门店巡检",
+    "core_tension": "总部策略依赖群聊和人工盯执行,门店动作不可追踪,复盘只能看到结果",
+    "confidence": "medium"
+  },
+  "thesis": {
+    "one_sentence": "把门店执行从群聊提醒升级为 AI agent 驱动的任务、知识、数据闭环。",
+    "pain_points": [
+      {
+        "name": "总部策略到门店动作衰减",
+        "why_now": "新品和活动节奏变快,区域经理无法逐店盯动作。",
+        "impact": "活动复盘只能解释销量结果,难以定位执行差异。",
+        "evidence_level": "public-pattern",
+        "evidence_needed": "客户提供最近一次新品活动 SOP、门店反馈或巡检记录。"
+      },
+      {
+        "name": "一线问题沉淀不回知识库",
+        "why_now": "门店新人多、班次碎,优秀经验靠人传人。",
+        "impact": "问题反复问、培训成本高、标准动作难复制。",
+        "evidence_level": "hypothesis",
+        "evidence_needed": "客户确认培训和门店问答的主要痛点。"
+      }
+    ],
+    "solution_angle": "用飞书 bot 承接一线入口,用 agent 把 SOP、任务、问答、巡检和经营看板连成闭环。",
+    "differentiation": "不是单点 demo,而是从门店动作到经营复盘的端到端工作方式升级。"
+  },
+  "knowledge_refs": [
+    {
+      "source": "feishu-base",
+      "table": "知识库",
+      "query": "消费零售 连锁餐饮 新品上市 门店巡检",
+      "cache_path": ".base-cache/knowledge/knowledge/industries/retail-consumer.md",
+      "title": "行业包 · 消费零售 / 连锁餐饮",
+      "used_for": "通过 Base 检索后作为痛点地图、素材提示、open questions"
+    }
+  ],
+  "outline": {
+    "arc": "先证明门店执行问题不是工具问题,而是动作、知识、数据断链;再展示飞书 bot + agent 如何闭环;最后给出试点路径。",
+    "slides": [
+      {
+        "key": "cover",
+        "title": "门店执行 AI agent 方案",
+        "role": "cover",
+        "message": "面向连锁餐饮的新品上市和巡检闭环。",
+        "content_beats": ["客户提案", "飞书企业 AI", "试点建议"],
+        "layout_candidate": { "layout": "cover", "rationale": "标准提案封面" },
+        "visual_intent": "深色飞书母版,客户 logo 与飞书 logo 并置。",
+        "assets": ["customer-logo"],
+        "evidence": [],
+        "risk_flags": ["客户 logo 需确认是否已入库"]
+      },
+      {
+        "key": "execution-gap",
+        "title": "门店执行的断点不在“有没有群”,而在动作能否闭环",
+        "role": "pain",
+        "message": "群聊能提醒,但不能保证 SOP、任务、反馈和复盘连起来。",
+        "content_beats": ["总部策略", "门店动作", "巡检反馈", "经营复盘"],
+        "layout_candidate": { "layout": "content", "variant": "before-after", "rationale": "适合旧工作方式 vs 新闭环方式" },
+        "visual_intent": "左右对比,左侧弱化群聊碎片,右侧强调闭环链路。",
+        "assets": ["workflow-demo"],
+        "evidence": ["需要客户提供现有活动 SOP 或群聊样例"],
+        "risk_flags": ["不能写具体损失数字"]
+      },
+      {
+        "key": "agent-loop",
+        "title": "飞书 bot 是入口,agent 是把执行跑起来的工作引擎",
+        "role": "solution",
+        "message": "一线通过飞书 bot 提问、接任务、报异常;agent 在后台调知识库、任务和数据。",
+        "content_beats": ["问答", "任务派发", "异常提醒", "复盘沉淀"],
+        "layout_candidate": { "layout": "arch-stack", "rationale": "适合表达入口、能力、数据底座的关系" },
+        "visual_intent": "四层架构:入口、agent 能力、业务系统、知识/数据底座。",
+        "assets": ["feishu-product-icons", "bot-demo"],
+        "evidence": [],
+        "risk_flags": []
+      },
+      {
+        "key": "pilot-path",
+        "title": "两周试点先跑一个闭环,再扩展到更多门店动作",
+        "role": "roadmap",
+        "message": "从一个活动 SOP 和一组门店开始,验证任务完成率、问题响应和复盘效率。",
+        "content_beats": ["第 1 周:场景和素材接入", "第 2 周:门店试跑", "复盘:指标和扩展建议"],
+        "layout_candidate": { "layout": "flow", "variant": "timeline", "rationale": "适合表达试点节奏" },
+        "visual_intent": "三阶段时间轴,每阶段只放可交付物。",
+        "assets": [],
+        "evidence": ["需要客户确认试点门店和负责人"],
+        "risk_flags": ["试点指标需客户确认"]
+      },
+      {
+        "key": "next-step",
+        "title": "下一步:确认试点场景、素材和门店范围",
+        "role": "closing",
+        "message": "把讨论落到可启动的试点清单。",
+        "content_beats": ["试点场景", "素材清单", "负责人", "时间窗口"],
+        "layout_candidate": { "layout": "end", "rationale": "标准收束页" },
+        "visual_intent": "保留飞书 slogan,不加过多 CTA。",
+        "assets": [],
+        "evidence": [],
+        "risk_flags": []
+      }
+    ]
+  },
+  "asset_plan": [
+    {
+      "id": "customer-logo",
+      "type": "logo",
+      "need": "客户品牌 logo",
+      "query": "客户中文名",
+      "preferred_source": "feishu-base",
+      "fallback": "若未入库,请用户上传官方 logo;不要自行绘制。",
+      "required": true
+    },
+    {
+      "id": "bot-demo",
+      "type": "demo",
+      "need": "飞书 bot 中一线提问、任务提醒、异常上报的 demo",
+      "query": "feishu bot store execution demo",
+      "preferred_source": "user-provided",
+      "fallback": "用 HTML mockup 重建流程,标注为示意。",
+      "required": false
+    },
+    {
+      "id": "workflow-demo",
+      "type": "demo",
+      "need": "旧的群聊驱动执行 vs 新的 agent 闭环执行流程示意",
+      "query": "store execution workflow before after",
+      "preferred_source": "generated",
+      "fallback": "用 DeckJSON before-after 或 flow/process 直接重建。",
+      "required": false
+    },
+    {
+      "id": "feishu-product-icons",
+      "type": "icon",
+      "need": "飞书 AI、知识问答、多维表格或任务相关产品标识",
+      "query": "飞书标识",
+      "preferred_source": "feishu-base",
+      "fallback": "使用文字 pill,不画商标。",
+      "required": false
+    }
+  ],
+  "open_questions": [
+    "客户是否已有最近一次新品活动 SOP 或巡检记录可以引用?",
+    "试点入口更偏飞书 bot,还是本地 agent + skills 给运营团队使用?",
+    "是否有真实门店截图、群聊样例或 BI 看板可作为 evidence slide?"
+  ],
+  "claim_discipline": {
+    "unsupported_claims": ["不能写具体节省时间、提升百分比或客户已验证效果。"],
+    "needs_user_confirmation": ["试点周期、试点门店数、成功指标。"]
+  },
+  "handoff": {
+    "target_skill": "feishu-deck-h5",
+    "deckjson_strategy": "needs-user-confirmation",
+    "notes": "用户确认 open questions 后,用 layout_candidate 写 DeckJSON。"
+  }
+}

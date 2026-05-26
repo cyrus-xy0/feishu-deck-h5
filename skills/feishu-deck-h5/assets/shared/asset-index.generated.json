@@ -1,0 +1,5681 @@
+{
+  "items": [
+    {
+      "collection": "bytedance-products",
+      "display_name": "doubao",
+      "id": "bytedance-products-doubao",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/bytedance-products/doubao.png",
+      "sha256": "4303fa608066ee294c851514fe1f1aa83d7f49615a11b48de5518487f51bafd3",
+      "size_bytes": 2470,
+      "tags": [
+        "bytedance-products",
+        "doubao",
+        "icon"
+      ]
+    },
+    {
+      "collection": "bytedance-products",
+      "display_name": "trae",
+      "id": "bytedance-products-trae",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/bytedance-products/trae.png",
+      "sha256": "f6b871ee270d2f3722e4054489c61f34fa4296045b191068e7590551c4bd1e6b",
+      "size_bytes": 8293,
+      "tags": [
+        "bytedance-products",
+        "icon",
+        "trae"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "Babycare",
+      "id": "clientlogo-babycare",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/Babycare.png",
+      "sha256": "5549e8515eb50deb7ef88e3254120117312e25889e3a87a70eb418cf963abe7b",
+      "size_bytes": 12147,
+      "tags": [
+        "Babycare",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "Cabana家具",
+      "id": "clientlogo-cabana家具",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/Cabana家具.png",
+      "sha256": "22cf84d8098dd4174b676e0fca1f765331bdfe3b539a220ea2084f0bfe5c63e1",
+      "size_bytes": 9336,
+      "tags": [
+        "Cabana家具",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "CPE源峰",
+      "id": "clientlogo-cpe源峰",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/CPE源峰.png",
+      "sha256": "0004d767cbe4370c472485ad6b2a902953739e9d36c10be07e9870f8244807e2",
+      "size_bytes": 72616,
+      "tags": [
+        "CPE源峰",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "CPE源峰_paired",
+      "id": "clientlogo-cpe源峰_paired",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/CPE源峰_paired.png",
+      "sha256": "3d18647da63c10ae8c630409c7442668f6675e5e2117d5c8331bfe8bab3edebf",
+      "size_bytes": 27044,
+      "tags": [
+        "CPE源峰",
+        "clientlogo",
+        "logo",
+        "paired"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "ELLASSAY_歌力思",
+      "id": "clientlogo-ellassay_歌力思",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/ELLASSAY_歌力思.png",
+      "sha256": "068364a7af516adb4872dc9735866579f284ed53fe4e745d3ba02959c77b108c",
+      "size_bytes": 11175,
+      "tags": [
+        "ELLASSAY",
+        "clientlogo",
+        "logo",
+        "歌力思"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "HBN颜究所",
+      "id": "clientlogo-hbn颜究所",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/HBN颜究所.png",
+      "sha256": "829e49772315d7717ddd5e3bcc36103a09c486447b5fd9a74e422c5d7ed31f06",
+      "size_bytes": 134976,
+      "tags": [
+        "HBN颜究所",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "HitGoo",
+      "id": "clientlogo-hitgoo",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/HitGoo.png",
+      "sha256": "d34474d6b5330f3f5cba4ef45a0071de638190825478a871b61eb09c63491892",
+      "size_bytes": 159641,
+      "tags": [
+        "HitGoo",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "IDG资本",
+      "id": "clientlogo-idg资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/IDG资本.png",
+      "sha256": "5a81a3ddc62f491408731c8511fb60a152d715f9b93fe001b11db8a5b5a53481",
+      "size_bytes": 20034,
+      "tags": [
+        "IDG资本",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "JACK_JONES_杰克琼斯",
+      "id": "clientlogo-jack_jones_杰克琼斯",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/JACK_JONES_杰克琼斯.png",
+      "sha256": "f4bafa85cd7633d4f3618e9b92db8ac3895de33dab7df16a79713b1954109b0a",
+      "size_bytes": 126340,
+      "tags": [
+        "JACK",
+        "JONES",
+        "clientlogo",
+        "logo",
+        "杰克琼斯"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "Kappa中国",
+      "id": "clientlogo-kappa中国",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/Kappa中国.png",
+      "sha256": "2a05f3b6d78b8dc757ad5eab45235cfdb0e5cbc4f2bba98bc9cd8159d91ed62d",
+      "size_bytes": 127000,
+      "tags": [
+        "Kappa中国",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "Karl Lagerfeld",
+      "id": "clientlogo-karl-lagerfeld",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/Karl Lagerfeld.png",
+      "sha256": "ae611cff41ac936de8661e8ad6fbb94b50473f2291840278fb7ac14eb91ff842",
+      "size_bytes": 216906,
+      "tags": [
+        "Karl",
+        "Lagerfeld",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "KKR",
+      "id": "clientlogo-kkr",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/KKR.png",
+      "sha256": "0a3ce5921bf358a4552546f16ec8f26099dce6476c34b4a177198f8ce9a925d4",
+      "size_bytes": 172589,
+      "tags": [
+        "KKR",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "LINLEE",
+      "id": "clientlogo-linlee",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/LINLEE.png",
+      "sha256": "c2a7e9521ffd01e8c6e1f6a96ccd5f943463a2a4d042e54e00fbea243dce7071",
+      "size_bytes": 367978,
+      "tags": [
+        "LINLEE",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "Mistine_1",
+      "id": "clientlogo-mistine_1",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/Mistine_1.png",
+      "sha256": "9e776c341de38a5d145f096d012db9df7564d77a741b4217ac3209fcedd57cfe",
+      "size_bytes": 37039,
+      "tags": [
+        "1",
+        "Mistine",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "Mistine_2",
+      "id": "clientlogo-mistine_2",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/Mistine_2.png",
+      "sha256": "6583b50fc17b8c064f9928ded30256370d3056599743e9e78191e9b56a75738a",
+      "size_bytes": 36976,
+      "tags": [
+        "2",
+        "Mistine",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "moodytiger",
+      "id": "clientlogo-moodytiger",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/moodytiger.png",
+      "sha256": "5da01da76f4abbe1cd5636466ee7e49dbdb1e4fbf4ab7bbd86dcd15dfe36598a",
+      "size_bytes": 108843,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "moodytiger"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "PAG",
+      "id": "clientlogo-pag",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/PAG.png",
+      "sha256": "b18bb8247729ea61bcc900f6ea7e48c7e3b7b6abdc83850482d72ef49e304466",
+      "size_bytes": 37535,
+      "tags": [
+        "PAG",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "PEAK_匹克",
+      "id": "clientlogo-peak_匹克",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/PEAK_匹克.png",
+      "sha256": "e0035adb9acc14a942437e2e10b768a0a4b38f4a2f85cd1be456ee466b26009e",
+      "size_bytes": 130324,
+      "tags": [
+        "PEAK",
+        "clientlogo",
+        "logo",
+        "匹克"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "RPS",
+      "id": "clientlogo-rps",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/RPS.png",
+      "sha256": "83374137b87965868882a02b95ea206914bdb6e08c98a3acaf08e1778d02c0ca",
+      "size_bytes": 96742,
+      "tags": [
+        "RPS",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "Toys _R_ Us",
+      "id": "clientlogo-toys-_r_-us",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/Toys _R_ Us.png",
+      "sha256": "fa318d7d3e93207ea778dc2e527c38a153ec06a6eb0c1f01a28852da861c9e15",
+      "size_bytes": 200341,
+      "tags": [
+        "R",
+        "Toys",
+        "Us",
+        "clientlogo",
+        "logo"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "ubras",
+      "id": "clientlogo-ubras",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/ubras.png",
+      "sha256": "f094039dc67f3db517ffff319ae6982c505c81483e811d774a23816c3928b23d",
+      "size_bytes": 90400,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "ubras"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "七匹狼",
+      "id": "clientlogo-七匹狼",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/七匹狼.png",
+      "sha256": "ae611cff41ac936de8661e8ad6fbb94b50473f2291840278fb7ac14eb91ff842",
+      "size_bytes": 216906,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "七匹狼"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "三元股份",
+      "id": "clientlogo-三元股份",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/三元股份.png",
+      "sha256": "107bcdf2d2e6a9259988ee2dc46bc537827401763c9cf43d49593736750f1942",
+      "size_bytes": 5768,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "三元股份"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "三只松鼠",
+      "id": "clientlogo-三只松鼠",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/三只松鼠.png",
+      "sha256": "30f39ce692db9cbd9ce129f50c6a8f3cec7955f748c9918e666f4a9f6aefb412",
+      "size_bytes": 130447,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "三只松鼠"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "三顿半",
+      "id": "clientlogo-三顿半",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/三顿半.png",
+      "sha256": "cc55f5ee917deefd96baaf78eccf50436cad7719aeec31f1374588f2243b15a9",
+      "size_bytes": 53525,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "三顿半"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "上海世新",
+      "id": "clientlogo-上海世新",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/上海世新.png",
+      "sha256": "6ecf19c678e153ec928e2de79a74f4b3c215ee0a8096f0a7997dafffb001d294",
+      "size_bytes": 206857,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "上海世新"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "上海柠季信息科技有限公司",
+      "id": "clientlogo-上海柠季信息科技有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/上海柠季信息科技有限公司.png",
+      "sha256": "12c89f767b6866abd40ab1637a42deff58784dfba6179df1b1c34cb2eee766ef",
+      "size_bytes": 18357,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "上海柠季信息科技有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "上海胡子大厨餐饮管理有限公司",
+      "id": "clientlogo-上海胡子大厨餐饮管理有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/上海胡子大厨餐饮管理有限公司.png",
+      "sha256": "5ac822dfaa4a9c856fd4d73210ecf2844d0c29ecde2a4d31c9ddaebe3418873c",
+      "size_bytes": 135193,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "上海胡子大厨餐饮管理有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "中国动向",
+      "id": "clientlogo-中国动向",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/中国动向.png",
+      "sha256": "0a627ac9f17eba9b45f749ad559a66bc624992f4cb1b97ef9c20b689a6615d75",
+      "size_bytes": 27708,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "中国动向"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "中国文化产业投资基金",
+      "id": "clientlogo-中国文化产业投资基金",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/中国文化产业投资基金.png",
+      "sha256": "df8298066fbe2138219797935e44f44073314ee951d43f793f3bd94151cbfc80",
+      "size_bytes": 358516,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "中国文化产业投资基金"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "中山市中泰龙办公用品",
+      "id": "clientlogo-中山市中泰龙办公用品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/中山市中泰龙办公用品.png",
+      "sha256": "cf4e407b9c87c7af479f6339202a79c0724e8c3bd8c4fc9c825a572871bad72c",
+      "size_bytes": 230309,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "中山市中泰龙办公用品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "中山市国景家具",
+      "id": "clientlogo-中山市国景家具",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/中山市国景家具.png",
+      "sha256": "4e84d73d2af566f7b46d17b3343a51f486a91c652a944f997a55f245a505c78f",
+      "size_bytes": 132248,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "中山市国景家具"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "中金公司",
+      "id": "clientlogo-中金公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/中金公司.png",
+      "sha256": "a9e849eae541697a41664bdf6c53b4ec06c48e1e0e69ae4c61c6eaf284a9b50e",
+      "size_bytes": 10768,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "中金公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "中顺洁柔",
+      "id": "clientlogo-中顺洁柔",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/中顺洁柔.png",
+      "sha256": "856ed687dc7280b35cfdda380d62dd0766beeb88f9d8a0221b9a383f625afee8",
+      "size_bytes": 148688,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "中顺洁柔"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "丸美股份",
+      "id": "clientlogo-丸美股份",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/丸美股份.png",
+      "sha256": "9e1db29b1c1efc70d1df3bdc967b8be9d7ba17d7e46a76ea0c5478b40363792a",
+      "size_bytes": 313744,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "丸美股份"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "乐歌股份",
+      "id": "clientlogo-乐歌股份",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/乐歌股份.png",
+      "sha256": "fe5322dbd16fbfae18080b1fc2fce5a7ea73686a3827fa4cf831290bc12b2098",
+      "size_bytes": 126130,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "乐歌股份"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "乖宝宠物",
+      "id": "clientlogo-乖宝宠物",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/乖宝宠物.png",
+      "sha256": "31a2d9ddcd601dcd0e2b11b389cc1d4d9d26c6c94292049f10399e3092725906",
+      "size_bytes": 660233,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "乖宝宠物"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "九坤投资",
+      "id": "clientlogo-九坤投资",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/九坤投资.jpg",
+      "sha256": "25bce1706a95c13f2f4dd7c532cec5772233ed3bbc6e23608e6b4ce74e909e06",
+      "size_bytes": 788660,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "九坤投资"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "书亦烧仙草",
+      "id": "clientlogo-书亦烧仙草",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/书亦烧仙草.png",
+      "sha256": "1c5f92898cc00d133a0d8b06e7d282222bbb977891f90a68d9768549f8e88d2c",
+      "size_bytes": 160938,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "书亦烧仙草"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "云南麒麟大口茶",
+      "id": "clientlogo-云南麒麟大口茶",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/云南麒麟大口茶.png",
+      "sha256": "3c9a0f267249a618dcf97202399782825719991ab369dcf87cf03be59fe4f22e",
+      "size_bytes": 97928,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "云南麒麟大口茶"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "五粮液",
+      "id": "clientlogo-五粮液",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/五粮液.png",
+      "sha256": "3fe51692d0a30c534b824646bb7b773c5092890062ffe5e16a0e7948990c27b3",
+      "size_bytes": 29151,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "五粮液"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "亚朵酒店",
+      "id": "clientlogo-亚朵酒店",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/亚朵酒店.png",
+      "sha256": "9f6b17287df4b09b620d51fb20629664b7bc138cce693e3b3b28c7767b5a1c82",
+      "size_bytes": 182923,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "亚朵酒店"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "京客隆",
+      "id": "clientlogo-京客隆",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/京客隆.png",
+      "sha256": "15c099241e7fab1084a08d86f338ccce0437717af1492ef5ae73a8e31868982d",
+      "size_bytes": 240250,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "京客隆"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "京粮控股",
+      "id": "clientlogo-京粮控股",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/京粮控股.png",
+      "sha256": "cff05c45d98898bfa5bb19f176f749c82ff290b5e59d707b5a43887418bcba41",
+      "size_bytes": 33073,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "京粮控股"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "仙迪集团",
+      "id": "clientlogo-仙迪集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/仙迪集团.png",
+      "sha256": "98d667c18f4aaffbc88055be67aea1ccfcb4e2e2feaf23237ed48978ce0f294a",
+      "size_bytes": 24551,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "仙迪集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "伊芙丽集团",
+      "id": "clientlogo-伊芙丽集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/伊芙丽集团.png",
+      "sha256": "d2eb4cbde4067dd32028b3b853b60203d2ff6e1aba8e16925ebeea56cdb1d28d",
+      "size_bytes": 128220,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "伊芙丽集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "优合",
+      "id": "clientlogo-优合",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/优合.png",
+      "sha256": "9192efcef5794602d2423d28fd0fb95645bf6898e6cc249ca4298fda7a1405cc",
+      "size_bytes": 19543,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "优合"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "优思西湖",
+      "id": "clientlogo-优思西湖",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/优思西湖.png",
+      "sha256": "074a7bc66907daf0e469ad034fde4bffe7331aa58631f2fd629119508a6dec88",
+      "size_bytes": 30202,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "优思西湖"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "优萃生物",
+      "id": "clientlogo-优萃生物",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/优萃生物.png",
+      "sha256": "ac0ce591118ef6189f94c2046de771e2bf24c8eb65d0799f1b9cee33f99c77ca",
+      "size_bytes": 29967,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "优萃生物"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "佳惠百货",
+      "id": "clientlogo-佳惠百货",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/佳惠百货.png",
+      "sha256": "7c32fdb4fee91020c2cd2469021509df8c57ee8f0f48c439c6d1ed0e819568d0",
+      "size_bytes": 105755,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "佳惠百货"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "佳沛奇异果",
+      "id": "clientlogo-佳沛奇异果",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/佳沛奇异果.png",
+      "sha256": "845126be958046c6446cf82defd84f7eae4a5c0fe68861a5a347773d05a5f0b7",
+      "size_bytes": 599848,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "佳沛奇异果"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "佳鲜农庄",
+      "id": "clientlogo-佳鲜农庄",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/佳鲜农庄.png",
+      "sha256": "762d1e0bb27fe27dca303a38b518946a25bed32d644ad1824ccfd184901425ea",
+      "size_bytes": 64250,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "佳鲜农庄"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "健力宝",
+      "id": "clientlogo-健力宝",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/健力宝.png",
+      "sha256": "3fbe37d5333a4e6d7732a2bc7223d271dfb18ffabf6c84d2d1170a33c5524c91",
+      "size_bytes": 18816,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "健力宝"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "元气森林",
+      "id": "clientlogo-元气森林",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/元气森林.png",
+      "sha256": "525b3279f2ee95d82ccc36a8c2dfae73cda6e545329677a1497f6f91850aefc1",
+      "size_bytes": 37667,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "元气森林"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "光源资本",
+      "id": "clientlogo-光源资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/光源资本.png",
+      "sha256": "792617368f3068384a5ae1d1bc80cbf9f84e1d9f6e6a5a0d5c282e01fe128efc",
+      "size_bytes": 100931,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "光源资本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "克丽缇娜",
+      "id": "clientlogo-克丽缇娜",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/克丽缇娜.png",
+      "sha256": "7c11badc420fdfcee89d6c651080269ded93fc66720f5a1c3a03c42dd2e0044c",
+      "size_bytes": 20527,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "克丽缇娜"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "凯宾斯基",
+      "id": "clientlogo-凯宾斯基",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/凯宾斯基.png",
+      "sha256": "ce3fa5ae522cbb1f2f86ad75b12a1eb321b94d84f1c3b395446e3b432295a421",
+      "size_bytes": 48221,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "凯宾斯基"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "利和味道",
+      "id": "clientlogo-利和味道",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/利和味道.png",
+      "sha256": "f8fef4e1b29a27a864e22e84bc7dff2b461037996213230e9868e92947f97245",
+      "size_bytes": 15034,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "利和味道"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "北木南",
+      "id": "clientlogo-北木南",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/北木南.png",
+      "sha256": "f21947c8e1b647b392612d5439f43aaddc61f3f7871c3fe8721b1e2c41566cfc",
+      "size_bytes": 134656,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "北木南"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "匹克体育",
+      "id": "clientlogo-匹克体育",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/匹克体育.png",
+      "sha256": "e0035adb9acc14a942437e2e10b768a0a4b38f4a2f85cd1be456ee466b26009e",
+      "size_bytes": 130324,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "匹克体育"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "华住酒店集团",
+      "id": "clientlogo-华住酒店集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/华住酒店集团.png",
+      "sha256": "e30a273ee3cb8225b5a78a99a7772bdccb149c7195c8166267cf05b8c0f0f1db",
+      "size_bytes": 13990,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "华住酒店集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "华映资本",
+      "id": "clientlogo-华映资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/华映资本.png",
+      "sha256": "84e743fa257cf7c1450e681de3bd9d623305932865fa0f50875df42c51a7803e",
+      "size_bytes": 30670,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "华映资本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "华熙生物",
+      "id": "clientlogo-华熙生物",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/华熙生物.png",
+      "sha256": "567c1feddb756a457f69b7dfdd6672edb2af6d9ce6e81f9a2ae975fde29bb0df",
+      "size_bytes": 18622,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "华熙生物"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "博士眼镜",
+      "id": "clientlogo-博士眼镜",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/博士眼镜.png",
+      "sha256": "15aaaf764017e2a1399368c8ac74c2502a076ea2fd6db9e47e2e49525fa04eda",
+      "size_bytes": 217732,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "博士眼镜"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "卡士酸奶",
+      "id": "clientlogo-卡士酸奶",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/卡士酸奶.png",
+      "sha256": "bd0c6d2a505548aeea8750847e59320d72d56c3e66f021e5f355698b1888d48f",
+      "size_bytes": 14138,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "卡士酸奶"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "卫龙",
+      "id": "clientlogo-卫龙",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/卫龙.png",
+      "sha256": "9ceb812232616c7bf4baf1f5640906da91f9fdd6fe211a9e207cf6908f6e7f92",
+      "size_bytes": 40334,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "卫龙"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "厚德食品",
+      "id": "clientlogo-厚德食品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/厚德食品.png",
+      "sha256": "637b22be4c5ca6f40e7cf75466d144b3f510a3dd2b3e7892016ceca124143975",
+      "size_bytes": 43572,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "厚德食品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "双汇发展",
+      "id": "clientlogo-双汇发展",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/双汇发展.png",
+      "sha256": "bdefaffa57c593afcb621bbf1dee2b6454c1d1391b13c2e3dd34cf1d7da129d4",
+      "size_bytes": 27921,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "双汇发展"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "口子窖",
+      "id": "clientlogo-口子窖",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/口子窖.png",
+      "sha256": "46ca5939920a04c6ba56dbd609850e331003de279400815ccf495851c12b838d",
+      "size_bytes": 27060,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "口子窖"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "名创优品",
+      "id": "clientlogo-名创优品",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/名创优品.jpg",
+      "sha256": "05a05f1a0b5c5bb190953ad745891fbc0923fe02a9dfc2350e3fa6bbb1f3701f",
+      "size_bytes": 2337,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "名创优品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "名创优品",
+      "id": "clientlogo-名创优品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/名创优品.png",
+      "sha256": "70cd422cc4306298d25d1485a2e8275535bbfd36f946faf6739cee5d08d55dfa",
+      "size_bytes": 48609,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "名创优品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "君亭酒店集团",
+      "id": "clientlogo-君亭酒店集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/君亭酒店集团.png",
+      "sha256": "c52e4d72192aad2b9640bfb0fa8f64705881e554bf34ba146d262b023d5b29f9",
+      "size_bytes": 278730,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "君亭酒店集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "周师兄",
+      "id": "clientlogo-周师兄",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/周师兄.png",
+      "sha256": "557745abe11823c779447b617df973f4827dd931574ee1c73a6bff7a0282d02a",
+      "size_bytes": 29696,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "周师兄"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "和府捞面",
+      "id": "clientlogo-和府捞面",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/和府捞面.png",
+      "sha256": "f99a019a3a58b8089b0e59bb2f82e406a9db1c57656a75c1f12330eb15177a32",
+      "size_bytes": 252830,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "和府捞面"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "唯怡",
+      "id": "clientlogo-唯怡",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/唯怡.png",
+      "sha256": "8e54e03096f98fa968bd0e3f40500bff6dfb0b8e3859488dea8d15b8944187be",
+      "size_bytes": 47167,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "唯怡"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "喜姐炸串",
+      "id": "clientlogo-喜姐炸串",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/喜姐炸串.png",
+      "sha256": "b62b4bd48970c9160dd54bd6471f084e934ab40bcba209ba528672d7e116a3a6",
+      "size_bytes": 23464,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "喜姐炸串"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "嘉麟杰",
+      "id": "clientlogo-嘉麟杰",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/嘉麟杰.png",
+      "sha256": "3a2b23d586d16b04a2a2b54bd1fafeb9af64626273919770be3204a141dfbb1b",
+      "size_bytes": 76201,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "嘉麟杰"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "国芳集团",
+      "id": "clientlogo-国芳集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/国芳集团.png",
+      "sha256": "b0f6faeab1458fa39e8c43c4d9343b6b62b7da0ddaf0048e78ef2c4c2c75ef32",
+      "size_bytes": 185727,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "国芳集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "圣农发展",
+      "id": "clientlogo-圣农发展",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/圣农发展.png",
+      "sha256": "9745041c34d37948da326405df96d9718dba7f1540363ef1205258b58ed24ef2",
+      "size_bytes": 61703,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "圣农发展"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "圣象集团有限公司",
+      "id": "clientlogo-圣象集团有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/圣象集团有限公司.png",
+      "sha256": "f1175e60210d85ee3fec2fc2b66078793b934002cde5013a56c6211da518b4f7",
+      "size_bytes": 114715,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "圣象集团有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "地素时尚",
+      "id": "clientlogo-地素时尚",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/地素时尚.png",
+      "sha256": "06309ff30734b776cbfce3c6f15780a2658ef7129ff1de9d3c93dd4889b74799",
+      "size_bytes": 155423,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "地素时尚"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "塔斯汀中国汉堡",
+      "id": "clientlogo-塔斯汀中国汉堡",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/塔斯汀中国汉堡.png",
+      "sha256": "ad4e4812284d3428a5fa1a0b9a13ac0ee4a1884d1859f24c5ae45dbecdaff6d7",
+      "size_bytes": 200078,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "塔斯汀中国汉堡"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "多点DMall",
+      "id": "clientlogo-多点dmall",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/多点DMall.png",
+      "sha256": "d2758443563b8883d7b2f7152a9ae85923b3d32995702646aececf717937db82",
+      "size_bytes": 15207,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "多点DMall"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "大洲新燕",
+      "id": "clientlogo-大洲新燕",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/大洲新燕.png",
+      "sha256": "c75a8fac1314177cd2b300cd245323b95ea13bf7f6425ee06e1d38796ebdc4eb",
+      "size_bytes": 31362,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "大洲新燕"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "大钲资本",
+      "id": "clientlogo-大钲资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/大钲资本.png",
+      "sha256": "0ec09c32b0c14e73a0fe47cebdc4aa53807d44599d70e7434ab7172cfcd4898f",
+      "size_bytes": 268365,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "大钲资本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "天合星元",
+      "id": "clientlogo-天合星元",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/天合星元.png",
+      "sha256": "4537404eca1b7547101b7821b7f4cb51cf8828c291d072a0974f415b427f4df0",
+      "size_bytes": 18661,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "天合星元"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "太平鸟",
+      "id": "clientlogo-太平鸟",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/太平鸟.png",
+      "sha256": "db16a62c4c667ae8b8fe0c132cbd43849ac373f16e5bc0944b4d676772b88720",
+      "size_bytes": 11666,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "太平鸟"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "太平鸟_1",
+      "id": "clientlogo-太平鸟_1",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/太平鸟_1.png",
+      "sha256": "cd072228b6d8f19a0f70191a8ccf33343c43b92015e692974a87c4e92c41ce4e",
+      "size_bytes": 11704,
+      "tags": [
+        "1",
+        "clientlogo",
+        "logo",
+        "太平鸟"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "夸父炸串",
+      "id": "clientlogo-夸父炸串",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/夸父炸串.png",
+      "sha256": "0d98bbc55b04c8106d130444804017bbdeedc4c4bab13e9a360f72c21a71558c",
+      "size_bytes": 25965,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "夸父炸串"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "奈尔宝Neobio",
+      "id": "clientlogo-奈尔宝neobio",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/奈尔宝Neobio.png",
+      "sha256": "f5aa4452291bd053ca9633c7505dc7ce9eff50661053850ef6fd377c8e1144f3",
+      "size_bytes": 81507,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "奈尔宝Neobio"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "奈雪的茶",
+      "id": "clientlogo-奈雪的茶",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/奈雪的茶.jpg",
+      "sha256": "8d80369f9388c6fc9e185bb72c4526783648e244ac18d9f57e762c0838ce460f",
+      "size_bytes": 1982,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "奈雪的茶"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "奈雪的茶",
+      "id": "clientlogo-奈雪的茶",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/奈雪的茶.png",
+      "sha256": "f4e9e5f6d94f8f6a723085894e5b789691c5aa5301b57ae2166a66414c6a12de",
+      "size_bytes": 195661,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "奈雪的茶"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "好慷在家",
+      "id": "clientlogo-好慷在家",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/好慷在家.png",
+      "sha256": "7e04e05444b0c48f4b8eeb95e76725b9454e120a61e0e19565af5dc1c51e6d0b",
+      "size_bytes": 20267,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "好慷在家"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "好望水",
+      "id": "clientlogo-好望水",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/好望水.png",
+      "sha256": "d6d664bbbe803a299faba6be73ba5d176811e3540bf03e94ebdf4ae646183365",
+      "size_bytes": 57925,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "好望水"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "如家",
+      "id": "clientlogo-如家",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/如家.png",
+      "sha256": "3637b4dc63c9c0cc5c8b16b8c6e164b55887606153faed5ea45b556d7921804a",
+      "size_bytes": 5482,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "如家"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "安能",
+      "id": "clientlogo-安能",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/安能.png",
+      "sha256": "1dd1758a839b976a1ad6b010fa90bfe6bd0994a95950afc60424f1340616cccc",
+      "size_bytes": 72576,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "安能"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "完美日记",
+      "id": "clientlogo-完美日记",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/完美日记.png",
+      "sha256": "da8eddae4a1edd9093020fde68071501f30110f9d8c86540264b3e0c6385d325",
+      "size_bytes": 23731,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "完美日记"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "完美日记_1",
+      "id": "clientlogo-完美日记_1",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/完美日记_1.png",
+      "sha256": "f781ca64d77e59c534beb9d76fee657a0a04c4e5f2b2a4da87d370a975a1c2ff",
+      "size_bytes": 47004,
+      "tags": [
+        "1",
+        "clientlogo",
+        "logo",
+        "完美日记"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "宝胜国际",
+      "id": "clientlogo-宝胜国际",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/宝胜国际.png",
+      "sha256": "875d360147bc90d74a8de703c1a3921fb55625a38605840124802ce120a623e7",
+      "size_bytes": 174642,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "宝胜国际"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "家家悦",
+      "id": "clientlogo-家家悦",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/家家悦.png",
+      "sha256": "2530f57339af83c94486cfbdf3f8d3e335ff22f8166a85fdfbf202f678fda8d7",
+      "size_bytes": 16228,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "家家悦"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "小糊涂仙",
+      "id": "clientlogo-小糊涂仙",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/小糊涂仙.png",
+      "sha256": "8290f7c207fad7db7ad90fab83fb3dde7a191ebcdb17820264dcb5969407dea1",
+      "size_bytes": 31608,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "小糊涂仙"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "屈臣氏",
+      "id": "clientlogo-屈臣氏",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/屈臣氏.png",
+      "sha256": "00cb9330a8b583388978f45490f1a26d0494e5a696c1102bd7725b43b5af2f8c",
+      "size_bytes": 6676,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "屈臣氏"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "山野泡泡",
+      "id": "clientlogo-山野泡泡",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/山野泡泡.png",
+      "sha256": "84c053397277f5c54296d7e2172eda54d55b1648864d5355c480ab089925724d",
+      "size_bytes": 72178,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "山野泡泡"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "巨子生物",
+      "id": "clientlogo-巨子生物",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/巨子生物.png",
+      "sha256": "19194dd84d955f7591712746bb5fbe21e32d77676ca063235d2b307ec211d935",
+      "size_bytes": 17366,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "巨子生物"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "巴奴毛肚火锅",
+      "id": "clientlogo-巴奴毛肚火锅",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/巴奴毛肚火锅.png",
+      "sha256": "04a6a9d33277dc922699546d90d9d8bd96c6251d5b13daaa2f7704b201cbe3d0",
+      "size_bytes": 3382,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "巴奴毛肚火锅"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "布鲁可",
+      "id": "clientlogo-布鲁可",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/布鲁可.png",
+      "sha256": "87d3994d78f33455d343afee1a1ea291b274cb92dfc8a802cdeef916f11f5fb7",
+      "size_bytes": 14380,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "布鲁可"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "广东中泰龙家具集团有限公司",
+      "id": "clientlogo-广东中泰龙家具集团有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/广东中泰龙家具集团有限公司.png",
+      "sha256": "1e432d651509b6b1a07e00b41b5e0f741404a3683d5bdc3631ff1089a2060035",
+      "size_bytes": 521120,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "广东中泰龙家具集团有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "广东仙津保健饮料食品有限公司",
+      "id": "clientlogo-广东仙津保健饮料食品有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/广东仙津保健饮料食品有限公司.png",
+      "sha256": "c076025233a5750fc57c376433d46b6b748b3560852e2c3728da8b1634f3c04f",
+      "size_bytes": 17470,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "广东仙津保健饮料食品有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "广东蓝色起源商业管理有限公司",
+      "id": "clientlogo-广东蓝色起源商业管理有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/广东蓝色起源商业管理有限公司.png",
+      "sha256": "abd2bee08140dc11537c0640155c76777a919a4046cdfad1bcc923a891a2dff9",
+      "size_bytes": 22698,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "广东蓝色起源商业管理有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "广州谷雨生物科技有限公司",
+      "id": "clientlogo-广州谷雨生物科技有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/广州谷雨生物科技有限公司.png",
+      "sha256": "f712c4930ee015a90a2dc24f995a1d09efdf27e2a04c403a40e32d464eb854f6",
+      "size_bytes": 138346,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "广州谷雨生物科技有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "广州酒家",
+      "id": "clientlogo-广州酒家",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/广州酒家.png",
+      "sha256": "40666bea78793e71d51f6cc4a2b304efc1d0562ab9b11f0157c91e10a6366a15",
+      "size_bytes": 85915,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "广州酒家"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "广西梦之岛",
+      "id": "clientlogo-广西梦之岛",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/广西梦之岛.png",
+      "sha256": "779207e9cc65342be46f00f4c11b95ed673c3f133634afd612c720e0da47fe28",
+      "size_bytes": 143316,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "广西梦之岛"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "库迪咖啡",
+      "id": "clientlogo-库迪咖啡",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/库迪咖啡.png",
+      "sha256": "d585fd849adef86288d254a5f9401721dfb77797e691d0fe92c8992a723570ca",
+      "size_bytes": 148279,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "库迪咖啡"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "康师傅",
+      "id": "clientlogo-康师傅",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/康师傅.png",
+      "sha256": "1500dfcf894d5376327762ae5aba7c48e81c75bfd012583325bc79054025f464",
+      "size_bytes": 195657,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "康师傅"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "弘毅投资",
+      "id": "clientlogo-弘毅投资",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/弘毅投资.png",
+      "sha256": "96fa47572b16144845e5d1f93d661842350242472385a96d46cf46b71594e80f",
+      "size_bytes": 9337,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "弘毅投资"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "很久以前",
+      "id": "clientlogo-很久以前",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/很久以前.png",
+      "sha256": "378658b3aeb05cfd12028282be180a7bfde8ef539a2ef74b47d7cc3645b488c5",
+      "size_bytes": 205357,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "很久以前"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "思念食品",
+      "id": "clientlogo-思念食品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/思念食品.png",
+      "sha256": "2e797fe653c1066f30552ad7c81448563bc5571216289d64bb4651515910bee0",
+      "size_bytes": 56117,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "思念食品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "恒安集团",
+      "id": "clientlogo-恒安集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/恒安集团.png",
+      "sha256": "52ed18fc11b74da2d1a602f4f32a54de8b63236a471fd87557bf2dcf9cbe30b0",
+      "size_bytes": 207960,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "恒安集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "惠友集团",
+      "id": "clientlogo-惠友集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/惠友集团.png",
+      "sha256": "b8ca7c0f1ba6a64e2590d3f67cf098f72df2c708c009f44ab81d8b5f568f315e",
+      "size_bytes": 46543,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "惠友集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "成都麻辣烤匠企业管理咨询有限公司",
+      "id": "clientlogo-成都麻辣烤匠企业管理咨询有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/成都麻辣烤匠企业管理咨询有限公司.png",
+      "sha256": "8322698f0145be084de417cb73dfa034affa98d3c086a7ae58579380629a76d7",
+      "size_bytes": 130628,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "成都麻辣烤匠企业管理咨询有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "敷尔佳",
+      "id": "clientlogo-敷尔佳",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/敷尔佳.png",
+      "sha256": "f7f138674d8c2c6e56b44a7d7ffd7c12d92e344fbf3926fc9103e271c9d2f135",
+      "size_bytes": 137584,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "敷尔佳"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "新乳业",
+      "id": "clientlogo-新乳业",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/新乳业.png",
+      "sha256": "ad1213df69e1ea3f4ab5a02f25cf562202ad62b190ee02e9c128076a23a7e59f",
+      "size_bytes": 23236,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "新乳业"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "新希望",
+      "id": "clientlogo-新希望",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/新希望.png",
+      "sha256": "ead09ced866e7397e918a9dc3c67a6805fd5e72151f03b07d37008f560ef012e",
+      "size_bytes": 20576,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "新希望"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "新希望六和",
+      "id": "clientlogo-新希望六和",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/新希望六和.png",
+      "sha256": "467c4efbe59f64c5cc25722cf7b13dcf3ea4ea17e32c3594172e307c43f2f967",
+      "size_bytes": 40768,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "新希望六和"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "无限极",
+      "id": "clientlogo-无限极",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/无限极.png",
+      "sha256": "98fb0c8c7e4509aa93dcf7a7900712f5dc83c4c2a9a07f6b19ac5069f82d0d52",
+      "size_bytes": 42705,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "无限极"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "昌大昌",
+      "id": "clientlogo-昌大昌",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/昌大昌.png",
+      "sha256": "37c5909ec6400168297a1bc7857c76902d3f32886adf4044c12399c46d98ff56",
+      "size_bytes": 25451,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "昌大昌"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "星聚会KTV",
+      "id": "clientlogo-星聚会ktv",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/星聚会KTV.jpeg",
+      "sha256": "ae0f4b26c486e42205a6cdebffa68ed62860d44c52b82a0b79ee17ad9745e16a",
+      "size_bytes": 52331,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "星聚会KTV"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "晨光生物",
+      "id": "clientlogo-晨光生物",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/晨光生物.png",
+      "sha256": "0e2ea47332dfc7008783e80fe392d036faf0217f0a6a05cc162f9272424ae5c7",
+      "size_bytes": 24401,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "晨光生物"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "晨光股份",
+      "id": "clientlogo-晨光股份",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/晨光股份.png",
+      "sha256": "5e2168ffea741329b84136b1181ef232db8e4b3ac45e54d841ed3dfd657cc370",
+      "size_bytes": 173962,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "晨光股份"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "智拓云达",
+      "id": "clientlogo-智拓云达",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/智拓云达.png",
+      "sha256": "6db8bf37e4f92ffa39453d537556048dad29c2fc2355b1bebba8e6d125bd9a75",
+      "size_bytes": 28773,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "智拓云达"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "曼伦商贸",
+      "id": "clientlogo-曼伦商贸",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/曼伦商贸.png",
+      "sha256": "aca4310d846407d19562bb1b5f7050fbaed2eda483cf62d0d329f7357f341b33",
+      "size_bytes": 137581,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "曼伦商贸"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "月满大江",
+      "id": "clientlogo-月满大江",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/月满大江.png",
+      "sha256": "662247a8465034396501e97179f8524224323d800170a769231ce205fb0e5cf0",
+      "size_bytes": 33181,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "月满大江"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "李与白餐饮",
+      "id": "clientlogo-李与白餐饮",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/李与白餐饮.png",
+      "sha256": "1c87e188e6ee7959763cb5d6b2895995c2e266dee31218f11c32a09b44b76fb6",
+      "size_bytes": 44762,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "李与白餐饮"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "束一科技Fabrique",
+      "id": "clientlogo-束一科技fabrique",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/束一科技Fabrique.png",
+      "sha256": "96e5dddf391a76e4f5b87537bcdce26c1095addb11d9f2f5aaa6881e5029e836",
+      "size_bytes": 12070,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "束一科技Fabrique"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "来伊份",
+      "id": "clientlogo-来伊份",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/来伊份.png",
+      "sha256": "c36e784062218b6fe19af51c8c102e2beed89b3fdc04ed18346457ad9fa75c2f",
+      "size_bytes": 69846,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "来伊份"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "果子熟了",
+      "id": "clientlogo-果子熟了",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/果子熟了.png",
+      "sha256": "0960e0ac5897b6c76b78db08641ff66e9055f807513bade9fb3555551e6abd5c",
+      "size_bytes": 11643,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "果子熟了"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "柠季",
+      "id": "clientlogo-柠季",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/柠季.png",
+      "sha256": "e68b836f827f1a32626ca26374c65d4e067357082f13c70478c27c8fbc38b54d",
+      "size_bytes": 18248,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "柠季"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "格力高",
+      "id": "clientlogo-格力高",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/格力高.png",
+      "sha256": "f31e9d29ce4d9efb03cbc02a96b52d75434d1c130e4bf52ca2b265015af2377a",
+      "size_bytes": 21764,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "格力高"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "梅花创投",
+      "id": "clientlogo-梅花创投",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/梅花创投.png",
+      "sha256": "1db5956a24360861060b25d848adbbd7a293086d3d440236fa472e52ba39303e",
+      "size_bytes": 34880,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "梅花创投"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "梅花生物",
+      "id": "clientlogo-梅花生物",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/梅花生物.png",
+      "sha256": "f76d2bbf180642398dfa6290408e42a5862ae9dcc9f9ac1827face0f18821f59",
+      "size_bytes": 152175,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "梅花生物"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "森马集团",
+      "id": "clientlogo-森马集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/森马集团.png",
+      "sha256": "d616dc23da124a51753904d13d616a14f6c343fab37e77319c9d4073d569ed8f",
+      "size_bytes": 106488,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "森马集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "椒爱水煮鱼川菜",
+      "id": "clientlogo-椒爱水煮鱼川菜",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/椒爱水煮鱼川菜.png",
+      "sha256": "706845939d40682c8f377d52b92cc1af259793f99fb73ef561a49882f1722757",
+      "size_bytes": 47868,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "椒爱水煮鱼川菜"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "楠火锅",
+      "id": "clientlogo-楠火锅",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/楠火锅.png",
+      "sha256": "dd32d4c63934558d8f85fb50605422d05c63066336eb44b6b01792084bdce441",
+      "size_bytes": 80257,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "楠火锅"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "槐店王婆大虾",
+      "id": "clientlogo-槐店王婆大虾",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/槐店王婆大虾.png",
+      "sha256": "c8d71ad1a3fba5779a1e42f14c4dc33a93455750ee698b1da1831e342b1ede95",
+      "size_bytes": 111700,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "槐店王婆大虾"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "橘朵",
+      "id": "clientlogo-橘朵",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/橘朵.png",
+      "sha256": "ed92aa5776efabf007db34557586cd8da4e4707a2ecb5ec0194b31a266c0c0e0",
+      "size_bytes": 101145,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "橘朵"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "欧派家居",
+      "id": "clientlogo-欧派家居",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/欧派家居.png",
+      "sha256": "173f65be52510e8f734c8ca51deafdd6f13f6c1dc72a5820eb483b660f108186",
+      "size_bytes": 36788,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "欧派家居"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "欧诗漫",
+      "id": "clientlogo-欧诗漫",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/欧诗漫.png",
+      "sha256": "85197384b7804f0b425386e9fb5d893ea13f403eb0be8e644b417baafc51c5d1",
+      "size_bytes": 116055,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "欧诗漫"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "歌力思",
+      "id": "clientlogo-歌力思",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/歌力思.png",
+      "sha256": "068364a7af516adb4872dc9735866579f284ed53fe4e745d3ba02959c77b108c",
+      "size_bytes": 11175,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "歌力思"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "歌力思_1",
+      "id": "clientlogo-歌力思_1",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/歌力思_1.png",
+      "sha256": "1280e74115d711b70059667be2edbab326e139526f22d0da0201541fed2871ba",
+      "size_bytes": 18020,
+      "tags": [
+        "1",
+        "clientlogo",
+        "logo",
+        "歌力思"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "武商集团",
+      "id": "clientlogo-武商集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/武商集团.png",
+      "sha256": "7616bca3c322e00860ab3c1be2496f3ac1bcf43167e32281421b2af74f3f4653",
+      "size_bytes": 193579,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "武商集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "毛戈平化妆品",
+      "id": "clientlogo-毛戈平化妆品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/毛戈平化妆品.png",
+      "sha256": "5541182e42340f48a07f41cf20afdfe0235d0869c1443a90febdbe4d945a24a8",
+      "size_bytes": 21624,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "毛戈平化妆品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "水星家纺",
+      "id": "clientlogo-水星家纺",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/水星家纺.png",
+      "sha256": "bbedbfd7581dcd36320149a917f549bdd27c35d19faa0e620c456cc12a8ef3d3",
+      "size_bytes": 24017,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "水星家纺"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "水羊股份",
+      "id": "clientlogo-水羊股份",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/水羊股份.png",
+      "sha256": "ab50d09981b7e92945f08aa2b0182ad85df0f5ce239cd8029e5fb686f0caf746",
+      "size_bytes": 137802,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "水羊股份"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "永璞咖啡",
+      "id": "clientlogo-永璞咖啡",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/永璞咖啡.png",
+      "sha256": "4b3fc0aa08358b7318e589b48f254370b53f118f5afdc92df7b4fedc9780c137",
+      "size_bytes": 17825,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "永璞咖啡"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "永辉超市",
+      "id": "clientlogo-永辉超市",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/永辉超市.png",
+      "sha256": "82501733ed61d6c2e63c757bee81dbbc2f9b7c5506e6c0ffddda67049796d7c9",
+      "size_bytes": 417121,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "永辉超市"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "汇源果汁",
+      "id": "clientlogo-汇源果汁",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/汇源果汁.png",
+      "sha256": "0b970ee9cea1f9df41f2abcbce3e6cb7a959f8274da54b01c1c60cb6621d01cf",
+      "size_bytes": 33835,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "汇源果汁"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "汉堡王",
+      "id": "clientlogo-汉堡王",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/汉堡王.png",
+      "sha256": "9448697e90b85dea7ce788923fbba7e087a86c42a9d78b4fde297b0b0b24c301",
+      "size_bytes": 51112,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "汉堡王"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "沪上阿姨",
+      "id": "clientlogo-沪上阿姨",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/沪上阿姨.jpg",
+      "sha256": "3920c0e6373e850207893e2a0e33f9427cb5b7c447ae6cc84c1f844c15196423",
+      "size_bytes": 4028,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "沪上阿姨"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "沪上阿姨",
+      "id": "clientlogo-沪上阿姨",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/沪上阿姨.png",
+      "sha256": "f9b36fc2c84b010bfd097ea07c3b831148d5fe239f69e165a469c18dd51c3715",
+      "size_bytes": 190679,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "沪上阿姨"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "泡泡玛特",
+      "id": "clientlogo-泡泡玛特",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/泡泡玛特.png",
+      "sha256": "16794ec6d8c63d0dc37597030124b7cf43b01808d58b143dbf1d627f8c3027c5",
+      "size_bytes": 11343,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "泡泡玛特"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "泰兰尼斯",
+      "id": "clientlogo-泰兰尼斯",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/泰兰尼斯.png",
+      "sha256": "f011b2df696fab3a6316572a125c01babaaed95884cd8d0de6195c098dde36c8",
+      "size_bytes": 31049,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "泰兰尼斯"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "海底捞",
+      "id": "clientlogo-海底捞",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/海底捞.png",
+      "sha256": "c04498ed4685b1e479bced32f9167c1d5ce44231c65c6ffc1a4e571dfef10097",
+      "size_bytes": 177359,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "海底捞"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "海澜之家",
+      "id": "clientlogo-海澜之家",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/海澜之家.png",
+      "sha256": "566adb5fc3ad3f628739fb97103e172210834ca2031be15c0084618b0484c294",
+      "size_bytes": 13029,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "海澜之家"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "海龟爸爸",
+      "id": "clientlogo-海龟爸爸",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/海龟爸爸.png",
+      "sha256": "fcbf4294319d642dbfdcdb80ef81023c1e3521534d5126e921d7d0a9824f0686",
+      "size_bytes": 196426,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "海龟爸爸"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "湖南御泥坊化妆品有限公司",
+      "id": "clientlogo-湖南御泥坊化妆品有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/湖南御泥坊化妆品有限公司.png",
+      "sha256": "95f6e2300924352690c1b84f9b9fdeb18a91533f6c558d4b6c5c6aa9fa0e81b6",
+      "size_bytes": 13766,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "湖南御泥坊化妆品有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "源码资本",
+      "id": "clientlogo-源码资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/源码资本.png",
+      "sha256": "d4bc6938e11d49beef5412664d76644788f6f0c00d48dd572a929eeb5d698a37",
+      "size_bytes": 12923,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "源码资本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "滋源",
+      "id": "clientlogo-滋源",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/滋源.png",
+      "sha256": "72f99b6138ddc46b21925f8fa3e5b9db4401b817b16f0bd39f1e6b4ff3b10021",
+      "size_bytes": 589610,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "滋源"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "熊大爷餐饮管",
+      "id": "clientlogo-熊大爷餐饮管",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/熊大爷餐饮管.png",
+      "sha256": "64c451d567b4c3409816a76c14a686bb7409e22f02ef146f9fd5715abb7299a7",
+      "size_bytes": 221720,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "熊大爷餐饮管"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "爸爸糖",
+      "id": "clientlogo-爸爸糖",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/爸爸糖.png",
+      "sha256": "6ce39a1c584b0072b337e28334209a4d1aceea087e9cef81c35f41bcb450b311",
+      "size_bytes": 53881,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "爸爸糖"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "物美商业",
+      "id": "clientlogo-物美商业",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/物美商业.png",
+      "sha256": "d8c277f69edc4d00ede09ab6afd0b55a1d31a491b5ebfca1ddb49bef5d6764c2",
+      "size_bytes": 20927,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "物美商业"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "狄卡威服饰",
+      "id": "clientlogo-狄卡威服饰",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/狄卡威服饰.png",
+      "sha256": "258fc99a8970ecfb493031d865060420ea539cd97d61ca9229c3184e0bc12deb",
+      "size_bytes": 42478,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "狄卡威服饰"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "玛丽黛佳_创元集团",
+      "id": "clientlogo-玛丽黛佳_创元集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/玛丽黛佳_创元集团.png",
+      "sha256": "2aa6f7461f4472504d5a9482ed3290041861976130694439a5ddd1258696837a",
+      "size_bytes": 13308,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "创元集团",
+        "玛丽黛佳"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "玩美假期",
+      "id": "clientlogo-玩美假期",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/玩美假期.png",
+      "sha256": "9ff82b80cca4b8d99dbed7a628acd7ff8e2e357cdfadfda1c7204c0b552e58c8",
+      "size_bytes": 29666,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "玩美假期"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "珀莱雅",
+      "id": "clientlogo-珀莱雅",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/珀莱雅.png",
+      "sha256": "335b66996b9c18d5aaf3cc5555db13c1904550c155bdab43446523be70331e1f",
+      "size_bytes": 29252,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "珀莱雅"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "珀莱雅_1",
+      "id": "clientlogo-珀莱雅_1",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/珀莱雅_1.png",
+      "sha256": "2877e10ea59a7da18b43be33c2fce96187aca3e7efbc8884c5deebabcefa3049",
+      "size_bytes": 126490,
+      "tags": [
+        "1",
+        "clientlogo",
+        "logo",
+        "珀莱雅"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "珀莱雅_2",
+      "id": "clientlogo-珀莱雅_2",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/珀莱雅_2.png",
+      "sha256": "b19687b432bfc1f2898c805c13cb27d0a75d68fb4ff1c4bc929c0eaf4a5344a3",
+      "size_bytes": 18903,
+      "tags": [
+        "2",
+        "clientlogo",
+        "logo",
+        "珀莱雅"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "瑞幸咖啡",
+      "id": "clientlogo-瑞幸咖啡",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/瑞幸咖啡.png",
+      "sha256": "598726fb0efcb86e6559a622ea12d96f48b80ed4ea550863c66c662434d8fa32",
+      "size_bytes": 37096,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "瑞幸咖啡"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "白象食品",
+      "id": "clientlogo-白象食品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/白象食品.png",
+      "sha256": "6a04e63c7fe7172583068cc32269517ca2bbc9c5648d4eba6b2f89a8aaa739dc",
+      "size_bytes": 149728,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "白象食品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "百安居",
+      "id": "clientlogo-百安居",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/百安居.png",
+      "sha256": "d8c277f69edc4d00ede09ab6afd0b55a1d31a491b5ebfca1ddb49bef5d6764c2",
+      "size_bytes": 20927,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "百安居"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "百联集团",
+      "id": "clientlogo-百联集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/百联集团.png",
+      "sha256": "8177fe3b5a5a213495de1221f57612b9c088eef928279aa5e1abf03282382a2d",
+      "size_bytes": 150457,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "百联集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "百胜中国",
+      "id": "clientlogo-百胜中国",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/百胜中国.png",
+      "sha256": "d64704d58a67e7d675a506290309c04b77ae4917fb0768b0d532f1095ddfe49c",
+      "size_bytes": 9218,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "百胜中国"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "百达屋集团_1",
+      "id": "clientlogo-百达屋集团_1",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/百达屋集团_1.png",
+      "sha256": "18dc829131807b4925e655e2707916618214aa5d1c794b863ae0dd48c839beea",
+      "size_bytes": 4888,
+      "tags": [
+        "1",
+        "clientlogo",
+        "logo",
+        "百达屋集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "百达屋集团_2",
+      "id": "clientlogo-百达屋集团_2",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/百达屋集团_2.png",
+      "sha256": "30235fd5906aa5794d9f2c7ece83685af5736878adebbecdb1c5549497bbbfd3",
+      "size_bytes": 4051,
+      "tags": [
+        "2",
+        "clientlogo",
+        "logo",
+        "百达屋集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "益客食品",
+      "id": "clientlogo-益客食品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/益客食品.png",
+      "sha256": "55b528c2ea8ddf48a9dddc0145fae8a2431e720b5b57efae57a00f1d639fe2e6",
+      "size_bytes": 17597,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "益客食品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "益禾堂",
+      "id": "clientlogo-益禾堂",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/益禾堂.png",
+      "sha256": "4501d51749d85371492109741f6f11784d1c7ba5024f0bf2e24a9b082a9fba75",
+      "size_bytes": 210414,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "益禾堂"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "盛泰集团",
+      "id": "clientlogo-盛泰集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/盛泰集团.png",
+      "sha256": "bc3e762f24105d870722abc13f0ff26baeb116e133e8bdd1f9e88bdc89681c35",
+      "size_bytes": 49986,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "盛泰集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "真格基金",
+      "id": "clientlogo-真格基金",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/真格基金.jpeg",
+      "sha256": "c5d1e6c8af91360e7c61392a19c05363b463a05a82aa663e852c64978b7e3140",
+      "size_bytes": 13948,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "真格基金"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "碧桂园创投",
+      "id": "clientlogo-碧桂园创投",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/碧桂园创投.png",
+      "sha256": "54e9a38d3a20d6378002504025278317d407ff975b44ff17be59d67763b5e17e",
+      "size_bytes": 97864,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "碧桂园创投"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "福建柒牌集团有限公司",
+      "id": "clientlogo-福建柒牌集团有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/福建柒牌集团有限公司.png",
+      "sha256": "d747b357ecea71c1ffab28d6838a144e512152268195f7bc09d7ae531a156d10",
+      "size_bytes": 99179,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "福建柒牌集团有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "秋田满满",
+      "id": "clientlogo-秋田满满",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/秋田满满.png",
+      "sha256": "4794193cd798b94dc14b20adc5505f1c8dd2f65c637111a03722bb7b303abc6e",
+      "size_bytes": 61787,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "秋田满满"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "空刻",
+      "id": "clientlogo-空刻",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/空刻.png",
+      "sha256": "489f4d33d229b298e8b8580ad0d0cdac4f56f1f8d81448c59370c8203cd9ab0b",
+      "size_bytes": 19562,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "空刻"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "窑鸡王",
+      "id": "clientlogo-窑鸡王",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/窑鸡王.png",
+      "sha256": "9224709be3b0e7907328543c66cf21c99099abcc3d7156fefe60c3b76463884f",
+      "size_bytes": 485711,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "窑鸡王"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "立高食品",
+      "id": "clientlogo-立高食品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/立高食品.png",
+      "sha256": "e6d0b4ee169c52256caef473096dc9b719ee3bb2709a7c9ef4d4ae16955ceedf",
+      "size_bytes": 116510,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "立高食品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "米村",
+      "id": "clientlogo-米村",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/米村.png",
+      "sha256": "43f7863039894c4d0ecd97ec7f831d28a916d92b33a2669c51a4d92d3eb2dd08",
+      "size_bytes": 172899,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "米村"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "红杉中国",
+      "id": "clientlogo-红杉中国",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/红杉中国.png",
+      "sha256": "59d67123bf398d41d79d401b3375f44d102ef8a0da56fe38efc98adb0229888a",
+      "size_bytes": 10443,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "红杉中国"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "经纬创投",
+      "id": "clientlogo-经纬创投",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/经纬创投.png",
+      "sha256": "5499aa1c12b54da041fd23f035d9cbf880368fc77456edabf7d58696dadb4cd8",
+      "size_bytes": 24888,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "经纬创投"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "绫致时装",
+      "id": "clientlogo-绫致时装",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/绫致时装.png",
+      "sha256": "580e179f25b635dbd5906dd7fd3eded78c4a2030b991405fb8997b078a5c0802",
+      "size_bytes": 107779,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "绫致时装"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "绫致时装_1",
+      "id": "clientlogo-绫致时装_1",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/绫致时装_1.png",
+      "sha256": "f4bafa85cd7633d4f3618e9b92db8ac3895de33dab7df16a79713b1954109b0a",
+      "size_bytes": 126340,
+      "tags": [
+        "1",
+        "clientlogo",
+        "logo",
+        "绫致时装"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "缙嘉国际",
+      "id": "clientlogo-缙嘉国际",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/缙嘉国际.png",
+      "sha256": "e2db6dfe5a87e02ad44b7d7fb591e38ee841a0d4343a933de776dc6abe1c8564",
+      "size_bytes": 16401,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "缙嘉国际"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "罗莱生活",
+      "id": "clientlogo-罗莱生活",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/罗莱生活.png",
+      "sha256": "db254e8a7d2f45cacb04eeef25575669d3fe0937dae83a2781674d67c4801753",
+      "size_bytes": 202688,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "罗莱生活"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "美丽营养科技",
+      "id": "clientlogo-美丽营养科技",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/美丽营养科技.png",
+      "sha256": "1772b8a289a2734f702b6153f7455d60319487fc8e63352609202e4cd31d7c9a",
+      "size_bytes": 45843,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "美丽营养科技"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "美宜佳",
+      "id": "clientlogo-美宜佳",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/美宜佳.jpg",
+      "sha256": "04393ff84a3af4b2fcfc8bbbeee425ccaca87d5ad4d5f89cbfefb1bb53a97961",
+      "size_bytes": 2191,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "美宜佳"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "美宜佳",
+      "id": "clientlogo-美宜佳",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/美宜佳.png",
+      "sha256": "bb321f952e026860ab47d164e91251645278ee9f517b53929ecf0fdd7fd2fe54",
+      "size_bytes": 20147,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "美宜佳"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "美特斯邦威",
+      "id": "clientlogo-美特斯邦威",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/美特斯邦威.png",
+      "sha256": "5d1b179850a6911db00cdec06275e4429fa53fca74cc5af7aa613e36b0273b67",
+      "size_bytes": 12494,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "美特斯邦威"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "联拓食品",
+      "id": "clientlogo-联拓食品",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/联拓食品.png",
+      "sha256": "64c451d567b4c3409816a76c14a686bb7409e22f02ef146f9fd5715abb7299a7",
+      "size_bytes": 221720,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "联拓食品"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "胖东来",
+      "id": "clientlogo-胖东来",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/胖东来.png",
+      "sha256": "44871f622684d7d0a49ea1f7129ae8c9a573a0bf26591aeab7385f5bc9a97b1b",
+      "size_bytes": 15001,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "胖东来"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "自然堂",
+      "id": "clientlogo-自然堂",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/自然堂.png",
+      "sha256": "7f3f93c7f4c1853496ff5361f53b06ac3192625c4e8ef72c186bc63fe69db46b",
+      "size_bytes": 216063,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "自然堂"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "致欧家居",
+      "id": "clientlogo-致欧家居",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/致欧家居.png",
+      "sha256": "06ace4135c6eb9cd30ebf6d44423867a8deb811c0c0914d61833da131385f7b2",
+      "size_bytes": 148403,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "致欧家居"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "舌尖科技",
+      "id": "clientlogo-舌尖科技",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/舌尖科技.png",
+      "sha256": "e35ed7f3189a44240da5b73fdbd8c3ccafe388d88f78a7fdabd4c3ad4d7d2d3d",
+      "size_bytes": 24353,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "舌尖科技"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "艾柯塞斯, ACCESS",
+      "id": "clientlogo-艾柯塞斯-access",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/艾柯塞斯, ACCESS.png",
+      "sha256": "098f323d6b844abe2386dab17e870f3dd8cccdb7ec8b7b74f13f1e00cbc86e26",
+      "size_bytes": 30609,
+      "tags": [
+        "ACCESS",
+        "clientlogo",
+        "logo",
+        "艾柯塞斯"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "芙清",
+      "id": "clientlogo-芙清",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/芙清.png",
+      "sha256": "aa6c02089c8c4c6799a37183ba0e9e0e24ea0cc306f30c81f55d95db15ed81a0",
+      "size_bytes": 17769,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "芙清"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "花知晓",
+      "id": "clientlogo-花知晓",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/花知晓.png",
+      "sha256": "08d6aaaa443afe1d2e9f36a0e5afffd61cf5c7e9457d62c5bea9b2a366910838",
+      "size_bytes": 339325,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "花知晓"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "花西子",
+      "id": "clientlogo-花西子",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/花西子.png",
+      "sha256": "467150b0d323e94ca87c933e0d3e5248cfe15c04f0966936be91b1b317f1d039",
+      "size_bytes": 181144,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "花西子"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "英利奥",
+      "id": "clientlogo-英利奥",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/英利奥.png",
+      "sha256": "46b6c81281a586a3505abb396cf603b07ddb2842adeea5cced0278fc646b79c6",
+      "size_bytes": 16672,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "英利奥"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "茉莉奶白",
+      "id": "clientlogo-茉莉奶白",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/茉莉奶白.png",
+      "sha256": "002fcd0c3498c7f7039a159ce93ea5262813ca7d34e6a62a01effc0a793c3034",
+      "size_bytes": 83628,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "茉莉奶白"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "茶百道",
+      "id": "clientlogo-茶百道",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/茶百道.jpg",
+      "sha256": "aafc467d7244d882752a98852693d06b3fbdc95d33efbff50300ed5d99f47c5c",
+      "size_bytes": 4000,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "茶百道"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "茶百道",
+      "id": "clientlogo-茶百道",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/茶百道.png",
+      "sha256": "23df27c039de004276140327c9f5f398fa1915aae863c5102666f96f34379a8a",
+      "size_bytes": 454558,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "茶百道"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "蒙自源",
+      "id": "clientlogo-蒙自源",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/蒙自源.png",
+      "sha256": "51b5aa8a9de0a7c2fbf49196d471e40e50710450e1dd187ca17252550537b87d",
+      "size_bytes": 370607,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "蒙自源"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "蓝月亮集团",
+      "id": "clientlogo-蓝月亮集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/蓝月亮集团.png",
+      "sha256": "4d8abab2a485ed81bfa8b80d30b7491202ebc4b86abf32ded3e4369ec73075b2",
+      "size_bytes": 16787,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "蓝月亮集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "蕉内",
+      "id": "clientlogo-蕉内",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/蕉内.png",
+      "sha256": "d26cc7c1eaec4ba7c5367fc890c3ea3f6210c6ba807ce8ba76a42f2439d0ffdb",
+      "size_bytes": 28252,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "蕉内"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "蜜雪冰城",
+      "id": "clientlogo-蜜雪冰城",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/蜜雪冰城.png",
+      "sha256": "f6e7a11becb84ba13312ffeee9bedece46f827c45ff2a0e6b41f1c5385c5e689",
+      "size_bytes": 254305,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "蜜雪冰城"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "西昊智能",
+      "id": "clientlogo-西昊智能",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/西昊智能.png",
+      "sha256": "f0135a00fa8a53cbfaaac0c72572f6eec714a5b82f352716590c1066149d47e6",
+      "size_bytes": 15013,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "西昊智能"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "西贝集团",
+      "id": "clientlogo-西贝集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/西贝集团.png",
+      "sha256": "e7932f7e2da581453ba048b2f7bdc9184ef6dcc153d0c425ade8baf361ccc4a9",
+      "size_bytes": 166183,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "西贝集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "认养一头牛",
+      "id": "clientlogo-认养一头牛",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/认养一头牛.png",
+      "sha256": "6495a6b7843bca71769dcb13fa952fa58e932dc35116c8296864538ae03327e6",
+      "size_bytes": 162901,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "认养一头牛"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "贝德服装集团",
+      "id": "clientlogo-贝德服装集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/贝德服装集团.png",
+      "sha256": "512c9a91b6a094e33715689eb5c4e1862151d77b3bc0c2af03038b1261033579",
+      "size_bytes": 33014,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "贝德服装集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "贝泰妮",
+      "id": "clientlogo-贝泰妮",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/贝泰妮.png",
+      "sha256": "1e0270f438fb5a8395ebfbfe538606859a9c03087977634a2f50f1fdac42709d",
+      "size_bytes": 18824,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "贝泰妮"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "赫基集团",
+      "id": "clientlogo-赫基集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/赫基集团.png",
+      "sha256": "86d4dcef853170ad877dd66ed50157baf8a0ed46dbbbf242453b0e93bc6364bc",
+      "size_bytes": 15212,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "赫基集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "超级猩猩",
+      "id": "clientlogo-超级猩猩",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/超级猩猩.png",
+      "sha256": "328cb5a894008f869fdc2f020c236991ae0beac0cd70dad16edf03b71cc08adc",
+      "size_bytes": 218157,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "超级猩猩"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "迪尚集团",
+      "id": "clientlogo-迪尚集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/迪尚集团.png",
+      "sha256": "d8d4dc09f1f19ef9351c579009582589d84663a641eec23ca6660a4b6f23343a",
+      "size_bytes": 3793,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "迪尚集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "逐本",
+      "id": "clientlogo-逐本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/逐本.png",
+      "sha256": "bdf014d5fea165754cd4365187f7ae86f11969ee5dbfc92b1889fa3990288df8",
+      "size_bytes": 183231,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "逐本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "通葡",
+      "id": "clientlogo-通葡",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/通葡.png",
+      "sha256": "8296ca97a3b478a686ed8c4098555a364bd26f47a270e97d4cfcf07deb642bb4",
+      "size_bytes": 66179,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "通葡"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "郁美净",
+      "id": "clientlogo-郁美净",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/郁美净.png",
+      "sha256": "745c4fb221373e29708807a2654ee42e5365728e0163cf2c980859f75e6330f6",
+      "size_bytes": 108613,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "郁美净"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "鄂尔多斯",
+      "id": "clientlogo-鄂尔多斯",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/鄂尔多斯.png",
+      "sha256": "8a725a853a487e22f19156ad09de074e50761f26fa2942715355f613f3bc8696",
+      "size_bytes": 126987,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "鄂尔多斯"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "重庆亚特萍姐商贸有限公司",
+      "id": "clientlogo-重庆亚特萍姐商贸有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/重庆亚特萍姐商贸有限公司.png",
+      "sha256": "8ca1688b9524b451e6c4a52315196d7b4c9cf6415ff011676833042966cac8b9",
+      "size_bytes": 3242,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "重庆亚特萍姐商贸有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "重庆麻爪爪餐饮管理有限公司",
+      "id": "clientlogo-重庆麻爪爪餐饮管理有限公司",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/重庆麻爪爪餐饮管理有限公司.png",
+      "sha256": "96121ba94f3111c8cff9028059379eca118d4c92a7b5415a579e607d427f2641",
+      "size_bytes": 4525,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "重庆麻爪爪餐饮管理有限公司"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "重百",
+      "id": "clientlogo-重百",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/重百.png",
+      "sha256": "1536c263188403facbdcb5f4ee1cf830944144f27bf4393bb7483b2d3d189971",
+      "size_bytes": 142379,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "重百"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "金多多",
+      "id": "clientlogo-金多多",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/金多多.png",
+      "sha256": "a36e75b108003c53983e2483b86ced128da5f776d411b58321d83747fed1bf0d",
+      "size_bytes": 63294,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "金多多"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "钓鱼台美高梅",
+      "id": "clientlogo-钓鱼台美高梅",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/钓鱼台美高梅.png",
+      "sha256": "b7c05efeb379c0c985ccc155cad0ed830b2429a7df012cacd378c1dc5432718b",
+      "size_bytes": 3974,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "钓鱼台美高梅"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "钟鼎资本",
+      "id": "clientlogo-钟鼎资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/钟鼎资本.png",
+      "sha256": "b925b88d3fb2b06d614a82c28f965790e36e952af411ad0fa54acbbbcf7c55c1",
+      "size_bytes": 9223,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "钟鼎资本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "银川新华百货连锁超市",
+      "id": "clientlogo-银川新华百货连锁超市",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/银川新华百货连锁超市.png",
+      "sha256": "a43eae961310e4c88ce443eb54144f12ed989ad5bb53664d47651b7745731a8d",
+      "size_bytes": 193398,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "银川新华百货连锁超市"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "银河德睿",
+      "id": "clientlogo-银河德睿",
+      "kind": "logo",
+      "mime": "image/jpeg",
+      "path": "assets/shared/clientlogo/银河德睿.jpeg",
+      "sha256": "a86a8d33925391140a0eb832ef7106b2990b6c4c6f6bfcfd3d3f2535f364868b",
+      "size_bytes": 50169,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "银河德睿"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "银泰集团",
+      "id": "clientlogo-银泰集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/银泰集团.png",
+      "sha256": "31ee7a5b2d2f912f5f34178764a7b3a5c1ff830b0b2f48089e79dd4ccb42b877",
+      "size_bytes": 114295,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "银泰集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "锦江酒店",
+      "id": "clientlogo-锦江酒店",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/锦江酒店.png",
+      "sha256": "b9925080dcb49d510045444aeff66f9f8067fc2cf895c46e115503ff1d146f0b",
+      "size_bytes": 4058,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "锦江酒店"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "长白山",
+      "id": "clientlogo-长白山",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/长白山.png",
+      "sha256": "7824de5f7b8f12b2f415b588ae7f97ee73a6c2502171ed5ab01d4487d15df0bc",
+      "size_bytes": 8722,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "长白山"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "阿甘锅盔",
+      "id": "clientlogo-阿甘锅盔",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/阿甘锅盔.png",
+      "sha256": "ea09dedf0e89f20845b9ab87cef3600b4014746f9675665f957a314b124fd3ab",
+      "size_bytes": 143131,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "阿甘锅盔"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "阿香米线",
+      "id": "clientlogo-阿香米线",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/阿香米线.png",
+      "sha256": "bb8cca6f4d4cfcbdb07d5bcbaec38ca8ded4ba1d55e58a2920187fde340d76ae",
+      "size_bytes": 40076,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "阿香米线"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "雅戈尔",
+      "id": "clientlogo-雅戈尔",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/雅戈尔.png",
+      "sha256": "87680f8c3fa1b17d1c5604c75f0028bcfff8c0d1e7d4ee37ce3ffe9bc6475ec9",
+      "size_bytes": 19400,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "雅戈尔"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "雅鹿",
+      "id": "clientlogo-雅鹿",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/雅鹿.png",
+      "sha256": "7494f70bfbfb91bc52e57ea9a7e4b67f048371282438aaa140463df68deaf70c",
+      "size_bytes": 240399,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "雅鹿"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "霸王茶姬",
+      "id": "clientlogo-霸王茶姬",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/霸王茶姬.png",
+      "sha256": "3024b610fe4c4e5ec859dd1883891aa3957c6cfd3504703d12e5aa6fe4981566",
+      "size_bytes": 49888,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "霸王茶姬"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "飞鹤",
+      "id": "clientlogo-飞鹤",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/飞鹤.png",
+      "sha256": "9db446062c1ed05fe47d8d7fe2d02b2c0e9ee391a07d17e4739abccc7bc1117c",
+      "size_bytes": 13134,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "飞鹤"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "首旅集团",
+      "id": "clientlogo-首旅集团",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/首旅集团.png",
+      "sha256": "8030c893374b4c06aac207b93bf0cb926bc4b8cfdc37a1aa3907d0eecc5b4450",
+      "size_bytes": 12864,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "首旅集团"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "马路边边",
+      "id": "clientlogo-马路边边",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/马路边边.png",
+      "sha256": "fdee36dbb38b18ec2daa0ed87a1b7f16aba062f485a4b2623127b347d9b3304b",
+      "size_bytes": 500638,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "马路边边"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "高成资本",
+      "id": "clientlogo-高成资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/高成资本.png",
+      "sha256": "0e3968b21c79cc4596ebad7f4e0ac51fa2bbbd250f9473b58f99979bf162c786",
+      "size_bytes": 5957,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "高成资本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "高樟资本",
+      "id": "clientlogo-高樟资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/高樟资本.png",
+      "sha256": "5fe6993ef9f4fd6654db009894bbc122d866e7f49496811d0695e1becb35c58f",
+      "size_bytes": 5220,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "高樟资本"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "鲨鱼菲特",
+      "id": "clientlogo-鲨鱼菲特",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/鲨鱼菲特.png",
+      "sha256": "2b81b9373dc02145e97e9d987089950bfd828eb2f38d437f407a1e05acd8cdf4",
+      "size_bytes": 29633,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "鲨鱼菲特"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "麦德龙",
+      "id": "clientlogo-麦德龙",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/麦德龙.png",
+      "sha256": "d8c277f69edc4d00ede09ab6afd0b55a1d31a491b5ebfca1ddb49bef5d6764c2",
+      "size_bytes": 20927,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "麦德龙"
+      ]
+    },
+    {
+      "collection": "clientlogo",
+      "display_name": "黑蚁资本",
+      "id": "clientlogo-黑蚁资本",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/clientlogo/黑蚁资本.png",
+      "sha256": "4e035a4159b88b0ae0463157e7c3b3750cb883f2330aa479bf726f89eeb9ab47",
+      "size_bytes": 6726,
+      "tags": [
+        "clientlogo",
+        "logo",
+        "黑蚁资本"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "01_east_asian_woman_white_shirt",
+      "id": "digital_employee_avatars_50-01_east_asian_woman_white_shirt",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/01_east_asian_woman_white_shirt.png",
+      "sha256": "d02f0e25fd6b23ecd9890e18aaff80ea5521b4d69a92b2fbc0417b7615e22a5a",
+      "size_bytes": 87573,
+      "tags": [
+        "01",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "east",
+        "shirt",
+        "white",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "03_southeast_asian_man_hoodie",
+      "id": "digital_employee_avatars_50-03_southeast_asian_man_hoodie",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/03_southeast_asian_man_hoodie.png",
+      "sha256": "f93d67faffa3e0e28e0e7ecaa9d3190e7bafae28d9cdf946e38a0577ccf3eeee",
+      "size_bytes": 85219,
+      "tags": [
+        "03",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "hoodie",
+        "man",
+        "southeast"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "05_african_man_beard_polo",
+      "id": "digital_employee_avatars_50-05_african_man_beard_polo",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/05_african_man_beard_polo.png",
+      "sha256": "f44761de5f4dded2f76217b6b263ab94e514fcf2b9bc4d5fd09f2b23695083a5",
+      "size_bytes": 77886,
+      "tags": [
+        "05",
+        "african",
+        "avatar",
+        "beard",
+        "digital_employee_avatars_50",
+        "man",
+        "polo"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "06_latin_woman_wavy_sweater",
+      "id": "digital_employee_avatars_50-06_latin_woman_wavy_sweater",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/06_latin_woman_wavy_sweater.png",
+      "sha256": "c640350968cf9c19987ea213632c4d6a8057663b954481a9ed34d2ff1b6ed00a",
+      "size_bytes": 116565,
+      "tags": [
+        "06",
+        "avatar",
+        "digital_employee_avatars_50",
+        "latin",
+        "sweater",
+        "wavy",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "07_middle_eastern_man_white_shirt",
+      "id": "digital_employee_avatars_50-07_middle_eastern_man_white_shirt",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/07_middle_eastern_man_white_shirt.png",
+      "sha256": "d9e9a40a94ee6fe5e001eff36ba19ac0e404838749568f89c3c6961a25bca013",
+      "size_bytes": 87784,
+      "tags": [
+        "07",
+        "avatar",
+        "digital_employee_avatars_50",
+        "eastern",
+        "man",
+        "middle",
+        "shirt",
+        "white"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "08_east_asian_man_glasses_sweater",
+      "id": "digital_employee_avatars_50-08_east_asian_man_glasses_sweater",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/08_east_asian_man_glasses_sweater.png",
+      "sha256": "5ad9b1e9e66af0fdd175fab2d29d8b63fbfd7346b930939ab1b13abc7741b3fb",
+      "size_bytes": 76406,
+      "tags": [
+        "08",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "east",
+        "glasses",
+        "man",
+        "sweater"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "09_caucasian_woman_blonde_bob",
+      "id": "digital_employee_avatars_50-09_caucasian_woman_blonde_bob",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/09_caucasian_woman_blonde_bob.png",
+      "sha256": "14f2636d7a98bdda9a1b91a056e05ebabfd16ae0460b901bf64ebaa01ef2a30d",
+      "size_bytes": 102698,
+      "tags": [
+        "09",
+        "avatar",
+        "blonde",
+        "bob",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "11_east_asian_man_business_casual",
+      "id": "digital_employee_avatars_50-11_east_asian_man_business_casual",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/11_east_asian_man_business_casual.png",
+      "sha256": "dbbf4b0c879427a974d97f749ef3a0e198359fd4644612cfd0e86825b6bb0f28",
+      "size_bytes": 81055,
+      "tags": [
+        "11",
+        "asian",
+        "avatar",
+        "business",
+        "casual",
+        "digital_employee_avatars_50",
+        "east",
+        "man"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "12_indian_woman_braid_blouse",
+      "id": "digital_employee_avatars_50-12_indian_woman_braid_blouse",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/12_indian_woman_braid_blouse.png",
+      "sha256": "0ffaa39665af3c78da74311a9ad15440eaa1a9a1cb4ec605b50f20633d247a7c",
+      "size_bytes": 82547,
+      "tags": [
+        "12",
+        "avatar",
+        "blouse",
+        "braid",
+        "digital_employee_avatars_50",
+        "indian",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "13_caucasian_man_beard_denim",
+      "id": "digital_employee_avatars_50-13_caucasian_man_beard_denim",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/13_caucasian_man_beard_denim.png",
+      "sha256": "e2bc4b7a5030e7a0d85143ca5a90d48c75f39713111c9454def59733bd22d651",
+      "size_bytes": 99823,
+      "tags": [
+        "13",
+        "avatar",
+        "beard",
+        "caucasian",
+        "denim",
+        "digital_employee_avatars_50",
+        "man"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "14_east_asian_woman_short_bob_vest",
+      "id": "digital_employee_avatars_50-14_east_asian_woman_short_bob_vest",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/14_east_asian_woman_short_bob_vest.png",
+      "sha256": "14d9c1b981faa8958dc379e6a85d6cdec31e47d4e1d08961b9188d65188ce6d4",
+      "size_bytes": 87622,
+      "tags": [
+        "14",
+        "asian",
+        "avatar",
+        "bob",
+        "digital_employee_avatars_50",
+        "east",
+        "short",
+        "vest",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "15_southeast_asian_woman_scarf",
+      "id": "digital_employee_avatars_50-15_southeast_asian_woman_scarf",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/15_southeast_asian_woman_scarf.png",
+      "sha256": "7e0b2ee49f250311af60ab30e6d7cdb032bff0de9713bef8708202ff9078fe12",
+      "size_bytes": 101850,
+      "tags": [
+        "15",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "scarf",
+        "southeast",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "16_african_woman_braids_turtleneck",
+      "id": "digital_employee_avatars_50-16_african_woman_braids_turtleneck",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/16_african_woman_braids_turtleneck.png",
+      "sha256": "c37ed9a40f179d248b93e0b82781319902db6a66a03338bd07cd204c37e70311",
+      "size_bytes": 116665,
+      "tags": [
+        "16",
+        "african",
+        "avatar",
+        "braids",
+        "digital_employee_avatars_50",
+        "turtleneck",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "17_caucasian_woman_red_hair_cardigan",
+      "id": "digital_employee_avatars_50-17_caucasian_woman_red_hair_cardigan",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/17_caucasian_woman_red_hair_cardigan.png",
+      "sha256": "6bb644985fb163a6e0ee43ae227860abb35af62bc2231cf001f7d3d7dadc4ed7",
+      "size_bytes": 120080,
+      "tags": [
+        "17",
+        "avatar",
+        "cardigan",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "hair",
+        "red",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "18_east_asian_young_man_bangs_hoodie",
+      "id": "digital_employee_avatars_50-18_east_asian_young_man_bangs_hoodie",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/18_east_asian_young_man_bangs_hoodie.png",
+      "sha256": "d72707249ddf3cd852fc46d671d4f43be6c34a51db86dca948322ea9e66e5182",
+      "size_bytes": 99403,
+      "tags": [
+        "18",
+        "asian",
+        "avatar",
+        "bangs",
+        "digital_employee_avatars_50",
+        "east",
+        "hoodie",
+        "man",
+        "young"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "19_latin_man_slick_suit",
+      "id": "digital_employee_avatars_50-19_latin_man_slick_suit",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/19_latin_man_slick_suit.png",
+      "sha256": "2bb4ba85ffc8f41487324ce1f676951c6861baacfe354ca2bf2d4d71dc5dde73",
+      "size_bytes": 84335,
+      "tags": [
+        "19",
+        "avatar",
+        "digital_employee_avatars_50",
+        "latin",
+        "man",
+        "slick",
+        "suit"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "20_middle_eastern_woman_hijab",
+      "id": "digital_employee_avatars_50-20_middle_eastern_woman_hijab",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/20_middle_eastern_woman_hijab.png",
+      "sha256": "e7ee96884124d9f4d4f457822c14538fc7c4a49ce808fc0a94856938c5f31c96",
+      "size_bytes": 90721,
+      "tags": [
+        "20",
+        "avatar",
+        "digital_employee_avatars_50",
+        "eastern",
+        "hijab",
+        "middle",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "21_east_asian_woman_half_up_cardigan",
+      "id": "digital_employee_avatars_50-21_east_asian_woman_half_up_cardigan",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/21_east_asian_woman_half_up_cardigan.png",
+      "sha256": "3fce9a2782d910b107351846cd3480bed60339439fe057e8e2b947f091fcde58",
+      "size_bytes": 93460,
+      "tags": [
+        "21",
+        "asian",
+        "avatar",
+        "cardigan",
+        "digital_employee_avatars_50",
+        "east",
+        "half",
+        "up",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "22_african_man_glasses_blazer",
+      "id": "digital_employee_avatars_50-22_african_man_glasses_blazer",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/22_african_man_glasses_blazer.png",
+      "sha256": "6eace9f47a5cb48122c58edf1ec2643413f4abcfce0fb79fb8adbba603204727",
+      "size_bytes": 93665,
+      "tags": [
+        "22",
+        "african",
+        "avatar",
+        "blazer",
+        "digital_employee_avatars_50",
+        "glasses",
+        "man"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "23_caucasian_man_undercut_polo",
+      "id": "digital_employee_avatars_50-23_caucasian_man_undercut_polo",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/23_caucasian_man_undercut_polo.png",
+      "sha256": "6b6b4ecbee3748fe62ea2967f3585b49dd5bdf4a6a4aa11c4d4e6eb6ad68a5e3",
+      "size_bytes": 65950,
+      "tags": [
+        "23",
+        "avatar",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "man",
+        "polo",
+        "undercut"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "24_south_asian_man_glasses_shirt",
+      "id": "digital_employee_avatars_50-24_south_asian_man_glasses_shirt",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/24_south_asian_man_glasses_shirt.png",
+      "sha256": "000c8cf85a3fd6465a475b7150771f9d3258e103a02f1bc316ecd12612ec5789",
+      "size_bytes": 92422,
+      "tags": [
+        "24",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "glasses",
+        "man",
+        "shirt",
+        "south"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "25_east_asian_woman_navy_blazer",
+      "id": "digital_employee_avatars_50-25_east_asian_woman_navy_blazer",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/25_east_asian_woman_navy_blazer.png",
+      "sha256": "818b7479a60099274b5839b15c7ad209082d116fdaa7f0cf8d8f44abf550671a",
+      "size_bytes": 83616,
+      "tags": [
+        "25",
+        "asian",
+        "avatar",
+        "blazer",
+        "digital_employee_avatars_50",
+        "east",
+        "navy",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "26_caucasian_woman_ponytail_athleisure",
+      "id": "digital_employee_avatars_50-26_caucasian_woman_ponytail_athleisure",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/26_caucasian_woman_ponytail_athleisure.png",
+      "sha256": "3fa9cfd310c3a9ed895c4180b3d47d08332500ee2dfba01565df5914a0ac2d5b",
+      "size_bytes": 96814,
+      "tags": [
+        "26",
+        "athleisure",
+        "avatar",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "ponytail",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "27_southeast_asian_man_glasses_cardigan",
+      "id": "digital_employee_avatars_50-27_southeast_asian_man_glasses_cardigan",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/27_southeast_asian_man_glasses_cardigan.png",
+      "sha256": "85d729824db7e488b3f7c68e9059a08ebe787f1717ea3ad269872c392afed456",
+      "size_bytes": 97993,
+      "tags": [
+        "27",
+        "asian",
+        "avatar",
+        "cardigan",
+        "digital_employee_avatars_50",
+        "glasses",
+        "man",
+        "southeast"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "28_african_american_man_fade_tshirt",
+      "id": "digital_employee_avatars_50-28_african_american_man_fade_tshirt",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/28_african_american_man_fade_tshirt.png",
+      "sha256": "574fbd2876e5641edac79f7e2f483bc4a5dbfe226c736340d28bfd65f667a034",
+      "size_bytes": 75466,
+      "tags": [
+        "28",
+        "african",
+        "american",
+        "avatar",
+        "digital_employee_avatars_50",
+        "fade",
+        "man",
+        "tshirt"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "29_east_asian_man_mature_vest",
+      "id": "digital_employee_avatars_50-29_east_asian_man_mature_vest",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/29_east_asian_man_mature_vest.png",
+      "sha256": "234f90295d4c61b879018c27f9a97f862f3475435753fe6d81b18805d2966187",
+      "size_bytes": 86898,
+      "tags": [
+        "29",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "east",
+        "man",
+        "mature",
+        "vest"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "30_indian_man_beard_kurta",
+      "id": "digital_employee_avatars_50-30_indian_man_beard_kurta",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/30_indian_man_beard_kurta.png",
+      "sha256": "7f7164c69feb5e2a93b50b661801d94a7357900332dd61e1ead340f0ef49908e",
+      "size_bytes": 86263,
+      "tags": [
+        "30",
+        "avatar",
+        "beard",
+        "digital_employee_avatars_50",
+        "indian",
+        "kurta",
+        "man"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "31_caucasian_woman_pixie_blouse",
+      "id": "digital_employee_avatars_50-31_caucasian_woman_pixie_blouse",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/31_caucasian_woman_pixie_blouse.png",
+      "sha256": "8f454abdb2ef1e1d61f46bfbea5a8010c5475f8b8b75fcbeee0d5a5a3dc78fa0",
+      "size_bytes": 87017,
+      "tags": [
+        "31",
+        "avatar",
+        "blouse",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "pixie",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "32_east_asian_woman_glasses_sweater",
+      "id": "digital_employee_avatars_50-32_east_asian_woman_glasses_sweater",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/32_east_asian_woman_glasses_sweater.png",
+      "sha256": "19a27f56db62961d0215a92dc7b9bf81107ed1c5b5d1234ecc9468fae34995ba",
+      "size_bytes": 88364,
+      "tags": [
+        "32",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "east",
+        "glasses",
+        "sweater",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "33_latin_woman_curly_dress_shirt",
+      "id": "digital_employee_avatars_50-33_latin_woman_curly_dress_shirt",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/33_latin_woman_curly_dress_shirt.png",
+      "sha256": "f2c89ce65a6ce00a4758cbca407b6819a897afe07523013d46091b7f7d838903",
+      "size_bytes": 119381,
+      "tags": [
+        "33",
+        "avatar",
+        "curly",
+        "digital_employee_avatars_50",
+        "dress",
+        "latin",
+        "shirt",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "34_middle_eastern_man_mature_suit",
+      "id": "digital_employee_avatars_50-34_middle_eastern_man_mature_suit",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/34_middle_eastern_man_mature_suit.png",
+      "sha256": "b96e7a2f0b711fa5a4f8b1f26fcb9b9a6b437caba832e0ef567f658620889d10",
+      "size_bytes": 88811,
+      "tags": [
+        "34",
+        "avatar",
+        "digital_employee_avatars_50",
+        "eastern",
+        "man",
+        "mature",
+        "middle",
+        "suit"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "35_african_woman_short_natural_blazer",
+      "id": "digital_employee_avatars_50-35_african_woman_short_natural_blazer",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/35_african_woman_short_natural_blazer.png",
+      "sha256": "d80c4fa7afbc086f346dc5193052f822333c7d60a50b6d871e009acecd144fba",
+      "size_bytes": 100559,
+      "tags": [
+        "35",
+        "african",
+        "avatar",
+        "blazer",
+        "digital_employee_avatars_50",
+        "natural",
+        "short",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "36_caucasian_man_blonde_sweater",
+      "id": "digital_employee_avatars_50-36_caucasian_man_blonde_sweater",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/36_caucasian_man_blonde_sweater.png",
+      "sha256": "9b8300065c1ab22d74bdb7d04e42b8c404bf1aac35283b75fee785d77d7ddea7",
+      "size_bytes": 104756,
+      "tags": [
+        "36",
+        "avatar",
+        "blonde",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "man",
+        "sweater"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "37_east_asian_young_man_headphones",
+      "id": "digital_employee_avatars_50-37_east_asian_young_man_headphones",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/37_east_asian_young_man_headphones.png",
+      "sha256": "6a8e1f436573dac65c6c1f2196de6b481665cecd08453f287bfe3b95550eccba",
+      "size_bytes": 80179,
+      "tags": [
+        "37",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "east",
+        "headphones",
+        "man",
+        "young"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "38_southeast_asian_woman_bob_blazer",
+      "id": "digital_employee_avatars_50-38_southeast_asian_woman_bob_blazer",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/38_southeast_asian_woman_bob_blazer.png",
+      "sha256": "65500a4edf6be9ce6b3baae2cd9eea71fb45593905f49c89c963ffa11d7bd25c",
+      "size_bytes": 87980,
+      "tags": [
+        "38",
+        "asian",
+        "avatar",
+        "blazer",
+        "bob",
+        "digital_employee_avatars_50",
+        "southeast",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "39_south_asian_woman_glasses_scarf",
+      "id": "digital_employee_avatars_50-39_south_asian_woman_glasses_scarf",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/39_south_asian_woman_glasses_scarf.png",
+      "sha256": "9673e909f70a1f9b9b6a00ef583967c37c27b35641f9a62de661eb9b4b28d474",
+      "size_bytes": 90729,
+      "tags": [
+        "39",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "glasses",
+        "scarf",
+        "south",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "40_caucasian_woman_brunette_pantsuit",
+      "id": "digital_employee_avatars_50-40_caucasian_woman_brunette_pantsuit",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/40_caucasian_woman_brunette_pantsuit.png",
+      "sha256": "39ee415b2de2d666e07109dfad28693303a145b9e79e7119d350b66ae568b5f3",
+      "size_bytes": 88806,
+      "tags": [
+        "40",
+        "avatar",
+        "brunette",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "pantsuit",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "42_african_american_woman_locs_blouse",
+      "id": "digital_employee_avatars_50-42_african_american_woman_locs_blouse",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/42_african_american_woman_locs_blouse.png",
+      "sha256": "b7061bdced453dff04952177f4f488f857cc9f23060226efc03692e521ea5ec0",
+      "size_bytes": 120581,
+      "tags": [
+        "42",
+        "african",
+        "american",
+        "avatar",
+        "blouse",
+        "digital_employee_avatars_50",
+        "locs",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "43_caucasian_man_mature_glasses",
+      "id": "digital_employee_avatars_50-43_caucasian_man_mature_glasses",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/43_caucasian_man_mature_glasses.png",
+      "sha256": "f2e9e54d9d82a7e90d3c1d890ff8855afbc96eeb5a4a3b2cf6919190143112ea",
+      "size_bytes": 81235,
+      "tags": [
+        "43",
+        "avatar",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "glasses",
+        "man",
+        "mature"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "44_east_asian_woman_ponytail_polo",
+      "id": "digital_employee_avatars_50-44_east_asian_woman_ponytail_polo",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/44_east_asian_woman_ponytail_polo.png",
+      "sha256": "9d21035d053a126e327cb602fa4be02dd4d746818cb432ce4b88d60ed563a108",
+      "size_bytes": 95424,
+      "tags": [
+        "44",
+        "asian",
+        "avatar",
+        "digital_employee_avatars_50",
+        "east",
+        "polo",
+        "ponytail",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "45_latin_man_beard_henley",
+      "id": "digital_employee_avatars_50-45_latin_man_beard_henley",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/45_latin_man_beard_henley.png",
+      "sha256": "6a0a25454c3e1bf8af39654f6f4bd2a251c8caf1a6c8ce29ccf0d3edc83a0026",
+      "size_bytes": 98085,
+      "tags": [
+        "45",
+        "avatar",
+        "beard",
+        "digital_employee_avatars_50",
+        "henley",
+        "latin",
+        "man"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "46_middle_eastern_woman_long_hair_blouse",
+      "id": "digital_employee_avatars_50-46_middle_eastern_woman_long_hair_blouse",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/46_middle_eastern_woman_long_hair_blouse.png",
+      "sha256": "cfb4a1f5876d133677521f47fccab7b0dd978823ccae7182ad6b636d1ebeccda",
+      "size_bytes": 93773,
+      "tags": [
+        "46",
+        "avatar",
+        "blouse",
+        "digital_employee_avatars_50",
+        "eastern",
+        "hair",
+        "long",
+        "middle",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "47_indian_woman_glasses_blazer",
+      "id": "digital_employee_avatars_50-47_indian_woman_glasses_blazer",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/47_indian_woman_glasses_blazer.png",
+      "sha256": "43084c5f0d4a7e53fc707281fbf6ed464be76fc388eeaac88585f0a379534f58",
+      "size_bytes": 100727,
+      "tags": [
+        "47",
+        "avatar",
+        "blazer",
+        "digital_employee_avatars_50",
+        "glasses",
+        "indian",
+        "woman"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "48_african_man_mature_glasses_shirt",
+      "id": "digital_employee_avatars_50-48_african_man_mature_glasses_shirt",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/48_african_man_mature_glasses_shirt.png",
+      "sha256": "5364bdb69e78afbcfebbca99be8eadce550bb57ec5252b0d6ac468011a9fa5de",
+      "size_bytes": 86015,
+      "tags": [
+        "48",
+        "african",
+        "avatar",
+        "digital_employee_avatars_50",
+        "glasses",
+        "man",
+        "mature",
+        "shirt"
+      ]
+    },
+    {
+      "collection": "digital_employee_avatars_50",
+      "display_name": "49_caucasian_woman_silver_bob_blouse",
+      "id": "digital_employee_avatars_50-49_caucasian_woman_silver_bob_blouse",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/digital_employee_avatars_50/49_caucasian_woman_silver_bob_blouse.png",
+      "sha256": "623c38a2bb4c15a120d51bcd88f1c42b327b5e023984d2ec5978979daf0ce98a",
+      "size_bytes": 113498,
+      "tags": [
+        "49",
+        "avatar",
+        "blouse",
+        "bob",
+        "caucasian",
+        "digital_employee_avatars_50",
+        "silver",
+        "woman"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_AI_Black",
+      "id": "feishu-products-飞书标识_ai_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_AI_Black.png",
+      "sha256": "285658f11c6a791bc0c9f95eb5cbbace23c85538b8ed20674ebbd527df4a9683",
+      "size_bytes": 6463,
+      "tags": [
+        "AI",
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_AI_Color",
+      "id": "feishu-products-飞书标识_ai_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_AI_Color.png",
+      "sha256": "4befdf8fffd570ccd7364ef907198a8a0d1a095d3dabbdfa0b56d9e82a19ba9e",
+      "size_bytes": 15845,
+      "tags": [
+        "AI",
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_AI_White",
+      "id": "feishu-products-飞书标识_ai_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_AI_White.png",
+      "sha256": "f89fc7360027823458dc8d9252a5931f69bd2e3215e7aa8ce694c8d7c5c361e6",
+      "size_bytes": 6257,
+      "tags": [
+        "AI",
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_aily_Black",
+      "id": "feishu-products-飞书标识_aily_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_aily_Black.png",
+      "sha256": "4c33644acb473aafa11c7663e919e576725eb74bbffc12609fc0874d15a4c9c4",
+      "size_bytes": 11658,
+      "tags": [
+        "Black",
+        "aily",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_aily_Color",
+      "id": "feishu-products-飞书标识_aily_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_aily_Color.png",
+      "sha256": "55120e9d5b9d19ed20c978ebcd6f773fcebc086be4e03c0fb6ba0212e1c493d8",
+      "size_bytes": 31566,
+      "tags": [
+        "Color",
+        "aily",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_aily_White",
+      "id": "feishu-products-飞书标识_aily_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_aily_White.png",
+      "sha256": "07c93574cb6b404a46382c21837d5a1f9cc00368acf90158372f9c3ff845d660",
+      "size_bytes": 11214,
+      "tags": [
+        "White",
+        "aily",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_aPaaS_Black",
+      "id": "feishu-products-飞书标识_apaas_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_aPaaS_Black.png",
+      "sha256": "e5839d2fe7798b12de1098c451b288e5796a9db5dc9630b7f34ad847a18d6588",
+      "size_bytes": 8442,
+      "tags": [
+        "Black",
+        "aPaaS",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_aPaaS_Color",
+      "id": "feishu-products-飞书标识_apaas_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_aPaaS_Color.png",
+      "sha256": "40aeceb3d87f809a5bae327f956dcf0b68e7cf7619d52bad8145f1f7e4acbdb1",
+      "size_bytes": 25019,
+      "tags": [
+        "Color",
+        "aPaaS",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_aPaaS_White",
+      "id": "feishu-products-飞书标识_apaas_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_aPaaS_White.png",
+      "sha256": "f154d13e1ec7c050d6cf8dfe83cfba0716d5731a5d793a17e2d0aa653932ae38",
+      "size_bytes": 8223,
+      "tags": [
+        "White",
+        "aPaaS",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_妙搭_Black",
+      "id": "feishu-products-飞书标识_妙搭_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_妙搭_Black.png",
+      "sha256": "77b36d94636e3ec65c11c1677512354508038e1fb6439714423e627ec4a4764f",
+      "size_bytes": 6265,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "妙搭",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_妙搭_Color",
+      "id": "feishu-products-飞书标识_妙搭_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_妙搭_Color.png",
+      "sha256": "57f2a8371249592a8e3b613b7f93783ebf8504ffda23e9fa7df60a9537e819b9",
+      "size_bytes": 20313,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "妙搭",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_妙搭_White",
+      "id": "feishu-products-飞书标识_妙搭_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_妙搭_White.png",
+      "sha256": "5a3d50201c3729cacfbfae1ebf6cf2eb9c2e5107460fa8ddb4b4a10d94c354c8",
+      "size_bytes": 5954,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "妙搭",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_知识问答_Black",
+      "id": "feishu-products-飞书标识_知识问答_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_知识问答_Black.png",
+      "sha256": "1f224d51359153bf04b15171f078927f87494f100b80e83e59e67dbf1f2bb266",
+      "size_bytes": 13695,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "知识问答",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_知识问答_Color",
+      "id": "feishu-products-飞书标识_知识问答_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_知识问答_Color.png",
+      "sha256": "ff3ae95b2ca298f737b7d0e67168efdc9aedc7198216732cdebc032979b4eff2",
+      "size_bytes": 74383,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "知识问答",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_知识问答_White",
+      "id": "feishu-products-飞书标识_知识问答_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_知识问答_White.png",
+      "sha256": "ae0249591ebb5720e381a405702d0ad38d309a491c77a72ed30ec314c0c3cee8",
+      "size_bytes": 13093,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "知识问答",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_集成平台__Black",
+      "id": "feishu-products-飞书标识_集成平台__black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_集成平台__Black.png",
+      "sha256": "bc07659d09016b07d21efb9e44d4eefbe550108fe3631d87f3eeeeb8b9550ed9",
+      "size_bytes": 6619,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "集成平台",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_集成平台_Color",
+      "id": "feishu-products-飞书标识_集成平台_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_集成平台_Color.png",
+      "sha256": "9b88867135cadf986c7a3481d1c4aa97d55813848cec52a99ae7c337712f5191",
+      "size_bytes": 6401,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "集成平台",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_集成平台_White",
+      "id": "feishu-products-飞书标识_集成平台_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_集成平台_White.png",
+      "sha256": "03c675003071866913905d0951eee1b89e897d1e6002a0410e6c62deb0047eed",
+      "size_bytes": 6159,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "集成平台",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书_Color",
+      "id": "feishu-products-飞书标识_飞书_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书_Color.png",
+      "sha256": "b9edfecaba700278e2cff170d66775f44252a564d40f13c56e9144921bf9f3c3",
+      "size_bytes": 3757,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书People_Black",
+      "id": "feishu-products-飞书标识_飞书people_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书People_Black.png",
+      "sha256": "bf3f566e508b0a3ab1577e8f7db7a616691f3f46da0a7f1fe2a7921dc072605b",
+      "size_bytes": 6436,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书People",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书People_Color",
+      "id": "feishu-products-飞书标识_飞书people_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书People_Color.png",
+      "sha256": "166f96d08b45cc57ffadeecf770890bd23aed5bd9fe60b50559c02ee4e647755",
+      "size_bytes": 6954,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书People",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书People_White",
+      "id": "feishu-products-飞书标识_飞书people_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书People_White.png",
+      "sha256": "043827b9dcacd32194ae1f713d7cabbb6a23e26a621230accf031e6a202d1173",
+      "size_bytes": 6147,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书People",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书人事_Black",
+      "id": "feishu-products-飞书标识_飞书人事_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书人事_Black.png",
+      "sha256": "6d39fe56fa5dc0b6908495a4df023c29381b6bad9c8c2cb9a81b5ac930b65e23",
+      "size_bytes": 6836,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书人事",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书人事_Color",
+      "id": "feishu-products-飞书标识_飞书人事_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书人事_Color.png",
+      "sha256": "1a48c45d003342367e599080d26adda52ee1ca7b922f6ea20256a278e1e220e2",
+      "size_bytes": 6817,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书人事",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书人事_White",
+      "id": "feishu-products-飞书标识_飞书人事_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书人事_White.png",
+      "sha256": "fd3f512c207d4a9998c385990a1272d1d259ebd15c5911b4715ff8776bbed54f",
+      "size_bytes": 6688,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书人事",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书会议_Black",
+      "id": "feishu-products-飞书标识_飞书会议_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书会议_Black.png",
+      "sha256": "1d984c649c8aee465205e6cdbe0a02e314395a0364659cceea1d7d026b9dcb8c",
+      "size_bytes": 5556,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书会议",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书会议_Color",
+      "id": "feishu-products-飞书标识_飞书会议_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书会议_Color.png",
+      "sha256": "943d152d05dc126b17002751804f70917853e50c301e3f9e1f4fc6fbc0d299d7",
+      "size_bytes": 14844,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书会议",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书会议_White",
+      "id": "feishu-products-飞书标识_飞书会议_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书会议_White.png",
+      "sha256": "6f8e5cc236021e60b7e07b4fb024f85e8c41eab81744c45037884ded647cffe4",
+      "size_bytes": 5174,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书会议",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书多维表格_Black",
+      "id": "feishu-products-飞书标识_飞书多维表格_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书多维表格_Black.png",
+      "sha256": "cbcd5dc62710572b2ad95b2aeb8a766f8ddcdf23c2a453850b0da6aba414ecd6",
+      "size_bytes": 7781,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书多维表格",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书多维表格_Color",
+      "id": "feishu-products-飞书标识_飞书多维表格_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书多维表格_Color.png",
+      "sha256": "93d8d12a7217ea93a1be86fb39f078e2022af2a2e19cfad6023c1d2dc0baf69d",
+      "size_bytes": 7695,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书多维表格",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书多维表格_White",
+      "id": "feishu-products-飞书标识_飞书多维表格_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书多维表格_White.png",
+      "sha256": "e68f918e331c78dbbfd98f887742d4208e9958f7fb016c7fa8c7142ffb73a9b7",
+      "size_bytes": 7582,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书多维表格",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书招聘_Black",
+      "id": "feishu-products-飞书标识_飞书招聘_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书招聘_Black.png",
+      "sha256": "37db81e3401638764d4095abe265ea22de85d0dbc1e43696f78e4eef64e4b179",
+      "size_bytes": 7829,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书招聘",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书招聘_Color",
+      "id": "feishu-products-飞书标识_飞书招聘_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书招聘_Color.png",
+      "sha256": "064d000b3009bd9705c4093d7218493f6a2b3a2601bccfed8bbd80a8949ad529",
+      "size_bytes": 8766,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书招聘",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书招聘_White",
+      "id": "feishu-products-飞书标识_飞书招聘_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书招聘_White.png",
+      "sha256": "3b6763b8471c9fdb1efa1701782f9d7d0a4e3cfdfb896b99f1dd5f93a2a419dc",
+      "size_bytes": 7513,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书招聘",
+        "飞书标识"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书绩效_Black",
+      "id": "feishu-products-飞书标识_飞书绩效_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书绩效_Black.png",
+      "sha256": "74a162c54825514554f862f716bb888e0a5c0db870cd480e96661a843dce24e4",
+      "size_bytes": 7819,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书标识",
+        "飞书绩效"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书绩效_Color",
+      "id": "feishu-products-飞书标识_飞书绩效_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书绩效_Color.png",
+      "sha256": "caf2f95d7d568fb4c2983a230704ddd2c209352ee292f54e24b5a610dc6d3603",
+      "size_bytes": 7970,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书标识",
+        "飞书绩效"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书绩效_White",
+      "id": "feishu-products-飞书标识_飞书绩效_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书绩效_White.png",
+      "sha256": "a56108b57759fb9e346037eb117fc95becf9fc4f8ca3b33ffd10969d810b2de5",
+      "size_bytes": 7337,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书标识",
+        "飞书绩效"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书项目_Black",
+      "id": "feishu-products-飞书标识_飞书项目_black",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书项目_Black.png",
+      "sha256": "b0fc700d06ec4bed59c39e94bd56ff88953260d753598456f1c94eef04cf3a68",
+      "size_bytes": 6389,
+      "tags": [
+        "Black",
+        "black",
+        "feishu-products",
+        "icon",
+        "飞书标识",
+        "飞书项目"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书项目_Color",
+      "id": "feishu-products-飞书标识_飞书项目_color",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书项目_Color.png",
+      "sha256": "f908810b1925b521e10c98cd02f6770c247cd741803134b4525c0ff82a4d5d87",
+      "size_bytes": 8468,
+      "tags": [
+        "Color",
+        "color",
+        "feishu-products",
+        "icon",
+        "飞书标识",
+        "飞书项目"
+      ]
+    },
+    {
+      "collection": "feishu-products",
+      "display_name": "飞书标识_飞书项目_White",
+      "id": "feishu-products-飞书标识_飞书项目_white",
+      "kind": "icon",
+      "mime": "image/png",
+      "path": "assets/shared/feishu-products/飞书标识_飞书项目_White.png",
+      "sha256": "14e87e46ec0ed9ea3fa3bbb256c918be4f3eecffdc75ecb696730191e5008b4e",
+      "size_bytes": 6136,
+      "tags": [
+        "White",
+        "feishu-products",
+        "icon",
+        "white",
+        "飞书标识",
+        "飞书项目"
+      ]
+    },
+    {
+      "collection": "mydigitalemployee",
+      "display_name": "参参",
+      "id": "mydigitalemployee-参参",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/mydigitalemployee/参参.png",
+      "sha256": "5196cc8618fa9b5163e4c7e1b2c124f3d28ece5730a3407d9838c0eee7ae795d",
+      "size_bytes": 92463,
+      "tags": [
+        "avatar",
+        "mydigitalemployee",
+        "参参"
+      ]
+    },
+    {
+      "collection": "mydigitalemployee",
+      "display_name": "呆呆",
+      "id": "mydigitalemployee-呆呆",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/mydigitalemployee/呆呆.png",
+      "sha256": "fa3522d2974bbf9ff6d4bacb9f4defbcb94e9cc7b9730c3c2857d10c36b5ee09",
+      "size_bytes": 90454,
+      "tags": [
+        "avatar",
+        "mydigitalemployee",
+        "呆呆"
+      ]
+    },
+    {
+      "collection": "mydigitalemployee",
+      "display_name": "图图",
+      "id": "mydigitalemployee-图图",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/mydigitalemployee/图图.png",
+      "sha256": "78333bfb9651871f3fe6b21b7cc113f1afdb00368cbd581eaad3e73032754cd2",
+      "size_bytes": 96247,
+      "tags": [
+        "avatar",
+        "mydigitalemployee",
+        "图图"
+      ]
+    },
+    {
+      "collection": "mydigitalemployee",
+      "display_name": "探探",
+      "id": "mydigitalemployee-探探",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/mydigitalemployee/探探.png",
+      "sha256": "10ff2f7be50e8bc64493f0d67ca7a682e9840ed1d82622f0e3ea4ac9b5089ab3",
+      "size_bytes": 93732,
+      "tags": [
+        "avatar",
+        "mydigitalemployee",
+        "探探"
+      ]
+    },
+    {
+      "collection": "mydigitalemployee",
+      "display_name": "睿睿",
+      "id": "mydigitalemployee-睿睿",
+      "kind": "avatar",
+      "mime": "image/png",
+      "path": "assets/shared/mydigitalemployee/睿睿.png",
+      "sha256": "fb075dca07b14cd3bbbfeff37e6613fdbce9b2f2cb2f80f50547b875472b8c5a",
+      "size_bytes": 90066,
+      "tags": [
+        "avatar",
+        "mydigitalemployee",
+        "睿睿"
+      ]
+    },
+    {
+      "collection": "third-party-logos",
+      "display_name": "salesforce",
+      "id": "third-party-logos-salesforce",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/third-party-logos/salesforce.png",
+      "sha256": "246896616fe43df27c33210a65ece1c6c923c5e14b90fdbda2bb17d5ce9f847a",
+      "size_bytes": 5907,
+      "tags": [
+        "logo",
+        "salesforce",
+        "third-party-logos"
+      ]
+    },
+    {
+      "collection": "third-party-logos",
+      "display_name": "servicenow",
+      "id": "third-party-logos-servicenow",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/third-party-logos/servicenow.png",
+      "sha256": "c0d124ad7164c826bc30b3f2dd699c6105e50bb22e488ca9e02662dae258944d",
+      "size_bytes": 2616,
+      "tags": [
+        "logo",
+        "servicenow",
+        "third-party-logos"
+      ]
+    },
+    {
+      "collection": "third-party-logos",
+      "display_name": "slack",
+      "id": "third-party-logos-slack",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/third-party-logos/slack.png",
+      "sha256": "45636a6e68c3db2821ba65be6b5ef9bbdffbf03c14c653cad2eb97193a7c92d0",
+      "size_bytes": 6790,
+      "tags": [
+        "logo",
+        "slack",
+        "third-party-logos"
+      ]
+    },
+    {
+      "collection": "third-party-logos",
+      "display_name": "workday",
+      "id": "third-party-logos-workday",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/third-party-logos/workday.png",
+      "sha256": "3257cbf05363452b4d91a6cf019e7e66fde41cdaadd604b805b636a16f476ac8",
+      "size_bytes": 2563,
+      "tags": [
+        "logo",
+        "third-party-logos",
+        "workday"
+      ]
+    },
+    {
+      "collection": "third-party-logos",
+      "display_name": "zoom",
+      "id": "third-party-logos-zoom",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/third-party-logos/zoom.png",
+      "sha256": "33da26bc92b0612d440ab28c594ed6f7a5b1119460fbaf454ca14d1552618696",
+      "size_bytes": 5273,
+      "tags": [
+        "logo",
+        "third-party-logos",
+        "zoom"
+      ]
+    },
+    {
+      "collection": "third-party-logos",
+      "display_name": "钉钉",
+      "id": "third-party-logos-钉钉",
+      "kind": "logo",
+      "mime": "image/png",
+      "path": "assets/shared/third-party-logos/钉钉.png",
+      "sha256": "808bc50ce4290ce13f3b6cdf8bd977478f97a1e81e5a572cdfa908f3997fd0fa",
+      "size_bytes": 5580,
+      "tags": [
+        "logo",
+        "third-party-logos",
+        "钉钉"
+      ]
+    }
+  ],
+  "root": "assets/shared",
+  "source": "feishu-base",
+  "version": "1.0"
+}

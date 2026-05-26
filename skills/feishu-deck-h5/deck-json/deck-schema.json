@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://feishu-deck-h5/deck-schema.json",
   "title": "DeckJSON",
-  "description": "Single-source-of-truth data model for a feishu-deck-h5 slide deck. 10 base layouts (3 multi-variant) + 2 specials. The deterministic renderer turns this into HTML; the visual editor edits this in place; the LLM produces this instead of free-form HTML.",
+  "description": "Single-source-of-truth data model for a feishu-deck-h5 slide deck. 13 regular layout enums (3 multi-variant) + 2 specials. The deterministic renderer turns this into HTML; the visual editor edits this in place; the LLM produces this instead of free-form HTML.",
   "type": "object",
   "required": ["version", "deck", "slides"],
   "additionalProperties": false,
@@ -290,7 +290,7 @@
         "end",
         "replica", "raw"
       ],
-      "description": "13 base layouts (content/stats/flow are multi-variant) + 2 specials (replica/raw). iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide."
+      "description": "13 regular layout enums (content/stats/flow are multi-variant) + 2 specials (replica/raw), for 15 total enum values. iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide."
     },
 
     "accent_enum": {

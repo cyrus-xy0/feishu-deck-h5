@@ -1,6 +1,7 @@
 # Install — agent-readable spec
 
-> This file is the canonical install procedure for `feishu-deck-h5`.
+> This file is the canonical install procedure for the lark deck product skills:
+> `deck-outline-planner`, `feishu-deck-h5`, and `pitch-rehearsal-simulator`.
 > If you are a Claude (or any AI agent) and the user asked you to install
 > this skill from a git URL, follow these steps in order.
 > If you are a human, [README.md](./README.md) is friendlier.
@@ -11,7 +12,7 @@ Tell your Claude agent:
 
 > "帮我安装 feishu-deck-h5 这个 skill：`git@github.com:FuQiang/feishu-deck-h5.git`"
 
-The agent will detect your harness, pick the right install path, and verify.
+The agent will detect your harness, install the product skills, and verify.
 
 ---
 
@@ -52,14 +53,18 @@ For non-Claude-Code harnesses (e.g. openclaw if it uses a different skill root),
 CLAUDE_DIR=~/.openclaw bash install.sh
 ```
 
-**Verify:** the script auto-runs `preflight.sh` at the end. Look for `PREFLIGHT OK`.
+**Verify:** the script symlinks `deck-outline-planner`, `feishu-deck-h5`, and
+`pitch-rehearsal-simulator`, then auto-runs `preflight.sh` for the H5 renderer.
+Look for `PREFLIGHT OK`.
 
 ### 3. Manual path (fallback when nothing else fits)
 
 ```bash
 git clone git@github.com:FuQiang/feishu-deck-h5.git ~/Projects/feishu-deck-h5
 mkdir -p ~/.claude/skills
+ln -s ~/Projects/feishu-deck-h5/skills/deck-outline-planner ~/.claude/skills/deck-outline-planner
 ln -s ~/Projects/feishu-deck-h5/skills/feishu-deck-h5 ~/.claude/skills/feishu-deck-h5
+ln -s ~/Projects/feishu-deck-h5/skills/pitch-rehearsal-simulator ~/.claude/skills/pitch-rehearsal-simulator
 bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh
 ```
 
@@ -98,7 +103,9 @@ Do **not** try to add them as a collaborator via `gh api` — only the repo owne
 ```
 .claude-plugin/marketplace.json   ← present means: plugin path supported
 .claude-plugin/plugin.json
+skills/deck-outline-planner/SKILL.md
 skills/feishu-deck-h5/SKILL.md    ← present means: manual/install.sh path supported
+skills/pitch-rehearsal-simulator/SKILL.md
 install.sh                        ← present means: install.sh path supported
 INSTALL.md                        ← this file
 README.md                         ← human-facing docs

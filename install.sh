@@ -4,7 +4,7 @@
 # Installs this skill into Claude Code (or any compatible harness that follows
 # the ~/.claude/skills/ convention) by:
 #   1. Cloning to $INSTALL_DIR (default: ~/Projects/feishu-deck-h5)
-#   2. Symlinking skills/feishu-deck-h5 into $CLAUDE_DIR/skills/feishu-deck-h5
+#   2. Symlinking product skills into $CLAUDE_DIR/skills/
 #   3. Running preflight to verify
 #
 # Usage:
@@ -22,12 +22,14 @@ REPO_URL="${REPO_URL:-git@github.com:FuQiang/feishu-deck-h5.git}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/Projects/feishu-deck-h5}"
 CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
 SKILLS_DIR="$CLAUDE_DIR/skills"
-LINK_PATH="$SKILLS_DIR/feishu-deck-h5"
+SKILL_NAMES=("deck-outline-planner" "feishu-deck-h5" "pitch-rehearsal-simulator")
+PRIMARY_LINK_PATH="$SKILLS_DIR/feishu-deck-h5"
 
 echo "==> feishu-deck-h5 install"
 echo "    repo:    $REPO_URL"
 echo "    target:  $INSTALL_DIR"
-echo "    symlink: $LINK_PATH"
+echo "    skills:  ${SKILL_NAMES[*]}"
+echo "    into:    $SKILLS_DIR"
 echo
 
 # Prereq 1: SSH access to GitHub
@@ -73,19 +75,27 @@ else
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-# 2. symlink into $CLAUDE_DIR/skills/
+# 2. symlink product skills into $CLAUDE_DIR/skills/
 mkdir -p "$SKILLS_DIR"
-if [ -L "$LINK_PATH" ] || [ -e "$LINK_PATH" ]; then
-  echo "==> removing existing $LINK_PATH..."
-  rm -rf "$LINK_PATH"
-fi
-ln -s "$INSTALL_DIR/skills/feishu-deck-h5" "$LINK_PATH"
-echo "==> symlinked: $LINK_PATH -> $INSTALL_DIR/skills/feishu-deck-h5"
+for SKILL_NAME in "${SKILL_NAMES[@]}"; do
+  SRC_PATH="$INSTALL_DIR/skills/$SKILL_NAME"
+  LINK_PATH="$SKILLS_DIR/$SKILL_NAME"
+  if [ ! -d "$SRC_PATH" ]; then
+    echo "ERROR — missing skill directory: $SRC_PATH"
+    exit 1
+  fi
+  if [ -L "$LINK_PATH" ] || [ -e "$LINK_PATH" ]; then
+    echo "==> removing existing $LINK_PATH..."
+    rm -rf "$LINK_PATH"
+  fi
+  ln -s "$SRC_PATH" "$LINK_PATH"
+  echo "==> symlinked: $LINK_PATH -> $SRC_PATH"
+done
 
 # 3. verify
 echo
 echo "==> running preflight..."
-if bash "$LINK_PATH/assets/preflight.sh"; then
+if bash "$PRIMARY_LINK_PATH/assets/preflight.sh"; then
   echo
   echo "==> DONE. Restart your Claude Code / harness session to pick up the new skill."
 else

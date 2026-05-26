@@ -336,11 +336,77 @@ are non-persistent and equally broken for this skill's purpose.
 
 ## DECK GENERATION POLICY (mandatory) — DeckJSON-first by default
 
+### Scene outline handoff (product loop)
+
+When the input is a business scene / raw brief / proposal goal, treat the deck
+as a product workflow, not a visual demo. If `deck-outline-planner` is available,
+use it before authoring DeckJSON. The expected handoff object is a
+`deck-outline-planner/schema/deck-outline.schema.json` outline with:
+
+- `brief.delivery_mode`: `local-agent`, `feishu-bot`, or `unknown`
+- `scene.core_tension`: the business conflict this deck must resolve
+- `thesis.pain_points[]`: industry pain points with evidence level
+- `outline.slides[]`: stable slide keys, messages, layout candidates
+- `asset_plan[]`: image / video / icon / logo / demo needs and fallback policy
+- `claim_discipline`: unsupported claims and items that require confirmation
+
+Consumption rule:
+
+1. Preserve every `outline.slides[].key` as the DeckJSON slide `key` unless the
+   key violates DeckJSON's kebab-case rule.
+2. Use `layout_candidate` as the first layout choice, but change it if the H5
+   renderer has a safer native layout.
+3. Resolve logo/icon/avatar/demo references through Feishu Base first:
+   `python3 scripts/base_library.py search-assets "<keyword>" --limit 20`.
+   `assets/shared/asset-index.generated.json` is a Base-exported local cache,
+   not the source of truth.
+4. Put real customer screenshots, video, or demo links in `asset_plan`; do not
+   invent them during H5 rendering.
+5. Record in `FEEDBACK.md` which outline assumptions survived, changed, or
+   blocked generation.
+
+Default implementation: use the deterministic H5-side compiler before manual
+DeckJSON edits:
+
+```bash
+python3 skills/feishu-deck-h5/deck-json/compile-outline.py \
+  runs/<ts>/input/outline.json \
+  runs/<ts>/output/deck.json \
+  --report runs/<ts>/output/compile-report.json \
+  --feedback runs/<ts>/output/FEEDBACK.md
+```
+
+The compiler preserves slide keys, maps `layout_candidate` to the closest valid
+DeckJSON layout / variant, keeps evidence and risk flags in non-rendered notes,
+and surfaces asset / claim gaps in the report. It is a first-pass compiler, not
+a substitute for confirming real customer assets through the asset workflow.
+
+If no outline exists yet, produce a design plan per DESIGN-FIRST POLICY before
+touching files. If the user explicitly asks for "not just a demo", the deck arc
+must include business pain, product workflow, evidence or pilot path, and a next
+decision — a standalone demo slide is insufficient.
+
+### Post-H5 pitch rehearsal hook
+
+When the user asks what will happen if this deck is used in a customer pitch
+("模拟讲这套片子", "客户听完会怎样", "pitch rehearsal", etc.), do not treat that
+as another render pass. Hand the finished `outline.json` / `deck.json` /
+`index.html` to `pitch-rehearsal-simulator` and produce:
+
+```text
+pitch-rehearsal.json
+PITCH_REHEARSAL.md
+```
+
+The rehearsal output is a scenario forecast, not observed customer research.
+Feed its `revision_queue` back into DeckJSON / texts / evidence pages only after
+preserving claim discipline.
+
 **After PREFLIGHT passes, decide HOW you'll author the deck. Two paths:**
 
 | Path | When | What you write | What renders |
 |---|---|---|---|
-| **A · DeckJSON-first** *(RECOMMENDED, default)* | The deck fits one of the 14 layouts in `deck-json/deck-schema.json` (12 base + 2 specials) — covers ~95% of real decks | `runs/<ts>/output/deck.json` per schema | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + texts.md + assets/` automatically |
+| **A · DeckJSON-first** *(RECOMMENDED, default)* | The deck fits one of the 15 layout enum values in `deck-json/deck-schema.json` (13 regular + 2 specials) — covers ~95% of real decks | `runs/<ts>/output/deck.json` per schema | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + texts.md + assets/` automatically |
 | **B · Raw HTML authoring** *(legacy / escape hatch)* | A pattern genuinely doesn't fit any schema layout AND can't be expressed as `raw` block embed | Hand-author `index.html` per the R02 / R06 / R20 / L1-L4 / BF1-BF12 rules below | Skill's existing `validate.py` HARD GATE before delivery |
 
 **Why Path A is the default**:
@@ -499,6 +565,7 @@ If 1-2 specific slides won't fit the schema but everything else does:
 | Tool | Use case | Doc |
 |---|---|---|
 | `deck-json/render-deck.py` | Render deck.json → HTML (always runs first) | inline help: `--help` |
+| `deck-json/compile-outline.py` | Compile deck-outline-planner `outline.json` → DeckJSON + report / FEEDBACK | inline help: `--help` |
 | `deck-json/deck-cli.py` | 14 atomic ops on deck.json (set / set-accent / set-decor / set-variant / reorder / move-key / insert / delete / clone / render / list / get / show / lint) — auto-backup + revalidate + rollback | `deck-json/DECK-CLI-README.md` |
 | `deck-json/validate-deck.py` | Standalone schema lint of deck.json (called by render-deck.py + deck-cli.py automatically) | inline help |
 | `deck-json/sync-index-to-deck.py` | **Detect + recover post-render drift** — port edits made directly to index.html back into deck.json so re-render is byte-identical. Run before any fork / library ingest / delivery. | see ROUND-TRIP INTEGRITY section |
@@ -1360,7 +1427,7 @@ agenda.item-01.en: Context and challenges
 |---|---|
 | `assets/apply-texts.py [<html> <texts.md>] [--dry-run] [--check]` | Apply edits from texts.md back into HTML. With no args, defaults to `index.html` + `texts.md` in the script's own directory (so it works inside the bundled deliverable zip). `--check` exits 1 on drift. |
 | `assets/extract-texts.py <html> [--out texts.md] [--annotate out.html]` | Bootstrap texts.md from a deck. Mode A: deck already annotated — just dump. Mode B: bare deck — auto-add `data-text-id` and emit annotated HTML alongside texts.md. |
-| `assets/package-deliverable.sh <output-dir> [--name foo]` | Bundle the per-run output into `deck-editable.zip` containing `index.html`, `texts.md`, `apply-texts.py`, `apply.command` (macOS), `apply.bat` (Windows), and a user-facing `README.txt`. The recipient unzips, edits texts.md, double-clicks the launcher — no Claude Code or pip required, just stock Python 3. |
+| `assets/package-deliverable.sh <output-dir> [--name foo]` | Bundle the per-run output into `deck-editable.zip` containing `index.html`, `assets/`, `texts.md`, apply engine + launchers, `README.txt`, and source/metadata sidecars when present (`deck.json`, `FEEDBACK.md`, `assets-manifest.yaml`, pitch rehearsal files). The recipient unzips, edits texts.md, double-clicks the launcher — no Claude Code or pip required, just stock Python 3. |
 
 **Retrofit limitation**: `extract-texts.py` Mode B captures pure text
 leaves only. Mixed-content elements (text + inline tags) are skipped —
@@ -1425,7 +1492,7 @@ verify the artifact form. Pick exactly **one** of three valid shapes:
 | Shape | When | What goes back |
 |---|---|---|
 | **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. 90% of cases. | `bash build.sh --inline` → ship `examples/sample-deck-inline.html` (or its renamed copy under `runs/<ts>/output/`). Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. |
-| **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + assets + `texts.md` + `apply-texts.py` + `apply.command`/`apply.bat` launchers. Recipient unzips, edits `texts.md`, double-clicks the launcher to regenerate. |
+| **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + `assets/` + `texts.md` + `deck.json`/`FEEDBACK.md`/`assets-manifest.yaml` when present + `apply-texts.py` + `apply.command`/`apply.bat` launchers. Recipient unzips, edits `texts.md`, double-clicks the launcher to regenerate. |
 | **C · hosted URL** *(when the user already deploys to Pages / a CDN)* | Deck lives at a stable web URL. | Ship the URL string. No file attachment. |
 
 **Banned form · single linked HTML**: never hand back just one
@@ -1630,7 +1697,11 @@ The zip contains:
 ```
 deck-editable.zip
 ├── index.html        ← the deck (single inlined file, viewable offline)
+├── assets/           ← CSS/JS/images referenced by linked decks
 ├── texts.md          ← editable copy of every visible string
+├── deck.json         ← structured source when generated through DeckJSON
+├── FEEDBACK.md       ← maintainer-facing decision/backlog notes
+├── assets-manifest.yaml
 ├── apply-texts.py    ← engine, stdlib-only Python 3
 ├── apply.command     ← macOS one-click launcher (double-click)
 ├── apply.bat         ← Windows one-click launcher
@@ -2530,8 +2601,9 @@ message (Mode 1 — Claude Code on local) MUST include:
 
 For Mode 2 (zip / remote / Feishu bot), `FEEDBACK.md` ships INSIDE
 `deck-editable.zip` so the recipient can fill it offline. The
-`package-deliverable.sh` script already includes `*.md` files in the
-zip; no extra work needed.
+`package-deliverable.sh` script includes the expected source and
+metadata sidecars (`deck.json`, `FEEDBACK.md`, `assets-manifest.yaml`,
+pitch rehearsal files) when present; no extra work needed.
 
 ### Maintainer-side workflow (informational, not enforced)
 
@@ -2743,6 +2815,19 @@ feishu-deck-h5/
   sub-product brand kit. Many decks share the same files; downstream tools
   (the slide library) dedupe these against their own `assets/shared/` copy.
 
+Source-of-truth rule:
+
+- 飞书 Base `素材库` 表 is the authoritative shared pool for both local agent
+  usage and Feishu bot usage.
+- `assets/shared/` is only the local cache mirror used so HTML can reference
+  files on disk. Do not hand-edit it as the primary source.
+- Before rendering, `deck-json/render-deck.py` automatically runs
+  `python3 scripts/base_library.py sync-shared-assets --export-index`, so the
+  cache and `asset-index.generated.json` are refreshed from Base.
+- `--offline-cache` is an explicit emergency/maintenance mode only; Feishu bot
+  and normal local-agent paths must not pass it. Never silently treat local
+  files as authoritative.
+
 **`copy-assets.py` emits `output/assets-manifest.yaml`** at hand-off time,
 classifying every referenced file as `shared` / `framework` / `deck-local`.
 The slide library reads this manifest on ingest:
@@ -2832,14 +2917,14 @@ DON'T fetch from the web. The licensed PNGs are right here.
 
 **Authoring discipline**:
 
-1. 任何 slide 提到具体 飞书 产品 → **优先从 `assets/shared/feishu-products/` 找现成 PNG**,不要自己画 SVG / 用 emoji / 用文字代替
+1. 任何 slide 提到具体 飞书 产品 → **先查 Base 素材库**,再使用同步到 `assets/shared/feishu-products/` 的缓存 PNG,不要自己画 SVG / 用 emoji / 用文字代替
 2. 找不到对应产品的 icon → 用 `lark-logo.png` (飞书品牌总标志,含 wordmark) 兜底,**不要自己设计**
 3. 多个产品并列出现 (如 P04 三入口卡) → 中卡用 `lark-logo.png` (品牌总标志) 突出,边卡用产品 icon 区分
 4. 编辑器路径相对值跟你的文件位置变 — 一般 `runs/<ts>/output/` 下用 `../../../skills/feishu-deck-h5/assets/...`,`single-pages/` 子目录加多一层
 
 **Why this is mandatory**: 飞书的 brand guidelines 要求产品标识必须用 official
 PNG,不允许重绘。手写 SVG 模仿就是商标违规;用 emoji 替代失专业感;
-fetch 远程图既慢又怕版权链接失效。`assets/shared/feishu-products/` 里 45 张就是定稿版本,直接拿来用。
+fetch 远程图既慢又怕版权链接失效。Base `素材库` 中的飞书产品标识才是权威版本,`assets/shared/feishu-products/` 只是渲染前同步出来的本地缓存。
 
 ### Client / portfolio brand logos (mandatory) — `assets/shared/clientlogo/`
 
@@ -2862,13 +2947,13 @@ logos in `assets/` root — that folder is reserved for framework
 **Lookup workflow** (every time you author a slide that references client logos):
 
 ```bash
-ls /Users/<user>/.claude/skills/feishu-deck-h5/assets/shared/clientlogo/ | grep -i "<name>"
+python3 scripts/base_library.py search-assets "<name>" --limit 20
 ```
 
-If the brand exists → use that file. If it doesn't → ask the user to drop
-it into `assets/shared/clientlogo/` first; do NOT save it to the run's
-`input/` folder, do NOT save it to `assets/` root, do NOT generate a
-text fallback PNG without telling the user.
+If the brand exists in Base → use the synced cache file. If it doesn't → ask
+the user to add it to Base `素材库` first; do NOT save it to the run's `input/`
+folder, do NOT save it to `assets/` root, do NOT generate a text fallback PNG
+without telling the user.
 
 **HTML embed pattern**:
 
@@ -2885,10 +2970,10 @@ text fallback PNG without telling the user.
 (Path depth: `runs/<ts>/output/single-pages/p<NN>.html` → 4 levels up to
 repo root, then `skills/feishu-deck-h5/assets/shared/clientlogo/`.)
 
-**Why this is mandatory**: the user maintains `assets/shared/clientlogo/` as a
-versioned, growing library shared across all decks. Old per-deck `input/`
-copies go stale; `assets/` root pollution makes the brand asset surface
-unmaintainable. Single source of truth = `assets/shared/clientlogo/`.
+**Why this is mandatory**: the user maintains Base `素材库` as the versioned,
+growing library shared across all decks. Old per-deck `input/` copies go
+stale; `assets/` root pollution makes the brand asset surface unmaintainable.
+Single source of truth = Base; `assets/shared/clientlogo/` is only cache.
 
 ### Digital employee portraits (mandatory) — TWO source folders
 
@@ -2896,11 +2981,13 @@ unmaintainable. Single source of truth = `assets/shared/clientlogo/`.
 
 1. **Named, specific persona** (睿睿 / 参参 / 探探 / 呆呆 / 图图 the 5 内部
    AI 助手, or any task-specific persona like 门店 FFDI 营运助手 / 销售知识
-   助手) → portrait MUST come from `assets/shared/mydigitalemployee/<name>.png`.
+   助手) → search Base `素材库` first; the synced cache path is
+   `assets/shared/mydigitalemployee/<name>.png`.
 
 2. **Anonymous / generic AI agent slot** (e.g. P33 row "门店巡检" of
    品牌X — the row needs a digital-employee face but no specific named
    persona is assigned) → portrait MUST come from
+   Base `素材库`; the synced cache path is
    `assets/shared/digital_employee_avatars_50/NN_<traits>.png` (50-portrait
    generic library, diverse demographics, named by index +
    ethnic/style traits like `01_east_asian_woman_white_shirt.png`).
@@ -2974,12 +3061,12 @@ needs a generic AI-agent face (no specific name) → use
 placeholder, **do NOT** crop from input/, **do NOT** save to
 `assets/` root.
 
-**Why this is mandatory**: the user maintains both folders as
-versioned, growing libraries shared across decks (P25 / P26 / P27 /
-P29 / P33 / P41 reference these portraits). The historical mistake of
-saving the same avatar in three places (input/, assets/ root,
-clientlogo/) led to drift and broken refs. **Single source of truth**:
-named → `mydigitalemployee/`, generic → `digital_employee_avatars_50/`.
+**Why this is mandatory**: the user maintains Base `素材库` as the versioned,
+growing library shared across decks (P25 / P26 / P27 / P29 / P33 / P41
+reference these portraits). The historical mistake of saving the same avatar
+in three places (input/, assets/ root, clientlogo/) led to drift and broken
+refs. **Single source of truth**: Base; local named → `mydigitalemployee/`,
+generic → `digital_employee_avatars_50/` are cache paths.
 
 ### Interactive demo / phone mockup spec (mandatory) — when a slide animates a chat / app
 
@@ -3133,7 +3220,7 @@ with data, just use the screenshot — `<img>` it with `max-width: native`.
 
 There are TWO tiers of layouts in this skill:
 
-- **Original 10–13 layouts** — `cover / agenda / section / content-3up /
+- **Original legacy layout set** — `cover / agenda / section / content-3up /
   content-2col / quote / stats(row,hero) / big-stat / image-text / table /
   flow(timeline,process) / end`. CSS in `assets/feishu-deck.css`. Fully
   parity'd with master spec (header position, content-bg, R48 centering,
@@ -7493,6 +7580,6 @@ visually, fix the slide; the validator only catches programmable rules.
 
 ## Examples
 
-- `examples/sample-deck.html` — 12-slide demo using all 13 layouts (single file, inlined).
+- `examples/sample-deck.html` — inlined HTML demo deck.
 - `preview-dark.html` — token swatches and component gallery for visual self-test.
 - `templates/slide-recipes.html` — every layout in one reference deck (open and copy).
