@@ -1445,8 +1445,11 @@ def audit_list_echo(slides: list[str], iss: 'Issues'):
     _SKIP_LAYOUT_RE = re.compile(
         r'data-layout="(agenda|section|cover|end)"')
     # Class names on parent chain that signal "echo is intentional"
+    # story-arc: a one-pager case's 痛点/冲突/解法/价值 beats are sequential
+    # narrative about ONE customer/scene, so cross-beat entity echo
+    # (新店 / 瑞幸 / …) is cohesion by design, not a summary restatement.
     _SKIP_PARENT_CLS = ('agenda', 'toc', 'outline', 'chapter-list',
-                        'section-list', 'pills', 'tabs')
+                        'section-list', 'pills', 'tabs', 'story-arc')
     # Minimum target leaf length to consider as a "summary" candidate.
     # Below this, a leaf is too short to be summarizing anything.
     _MIN_TARGET_LEN = 12

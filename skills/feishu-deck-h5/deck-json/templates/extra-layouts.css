@@ -283,6 +283,7 @@
 }
 .slide[data-layout="issue-tree"] .root .q {
   font: 700 28px/1.3 var(--fs-font-cjk); color: #fff;
+  text-wrap: balance;   /* 2026-05-26 · avoid orphan last-line (R-VIS-ORPHAN) */
 }
 .slide[data-layout="issue-tree"] .root .why {
   margin-top: 14px;

@@ -1036,6 +1036,7 @@ body {
   /* 2026-05-16: 18 → 22 — timeline node body content per SKILL.md
      typography floor. Was reading as illegible fine print on projector. */
   font: 500 24px/1.5 var(--fs-font-cjk); color: var(--fs-text-65);
+  text-wrap: balance;   /* 2026-05-26 · even the 2-line wrap (R-VIS-ORPHAN) */
 }
 
 /* ============================================================================

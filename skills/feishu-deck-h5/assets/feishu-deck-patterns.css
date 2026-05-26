@@ -115,6 +115,7 @@
   /* 2026-05-20 · 22 → 24 (body floor). */
   font: 500 24px/1.55 var(--fs-font-cjk);
   color: rgba(255, 255, 255, 0.86);
+  text-wrap: balance;   /* 2026-05-26 · rebalance beat lines so the inline .accent doesn't orphan (R-VIS-ORPHAN) */
 }
 .slide.story-case .story-arc p .accent {
   color: var(--fs-teal);
@@ -140,6 +141,9 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   background-color: rgba(8, 12, 24, 0.45);
   background-repeat: no-repeat;
+  /* allow:drop-shadow — the scene image is a documentary-still frame; the
+     v2 spec (SKILL.md ONE-PAGER image-sizing) intentionally gives it depth
+     (soft drop) + a 1px brand ring. This is the one sanctioned R12 exception. */
   box-shadow: 0 24px 64px -24px rgba(0, 0, 0, 0.65),
               0 0 0 1px rgba(60, 127, 255, 0.16);
 }

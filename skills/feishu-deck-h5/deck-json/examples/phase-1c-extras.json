@@ -61,8 +61,8 @@
       "data": {
         "title": "matrix · 业务影响 × 实施难度",
         "axes": {
-          "y": { "name": "业务影响", "high_label": "HIGH", "low_label": "LOW" },
-          "x": { "name": "实施难度", "high_label": "HARD", "low_label": "EASY" }
+          "y": { "name": "业务影响", "high_label": "高", "low_label": "低" },
+          "x": { "name": "实施难度", "high_label": "难", "low_label": "易" }
         },
         "quadrants": {
           "tl": { "title": "立即做",   "items": ["销售周报自动化", "审批流上线"] },
@@ -199,11 +199,11 @@
       "data": {
         "title": "waterfall · 桥图",
         "bars": [
-          { "kind": "base", "value": "¥ 8.2M",  "delta": "起点",       "label": "Q1 ARR" },
+          { "kind": "base", "value": "¥ 8.2M",  "delta": "起点",       "label": "期初 ARR" },
           { "kind": "pos",  "value": "+ ¥ 2.4M", "delta": "+ 29%",      "label": "渠道扩展", "sublabel": "新签 12 家头部" },
           { "kind": "neg",  "value": "− ¥ 0.4M", "delta": "− 5%",       "label": "客户流失", "sublabel": "2 家服务到期" },
           { "kind": "pos",  "value": "+ ¥ 1.6M", "delta": "+ 18%",      "label": "客单提升", "sublabel": "AI 模块加购" },
-          { "kind": "end",  "value": "¥ 11.8M", "delta": "合计 + 44%", "label": "Q4 ARR" }
+          { "kind": "end",  "value": "¥ 11.8M", "delta": "合计 + 44%", "label": "期末 ARR" }
         ],
         "footnote": "口径: 公司全年 ARR · Q4 / Q1 同口径"
       }
