@@ -55,6 +55,10 @@ HEAD
   echo '<script src="../assets/feishu-deck.js"></script></body></html>'
 } > "$OUT_LINK"
 
+python3 "$ROOT/assets/extract-texts.py" "$OUT_LINK" \
+  --annotate "$OUT_LINK" \
+  --out "${OUT_LINK%.html}.texts.md"
+
 # Patch the linked CSS so --fs-asset-* point to ../assets relative to examples/
 # (the CSS already has the right relative paths from assets/ — examples/ → ../assets/ works)
 
@@ -84,18 +88,34 @@ print(out)
     echo '<title>先进团队的工作方式 · 飞书 2026 客户提案 (inline)</title>'
     echo '<meta name="fs-deck-mode" content="inline">'
     echo '<meta name="fs-language" content="zh-en">'
-    echo '<style>'
+    echo '<style data-source="framework">'
     cat "$ROOT/assets/feishu-deck.css"
     echo
     echo "/* === Inlined brand assets (single-file delivery mode) === */"
     echo "$ASSET_OVERRIDE"
     echo '</style>'
     echo '</head><body>'
-    cat "$ROOT/_body.partial.html"
-    echo '<script>'
+    python3 - "$OUT_LINK" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+html = Path(sys.argv[1]).read_text(encoding='utf-8')
+match = re.search(
+    r'<body>\s*(.*?)\s*<script\s+src="../assets/feishu-deck\.js"></script></body>',
+    html,
+    re.S,
+)
+if not match:
+    raise SystemExit('ERROR: cannot extract annotated body from linked sample deck')
+print(match.group(1))
+PY
+    echo '<script data-source="framework">'
     cat "$ROOT/assets/feishu-deck.js"
     echo '</script></body></html>'
   } > "$OUT_INLINE"
+
+  cp "${OUT_LINK%.html}.texts.md" "${OUT_INLINE%.html}.texts.md"
 fi
 
 # ---- Build slide-recipes.html (also linked) ----

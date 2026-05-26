@@ -6,7 +6,7 @@
 <title>先进团队的工作方式 · 飞书 2026 客户提案 (inline)</title>
 <meta name="fs-deck-mode" content="inline">
 <meta name="fs-language" content="zh-en">
-<style>
+<style data-source="framework">
 /* ============================================================================
    feishu-deck-h5 · design system stylesheet
    Source of truth for every slide. Do not invent tokens; use only these.
@@ -696,6 +696,14 @@ body {
   position: absolute; bottom: 96px; left: 126px; right: 124px;
   display: flex; flex-wrap: wrap; gap: 14px;
 }
+/* 2026-05-20 · section pill 升 16→24 (Body tier) — Hero-context label floor 规则
+   (SKILL.md 2026-05-17): section 页 chapter-num 160 / title 88 是 hero anchor,
+   同一页内 content label(产品名)必须 ≥ 24 Body,不能 16 chrome,否则在投影
+   距离上看不清。 */
+.slide[data-layout="section"] .pills .pill {
+  font-size: 24px;
+  padding: 12px 22px;
+}
 
 /* ============================================================================
    LAYOUT 03 — Content (3-up cards)
@@ -774,18 +782,80 @@ body {
 /* li uses block + left padding (NOT grid). Grid would treat <b> and the
    trailing text node as two separate items: text node would auto-place
    into row 2 / col 1 (36px wide) and CJK chars would wrap one-per-line. */
-.slide[data-layout="content-2col"] .col-text ul.feature-list li {
+/* feature-list bullet pattern — generalized 2026-05-22 from content-2col
+   `.col-text` scope to ANY slide (utility class). Use `<ul class="feature-list">`
+   in any raw layout to get framework-standard colored-dot bullets with halo. */
+.slide ul.feature-list li {
   /* 2026-05-17: text-72 → #fff. feature-list items ARE body content;
      muted color was readability gap on projector. */
-  position: relative; padding-left: 36px;
+  position: relative; padding-left: 28px;
   font: 500 24px/1.45 var(--fs-font-cjk); color: #fff;
+  list-style: none;
 }
-.slide[data-layout="content-2col"] .col-text ul.feature-list li::before {
+.slide ul.feature-list li::before {
   content: ""; position: absolute; left: 0; top: 14px;
   width: 8px; height: 8px; border-radius: 999px;
   background: var(--fs-accent);
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--fs-accent) 16%, transparent);
 }
+
+/* ============================================================================
+   UTILITY · .fs-claim-row — icon + label + description row (added 2026-05-22)
+   ----------------------------------------------------------------------------
+   For "highlight badge / claim tile / KPI callout" patterns where each tile
+   has: small icon (left) + bold label (line 1) + lighter desc (line 2 below).
+   USE THIS instead of authoring ad-hoc `.highlight` / `.hi` / `.kpi-tile`
+   structures in raw layouts.
+
+   Structure:
+     <div class="fs-claim-row is-teal">              <!-- accent variant -->
+       <span class="fs-claim-row__icon">✓</span>
+       <div class="fs-claim-row__text">
+         <span class="fs-claim-row__label">全自动 · 端到端</span>
+         <span class="fs-claim-row__desc">从三流输入到双平台产出零人工介入</span>
+       </div>
+     </div>
+
+   Accents: .is-blue / .is-teal / .is-violet / .is-purple / .is-orange
+   (defaults to teal if no variant class).
+   ============================================================================ */
+.slide .fs-claim-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px; border-radius: 12px;
+  border: 1px solid var(--fs-divider);
+  background: rgba(255, 255, 255, 0.04);
+}
+.slide .fs-claim-row__icon {
+  width: 24px; height: 24px; flex: 0 0 24px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font: 700 16px/1 var(--fs-font-latin);
+  background: rgba(51, 214, 192, 0.20);
+  color: var(--fs-teal);
+}
+.slide .fs-claim-row__text {
+  flex: 1; display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.slide .fs-claim-row__label {
+  font: 700 24px/1.3 var(--fs-font-cjk); color: #fff;
+  letter-spacing: -0.005em;
+}
+.slide .fs-claim-row__desc {
+  font: 500 24px/1.4 var(--fs-font-cjk); color: #cdd0df;
+}
+/* Accent variants */
+.slide .fs-claim-row.is-blue   { border-color: rgba(60,127,255,0.40); background: rgba(60,127,255,0.05); }
+.slide .fs-claim-row.is-blue   .fs-claim-row__icon { background: rgba(60,127,255,0.20); color: var(--fs-blue); }
+.slide .fs-claim-row.is-teal   { border-color: rgba(51,214,192,0.40); background: rgba(51,214,192,0.05); }
+.slide .fs-claim-row.is-teal   .fs-claim-row__icon { background: rgba(51,214,192,0.20); color: var(--fs-teal); }
+.slide .fs-claim-row.is-violet { border-color: rgba(159,111,241,0.40); background: rgba(159,111,241,0.05); }
+.slide .fs-claim-row.is-violet .fs-claim-row__icon { background: rgba(159,111,241,0.20); color: var(--fs-violet); }
+.slide .fs-claim-row.is-purple { border-color: rgba(123,90,209,0.40); background: rgba(123,90,209,0.05); }
+.slide .fs-claim-row.is-purple .fs-claim-row__icon { background: rgba(123,90,209,0.20); color: var(--fs-purple); }
+.slide .fs-claim-row.is-orange { border-color: rgba(254,127,0,0.40); background: rgba(254,127,0,0.05); }
+.slide .fs-claim-row.is-orange .fs-claim-row__icon { background: rgba(254,127,0,0.20); color: var(--fs-orange); }
+
 .slide[data-layout="content-2col"] .col-visual {
   border: 1px solid var(--fs-hairline); border-radius: 16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
@@ -835,10 +905,14 @@ body {
 .slide[data-layout="stats"] .col:first-child { border-left: 0; padding-left: 0; }
 /* 规范: stats trend tags must be readable at slide projection distance.
    ≥ 20 px CJK font, no Latin-uppercase forcing on CJK glyphs (which falls back
-   to system font and renders smaller). */
+   to system font and renders smaller).
+   2026-05-20 · bumped 24 → 28 (sub tier). At 24, trend visually disappeared
+   next to the 132px hero number per BF13 hero-context label floor — needs to
+   sit closer in weight to the .label below it. 28 reads as deliberate label
+   without competing with the 132 number. */
 .slide[data-layout="stats"] .col .trend {
   display: inline-flex; align-items: center; gap: 8px;
-  font: 600 24px/1 var(--fs-font-cjk); letter-spacing: 0.04em;
+  font: 600 28px/1 var(--fs-font-cjk); letter-spacing: 0.04em;
   text-transform: none; color: var(--fs-accent);
 }
 .slide[data-layout="stats"] .col .num {
@@ -851,13 +925,18 @@ body {
 .slide[data-layout="stats"] .col .label {
   font: 500 24px/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
 }
+/* 2026-05-20 · font family switched latin → cjk on .source / .footnote.
+   When source text mixes Latin and CJK ("Source · 内部传输实测 2024 Q4"),
+   var(--fs-font-latin) falls back to system font for the CJK glyphs and
+   renders smaller / mismatched. CJK-first font handles both scripts more
+   uniformly at 16px. */
 .slide[data-layout="stats"] .col .source {
-  font: 500 16px/1.4 var(--fs-font-latin); color: var(--fs-text-40);
+  font: 500 16px/1.4 var(--fs-font-cjk); color: var(--fs-text-40);
   letter-spacing: 0.06em;
 }
 .slide[data-layout="stats"] .footnote {
   position: absolute; left: 96px; right: 96px; bottom: 110px;
-  font: 500 16px/1.4 var(--fs-font-latin); color: var(--fs-text-40);
+  font: 500 16px/1.4 var(--fs-font-cjk); color: var(--fs-text-40);
   letter-spacing: 0.04em;
 }
 
@@ -876,8 +955,11 @@ body {
   position: absolute; left: 96px; right: 96px; bottom: 130px; max-width: 1100px;
 }
 .slide[data-layout="image-text"] h2.title {
+  /* allow:typescale — image-text 是 hero-style 全幅图布局(类 cover/section),
+     2026-05-20 加入 Hero exception 名单,从 4-tier 的 48 升到 master-spec 的 88
+     (与 section H2 同级)。在 cinematic 全屏画面上 48 px ZH 标题视觉空虚。*/
   margin-top: 24px;
-  font: 700 48px/1.1 var(--fs-font-cjk); letter-spacing: -0.005em;
+  font: 700 88px/1.1 var(--fs-font-cjk); letter-spacing: -0.005em;
 }
 .slide[data-layout="image-text"] .lede { margin-top: 28px; color: var(--fs-text-65); }
 
@@ -963,6 +1045,7 @@ body {
   /* 2026-05-16: 18 → 22 — timeline node body content per SKILL.md
      typography floor. Was reading as illegible fine print on projector. */
   font: 500 24px/1.5 var(--fs-font-cjk); color: var(--fs-text-65);
+  text-wrap: balance;   /* 2026-05-26 · even the 2-line wrap (R-VIS-ORPHAN) */
 }
 
 /* ============================================================================
@@ -1044,23 +1127,36 @@ body {
   font: 700 48px/1.05 var(--fs-font-cjk); letter-spacing: -0.005em;
 }
 
-/* TOC = vertical pill stack, centered on canvas */
+/* TOC = vertical pill stack, centered on canvas
+   2026-05-20 · 自适应 padding/gap by pill count (BF-AGENDA-DENSITY).
+   default tuned for N=3-4; N=5 / N≥6 progressively tighten so 6 pills
+   no longer overflow the 840px usable area and break "visually centered". */
 .slide[data-layout="agenda"] .toc {
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  /* 2026-05-06 v2.1 · gap 36 → 56 (more breathing room between pills) */
   gap: 56px;
   padding: 120px 96px;
 }
 .slide[data-layout="agenda"][data-variant="with-header"] .toc { padding-top: 280px; }
+
+/* N=5 · 紧凑档 */
+.slide[data-layout="agenda"] .toc:has(.item:nth-child(5)) {
+  gap: 36px; padding: 80px 96px;
+}
+.slide[data-layout="agenda"] .toc:has(.item:nth-child(5)) .item { padding: 28px 96px; }
+
+/* N≥6 · 极致紧凑 */
+.slide[data-layout="agenda"] .toc:has(.item:nth-child(6)) {
+  gap: 24px; padding: 60px 96px;
+}
+.slide[data-layout="agenda"] .toc:has(.item:nth-child(6)) .item { padding: 22px 96px; }
 
 /* Each .item = a pill card */
 .slide[data-layout="agenda"] .toc .item {
   display: grid; grid-template-columns: 140px 1fr;
   align-items: center; gap: 40px;
   width: 1180px; max-width: 100%;
-  /* 2026-05-06 v2.1 · padding 34/52 → 44/96 (numbers no longer crowd left edge) */
   padding: 44px 96px;
   background: rgba(8,14,40,0.45);
   border: 1.5px solid rgba(60,127,255,0.55);
@@ -1124,6 +1220,15 @@ body {
 }
 .slide[data-layout="big-stat"] .copy p {
   font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); max-width: 600px;
+}
+/* 2026-05-20 · big-stat eyebrow override. Global .slide .eyebrow is 16px
+   Latin (designed for footer chrome). In big-stat next to a 312px hero
+   number, 16 reads as invisible. Bump to 28 (sub tier) so eyebrow earns
+   its labeling role in the hero composition. */
+.slide[data-layout="big-stat"] .copy .eyebrow {
+  font-size: 28px;
+  margin-bottom: 18px;
+  letter-spacing: 0.08em;
 }
 
 /* BF11 — Hero zone content centered, not left-flush (2026-05-16).
@@ -1365,7 +1470,7 @@ body {
    this is safe to apply universally. */
 .slide[data-layout="content-3up"]  .grid       { top: 200px; bottom: 110px; align-content: center; }
 .slide[data-layout="content-2col"] .grid       { top: 200px; bottom: 110px; align-content: center; }
-.slide[data-layout="stats"]        .grid       { top: 220px; align-content: center; }
+.slide[data-layout="stats"]        .grid       { top: 220px; bottom: 200px; align-content: center; }
 .slide[data-layout="stats"]        .footnote   { bottom: 96px; }
 .slide[data-layout="table"]        .table-wrap { top: 200px; bottom: 110px; }
 /* Timeline opts OUT of L2 vertical centering. .axis is absolutely positioned
@@ -3218,6 +3323,66 @@ body {
   .slide-frame { page-break-after: always; }
 }
 
+/* ============================================================================
+   Mobile UX (≤900px) — tap-to-enlarge + swipe nav
+   ----------------------------------------------------------------------------
+   Root cause this fixes: on mobile, auto mode = 'scroll' → each slide-frame is
+   100% viewport width with aspect-ratio 16/9. On a 393×852 phone that's
+   ~393×220 — design canvas 1920×1080 scales to ~0.2×, so 22px body text
+   becomes ~4.5px on screen. User-reported symptom: "手机端打开就是错乱的".
+
+   Fix philosophy: scroll mode stays as the overview, but tapping any slide
+   switches to present mode (slide fills viewport) for that one frame. From
+   there a left/right swipe paginates; tap "← 返回列表" returns to scroll.
+   Pair with the .js handlers (init() bottom block).
+   ============================================================================ */
+@media (max-width: 900px) {
+  /* Hint on each scroll-mode frame that tapping enlarges it. */
+  .deck[data-mode="scroll"] .slide-frame { cursor: pointer; }
+  .deck[data-mode="scroll"] .slide-frame::after {
+    content: "点击放大";
+    position: absolute; right: 10px; bottom: 10px;
+    z-index: 50;
+    background: rgba(60,127,255,0.92); color: #fff;
+    font: 700 11px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    padding: 5px 10px; border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    pointer-events: none;
+    letter-spacing: 0.04em;
+  }
+  /* Mobile present-mode chrome: back button + page indicator. */
+  .fs-mobile-back {
+    position: fixed; top: max(10px, env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    z-index: 1001;
+    background: rgba(8,12,24,0.85); color: #fff;
+    font: 700 13px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    padding: 9px 14px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.20);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    display: none;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .fs-mobile-pageno {
+    position: fixed; bottom: max(14px, env(safe-area-inset-bottom));
+    left: 50%; transform: translateX(-50%);
+    z-index: 1001;
+    background: rgba(8,12,24,0.85); color: #fff;
+    font: 700 13px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    padding: 8px 16px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.20);
+    backdrop-filter: blur(8px);
+    display: none;
+    pointer-events: none;
+    letter-spacing: 0.05em;
+  }
+  .deck[data-mode="present"] ~ .fs-mobile-back,
+  .deck[data-mode="present"] ~ .fs-mobile-pageno { display: block; }
+}
+
 /* === Inlined brand assets (single-file delivery mode) === */
 :root {
   --fs-asset-logo: url("data:image/png;base64,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");
@@ -3250,13 +3415,13 @@ body {
 <!-- 01 Cover (封面) ======================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="cover" data-screen-label="01 Cover" data-slide-key="cover">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-01.wordmark">飞书</div>
     <div class="stage">
-      <h1 class="title title-zh">先进团队的<br>工作方式</h1>
-      <p class="subtitle">The way advanced teams work</p>
+      <h1 class="title title-zh" data-text-id="slide-01.title">先进团队的<br>工作方式</h1>
+      <p class="subtitle" data-text-id="slide-01.subtitle">The way advanced teams work</p>
     </div>
     <div class="author">
-      <span class="role">客户提案 · 2026.04</span>飞书企业服务团队
+      <span class="role" data-text-id="slide-01.role">客户提案 · 2026.04</span>飞书企业服务团队
     </div>
   </div>
 </div>
@@ -3264,17 +3429,17 @@ body {
 <!-- 02 Agenda ============================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="agenda" data-screen-label="02 Agenda" data-slide-key="agenda">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-02.wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh">本次汇报共六个部分</h2>
+      <h2 class="title-zh" data-text-id="slide-02.title_zh">本次汇报共六个部分</h2>
     </div>
     <div class="toc">
-      <div class="item"><div class="n">01</div><div><div class="title-zh">背景与挑战</div><div class="title-en" data-allow-body-floor>Context and challenges</div></div></div>
-      <div class="item"><div class="n">02</div><div><div class="title-zh">先进团队的工作方式</div><div class="title-en" data-allow-body-floor>How advanced teams work</div></div></div>
-      <div class="item"><div class="n">03</div><div><div class="title-zh">飞书平台能力</div><div class="title-en" data-allow-body-floor>Lark platform capabilities</div></div></div>
-      <div class="item"><div class="n">04</div><div><div class="title-zh">客户实证</div><div class="title-en" data-allow-body-floor>Customer evidence</div></div></div>
-      <div class="item"><div class="n">05</div><div><div class="title-zh">部署与服务</div><div class="title-en" data-allow-body-floor>Rollout and service</div></div></div>
-      <div class="item"><div class="n">06</div><div><div class="title-zh">下一步</div><div class="title-en" data-allow-body-floor>Next steps</div></div></div>
+      <div class="item"><div class="n" data-text-id="slide-02.n">01</div><div><div class="title-zh" data-text-id="slide-02.title_zh_02">背景与挑战</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en">Context and challenges</div></div></div>
+      <div class="item"><div class="n" data-text-id="slide-02.n_02">02</div><div><div class="title-zh" data-text-id="slide-02.title_zh_03">先进团队的工作方式</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_02">How advanced teams work</div></div></div>
+      <div class="item"><div class="n" data-text-id="slide-02.n_03">03</div><div><div class="title-zh" data-text-id="slide-02.title_zh_04">飞书平台能力</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_03">Lark platform capabilities</div></div></div>
+      <div class="item"><div class="n" data-text-id="slide-02.n_04">04</div><div><div class="title-zh" data-text-id="slide-02.title_zh_05">客户实证</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_04">Customer evidence</div></div></div>
+      <div class="item"><div class="n" data-text-id="slide-02.n_05">05</div><div><div class="title-zh" data-text-id="slide-02.title_zh_06">部署与服务</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_05">Rollout and service</div></div></div>
+      <div class="item"><div class="n" data-text-id="slide-02.n_06">06</div><div><div class="title-zh" data-text-id="slide-02.title_zh_07">下一步</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_06">Next steps</div></div></div>
     </div>
   </div>
 </div>
@@ -3282,16 +3447,16 @@ body {
 <!-- 03 Section (一级章节页) ================================================ -->
 <div class="slide-frame">
   <div class="slide" data-layout="section" data-screen-label="03 Section" data-slide-key="section-advanced-team">
-    <div class="wordmark">飞书</div>
-    <div class="chapter-num">02.</div>
-    <h2 class="title title-zh">先进团队的工作方式</h2>
-    <p class="lede">即时同步 · 共识对齐 · 闭环交付</p>
+    <div class="wordmark" data-text-id="slide-03.wordmark">飞书</div>
+    <div class="chapter-num" data-text-id="slide-03.chapter_num">02.</div>
+    <h2 class="title title-zh" data-text-id="slide-03.title">先进团队的工作方式</h2>
+    <p class="lede" data-text-id="slide-03.lede">即时同步 · 共识对齐 · 闭环交付</p>
     <div class="pills">
-      <span class="pill">飞书消息</span>
-      <span class="pill">飞书文档</span>
-      <span class="pill">飞书多维表格</span>
-      <span class="pill">飞书知识库</span>
-      <span class="pill">飞书视频会议</span>
+      <span class="pill" data-text-id="slide-03.pill_01">飞书消息</span>
+      <span class="pill" data-text-id="slide-03.pill_02">飞书文档</span>
+      <span class="pill" data-text-id="slide-03.pill_03">飞书多维表格</span>
+      <span class="pill" data-text-id="slide-03.pill_04">飞书知识库</span>
+      <span class="pill" data-text-id="slide-03.pill_05">飞书视频会议</span>
     </div>
   </div>
 </div>
@@ -3299,37 +3464,37 @@ body {
 <!-- 04 Content 3-up ======================================================= -->
 <div class="slide-frame">
   <div class="slide" data-layout="content-3up" data-screen-label="04 Content" data-slide-key="three-pillars">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-04.wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh">先进团队的三大工作方式</h2>
+      <h2 class="title-zh" data-text-id="slide-04.title_zh">先进团队的三大工作方式</h2>
     </div>
     <div class="grid">
       <div class="card">
         <div class="head">
           <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
-          <div class="num">01</div>
+          <div class="num" data-text-id="slide-04.num">01</div>
         </div>
-        <h3 class="ctitle">即时同步<br>Instant sync</h3>
-        <p class="cbody">30 万人组织,一封消息触达全员,3 秒内全部已读。</p>
-        <div class="cfoot"><span data-allow-body-floor>MESSENGER · DOCS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <h3 class="ctitle" data-text-id="slide-04.ctitle_01">即时同步<br>Instant sync</h3>
+        <p class="cbody" data-text-id="slide-04.cbody_01">30 万人组织,一封消息触达全员,3 秒内全部已读。</p>
+        <div class="cfoot"><span data-allow-body-floor data-text-id="slide-04.span">MESSENGER · DOCS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
       <div class="card">
         <div class="head">
           <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
-          <div class="num">02</div>
+          <div class="num" data-text-id="slide-04.num_02">02</div>
         </div>
-        <h3 class="ctitle">共识对齐<br>Aligned consensus</h3>
-        <p class="cbody">所有讨论沉淀进 Wiki,决策可追溯,新成员第一天就能看到全貌。</p>
-        <div class="cfoot"><span data-allow-body-floor>WIKI · BASE</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <h3 class="ctitle" data-text-id="slide-04.ctitle_02">共识对齐<br>Aligned consensus</h3>
+        <p class="cbody" data-text-id="slide-04.cbody_02">所有讨论沉淀进 Wiki,决策可追溯,新成员第一天就能看到全貌。</p>
+        <div class="cfoot"><span data-allow-body-floor data-text-id="slide-04.span_02">WIKI · BASE</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
       <div class="card">
         <div class="head">
           <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
-          <div class="num">03</div>
+          <div class="num" data-text-id="slide-04.num_03">03</div>
         </div>
-        <h3 class="ctitle">闭环交付<br>Closed-loop delivery</h3>
-        <p class="cbody">从需求到上线,流程在 Base 中自动流转,每一步都有责任人和时间戳。</p>
-        <div class="cfoot"><span data-allow-body-floor>BASE · MEETINGS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <h3 class="ctitle" data-text-id="slide-04.ctitle_03">闭环交付<br>Closed-loop delivery</h3>
+        <p class="cbody" data-text-id="slide-04.cbody_03">从需求到上线,流程在 Base 中自动流转,每一步都有责任人和时间戳。</p>
+        <div class="cfoot"><span data-allow-body-floor data-text-id="slide-04.span_03">BASE · MEETINGS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
     </div>
   </div>
@@ -3338,18 +3503,18 @@ body {
 <!-- 05 Content 2-col ====================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="content-2col" data-screen-label="05 Content" data-slide-key="lark-base-tour">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-05.wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh">让流程在表格里运转</h2>
+      <h2 class="title-zh" data-text-id="slide-05.title_zh">让流程在表格里运转</h2>
     </div>
     <div class="grid">
       <div class="col-text">
-        <p class="lede">Lark Base 把任务、工单、合同、人员、审批,统一到一个可视化的多维表格。</p>
+        <p class="lede" data-text-id="slide-05.lede">Lark Base 把任务、工单、合同、人员、审批,统一到一个可视化的多维表格。</p>
         <ul class="feature-list">
-          <li>看板、甘特、日历、卡片视图,一份数据多种视角。</li>
-          <li>关联字段把分散的表打成网,数据不再孤立。</li>
-          <li>触发器 + 自动化,把人手操作变成系统行为。</li>
-          <li>开放 API,与 ERP、CRM、自研系统双向同步。</li>
+          <li data-text-id="slide-05.li">看板、甘特、日历、卡片视图,一份数据多种视角。</li>
+          <li data-text-id="slide-05.li_02">关联字段把分散的表打成网,数据不再孤立。</li>
+          <li data-text-id="slide-05.li_03">触发器 + 自动化,把人手操作变成系统行为。</li>
+          <li data-text-id="slide-05.li_04">开放 API,与 ERP、CRM、自研系统双向同步。</li>
         </ul>
       </div>
       <div class="col-visual">
@@ -3435,11 +3600,11 @@ body {
 <!-- 06 Quote ============================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="quote" data-screen-label="06 Quote" data-slide-key="quote-30k-team">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-06.wordmark">飞书</div>
     <div class="stack">
       <hr class="keyline">
-      <blockquote>飞书让 30 万人 <span class="accent-text">像一个团队</span> 一样工作。</blockquote>
-      <div class="attrib">某头部互联网公司 · CIO · 2024</div>
+      <blockquote>飞书让 30 万人 <span class="accent-text" data-text-id="slide-06.accent_text">像一个团队</span> 一样工作。</blockquote>
+      <div class="attrib" data-text-id="slide-06.attrib">某头部互联网公司 · CIO · 2024</div>
     </div>
   </div>
 </div>
@@ -3447,53 +3612,53 @@ body {
 <!-- 07 Stats ============================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="stats" data-screen-label="07 Stats" data-slide-key="kpi-4up">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-07.wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh">飞书带来的可量化结果</h2>
+      <h2 class="title-zh" data-text-id="slide-07.title_zh">飞书带来的可量化结果</h2>
     </div>
     <div class="grid">
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
-        <span class="trend">↑ 触达</span>
-        <div class="num">3<span class="unit">秒</span></div>
-        <div class="label">30 万人组织全员消息送达时延</div>
-        <div class="source">Source · 内部传输实测 2024 Q4</div>
+        <span class="trend" data-text-id="slide-07.trend">↑ 触达</span>
+        <div class="num">3<span class="unit" data-text-id="slide-07.unit">秒</span></div>
+        <div class="label" data-text-id="slide-07.label">30 万人组织全员消息送达时延</div>
+        <div class="source" data-text-id="slide-07.source">Source · 内部传输实测 2024 Q4</div>
       </div>
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <span class="trend">↑ 已读</span>
-        <div class="num">98<span class="unit">%</span></div>
-        <div class="label">关键通知 30 分钟内已读率</div>
-        <div class="source">Source · 12 家头部企业平均</div>
+        <span class="trend" data-text-id="slide-07.trend_02">↑ 已读</span>
+        <div class="num">98<span class="unit" data-text-id="slide-07.unit_02">%</span></div>
+        <div class="label" data-text-id="slide-07.label_02">关键通知 30 分钟内已读率</div>
+        <div class="source" data-text-id="slide-07.source_02">Source · 12 家头部企业平均</div>
       </div>
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
-        <span class="trend">↑ ROI</span>
-        <div class="num">3.2<span class="unit">×</span></div>
-        <div class="label">部署 12 个月后协同 ROI 中位数</div>
-        <div class="source">Source · IDC 2024 商务白皮书</div>
+        <span class="trend" data-text-id="slide-07.trend_03">↑ ROI</span>
+        <div class="num">3.2<span class="unit" data-text-id="slide-07.unit_03">×</span></div>
+        <div class="label" data-text-id="slide-07.label_03">部署 12 个月后协同 ROI 中位数</div>
+        <div class="source" data-text-id="slide-07.source_03">Source · IDC 2024 商务白皮书</div>
       </div>
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-        <span class="trend">↓ 决策</span>
-        <div class="num">&lt;60<span class="unit">秒</span></div>
-        <div class="label">关键决策从发起到对齐时长</div>
-        <div class="source">Source · 客户访谈 N=24</div>
+        <span class="trend" data-text-id="slide-07.trend_04">↓ 决策</span>
+        <div class="num">&lt;60<span class="unit" data-text-id="slide-07.unit_04">秒</span></div>
+        <div class="label" data-text-id="slide-07.label_04">关键决策从发起到对齐时长</div>
+        <div class="source" data-text-id="slide-07.source_04">Source · 客户访谈 N=24</div>
       </div>
     </div>
-    <p class="footnote">数据样本: 12 家中国头部企业, 2024 Q3-Q4 实测, 口径见附录 A.</p>
+    <p class="footnote" data-text-id="slide-07.footnote">数据样本: 12 家中国头部企业, 2024 Q3-Q4 实测, 口径见附录 A.</p>
   </div>
 </div>
 
 <!-- 08 Big stat =========================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="big-stat" data-screen-label="08 Big Stat" data-slide-key="scale-30k">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-08.wordmark">飞书</div>
     <div class="stage">
-      <div class="num">30<span class="unit">万人</span></div>
+      <div class="num">30<span class="unit" data-text-id="slide-08.unit">万人</span></div>
       <div class="copy">
-        <h2>单一组织,统一协同</h2>
-        <p>飞书的消息、文档、视频会议在 30 万人量级下保持秒级响应,且不依赖私有部署。</p>
+        <h2 data-text-id="slide-08.h2">单一组织,统一协同</h2>
+        <p data-text-id="slide-08.p">飞书的消息、文档、视频会议在 30 万人量级下保持秒级响应,且不依赖私有部署。</p>
       </div>
     </div>
   </div>
@@ -3525,10 +3690,10 @@ body {
       </g>
       <rect width="1920" height="1080" fill="url(#ph2)"/>
     </svg>
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-09.wordmark">飞书</div>
     <div class="stage">
-      <h2 class="title title-zh">现场决策,<br>从未离线</h2>
-      <p class="lede">门店、产线、出差、远程,飞书让每一处节点都能即时被看到、被对齐。</p>
+      <h2 class="title title-zh" data-text-id="slide-09.title">现场决策,<br>从未离线</h2>
+      <p class="lede" data-text-id="slide-09.lede">门店、产线、出差、远程,飞书让每一处节点都能即时被看到、被对齐。</p>
     </div>
   </div>
 </div>
@@ -3536,21 +3701,21 @@ body {
 <!-- 10 Table ============================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="table" data-screen-label="10 Table" data-slide-key="comparison-vs-traditional">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-10.wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh">飞书与传统办公套件</h2>
+      <h2 class="title-zh" data-text-id="slide-10.title_zh">飞书与传统办公套件</h2>
     </div>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>能力</th><th>飞书 Lark</th><th>传统套件 A</th><th>传统套件 B</th></tr>
+          <tr><th data-text-id="slide-10.th_01">能力</th><th data-text-id="slide-10.th_02">飞书 Lark</th><th data-text-id="slide-10.th_03">传统套件 A</th><th data-text-id="slide-10.th_04">传统套件 B</th></tr>
         </thead>
         <tbody>
-          <tr><td>消息 + 文档 + 表格 + 会议 一体化</td><td>原生集成</td><td>多产品拼接</td><td>多产品拼接</td></tr>
-          <tr><td>多维表格 (Base) 自动化</td><td>核心能力</td><td>第三方插件</td><td>不支持</td></tr>
-          <tr><td>30 万人级消息触达</td><td>3 秒内全员</td><td>未公开</td><td>未公开</td></tr>
-          <tr><td>跨域中英双语支持</td><td>原生</td><td>需配置</td><td>需配置</td></tr>
-          <tr><td>开放 API + Webhook</td><td>全量开放</td><td>受限</td><td>受限</td></tr>
+          <tr><td data-text-id="slide-10.td_01">消息 + 文档 + 表格 + 会议 一体化</td><td data-text-id="slide-10.td_02">原生集成</td><td data-text-id="slide-10.td_03">多产品拼接</td><td data-text-id="slide-10.td_04">多产品拼接</td></tr>
+          <tr><td data-text-id="slide-10.td_05">多维表格 (Base) 自动化</td><td data-text-id="slide-10.td_06">核心能力</td><td data-text-id="slide-10.td_07">第三方插件</td><td data-text-id="slide-10.td_08">不支持</td></tr>
+          <tr><td data-text-id="slide-10.td_09">30 万人级消息触达</td><td data-text-id="slide-10.td_10">3 秒内全员</td><td data-text-id="slide-10.td_11">未公开</td><td data-text-id="slide-10.td_12">未公开</td></tr>
+          <tr><td data-text-id="slide-10.td_13">跨域中英双语支持</td><td data-text-id="slide-10.td_14">原生</td><td data-text-id="slide-10.td_15">需配置</td><td data-text-id="slide-10.td_16">需配置</td></tr>
+          <tr><td data-text-id="slide-10.td_17">开放 API + Webhook</td><td data-text-id="slide-10.td_18">全量开放</td><td data-text-id="slide-10.td_19">受限</td><td data-text-id="slide-10.td_20">受限</td></tr>
         </tbody>
       </table>
     </div>
@@ -3560,15 +3725,15 @@ body {
 <!-- 11 Timeline =========================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="timeline" data-screen-label="11 Timeline" data-slide-key="roadmap-12week" style="--cols:4">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-11.wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh">12 周落地路径</h2>
+      <h2 class="title-zh" data-text-id="slide-11.title_zh">12 周落地路径</h2>
     </div>
     <div class="nodes">
-      <div class="node"><div class="when">W1-2</div><div class="what">需求蓝图</div><div class="desc">访谈 6 部门, 输出协同地图与目标 KPI。</div></div>
-      <div class="node"><div class="when">W3-5</div><div class="what">关键流程上线</div><div class="desc">销售、HR、财务三条核心流在 Base 中先跑通。</div></div>
-      <div class="node"><div class="when">W6-8</div><div class="what">全员推广</div><div class="desc">分层培训, 关键岗位 100% 接入, 数据搬迁完成。</div></div>
-      <div class="node"><div class="when">W9-12</div><div class="what">数据复盘</div><div class="desc">复盘 KPI, 调整流程, 形成长期治理机制。</div></div>
+      <div class="node"><div class="when" data-text-id="slide-11.when">W1-2</div><div class="what" data-text-id="slide-11.what">需求蓝图</div><div class="desc" data-text-id="slide-11.desc">访谈 6 部门, 输出协同地图与目标 KPI。</div></div>
+      <div class="node"><div class="when" data-text-id="slide-11.when_02">W3-5</div><div class="what" data-text-id="slide-11.what_02">关键流程上线</div><div class="desc" data-text-id="slide-11.desc_02">销售、HR、财务三条核心流在 Base 中先跑通。</div></div>
+      <div class="node"><div class="when" data-text-id="slide-11.when_03">W6-8</div><div class="what" data-text-id="slide-11.what_03">全员推广</div><div class="desc" data-text-id="slide-11.desc_03">分层培训, 关键岗位 100% 接入, 数据搬迁完成。</div></div>
+      <div class="node"><div class="when" data-text-id="slide-11.when_04">W9-12</div><div class="what" data-text-id="slide-11.what_04">数据复盘</div><div class="desc" data-text-id="slide-11.desc_04">复盘 KPI, 调整流程, 形成长期治理机制。</div></div>
     </div>
     <div class="axis"></div>
   </div>
@@ -3577,15 +3742,15 @@ body {
 <!-- 12 Process (4-step pipeline) ============================================ -->
 <div class="slide-frame">
   <div class="slide" data-layout="process" data-screen-label="12 Process" data-slide-key="process-4step" style="--cols:4">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-12.wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh">需求到交付,四步成型</h2>
+      <h2 class="title-zh" data-text-id="slide-12.title_zh">需求到交付,四步成型</h2>
     </div>
     <div class="flow">
-      <div class="step"><div class="stnum">01</div><h3>提出</h3><p>任意一线员工在 Messenger 发起,自动落入 Base 队列。</p></div>
-      <div class="step"><div class="stnum">02</div><h3>对齐</h3><p>相关方在 Docs 留痕讨论,关键决策沉淀到 Wiki。</p></div>
-      <div class="step"><div class="stnum">03</div><h3>交付</h3><p>负责人在 Base 中流转, 责任人 + 时间戳每一步可追溯。</p></div>
-      <div class="step"><div class="stnum">04</div><h3>复盘</h3><p>会后 Meetings 自动生成纪要, 关键指标进入下个周期。</p></div>
+      <div class="step"><div class="stnum" data-text-id="slide-12.stnum">01</div><h3 data-text-id="slide-12.h3">提出</h3><p data-text-id="slide-12.p">任意一线员工在 Messenger 发起,自动落入 Base 队列。</p></div>
+      <div class="step"><div class="stnum" data-text-id="slide-12.stnum_02">02</div><h3 data-text-id="slide-12.h3_02">对齐</h3><p data-text-id="slide-12.p_02">相关方在 Docs 留痕讨论,关键决策沉淀到 Wiki。</p></div>
+      <div class="step"><div class="stnum" data-text-id="slide-12.stnum_03">03</div><h3 data-text-id="slide-12.h3_03">交付</h3><p data-text-id="slide-12.p_03">负责人在 Base 中流转, 责任人 + 时间戳每一步可追溯。</p></div>
+      <div class="step"><div class="stnum" data-text-id="slide-12.stnum_04">04</div><h3 data-text-id="slide-12.h3_04">复盘</h3><p data-text-id="slide-12.p_04">会后 Meetings 自动生成纪要, 关键指标进入下个周期。</p></div>
     </div>
   </div>
 </div>
@@ -3593,14 +3758,14 @@ body {
 <!-- 13 End (封底带 slogan) ================================================= -->
 <div class="slide-frame">
   <div class="slide" data-layout="end" data-screen-label="13 End" data-slide-key="closing">
-    <div class="wordmark">飞书</div>
+    <div class="wordmark" data-text-id="slide-13.wordmark">飞书</div>
     <div class="slogan" role="img" aria-label="先进团队 先用飞书"></div>
-    <div class="contact">contact@feishu.cn  ·  feishu.cn</div>
+    <div class="contact" data-text-id="slide-13.contact">contact@feishu.cn  ·  feishu.cn</div>
   </div>
 </div>
 
 </div><!-- /.deck -->
-<script>
+<script data-source="framework">
 /* ============================================================================
    feishu-deck-h5 · runtime
    - Scale-to-fit each .slide to its frame (1920×1080 design canvas)
@@ -3689,9 +3854,15 @@ body {
       if (deck.dataset.mode !== 'present') return;
       const cur = currentIdx(frames);
       switch (e.key) {
-        case 'ArrowRight': case 'PageDown': case ' ': case 'Spacebar':
+        // Next-slide aliases. Covers standard keyboards + most presentation
+        // clickers, including Windows-market models that emit ArrowDown/Up
+        // (Targus / Kensington Expert / DinoFire / 一拓 / Aibatu) and ones
+        // that map "advance" to Enter.
+        case 'ArrowRight': case 'ArrowDown': case 'PageDown':
+        case ' ': case 'Spacebar': case 'Enter':
           e.preventDefault(); goTo(deck, frames, Math.min(cur + 1, frames.length - 1)); break;
-        case 'ArrowLeft':  case 'PageUp':
+        case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+        case 'Backspace':
           e.preventDefault(); goTo(deck, frames, Math.max(cur - 1, 0)); break;
         case 'Home':
           e.preventDefault(); goTo(deck, frames, 0); break;
@@ -3776,6 +3947,48 @@ body {
     // Initial target is now visible via .is-current; disable the CSS
     // first-frame fallback so the cover cannot bleed through later fades.
     deck.setAttribute('data-js-ready', '');
+
+    // ---- Restart slide media on enter + fs-slide-enter/leave events ----
+    // One observer covers EVERY .is-current toggle path: present-mode goTo,
+    // hash nav, prev/next buttons, AND the mobile patch's direct toggles
+    // (separate IIFE below). Initial pass pauses hidden autoplay videos and
+    // starts the current slide's video.
+    const mediaState = frames.map((f) => f.classList.contains('is-current'));
+    frames.forEach((f, i) => syncFrameMedia(f, mediaState[i]));
+    const mediaObserver = new MutationObserver((muts) => {
+      for (const m of muts) {
+        const i = frames.indexOf(m.target);
+        if (i < 0) continue;
+        const now = m.target.classList.contains('is-current');
+        if (now === mediaState[i]) continue;   // class changed but is-current didn't
+        mediaState[i] = now;
+        syncFrameMedia(m.target, now);
+      }
+    });
+    frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
+    signal.addEventListener('abort', () => mediaObserver.disconnect());
+
+    // Browsers block unmuted autoplay until the first user gesture. If the
+    // deck opens directly on a video slide, that video falls back to muted on
+    // load; upgrade it to sound on the first input — WITHOUT resetting its
+    // playhead (so the click that enables sound doesn't restart the clip).
+    let mediaGestureDone = false;
+    const upgradeMediaSound = () => {
+      if (mediaGestureDone) return;
+      mediaGestureDone = true;
+      const cur = frames.find((f) => f.classList.contains('is-current'));
+      if (!cur) return;
+      cur.querySelectorAll('video').forEach((v) => {
+        if (v.autoplay && !v.hasAttribute('data-keep-muted')
+            && !v.hasAttribute('muted') && v.muted) {
+          v.muted = false;
+          const p = v.play();
+          if (p && p.catch) p.catch(() => {});
+        }
+      });
+    };
+    ['pointerdown', 'keydown', 'touchstart'].forEach((ev) =>
+      document.addEventListener(ev, upgradeMediaSound, { signal }));
 
     // ---- Auto-idle (chrome fades after 2.5s of no input) ----
     let idleTimer;
@@ -3890,6 +4103,62 @@ body {
     return 0;
   }
 
+  // Restart-on-enter for slide media (2026-05-24).
+  // Present mode keeps EVERY slide in the DOM at once, so a <video autoplay
+  // loop> starts on page load while its slide is still hidden and is mid-loop
+  // by the time the presenter navigates to it. Entering a frame resets its
+  // <video>s to the start (and plays them if marked autoplay); leaving a
+  // frame pauses them. Also fires fs-slide-enter / fs-slide-leave on the
+  // .slide so CSS-keyframe decks can re-trigger animations on revisit.
+  // Opt out of restart per element with data-no-restart.
+  //
+  // Sound (2026-05-25): autoplay videos play WITH SOUND by default. Slide nav
+  // is itself a user gesture, so unmuting succeeds on every navigated-to
+  // slide; on the very first frame (pre-gesture) the unmuted play rejects and
+  // we fall back to muted — upgradeMediaSound() (see init) then turns sound on
+  // at the first input. Keep a video silent (decorative loop backgrounds,
+  // secondary clips that would overlap audio) with data-keep-muted.
+  //
+  // Driven by a single MutationObserver on frame .class (see init) so it
+  // catches every nav path.
+  function syncFrameMedia(frame, isCurrent) {
+    if (!frame) return;
+    const slide = frame.querySelector('.slide');
+    const vids = frame.querySelectorAll('video');
+    if (isCurrent) {
+      vids.forEach((v) => {
+        if (v.hasAttribute('data-no-restart')) return;
+        try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
+        if (v.autoplay) playWithSound(v);
+      });
+      if (slide) slide.dispatchEvent(new CustomEvent('fs-slide-enter', { bubbles: true }));
+    } else {
+      vids.forEach((v) => {
+        if (v.hasAttribute('data-no-restart')) return;
+        try { v.pause(); } catch (e) { /* noop */ }
+      });
+      if (slide) slide.dispatchEvent(new CustomEvent('fs-slide-leave', { bubbles: true }));
+    }
+  }
+
+  // Play an autoplay <video>, unmuting it UNLESS the author asked for silence.
+  // Conservative (2026-05-25): an authored `muted` attribute is respected as
+  // "keep silent" (so already-shipped `autoplay muted loop` decks don't
+  // suddenly blare), same as data-keep-muted. Only videos authored WITHOUT
+  // muted get sound. Unmuted play falls back to muted if the browser blocks
+  // it (no user gesture yet); upgradeMediaSound() retries on first input.
+  function playWithSound(v) {
+    const keepSilent = v.hasAttribute('data-keep-muted') || v.hasAttribute('muted');
+    if (!keepSilent) v.muted = false;
+    const p = v.play();
+    if (p && p.catch) p.catch(() => {
+      if (keepSilent) return;                 // already muted, or couldn't play
+      v.muted = true;                         // unmuted autoplay blocked → retry muted
+      const p2 = v.play();
+      if (p2 && p2.catch) p2.catch(() => {});
+    });
+  }
+
   function goTo(deck, frames, idx, updateHash) {
     if (idx < 0 || idx >= frames.length) return;
     // After the first navigation, arm the reveal animation for subsequent
@@ -3999,6 +4268,136 @@ body {
   // Expose programmatic API for SPA hosts
   if (typeof window !== 'undefined') {
     window.feishuDeck = { init };
+  }
+})();
+
+/* ============================================================================
+   Mobile UX patch (≤900px) — tap-to-enlarge + swipe nav (2026-05-21)
+   ----------------------------------------------------------------------------
+   Issue: on mobile, the framework auto-switches to scroll mode where each
+   slide-frame is 100vw × 9/16 (~393×220 on a 393w phone). The 1920×1080
+   design canvas scales to ~0.2× → 22px body text becomes ~4.5px → unreadable.
+   User reported "手机端打开就是错乱的".
+
+   Fix: keep scroll mode as the overview but make each frame a tap target —
+   tap any slide → switch to present mode showing that one slide filling the
+   viewport. Left/right swipe paginates. Tap "← 返回列表" returns to scroll.
+
+   Paired with the CSS block at the bottom of feishu-deck.css (same date stamp).
+   Runs as a separate IIFE after the main init, so existing init logic stays
+   untouched. Mobile-only — does nothing on viewports > 900px.
+   ============================================================================ */
+(function () {
+  if (typeof window === 'undefined') return;
+  if (!window.matchMedia('(max-width: 900px)').matches) return;
+
+  function wire() {
+    const deck = document.querySelector('.deck');
+    if (!deck) return;
+    const frames = Array.from(deck.querySelectorAll('.slide-frame'));
+    if (!frames.length) return;
+    if (document.querySelector('.fs-mobile-back')) return;  // idempotent
+
+    const backBtn = document.createElement('div');
+    backBtn.className = 'fs-mobile-back';
+    backBtn.textContent = '← 返回列表';
+    backBtn.setAttribute('role', 'button');
+    backBtn.setAttribute('aria-label', '返回 slide 列表');
+    document.body.appendChild(backBtn);
+
+    const pageNo = document.createElement('div');
+    pageNo.className = 'fs-mobile-pageno';
+    document.body.appendChild(pageNo);
+
+    function curIdx() {
+      for (let i = 0; i < frames.length; i++) {
+        if (frames[i].classList.contains('is-current')) return i;
+      }
+      return 0;
+    }
+    function updatePageNo() {
+      pageNo.textContent = (curIdx() + 1) + ' / ' + frames.length;
+    }
+    // MANUAL scale computation. The framework's ResizeObserver only watches
+    // documentElement and does NOT fire on data-mode flips (the viewport
+    // doesn't change). So after switching mode, --fs-scale stays at the
+    // previous mode's value and the slide visibly fails to scale up.
+    // Measure clientWidth/Height ourselves after layout settles.
+    function scaleNow(idx) {
+      const frame = frames[idx];
+      const slide = frame && frame.querySelector('.slide');
+      if (!slide) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const w = frame.clientWidth, h = frame.clientHeight;
+          if (!w || !h) return;
+          const scale = Math.min(w / 1920, h / 1080);
+          slide.style.setProperty('--fs-scale', String(scale));
+        });
+      });
+    }
+    function setMode(mode, idx) {
+      deck.dataset.mode = mode;
+      try { localStorage.setItem('fs-deck-mode', mode); } catch (e) {}
+      if (mode === 'present' && typeof idx === 'number') {
+        frames.forEach((f, i) => f.classList.toggle('is-current', i === idx));
+        scaleNow(idx);
+      } else if (mode === 'scroll') {
+        frames.forEach((_, i) => scaleNow(i));
+      }
+      updatePageNo();
+    }
+    function go(delta) {
+      const cur = curIdx();
+      const next = Math.max(0, Math.min(frames.length - 1, cur + delta));
+      if (next !== cur) {
+        frames.forEach((f, i) => f.classList.toggle('is-current', i === next));
+        scaleNow(next);
+        updatePageNo();
+      }
+    }
+
+    frames.forEach((frame, i) => {
+      frame.addEventListener('click', (e) => {
+        if (deck.dataset.mode !== 'scroll') return;
+        if (e.target && e.target.closest('a, button, iframe, [role="button"], .probe-tab')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setMode('present', i);
+      }, true);
+    });
+
+    backBtn.addEventListener('click', () => {
+      const cur = curIdx();
+      setMode('scroll');
+      if (cur >= 0) setTimeout(() => frames[cur].scrollIntoView({ block: 'center' }), 50);
+    });
+
+    let sx = null, sy = null, st = 0;
+    document.addEventListener('touchstart', (e) => {
+      if (deck.dataset.mode !== 'present') return;
+      const t0 = e.touches[0]; sx = t0.clientX; sy = t0.clientY; st = Date.now();
+    }, { passive: true });
+    document.addEventListener('touchend', (e) => {
+      if (deck.dataset.mode !== 'present' || sx === null) return;
+      const t1 = e.changedTouches[0];
+      const dx = t1.clientX - sx, dy = t1.clientY - sy, dt = Date.now() - st;
+      sx = sy = null;
+      if (dt > 600) return;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        if (e.target && e.target.closest('iframe')) return;
+        e.preventDefault();
+        go(dx < 0 ? +1 : -1);
+      }
+    }, { passive: false });
+
+    updatePageNo();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire, { once: true });
+  } else {
+    setTimeout(wire, 100);
   }
 })();
 </script></body></html>
