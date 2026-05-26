@@ -85,6 +85,6 @@ jobs:
           ls -la examples/
           echo
           echo "=== self-check items in SKILL.md ==="
-          grep -cE '^\[ \] +[0-9]+\. ' SKILL.md
+          grep -cE '^\[ \] +[0-9]+\. ' SKILL.md || true
           echo "=== audit functions in validate.py ==="
-          grep -cE '^def (audit|check)_' assets/validate.py
+          grep -cE '^def (audit|check)_' assets/validate.py || true
