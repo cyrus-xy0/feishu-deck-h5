@@ -1,0 +1,346 @@
+# deck-pipeline · 流水线定义
+# 本文件是 SKILL.md 的机器可读版本，供 harness / scheduler 解析执行。
+# 格式：YAML，每个 stage 包含有序 task 列表。
+
+name: deck-pipeline
+version: "1.0.0"
+description: 飞书 HTML Deck 全流程治理 — 编排 feishu-deck-h5 及相关技能
+
+compatibility:
+  layer: skills/deck-pipeline/assets/compat.py
+  historical_runs_policy: immutable
+  preflight_modes: [ok, bootstrapped]
+  validate_defaults:
+    strict_default: false
+    visual_default: false
+  delivery_defaults:
+    shared_assets_mode: copy
+    mutate_guard: historical-run-guard
+  visual_standards:
+    title_logo_horizontal_lock:
+      enabled: true
+      applies_when:
+        - "user explicitly requests title and Feishu logo horizontal alignment"
+        - "content page shows both main title and .wordmark in the top header area"
+      required_structure:
+        - "header contains only title container and wordmark"
+        - "subtitle must be outside the header row"
+        - "header must be position: relative"
+        - "wordmark must be position: absolute inside header"
+        - "header must reserve fixed right space for the logo"
+      logo_box:
+        width: 160
+        height: 50
+        top: -2
+        right: 4
+      header_padding_right: 196
+      forbidden_fixes:
+        - "align logo with a title+subtitle flex block"
+        - "keep subtitle in header and iterate margin-top repeatedly"
+        - "shrink title width without reserving explicit logo space"
+  local_tooling:
+    safe_preflight: skills/deck-pipeline/assets/safe-preflight.py
+    historical_run_guard: skills/deck-pipeline/assets/historical-run-guard.py
+    deck_edit: skills/deck-pipeline/assets/deck-edit.py
+    deck_manage: skills/deck-pipeline/assets/deck-manage.py
+    deck_screenshot: skills/deck-pipeline/assets/deck-screenshot.py
+    inline_assets: skills/deck-pipeline/assets/inline-assets.py
+    safe_copy_assets: skills/deck-pipeline/assets/safe-copy-assets.py
+    safe_validate: skills/deck-pipeline/assets/safe-validate.py
+    safe_finalize: skills/deck-pipeline/assets/safe-finalize.sh
+
+depends:
+  - skill: feishu-deck-h5
+    required: true
+    min_version: "1.0.0"
+
+stages:
+  - id: S0
+    name: 环境就绪
+    description: 确保技能可运行，创建隔离的工作区
+    human_confirm: false
+    tasks:
+      - id: T0.1
+        name: 运行 preflight 检查
+        type: script
+        invoke: deck-pipeline/assets/safe-preflight.py
+        args: []
+        exit_on_fail: true
+        fail_message: "preflight 失败 — 请挂载本地可写目录后重试"
+        produces: []
+
+      - id: T0.2
+        name: 创建 per-run 工作区
+        type: script
+        invoke: feishu-deck-h5/assets/new-run.sh
+        args: ["{{ slug }}"]
+        exit_on_fail: true
+        fail_message: "无法创建工作区 — 检查目录权限"
+        produces:
+          - path: "runs/{{ timestamp }}/{input,output}/"
+            type: directory
+
+      - id: T0.3
+        name: 记录 run 元信息
+        type: agent-action
+        action: write-run-meta
+        produces:
+          - path: "runs/{{ timestamp }}/output/RUN-META.yaml"
+            type: file
+
+  - id: S1
+    name: 输入解析
+    description: 理解用户要做什么，选择正确的生成模式
+    human_confirm: true
+    confirm_points:
+      - task: T1.3
+        prompt: "确认生成模式：Replica（保留原设计）/ Rewrite（原生重画）/ DeckJSON Render（deck.json 渲染）？"
+      - task: T1.4
+        prompt: "内容密度偏薄，是否补充？建议：①… ②… ③…"
+      - task: T1.5
+        prompt: "语言模式：zh-only（默认）/ zh-en（双语）？"
+    tasks:
+      - id: T1.1
+        name: 采集用户输入
+        type: agent-action
+        action: collect-input
+        produces:
+          - path: "runs/{{ timestamp }}/input/"
+            type: directory
+
+      - id: T1.2
+        name: 判断输入类型
+        type: agent-decision
+        decision: input-type
+        options: [text-brief, designed-pdf, structured-toml, existing-html]
+        produces: []
+
+      - id: T1.3
+        name: 选择生成模式
+        type: agent-decision
+        decision: generation-mode
+        options: [deckjson-render, replica, rewrite]
+        requires_confirm: true
+
+      - id: T1.4
+        name: 评估内容密度
+        type: agent-decision
+        decision: content-density
+        options: [sufficient, thin-needs-augmentation, thin-use-sparse-layout]
+        requires_confirm: true
+        condition:
+          thin-needs-augmentation: "停止生成，向用户确认补充内容"
+
+      - id: T1.5
+        name: 确定语言模式
+        type: agent-decision
+        decision: language-mode
+        options: [zh-only, zh-en]
+        requires_confirm: true
+        default: zh-only
+
+  - id: S2
+    name: 内容生成
+    description: 生成符合飞书规范的 HTML deck
+    human_confirm: false
+    tasks:
+      - id: T2.1
+        name: DeckJSON Render 路径
+        type: script
+        invoke: feishu-deck-h5/deck-json/render-deck.py
+        args: ["{{ deck_json }}", "{{ output_dir }}"]
+        condition: "generation-mode == deckjson-render"
+        fallback: T2.2
+        produces:
+          - path: "runs/{{ timestamp }}/output/index.html"
+            type: file
+
+      - id: T2.2
+        name: LLM 手写路径
+        type: agent-action
+        action: author-deck-html
+        condition: "generation-mode == rewrite or T2.1.fallback"
+        produces:
+          - path: "runs/{{ timestamp }}/output/index.html"
+            type: file
+
+      - id: T2.3
+        name: Replica 路径
+        type: agent-action
+        action: replica-pdf-to-html
+        condition: "generation-mode == replica"
+        requires_external: [pdf2image, imagemagick]
+        produces:
+          - path: "runs/{{ timestamp }}/output/index.html"
+            type: file
+
+      - id: T2.4
+        name: 匹配品牌资产
+        type: agent-action
+        action: match-brand-assets
+        asset_sources:
+          - feishu-deck-h5/assets/shared/clientlogo/
+          - feishu-deck-h5/assets/shared/feishu-products/
+          - feishu-deck-h5/assets/shared/digital_employee_avatars_50/
+          - feishu-deck-h5/assets/shared/mydigitalemployee/
+        fallback_asset: feishu-deck-h5/assets/lark-logo.png
+        produces: []
+
+      - id: T2.4a
+        name: 应用标题与飞书 Logo 对平锁定
+        type: agent-action
+        action: enforce-title-logo-horizontal-lock
+        condition: "top header contains both main title and .wordmark or user explicitly requests logo-title alignment"
+        rule: "subtitle must leave header; header becomes position: relative; wordmark becomes absolute with fixed right reserve"
+        produces: []
+
+      - id: T2.5
+        name: 标注 data-text-id
+        type: agent-action
+        action: annotate-text-ids
+        rule: "每个 text leaf 必须带 data-text-id=\"slide-NN.field\""
+        produces: []
+
+      - id: T2.6
+        name: 标注 data-slide-key
+        type: agent-action
+        action: annotate-slide-keys
+        rule: "每个 .slide 必须带 data-slide-key=\"<semantic-kebab-slug>\""
+        produces: []
+
+      - id: T2.7
+        name: 生成 texts.md
+        type: script
+        invoke: feishu-deck-h5/assets/extract-texts.py
+        args: ["{{ html_path }}", "--out", "{{ texts_path }}"]
+        produces:
+          - path: "runs/{{ timestamp }}/output/texts.md"
+            type: file
+
+  - id: S3
+    name: 质量保障
+    description: 确保 deck 通过所有规范检查
+    human_confirm: true
+    confirm_points:
+      - task: T3.4
+        prompt: "请在浏览器中打开 deck 确认视觉效果，是否通过？"
+    tasks:
+      - id: T3.1
+        name: 运行 validator
+        type: script
+        invoke: deck-pipeline/assets/safe-validate.py
+        args: ["{{ html_path }}"]
+        max_retries: 3
+        retry_with: T3.2
+        produces:
+          - type: validation-report
+
+      - id: T3.2
+        name: 修复 validator errors
+        type: agent-action
+        action: fix-validator-errors
+        condition: "T3.1.exit_code != 0"
+        produces: []
+
+      - id: T3.3
+        name: 运行 strict validator
+        type: script
+        invoke: deck-pipeline/assets/safe-validate.py
+        args: ["{{ html_path }}", "--strict"]
+        condition: "T3.1.exit_code == 0"
+        produces:
+          - type: strict-validation-report
+
+      - id: T3.4
+        name: 人工 review
+        type: human-confirm
+        prompt: "请在浏览器中打开 deck 确认视觉效果"
+        requires_confirm: true
+        checklist:
+          - "若页面顶部同时存在标题和 .wordmark，确认二者采用 header 内锚定布局，而不是 flex 参与式对齐"
+          - "确认 subtitle 不再参与 title/logo 同一条对齐线"
+
+  - id: S4
+    name: 交付封装
+    description: 产出可离开技能目录的交付物
+    human_confirm: true
+    confirm_points:
+      - task: T4.3
+        prompt: "交付形态：inline 单文件（默认）/ zip 编辑包 / URL？"
+    tasks:
+      - id: T4.1
+        name: 自包含输出
+        type: script
+        invoke: deck-pipeline/assets/safe-copy-assets.py
+        args: ["{{ output_dir }}"]
+        produces:
+          - path: "runs/{{ timestamp }}/output/assets/"
+            type: directory
+
+      - id: T4.2
+        name: 生成 FEEDBACK.md
+        type: agent-action
+        action: generate-feedback-md
+        produces:
+          - path: "runs/{{ timestamp }}/output/FEEDBACK.md"
+            type: file
+
+      - id: T4.3
+        name: 选择交付形态
+        type: agent-decision
+        decision: delivery-shape
+        options: [inline, remote-zip, hosted-url]
+        requires_confirm: true
+        default: inline
+
+      - id: T4.4
+        name: 执行交付封装
+        type: script
+        invoke: deck-pipeline/assets/safe-finalize.sh
+        args: ["{{ output_dir }}", "{{ delivery_mode }}", "--strict", "--name", "{{ delivery_name }}"]
+        produces:
+          - path: "runs/{{ timestamp }}/output/{{ delivery_name }}.html"
+            type: file
+          - path: "runs/{{ timestamp }}/output/{{ delivery_name }}.zip"
+            type: file
+            condition: "delivery-shape == remote-zip"
+
+      - id: T4.5
+        name: 交付物命名
+        type: agent-action
+        action: apply-naming-convention
+        rule: "lark-<customer-slug>-<YYYY-MM-DD>.html"
+        produces: []
+
+      - id: T4.6
+        name: 回传交付物
+        type: agent-action
+        action: hand-back-deliverable
+        rule: "交互模式必须回传路径；非交互模式写入文件即可"
+        produces: []
+
+# 扩展点定义
+extension_points:
+  - id: EP-PDF
+    stage: S1
+    after_task: T1.2
+    description: "PDF 解析 — 替换 agent 逻辑判断为技能调用"
+    candidate_skills: [pdf-extract]
+
+  - id: EP-IMAGE
+    stage: S2
+    after_task: T2.4
+    description: "图片处理 — 替换 agent 资产匹配为技能调用"
+    candidate_skills: [image-process]
+
+  - id: EP-EXPORT
+    stage: S4
+    after_task: T4.3
+    description: "多格式输出 — 增加 .pptx / .pdf 输出路径"
+    candidate_skills: [pptx-export, pdf-export]
+
+  - id: EP-BATCH
+    stage: S2
+    after_task: T2.1
+    description: "批量生成 — 循环调用 render-deck.py"
+    candidate_skills: [batch-render]
