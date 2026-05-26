@@ -257,7 +257,7 @@ cd "<workspace path from preflight stdout>"
 ```
 
 Once inside the workspace, EVERY subsequent skill command —
-`assets/new-run.sh`, `assets/render.py`, `assets/validate.py`,
+`assets/new-run.sh`, `deck-json/render-deck.py`, `assets/validate.py`,
 `build.sh`, `assets/package-deliverable.sh` — runs from this
 workspace, NOT from the original RO mount. The `runs/<ts>/output/`
 artifact will land here; that's the path you hand back to the user
@@ -1088,7 +1088,7 @@ Before ANY operation that **net-removes** a slide from a deck:
 |---|---|---|
 | Removing a `.slide-frame` block from `index.html` via Edit | **Yes** | Even if "just one slide" |
 | `rm` of the entire `output/` folder | **Yes** | Wholesale wipe |
-| Running `render.py multi-case-bundle` with FEWER `[[cases]]` than the current `index.html` has slides | **Yes** | Net delete via regen |
+| Re-rendering a `deck.json` with FEWER `content/story-case` (or any) slides than the current `index.html` has | **Yes** | Net delete via regen |
 | Replacing N slides with M < N slides in one operation | **Yes** | Net-removed = N − M |
 | Editing texts.md to drop a `## slide-NN` section, then running `apply-texts.py` | **Yes** | `apply-texts.py` itself only patches text leaves, but if the user's intent was "drop this slide", confirm + back up the HTML before applying |
 | Inserting slides (M > N) | No | Pure addition is reversible by deleting back |
@@ -1759,7 +1759,7 @@ the agent generate the slide.
 | `table` | ≥ 4 rows × 3 cols of meaningful comparison | < 3 rows, OR the columns aren't really distinct |
 | `timeline` | 4-6 chronological milestones | < 3 milestones, OR all in same week |
 | `process` | 3-6 sequential steps | < 3 steps, OR steps are vague |
-| `one-pager case` (story-case) | 4 beats: 痛点 / 冲突 / 解法 / 价值 | any beat < 10 chars (already enforced by render.py schema-fit refusal — exit 4) |
+| `one-pager case` (story-case) | 4 beats: 痛点 / 冲突 / 解法 / 价值 | any beat < 10 chars (already enforced by render-deck.py schema-fit refusal — exit 4) |
 
 For `quote` / `big-stat` / `cover` / `agenda` / `section` / `end` /
 `image-text`, terse input is **fine** — these are sparse-by-design.
@@ -1855,7 +1855,7 @@ default, because the schema and recipe markup show them as fields.
   instruction to make one up.
 - If the user did NOT give you a source citation, OMIT the source
   line entirely (drop `.case-caption` / `.source-footer` from the
-  markup; leave `source = ""` in the TOML schema). Do NOT write
+  markup; omit the `source` field from the slide's `data`). Do NOT write
   "客户访谈" / "内部口径" / "实践访谈" / "调研口径" as a placeholder
    — these read as factual claims and break trust if the customer
   reads the deck.
@@ -1872,50 +1872,48 @@ This rule overrides the example schemas. Treat schema fields like
 **form**, not **content**: the field exists; you fill it ONLY with
 what the user actually provided.
 
-### How to render — TWO paths · template by default, LLM when better
+### How to render — `content` layout + `variant: story-case` (Path A DeckJSON)
 
-| Path | Command | When |
-|---|---|---|
-| **A · Template (canonical, ~0.5s, 0 tokens)** | `python3 assets/render.py one-pager <input.toml> <output-dir>/` | The case content fits the schema cleanly (4-beat 痛点/冲突/解法/价值 + hook + scene image). Validator-pass guaranteed; visual frozen at template `v1`; same input → same output. |
-| **B · LLM authoring (creative, ~30-60s, ~70K tokens)** | The agent writes the HTML/CSS by hand, staying within brand tokens | The case content does NOT fit the schema, OR the LLM judges a substantially better visual treatment for *this specific story*. Brand styling must still match — see "Brand floor" below. |
+The one-pager case is a **DeckJSON layout**, not a separate engine. Author
+it as a `content` slide with `variant: "story-case"` in `deck.json`, then
+`render-deck.py` produces `index.html` + `texts.md` (see DECK GENERATION
+POLICY for the Path A flow). The 4-beat 痛点/冲突/解法/价值 + hook + scene
+shape maps 1:1 to the `data_content_story_case` schema (field reference
+below). render-deck.py runs the schema-fit refusal + accent review
+automatically (see "Safety nets" below).
 
-**Default is Path A — but only when it actually fits.** Don't force a
-square peg through the schema. The template is the right tool for the
-80% of cases that look like the瑞幸 example; for the rest, mechanical
-templating is worse than thoughtful authoring.
+> Historical note: pre-2026-05-26 this layout had its own TOML engine
+> (`render.py one-pager`). That engine + its `examples/one-pager-luckin/`
+> TOML were retired; the layout, the policy in this section, and the two
+> safety nets all live in the DeckJSON path now. Old `.toml` cases convert
+> 1:1 to a `content/story-case` slide.
 
-#### When to deviate from the template (Path B)
+#### When story-case doesn't fit — use a different layout (not a different engine)
 
-Take Path B if ANY of these apply:
+The 4-beat arc is intentionally narrow. When the case's natural shape
+isn't 4-beat, pick the layout that fits instead of forcing it:
 
-1. **User explicitly asks for something the schema can't express** —
-   "加一段客户原话", "做成 timeline", "用 big-stat 突出 ROI 数字",
-   "做成竖版手机端", "把 4 个 beat 改成 6 个观察", "图分两张拼贴",
-   "case 没有冲突,只有 3 个发现". The schema is intentionally narrow;
-   when the ask exceeds it, deviate rather than mutilate the content.
-2. **The story's natural shape isn't 4-beat** — e.g. it's really a
-   one-sentence customer testimonial (`quote` layout fits better),
-   a hero metric with prose around it (`big-stat`), a chronological
-   roadmap (`timeline`), or a 3-up parallel observation (`content-3up`).
-3. **You judge a clearly stronger visual approach for THIS case** —
-   the illustration calls for full-bleed not framed; the value beat
-   is so quantifiable it should be a `.stats` row; the conflict is
-   so visceral it deserves to be a quote, etc. **Trust this judgment**
-   — going Path B for genuine creative reasons is the right call,
-   not a failure to template.
-4. **It's a brand-new pattern that may itself become a template
-   later** — author it manually first; if it ships well and recurs,
-   propose lifting it into a new `templates/<name>.html` + a
-   `render.py <name>` subcommand.
+1. **User asks for something story-case can't express** — "加一段客户原话",
+   "做成 timeline", "用大数字突出 ROI", "把 4 个 beat 改成 6 个观察",
+   "case 没有冲突,只有 3 个发现". Switch layout rather than mutilate content.
+2. **The story's natural shape** is a one-sentence testimonial → `quote`;
+   a hero metric + prose → `stats` variant `hero`; a chronological roadmap
+   → `flow` variant `timeline`; 3 parallel observations → `content` variant
+   `3up`.
+3. **A genuinely one-off visual shape** that no layout + variant covers →
+   `layout: "raw"` for that single slide (keep the rest of the deck on
+   schema layouts). If the shape recurs across ≥ 2 decks, propose a schema
+   extension (deck-json/MIGRATION-REPORT.md Phase 0.2), not a pile of raw
+   slides.
 
-Don't take Path B just to add per-case flair (different fonts,
-off-palette colors, custom logo treatment) — that's drift, not
-creativity. The brand floor below applies regardless of path.
+Don't switch layout just for per-case flair (different fonts, off-palette
+colors, custom logo) — that's drift, not fit. The brand floor below applies
+to every layout you land on.
 
-#### Brand floor (mandatory, applies to BOTH paths)
+#### Brand floor (mandatory, applies to every layout)
 
-When deviating, you can break with the template's *layout shape* but
-NOT with these brand basics. The validator enforces most of them:
+Whatever layout the case lands on, you can vary the *shape* but NOT these
+brand basics. The validator enforces most of them:
 
 - Dark cinematic background — `lark-content-bg.jpg` via the master
   decor system, OR a brand-aligned `data-decor` token (no white /
@@ -1930,121 +1928,98 @@ NOT with these brand basics. The validator enforces most of them:
   must still PASS strict. Deviation is a layout choice, not a license
   to skip integrity checks.
 
-If the deviation is solid (story really fit better, brand floor held,
-validator green), proactively offer to lift it into a new template:
+If a genuinely new case shape recurs across ≥ 2 decks, propose a schema
+extension (a new `content` variant or a new layout) per
+deck-json/MIGRATION-REPORT.md Phase 0.2 — that's how the layout catalog
+grows, without one-off raw slides accumulating.
 
-> 这次走了 Path B,因为 [reason]。如果这种结构会在别的案例复现,
-> 我可以把它沉淀成 `templates/<new-name>.html` + render.py 子命令,
-> 下次同类故事就 0 token 出图。要不要做?
+#### When the user rejects a story-case output
 
-This is how the template library grows — Path B today becomes Path A
-tomorrow.
+If the problem is *visual or structural* and it'd recur on the next case,
+fix the **template** (`deck-json/templates/content-story-case.fragment.html`)
+or its CSS in `assets/feishu-deck-patterns.css`, then re-render — don't
+hand-patch the single output's `index.html` (the next render overwrites it,
+and the next case hits the same bug).
 
-#### When the user rejects a Path A output
+If the problem is *copy / wording / strategic emphasis*, edit the slide's
+`data` in `deck.json` (or `texts.md`) and re-render. The template is fine;
+the content was wrong.
 
-If the output's problem is *visual or structural*, fix the **template**
-(`templates/one-pager-case.html`) and bump
-`PATTERNS["one-pager"].version` in `render.py`. Don't hand-patch the
-single output — the next case will hit the same bug.
+If the problem is *"this case shouldn't have been story-case at all"*,
+switch the slide's layout/variant (see "When story-case doesn't fit"
+above) and proactively expand the trigger-detection rules so similar cases
+route correctly next time.
 
-If the problem is *copy / wording / strategic emphasis*, edit
-`input.toml` (or `texts.md`) and re-render. The template is fine; the
-content fed in was wrong.
+### Safety nets — schema-fit refusal + accent review (in render-deck.py)
 
-If the problem is *"this case shouldn't have used the template at
-all"*, that's a Path A → Path B retroactive switch — surface this
-to the user as a learning signal for next time, and proactively
-expand the trigger-detection rules so similar cases route to Path B
-up front.
+`render-deck.py` runs two automatic checks for every `content/story-case`
+slide (ported 2026-05-26 from the retired render.py). They catch the
+predictable failure modes: thin/placeholder beats, and a mis-framed accent.
 
-### Path A safety nets — schema-fit refusal + accent review
-
-`render.py` runs two automatic checks every Path A invocation. They
-exist because the failure modes of "Layer 2 抽 TOML → Layer 1 渲染"
-are predictable: extractors stuff placeholders when they can't fill a
-beat, and miss-frame the accent boundary when the source is wordy.
-
-**1 · Schema-fit refusal (exit 4).** Before rendering, every beat in
-`fit_check` is scanned for:
+**1 · Schema-fit refusal (exit 4).** After schema-validate, before render,
+every story-case beat is scanned for:
 
 - Placeholder content: `TBD / TODO / TBC / XXX / N/A / 待补 / 占位 /
-  稍后补充 / 未填 / None`, ellipsis-only strings, question-mark-only
-  strings.
+  稍后补充 / 未填 / None`, ellipsis-only, question-mark-only strings.
 - Length floor: meaty beats (`arc.pain / arc.conflict / arc.solution`)
-  must be ≥ 10 chars; `*.accent` must be ≥ 2 chars; `*.lead / *.tail`
-  can be very short (connective tissue, ≥ 1 char).
-- Duplicate content across beats (LLM laziness signal).
+  ≥ 10 chars; `*.accent` ≥ 2 chars; `*.lead / *.tail` ≥ 1 char (connective).
+- Duplicate content across beats (laziness signal).
 
-If any beat fails, render REFUSES (exit 4) and surfaces the offenders.
-The agent's correct response is one of:
+If any beat fails, render REFUSES (exit 4) and lists the offenders. Correct
+response:
 
-- Re-extract the TOML from the source if a beat got lost in extraction.
-- **Take Path B** — the failure is the schema's way of saying "this
-  story doesn't have a clean 4-beat arc". Don't fight it.
-- Add `--skip-fit-check` to bypass, but only if you have a specific
-  reason (e.g. the user gave you intentionally terse copy and confirmed
-  it's fine). The flag exists for the rare legit case; not as a way to
-  silence the warning.
+- Fill the beat in `deck.json` with real content.
+- **Switch layout** — the failure often means "this story doesn't have a
+  clean 4-beat arc"; use quote / stats-hero / content-3up instead.
+- `--skip-fit-check` to bypass, ONLY for a specific reason (intentionally
+  terse copy the user confirmed). Not a way to silence the warning.
 
-**2 · Accent boundary review (post-render print).** After successful
-render, render.py prints each accent-bearing field with the highlight
-visually marked (ANSI bold-teal in TTY, `[brackets]` otherwise):
+**2 · Accent review (post-render print).** After a successful render,
+render-deck.py prints each accent-bearing field with the highlight marked
+(ANSI teal in a TTY, `[brackets]` otherwise):
 
 ```
 ACCENT 复核 (1 秒目测,被高亮的词是该突出的吗?)
-    hook  ·  新店垃圾桶距出餐窄 1 米,按 SOP 必须 [砸墙返工] —— 老专家随手两招就解决。
-   value  ·  飞书把这种不在手册里的隐形经验萃取到 [企业 AI 知识库],新人...
+  luckin-case ·  hook  ·  新店垃圾桶距出餐窄 1 米,按 SOP 必须 [砸墙返工] —— …
+  luckin-case · value  ·  飞书把这种隐形经验萃取到 [企业 AI 知识库],…
 ```
 
-Eyeball it. If the bracketed word isn't the emotional pivot of the
-sentence (e.g. extractor highlighted `1 米` instead of `砸墙返工`),
-edit `input.toml`'s `*.accent` and rerun — 0.2 seconds, no LLM cost.
+Eyeball it. If the bracketed word isn't the emotional pivot (e.g. `1 米`
+instead of `砸墙返工`), fix `arc.value.accent` / `hook.accent` in `deck.json`
+and re-render.
 
-These two checks together close the two real failure modes of the
-Layer 2 extraction pipeline. They don't replace human judgment, but
-they catch the dumb cases automatically.
+### Field reference — `data_content_story_case` (deck.json)
 
-### Path A — input.toml schema (all fields required unless marked)
+Full schema: `deck-json/deck-schema.json` → `$defs/data_content_story_case`
+(`required: title, industry, hook, arc, scene`). The `data` block of a
+story-case slide:
 
-See `examples/one-pager-luckin/input.toml` for the canonical example.
-
-```toml
-title    = "客户/项目 · 案例标题"     # ≤22 chars recommended (single-line at 52px)
-industry = "行业 · 场景 · 客户案例"   # short tag, fits in pill
-brand    = "飞书企业 AI · 客户案例"   # OPTIONAL story-id suffix (e.g. " · STORY 015") — only if the user gives you one. NEVER fabricate.
-source   = ""                          # OPTIONAL — leave blank if user didn't cite a source. NEVER fabricate "客户访谈" / "内部口径".
-
-[hook]                                  # one-line story trailer with teal accent
-lead   = "...before the accent..."
-accent = "强调动词"                    # rendered teal
-tail   = "...after the accent..."
-
-[arc]                                   # 4 narrative beats
-pain     = "..."                        # blue
-conflict = "..."                        # orange
-solution = "..."                        # teal
-
-[arc.value]                             # value beat with its own teal accent
-lead   = "..."
-accent = "..."
-tail   = "..."
-
-[scene]
-image    = "./scene.png"               # path RELATIVE to this TOML
-caption  = "现场 · 一句话场景说明"
-alt      = "无障碍描述,完整场景内容"
-# fit      = "cover"                    # optional: cover (default) | contain
-# position = "center"                   # optional: any CSS background-position
+```jsonc
+{ "key": "case-<slug>", "layout": "content", "variant": "story-case",
+  "accent": "blue", "decor": "blue-glow",
+  "screen_label": "01 客户案例 — 标题",
+  "data": {
+    "title":    "客户/项目 · 案例标题",           // single line, no <br> (R13)
+    "industry": "行业 · 场景 · 客户案例",          // short pill tag
+    // OPTIONAL story-id / source — ONLY if the user gave one. NEVER fabricate.
+    "hook":  { "lead": "…before…", "accent": "强调动词", "tail": "…after…" },
+    "arc": {
+      "pain":     "…",                              // blue   · ≥10 chars
+      "conflict": "…",                              // orange · ≥10 chars
+      "solution": "…",                              // teal   · ≥10 chars
+      "value":  { "lead": "…", "accent": "…", "tail": "…" }   // violet
+    },
+    "scene": { "image": "input/scene.png",          // path relative to deck.json
+               "caption": "现场 · 一句话场景说明",
+               "alt": "无障碍描述,完整场景内容" }
+  } }
 ```
 
-Run:
-```
-python3 assets/render.py one-pager input.toml runs/<ts>/output/
-```
-
-Outputs: `index.html`, `texts.md`, `scene.png`, `FEEDBACK.md` — all in
-the output directory. Validator runs automatically; non-zero exit means
-the **template** is broken (file an issue), not the input.
+Render with the standard Path A flow:
+`python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/`.
+Outputs `index.html` + `texts.md`; the scene image is copied in. A non-zero
+exit on a story-case slide is usually the schema-fit refusal (exit 4) — read
+the offenders, not a template bug.
 
 ### Trigger detection — when to use this layout
 
@@ -2104,7 +2079,7 @@ arranged as:
   frame (see "Image is the visual hero" below for sizing rules — image
   goes in via `background-image`, NEVER an `<img>` tag, to satisfy UI1).
 - ~~**`.source-footer`** (data citation line below the body)~~ **Retired 2026-05** alongside `.footer`. Data citations now live inline in the slide body (as a `.caption`, in a corner `.eyebrow`, or just trailing text). Hide-only CSS keeps any leftover DOM invisible.
-- ~~**Chrome footer**: brand line + page number.~~ **Retired 2026-05.** The fullscreen present-mode pager (bottom-center prev/next/page-no bar) now shows the page number; the corner `.wordmark` carries the brand. Templates and `render.py` no longer emit `<div class="footer">` / `<span class="pageno">`. Validator R07 no longer requires it. Don't add it to new slides.
+- ~~**Chrome footer**: brand line + page number.~~ **Retired 2026-05.** The fullscreen present-mode pager (bottom-center prev/next/page-no bar) now shows the page number; the corner `.wordmark` carries the brand. The renderer no longer emits `<div class="footer">` / `<span class="pageno">`. Validator R07 no longer requires it. Don't add it to new slides.
 
 The 4-beat 痛点/冲突/解法/价值 arc IS the rhetorical structure of a
 one-pager case. Don't replace it with generic bullets; the labeled
@@ -2230,14 +2205,14 @@ History of the rule (relevant context for future maintainers):
 </div>
 ```
 
-When using `render.py one-pager`, the v2 CSS lives in
-`assets/feishu-deck-patterns.css` — DO NOT inline these rules in the
-`<style>` block. The standalone template + bundle shell both `<link>`
-to that single source of truth so a v2 → v3 refactor only touches one
-file.
+The story-case v2 CSS lives in `assets/feishu-deck-patterns.css` —
+render-deck.py's `content-story-case.fragment.html` links it, so a
+v2 → v3 refactor only touches one file. **DON'T inline these rules** in a
+`<style>` block on a normal story-case slide.
 
-For Path B (LLM-authored one-pager that doesn't use render.py), copy
-this block verbatim into the slide's `<style>`:
+If you hand-author a one-off story-case as a `layout: "raw"` slide (the
+rare case where you need bespoke markup), copy this block verbatim into
+that slide's `<style>`:
 
 ```css
 .slide.story-case[data-layout="content-2col"] .grid {
@@ -2293,161 +2268,26 @@ instead of `auto` (regression to v1 behavior — fix it).
 
 ---
 
-## OTHER LAYER 1 PATTERNS — quote · big-stat · multi-case-bundle
+## Layer-1 patterns (RETIRED 2026-05-26) — quote / big-stat / multi-case-bundle
 
-`render.py` supports more patterns than just `one-pager`. Each one
-follows the same Path A / Path B logic as the one-pager case, the same
-schema-fit safety nets, and the same brand-floor requirements. Pick
-whichever pattern fits the user's content shape.
+These were a separate TOML-driven engine (`assets/render.py`). **Retired** —
+they were fully redundant with DeckJSON Path A layouts. The engine, its
+templates, and its `examples/*-luckin/` TOML samples were removed; the
+story-case schema-fit refusal + accent review were ported into
+`render-deck.py` (see the ONE-PAGER section's "Safety nets").
 
-The fragment-composition architecture means **adding a new pattern
-later doesn't break existing ones**: pattern CSS lives in
-`assets/feishu-deck-patterns.css` (single source of truth), and each
-slide layout exists as both a standalone `templates/<name>.html` (for
-single-slide decks) and a `templates/<name>.fragment.html` (for
-composition inside multi-case-bundle).
+Author what used to be a Layer-1 pattern as a normal deck.json layout:
 
-### `quote` — single customer testimonial slide
+| Old Layer-1 pattern | Now author as (deck.json) |
+|---|---|
+| `quote`             | `layout: "quote"` |
+| `big-stat`          | `layout: "stats"`, `variant: "hero"` |
+| `one-pager`         | `layout: "content"`, `variant: "story-case"` (see ONE-PAGER CASE POLICY above) |
+| `multi-case-bundle` | a normal multi-slide deck: `cover` + `agenda` + one `content/story-case` per case + `end` |
 
-**Trigger**: user gives a one-line customer quote / 客户原话 / 金句 +
-attribution. The case is the quote itself, no narrative arc.
+Old `.toml` case files convert 1:1 to the shapes above. If you ever need to
+render a legacy `.toml`, `render.py` is recoverable from git history.
 
-**Run**:
-```bash
-python3 assets/render.py quote <input.toml> <output-dir>/
-```
-
-**Schema** (see `examples/quote-luckin/input.toml`):
-
-```toml
-title       = "案例 · 客户原话"
-attribution = "客户名 · 角色 · 年份"
-# decor = "blue-glow"     # default; or "mix-glow" / "teal-glow" etc.
-# (brand / pageno fields retired 2026-05 — footer chrome is gone.)
-
-[quote]
-lead   = "...before the accent phrase..."
-accent = "强调短语"            # rendered teal, the emotional pivot
-tail   = "...after the accent..."
-```
-
-Required fields: `title`, `brand`, `attribution`, `quote.lead`,
-`quote.accent`, `quote.tail`. Fit-check covers all 4 narrative fields.
-Accent review prints the bracketed quote line for 1-second verification.
-
-### `big-stat` — one hero number + supporting prose
-
-**Trigger**: user wants to surface a single dominant metric (覆盖率 /
-ROI / 时延 / 占比) with surrounding context. The number IS the slide.
-
-**Run**:
-```bash
-python3 assets/render.py big-stat <input.toml> <output-dir>/
-```
-
-**Schema** (see `examples/big-stat-luckin/input.toml`):
-
-```toml
-title   = "案例 · 关键数字"
-brand   = "飞书企业 AI · 客户案例"      # OPTIONAL story-id suffix — only if user gives one
-source  = "数据来源 · <用户给的具体口径>"   # required when you cite a number — but cite the user's actual source. NEVER fabricate "客户内部口径".
-
-# top-level body fields — MUST come before any [table] header in TOML
-eyebrow = "IMPACT · 数字标签"          # optional small accent label
-heading = "一句话 takeaway"            # the meaning of the number
-body    = "解释这个数字背后的方法 / 范围 / 适用条件 ..."
-
-# the hero number — declared LAST because TOML scopes everything below
-# the [stat] header into the stat table.
-[stat]
-number = "82"
-unit   = "%"
-```
-
-Required: `title`, `brand`, `stat.number`, `stat.unit`, `heading`,
-`body`. Fit-check covers `heading` + `body` (numbers can naturally be
-short, so `stat.number / stat.unit` skip the length floor).
-
-### `multi-case-bundle` — full deck (cover + agenda + N cases + end)
-
-**Trigger**: user has 2+ customer cases and wants ONE deliverable
-(e.g. quarterly customer review, batch case-study export, "把这 5 个
-案例打包成一份 deck"). Each case must already exist as a one-pager
-TOML (or be authored as one first).
-
-**Run**:
-```bash
-python3 assets/render.py multi-case-bundle <bundle.toml> <output-dir>/
-```
-
-**Schema** (see `examples/bundle-luckin/bundle.toml`):
-
-```toml
-[deck]
-title  = "客户案例集 · 2026 Q1"
-author = "飞书企业 AI · 故事栏"
-date   = "2026.05.03"
-
-[agenda]
-title = "本期共 N 个案例"
-
-[brand]
-line    = "飞书企业 AI · 客户案例集"
-contact = "contact@feishu.cn  ·  feishu.cn"
-
-# Each case = relative path to an existing one-pager input.toml.
-# `label` is the short name shown in the agenda.
-[[cases]]
-input = "../one-pager-luckin/input.toml"
-label = "瑞幸营建 · 萃取隐形经验"
-
-[[cases]]
-input = "../one-pager-guming/input.toml"
-label = "古茗 SOP · ..."
-```
-
-**Composed deck layout**:
-- Slide 01 = cover (title + author + date, master spec — no subtitle)
-- Slide 02 = agenda (numbered list of case `label`s)
-- Slides 03..(N+2) = one-pager case fragments (one per `[[cases]]`)
-- Slide (N+3) = end (slogan + optional contact)
-
-**Fail-fast validation**: bundle render loads + validates EVERY case
-TOML up front (full schema-fit check) before writing any output. If
-ANY case has placeholder content / too-short beats / duplicate beats,
-bundle render aborts with the offending case name — no half-baked
-bundle ever ships. Each case's scene image is copied as
-`scene-NN.png` into the output directory; per-case data-text-ids
-become `slide-NN.field` so a unified texts.md works.
-
-### TOML pitfall (applies to all patterns)
-
-In TOML, **top-level keys must come before any `[table]` header** —
-otherwise they get scoped into that table. If `render.py` complains
-about missing top-level fields like `heading` or `eyebrow`, check that
-they appear above your first `[table]` block. The `[stat]` /
-`[quote]` / `[hook]` / `[arc]` / `[scene]` tables should be at the
-bottom of the file.
-
-### Adding new patterns later
-
-When a Path B authoring pattern recurs (the agent ships ≥ 2-3 cases
-that all use the same custom layout), promote it to Layer 1:
-
-1. Author `templates/<name>.html` with `{{ field }}` placeholders.
-2. Add a `<NAME>_REQUIRED / DEFAULTS / TEXT_IDS / FIT_CHECK /
-   ACCENT_PATHS` block to `assets/render.py`.
-3. Register it in `PATTERNS = {...}` with `version: "v1"` and
-   `needs_image: True/False`.
-4. Add a sample TOML under `examples/<name>-<demo>/`.
-5. Add a section here in SKILL.md following the quote / big-stat
-   shape above.
-
-This keeps the template library growing organically — every recurring
-Path B pattern eventually becomes a Path A template, and the LLM
-budget gets reclaimed for the next genuinely new shape.
-
----
 
 ## RUN-FEEDBACK CAPTURE (mandatory) — auto-generated `FEEDBACK.md` per run
 

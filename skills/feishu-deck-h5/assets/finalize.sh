@@ -111,13 +111,12 @@ else
     echo "  · texts.md sidecar already exists, skip"
 fi
 
-# ---------- 2.5 · FEEDBACK.md (auto-stub for Path B / LLM-authored decks) ----------
+# ---------- 2.5 · FEEDBACK.md (auto-stub when the agent forgot one) ----------
 #
-# Path A (render.py) emits FEEDBACK.md inline with the deck. Path B (freehand
-# LLM authoring) has no automation, and the agent forgets to write FEEDBACK.md
-# more often than not — out of the 17 runs through 2026-05-15, 8 missed it
-# (all Path B). SKILL.md "RUN-FEEDBACK CAPTURE" says the file is mandatory,
-# but mandatory-by-doc fails against forgetfulness.
+# Nothing in the current pipeline auto-emits FEEDBACK.md, and the agent
+# forgets to write it more often than not — out of the 17 runs through
+# 2026-05-15, 8 missed it. SKILL.md "RUN-FEEDBACK CAPTURE" says the file is
+# mandatory, but mandatory-by-doc fails against forgetfulness.
 #
 # Defense: if FEEDBACK.md is missing, emit a minimal stub here. The stub
 # is empty of agent decisions (the agent must still fill that in to make
@@ -138,10 +137,9 @@ if [ ! -f "$FEEDBACK" ]; then
      warning until it's gone. -->
 
 > ⚠️ This file was auto-stubbed by \`finalize.sh\` because the agent
-> didn't write one. The Path A pipeline (render.py for one-pager /
-> multi-case-bundle / quote / big-stat) emits FEEDBACK.md inline;
-> Path B (freehand LLM authoring) has no such automation, so this
-> stub catches the gap. Fill in the agent decisions and surprises
+> didn't write one. RUN-FEEDBACK CAPTURE in SKILL.md makes FEEDBACK.md
+> mandatory, but nothing in the pipeline auto-emits it, so this stub
+> catches the gap. Fill in the agent decisions and surprises
 > from this run, then send to the skill maintainer when you have
 > 3+ items worth raising.
 
