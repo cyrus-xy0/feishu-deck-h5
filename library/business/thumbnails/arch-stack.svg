@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" role="img" aria-label="architecture stack thumbnail">
+  <rect width="320" height="180" fill="#f7f8fc"/>
+  <rect x="28" y="24" width="264" height="28" rx="6" fill="#1457d9"/>
+  <rect x="42" y="68" width="236" height="20" rx="5" fill="#d8e6ff"/>
+  <rect x="42" y="98" width="236" height="20" rx="5" fill="#ccefe8"/>
+  <rect x="42" y="128" width="236" height="20" rx="5" fill="#ffe3c2"/>
+  <text x="160" y="42" font-family="Arial,sans-serif" font-size="15" fill="#ffffff" text-anchor="middle">分层架构</text>
+</svg>

@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "name": "Feishu H5 Deck Design Kit",
+  "source": "repo",
+  "description": "Reusable design assets and layout contracts for generated Feishu H5 decks.",
+  "layouts": [
+    "cover",
+    "agenda",
+    "section",
+    "content/3up",
+    "content/2col",
+    "content/story-case",
+    "content/blocks",
+    "content/matrix",
+    "content/before-after",
+    "stats/row",
+    "stats/hero",
+    "stats/waterfall",
+    "flow/timeline",
+    "flow/process",
+    "flow/tree",
+    "flow/swim",
+    "image-text",
+    "table",
+    "quote",
+    "arch-stack",
+    "logo-wall",
+    "iframe-embed",
+    "end"
+  ],
+  "css_tokens": [
+    "skills/feishu-deck-h5/assets/feishu-deck.css",
+    "skills/feishu-deck-h5/deck-json/templates/extra-layouts.css"
+  ],
+  "brand_assets": [
+    "skills/feishu-deck-h5/assets/lark-logo.png",
+    "skills/feishu-deck-h5/assets/lark-logo-mono-white.png",
+    "skills/feishu-deck-h5/assets/lark-cover-bg.jpg",
+    "skills/feishu-deck-h5/assets/lark-content-bg.jpg"
+  ],
+  "product_icon_index": "skills/feishu-deck-h5/assets/shared/asset-index.generated.json"
+}

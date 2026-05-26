@@ -27,7 +27,9 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
+
+import slide_library
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -109,6 +111,30 @@ def use_base_library() -> bool:
 
 def sync_base_assets() -> bool:
     return os.environ.get("GENERATOR_SYNC_BASE_ASSETS", "").lower() in {"1", "true", "yes"}
+
+
+def health_payload() -> dict[str, Any]:
+    gate = slide_library.validate_library(include_candidates=False)
+    return {
+        "ok": True,
+        "service": "lark-deck-generator",
+        "time": now_iso(),
+        "runs_dir": str(RUNS_DIR),
+        "renderer": str(RENDERER),
+        "renderer_exists": RENDERER.exists(),
+        "validator_exists": CHECK_ONLY.exists(),
+        "base_library": {
+            "enabled": use_base_library(),
+            "sync_assets": sync_base_assets(),
+            "identity": base_identity(),
+        },
+        "output_contract": REQUIRED_OUTPUTS + ["editable zip", "validator-report.md", "task.json"],
+        "library": {
+            "business_entries": gate["entries"],
+            "gate_ok": gate["ok"],
+            "design_kit": str(slide_library.DESIGN_KIT),
+        },
+    }
 
 
 def query_base_library(command: str, keyword: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -688,42 +714,7 @@ def slide_title(slide: dict[str, Any]) -> str:
 
 
 def slide_library_items(limit: int = 36) -> list[dict[str, Any]]:
-    """Small local slide library for the MVP editor.
-
-    P2 will replace this with the Business Library search service. For P1 the
-    editor can reuse valid slides from checked-in example decks.
-    """
-    sources = sorted((REPO / "skills/feishu-deck-h5/deck-json/examples").glob("*.json"))
-    items: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for source in sources:
-        try:
-            deck = read_json(source)
-        except Exception:
-            continue
-        for slide in deck.get("slides", []):
-            if not isinstance(slide, dict) or not slide.get("key") or not slide.get("layout"):
-                continue
-            if slide.get("layout") in {"cover", "end", "raw", "replica"}:
-                continue
-            identity = f"{source.name}:{slide.get('key')}"
-            if identity in seen:
-                continue
-            seen.add(identity)
-            items.append(
-                {
-                    "id": identity,
-                    "source": source.name,
-                    "key": slide.get("key"),
-                    "layout": slide.get("layout"),
-                    "variant": slide.get("variant", ""),
-                    "title": slide_title(slide),
-                    "slide": slide,
-                }
-            )
-            if len(items) >= limit:
-                return items
-    return items
+    return slide_library.search_slides(limit=limit)
 
 
 def task_versions(task_id: str) -> list[dict[str, Any]]:
@@ -876,11 +867,20 @@ def render_edit_page(task_id: str) -> bytes:
     </section>
     <section class="panel">
       <h2>素材库</h2>
-      <select id="library-select"></select>
+      <input id="library-query" placeholder="按行业、产品、价值主张搜索" oninput="renderLibrary()">
+      <select id="library-layout" onchange="renderLibrary()">
+        <option value="">全部 layout</option>
+        <option value="content">content</option>
+        <option value="flow">flow</option>
+        <option value="stats">stats</option>
+        <option value="arch-stack">arch-stack</option>
+      </select>
+      <select id="library-select" onchange="renderLibraryPreview()"></select>
+      <div id="library-preview" class="muted"></div>
       <div class="actions">
         <button class="secondary" onclick="insertLibrarySlide()">插入已有 slide</button>
       </div>
-      <p class="muted">当前读取本地示例 deck；P2 再替换为 Business Library 检索。</p>
+      <p class="muted">当前读取本地 Business Library；后续可替换为飞书 Base 检索。</p>
     </section>
   </aside>
   <section id="slide-editor"></section>
@@ -998,9 +998,34 @@ function syncFromForm() {{
 
 function renderLibrary() {{
   const select = document.getElementById('library-select');
-  select.innerHTML = library.map((item, index) => (
-    `<option value="${{index}}">${{esc(item.title)}} · ${{esc(item.layout)}}${{item.variant ? '/' + esc(item.variant) : ''}}</option>`
+  const query = document.getElementById('library-query').value.trim().toLowerCase();
+  const layout = document.getElementById('library-layout').value;
+  const rows = library
+    .map((item, index) => ({{...item, index}}))
+    .filter(item => !layout || item.layout === layout)
+    .filter(item => {{
+      if (!query) return true;
+      return JSON.stringify(item).toLowerCase().includes(query);
+    }});
+  select.innerHTML = rows.map(item => (
+    `<option value="${{item.index}}">${{esc(item.title)}} · ${{esc(item.layout)}}${{item.variant ? '/' + esc(item.variant) : ''}}</option>`
   )).join('');
+  if (!select.innerHTML) select.innerHTML = '<option value="">无匹配素材</option>';
+  renderLibraryPreview();
+}}
+
+function renderLibraryPreview() {{
+  const select = document.getElementById('library-select');
+  const item = library[Number(select.value)];
+  const root = document.getElementById('library-preview');
+  if (!item) {{
+    root.textContent = '没有匹配的可插入 slide。';
+    return;
+  }}
+  root.innerHTML = `
+    <p>${{esc(item.insert_suggestion || '')}}</p>
+    ${{item.thumbnail ? `<img src="/${{esc(item.thumbnail)}}" alt="" style="width:100%;max-height:120px;object-fit:cover;border:1px solid #d9dee8;border-radius:8px">` : ''}}
+  `;
 }}
 
 function renderSlideList() {{
@@ -1097,7 +1122,9 @@ function uniqueKey(base) {{
 
 function insertLibrarySlide() {{
   syncFromForm();
-  const item = library[Number(document.getElementById('library-select').value)];
+  const selected = document.getElementById('library-select').value;
+  if (selected === '') return;
+  const item = library[Number(selected)];
   if (!item) return;
   const slide = JSON.parse(JSON.stringify(item.slide));
   slide.key = uniqueKey(slide.key);
@@ -1428,7 +1455,44 @@ class GeneratorHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         parts = [unquote(p) for p in parsed.path.strip("/").split("/") if p]
         if parsed.path == "/health":
-            self.send_json(200, {"ok": True})
+            self.send_json(200, health_payload())
+            return
+        if parts == ["library", "slides"]:
+            query = parse_qs(parsed.query)
+            item = lambda key: (query.get(key) or [""])[0]
+            rows = slide_library.search_slides(
+                query=item("query") or item("q"),
+                industry=item("industry"),
+                product=item("product"),
+                customer_stage=item("customer_stage") or item("customer-stage"),
+                deck_type=item("deck_type") or item("deck-type"),
+                value_prop=item("value_prop") or item("value-prop"),
+                layout=item("layout"),
+                include_candidates=item("include_candidates").lower() in {"1", "true", "yes"},
+                limit=int(item("limit") or "20"),
+            )
+            self.send_json(200, {"items": rows})
+            return
+        if parts == ["library", "gate"]:
+            gate = slide_library.validate_library()
+            self.send_json(200 if gate["ok"] else 500, gate)
+            return
+        if parts == ["library", "design-kit"]:
+            self.send_json(200, slide_library.load_design_kit())
+            return
+        if len(parts) >= 2 and parts[0] == "library":
+            root = (REPO / "library").resolve()
+            target = (REPO / Path(*parts)).resolve()
+            if not target.is_file() or not target.is_relative_to(root):
+                self.send_json(404, {"error": "library file not found"})
+                return
+            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            raw = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
             return
         if len(parts) == 3 and parts[0] == "decks" and parts[2] == "status":
             try:
@@ -1487,6 +1551,16 @@ class GeneratorHandler(BaseHTTPRequestHandler):
                 task_id = parts[1]
                 task = edit_task(task_id, self.read_body_json(), base_url=self.base_url())
                 self.send_json(201 if task["status"] == "succeeded" else 500, task)
+                return
+            if parts == ["library", "candidates"]:
+                payload = self.read_body_json()
+                result = slide_library.mark_reuse_candidate(
+                    str(payload.get("task_id") or payload.get("taskId") or ""),
+                    str(payload.get("slide_key") or payload.get("slideKey") or ""),
+                    payload,
+                )
+                has_errors = any(issue["severity"] == "error" for issue in result.get("issues", []))
+                self.send_json(400 if has_errors else 201, result)
                 return
         except Exception as exc:  # noqa: BLE001
             self.send_json(400, {"error": str(exc)})

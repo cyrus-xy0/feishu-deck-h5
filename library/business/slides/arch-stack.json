@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "id": "biz-arch-stack",
+  "title": "飞书能力分层架构",
+  "status": "approved",
+  "thumbnail": "library/business/thumbnails/arch-stack.svg",
+  "tags": ["架构", "能力分层", "产品组合", "AI"],
+  "industry": ["消费零售", "制造", "金融", "互联网", "教育", "HR", "SaaS"],
+  "product": ["飞书AI", "Aily", "知识问答", "多维表格", "飞书会议"],
+  "customer_stage": ["首访", "POC", "竞品替代"],
+  "deck_type": ["客户pitch", "POC方案", "产品介绍"],
+  "value_prop": ["统一入口", "智能体引擎", "权限治理", "数据底座"],
+  "layout": "arch-stack",
+  "variant": "",
+  "source": {
+    "level": "synthetic",
+    "deck": "skills/feishu-deck-h5/deck-json/examples/phase-1c-extras.json",
+    "slide_key": "arch-demo",
+    "owner": "lark-deck-cyrus",
+    "approved_by": "system-seed"
+  },
+  "slide": {
+    "key": "arch-demo",
+    "layout": "arch-stack",
+    "accent": "blue",
+    "screen_label": "08 arch-stack",
+    "data": {
+      "title": "arch-stack · 分层架构",
+      "layers": [
+        {
+          "name": {
+            "title": "应用层",
+            "sub": "APPS · 面向终端用户"
+          },
+          "modules": ["飞书消息", "飞书文档", "多维表格", "飞书会议", "飞书知识库"]
+        },
+        {
+          "name": {
+            "title": "AI 层",
+            "sub": "AI · 智能体引擎"
+          },
+          "modules": ["aily 智能体", "知识问答", "AI 会议纪要", "AI 邮件"]
+        },
+        {
+          "name": {
+            "title": "平台层",
+            "sub": "PLATFORM · 一体化协同"
+          },
+          "modules": ["统一身份", "权限网关", "审计日志", "数据中台"]
+        },
+        {
+          "name": {
+            "title": "基础层",
+            "sub": "INFRA · 云 + 安全"
+          },
+          "modules": ["多云部署", "零信任安全", "全球加速", "灾备"]
+        }
+      ]
+    }
+  }
+}

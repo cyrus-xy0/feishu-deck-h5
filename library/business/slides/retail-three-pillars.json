@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "id": "biz-retail-three-pillars",
+  "title": "三卡式工作方式洞察",
+  "status": "approved",
+  "thumbnail": "library/business/thumbnails/retail-three-pillars.svg",
+  "tags": ["三卡", "工作方式", "闭环", "通用提案"],
+  "industry": ["消费零售", "SaaS", "通用"],
+  "product": ["飞书消息", "飞书Wiki", "飞书Base"],
+  "customer_stage": ["首访", "POC"],
+  "deck_type": ["客户pitch", "行业方案"],
+  "value_prop": ["即时同步", "共识对齐", "闭环交付"],
+  "layout": "content",
+  "variant": "3up",
+  "source": {
+    "level": "synthetic",
+    "deck": "skills/feishu-deck-h5/deck-json/examples/sample-deck.json",
+    "slide_key": "three-pillars",
+    "owner": "lark-deck-cyrus",
+    "approved_by": "system-seed"
+  },
+  "slide": {
+    "key": "three-pillars",
+    "layout": "content",
+    "variant": "3up",
+    "accent": "blue",
+    "screen_label": "04 三大能力",
+    "data": {
+      "title": "先进团队的三大工作方式",
+      "cards": [
+        {
+          "num": "01",
+          "icon": "message-circle",
+          "title_zh": "即时同步",
+          "body": "30 万人组织,一封消息触达全员,3 秒内全部已读。",
+          "footer_label": "MESSENGER · DOCS"
+        },
+        {
+          "num": "02",
+          "icon": "users",
+          "title_zh": "共识对齐",
+          "body": "所有讨论沉淀进 Wiki,决策可追溯,新成员第一天就能看到全貌。",
+          "footer_label": "WIKI · BASE"
+        },
+        {
+          "num": "03",
+          "icon": "check-circle",
+          "title_zh": "闭环交付",
+          "body": "从需求到上线,流程在 Base 中自动流转,每一步都有责任人和时间戳。",
+          "footer_label": "BASE · MEETINGS"
+        }
+      ],
+      "body_blocks": [
+        {
+          "type": "pullquote",
+          "text": "不是把工具堆给团队,是让团队的工作方式本身被升级。",
+          "tone": "default"
+        }
+      ]
+    }
+  }
+}

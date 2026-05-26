@@ -77,6 +77,10 @@ jobs:
         run: |
           python3 ../../evals/run-feishu-bot-contract.py
 
+      - name: Slide library contract
+        run: |
+          python3 ../../evals/run-slide-library-contract.py
+
       - name: Preflight self-test (CI environment is non-Cowork — should still pass)
         run: |
           # CI runs in a fresh GitHub runner, not a Cowork session. The preflight

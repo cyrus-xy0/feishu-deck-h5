@@ -34,6 +34,12 @@ Run the Feishu Bot MVP contract check:
 python3 evals/run-feishu-bot-contract.py
 ```
 
+Run the P2 slide library contract check:
+
+```bash
+python3 evals/run-slide-library-contract.py
+```
+
 The script writes ignored artifacts to `runs/product-evals/<run-id>/`:
 
 - `input/outline.json`
@@ -52,6 +58,10 @@ status/edit HTML pages.
 The bot contract simulates a natural Feishu brief, verifies the 3-5 question
 follow-up behavior, then answers the missing fields and asserts the bot returns
 status, preview, edit, and download links for a succeeded generator task.
+
+The slide library contract verifies the local Business Library gate, search
+results with thumbnail/insert suggestions, and the "mark worth reusing" flow
+that creates a review candidate from a generated task.
 
 ## Current 5 Rounds
 

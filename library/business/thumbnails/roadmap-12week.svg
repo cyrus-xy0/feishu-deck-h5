@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" role="img" aria-label="timeline slide thumbnail">
+  <rect width="320" height="180" fill="#f5fbff"/>
+  <rect x="24" y="28" width="168" height="18" rx="3" fill="#1457d9"/>
+  <line x1="44" y1="102" x2="276" y2="102" stroke="#1457d9" stroke-width="4"/>
+  <circle cx="54" cy="102" r="12" fill="#ffffff" stroke="#1457d9" stroke-width="4"/>
+  <circle cx="126" cy="102" r="12" fill="#ffffff" stroke="#1457d9" stroke-width="4"/>
+  <circle cx="198" cy="102" r="12" fill="#ffffff" stroke="#1457d9" stroke-width="4"/>
+  <circle cx="270" cy="102" r="12" fill="#ffffff" stroke="#1457d9" stroke-width="4"/>
+  <text x="160" y="146" font-family="Arial,sans-serif" font-size="15" fill="#202733" text-anchor="middle">12 周路径</text>
+</svg>

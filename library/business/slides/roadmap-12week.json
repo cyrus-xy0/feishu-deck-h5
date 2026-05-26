@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "id": "biz-roadmap-12week",
+  "title": "12 周试点落地路径",
+  "status": "approved",
+  "thumbnail": "library/business/thumbnails/roadmap-12week.svg",
+  "tags": ["试点", "落地路径", "项目计划", "时间线"],
+  "industry": ["消费零售", "制造", "金融", "HR", "SaaS"],
+  "product": ["飞书项目", "飞书Base", "飞书任务"],
+  "customer_stage": ["POC", "复盘续约"],
+  "deck_type": ["客户pitch", "POC方案", "项目启动"],
+  "value_prop": ["低风险试点", "可验证路径", "责任闭环"],
+  "layout": "flow",
+  "variant": "timeline",
+  "source": {
+    "level": "synthetic",
+    "deck": "skills/feishu-deck-h5/deck-json/examples/sample-deck.json",
+    "slide_key": "roadmap-12week",
+    "owner": "lark-deck-cyrus",
+    "approved_by": "system-seed"
+  },
+  "slide": {
+    "key": "roadmap-12week",
+    "layout": "flow",
+    "variant": "timeline",
+    "accent": "blue",
+    "screen_label": "11 12 周路径",
+    "data": {
+      "title": "12 周落地路径",
+      "cols": 4,
+      "nodes": [
+        {
+          "when": "W1-2",
+          "what": "需求蓝图",
+          "desc": "访谈 6 部门,输出协同地图与目标 KPI。"
+        },
+        {
+          "when": "W3-5",
+          "what": "关键流程上线",
+          "desc": "销售、HR、财务三条核心流在 Base 中先跑通。"
+        },
+        {
+          "when": "W6-8",
+          "what": "全员推广",
+          "desc": "分层培训,关键岗位 100% 接入,数据搬迁完成。"
+        },
+        {
+          "when": "W9-12",
+          "what": "数据复盘",
+          "desc": "复盘 KPI,调整流程,形成长期治理机制。"
+        }
+      ]
+    }
+  }
+}

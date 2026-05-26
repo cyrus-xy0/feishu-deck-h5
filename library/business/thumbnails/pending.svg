@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" role="img" aria-label="pending review thumbnail">
+  <rect width="320" height="180" fill="#f6f8fb"/>
+  <rect x="32" y="36" width="256" height="108" rx="10" fill="#ffffff" stroke="#d9dee8"/>
+  <text x="160" y="84" font-family="Arial,sans-serif" font-size="18" fill="#1457d9" text-anchor="middle">待审核</text>
+  <text x="160" y="112" font-family="Arial,sans-serif" font-size="13" fill="#657186" text-anchor="middle">Reusable slide candidate</text>
+</svg>

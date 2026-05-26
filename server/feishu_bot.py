@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -19,6 +20,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib import request
 
 import generator
 
@@ -380,12 +382,76 @@ def consume_events(args: argparse.Namespace) -> int:
     return proc.wait()
 
 
+def doctor_payload(base_url: str, *, require_generator: bool = False, require_public_url: bool = False) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    lark_cli = shutil.which("lark-cli")
+    checks.append({"name": "lark-cli", "ok": bool(lark_cli), "value": lark_cli or ""})
+
+    try:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        probe = STATE_PATH.parent / ".feishu-bot-state.probe"
+        probe.write_text("ok\n", encoding="utf-8")
+        probe.unlink()
+        state_ok = True
+        state_error = ""
+    except Exception as exc:  # noqa: BLE001
+        state_ok = False
+        state_error = str(exc)
+    checks.append({"name": "state-writable", "ok": state_ok, "path": str(STATE_PATH), "error": state_error})
+
+    public_like = not re.search(r"//(?:127\.0\.0\.1|localhost)(?::\d+)?", base_url)
+    checks.append(
+        {
+            "name": "public-base-url",
+            "ok": public_like or not require_public_url,
+            "ready": public_like,
+            "value": base_url,
+            "warning": "" if public_like else "飞书里返回 localhost 链接时,其他人无法打开。",
+        }
+    )
+
+    generator_ok = False
+    generator_error = ""
+    try:
+        with request.urlopen(base_url.rstrip("/") + "/health", timeout=3) as resp:
+            generator_ok = 200 <= resp.status < 300
+    except Exception as exc:  # noqa: BLE001
+        generator_error = str(exc)
+        curl = shutil.which("curl")
+        if curl:
+            proc = subprocess.run(
+                [curl, "-fsS", base_url.rstrip("/") + "/health"],
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=5,
+            )
+            generator_ok = proc.returncode == 0
+            if generator_ok:
+                generator_error = ""
+            elif proc.stderr:
+                generator_error = proc.stderr.strip()
+    checks.append({"name": "generator-health", "ok": generator_ok or not require_generator, "reachable": generator_ok, "error": generator_error})
+
+    return {"ok": all(item["ok"] for item in checks), "checks": checks}
+
+
 def cmd_handle_text(args: argparse.Namespace) -> int:
     state = load_state(args.state)
     result = handle_message_text(args.text, state, conversation_key=args.conversation_key, base_url=args.base_url)
     save_state(state, args.state)
     print(result.reply)
     return 0 if not result.task or result.task.get("status") == "succeeded" else 1
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    payload = doctor_payload(
+        args.base_url,
+        require_generator=args.require_generator,
+        require_public_url=args.require_public_url,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if payload["ok"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -405,6 +471,12 @@ def main(argv: list[str] | None = None) -> int:
     handle.add_argument("--base-url", default=DEFAULT_BASE_URL)
     handle.add_argument("--state", type=Path, default=STATE_PATH)
     handle.set_defaults(func=cmd_handle_text)
+
+    doctor = sub.add_parser("doctor", help="check Feishu bot runtime prerequisites")
+    doctor.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    doctor.add_argument("--require-generator", action="store_true", help="fail if generator /health is unreachable")
+    doctor.add_argument("--require-public-url", action="store_true", help="fail if base URL is localhost")
+    doctor.set_defaults(func=cmd_doctor)
 
     args = parser.parse_args(argv)
     return args.func(args)
