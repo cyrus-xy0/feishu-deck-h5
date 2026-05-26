@@ -116,6 +116,88 @@ def get_path(d, dotted: str):
     return cur
 
 
+# ---------------------------------------------------------------------------
+# content/story-case schema-fit refusal + accent review
+# Ported 2026-05-26 from the retired assets/render.py one-pager pipeline.
+# story-case carries the SAME field shape (hook.{lead,accent,tail},
+# arc.{pain,conflict,solution}, arc.value.{lead,accent,tail}), so the checks
+# apply verbatim. The JSON schema enforces field PRESENCE; this catches
+# placeholder / too-short / duplicate beats it can't see, and prints the
+# accent word for a 1-second eyeball. Opt out with --skip-fit-check.
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDER_PATTERNS = (
+    r"\b(TBD|TBC|TODO|XXX|N/?A|FIXME)\b",
+    r"(待补|具体待补|占位|稍后补充|有待补充|待定|暂无|未填|None)",
+    r"^[\s\.\-…—_]+$",
+    r"^(\?+|？+)$",
+    r"\.\.\.{2,}|…{2,}",
+)
+_MIN_LEN_FULL = 10        # arc.pain / arc.conflict / arc.solution
+_MIN_LEN_ACCENT = 2       # *.accent — highlight words
+_MIN_LEN_CONNECTIVE = 1   # *.lead / *.tail — connective tissue
+
+STORY_CASE_FIT_CHECK = (
+    "hook.lead", "hook.accent", "hook.tail",
+    "arc.pain", "arc.conflict", "arc.solution",
+    "arc.value.lead", "arc.value.accent", "arc.value.tail",
+)
+STORY_CASE_ACCENT_PATHS = (
+    ("hook",  "hook"),
+    ("value", "arc.value"),
+)
+
+
+def _min_len_for(path: str) -> int:
+    if path.endswith(".accent"):
+        return _MIN_LEN_ACCENT
+    if path.endswith((".lead", ".tail")):
+        return _MIN_LEN_CONNECTIVE
+    return _MIN_LEN_FULL
+
+
+def check_story_case_fit(data: dict) -> list:
+    """Return fit issues for one content/story-case slide's data dict.
+    Empty list = OK. Mirrors the retired render.py one-pager schema-fit gate."""
+    issues = []
+    seen = {}
+    for path in STORY_CASE_FIT_CHECK:
+        try:
+            text = get_path(data, path)
+        except KeyError:
+            continue
+        text = text.strip() if isinstance(text, str) else ""
+        for pat in _PLACEHOLDER_PATTERNS:
+            if re.search(pat, text, flags=re.IGNORECASE):
+                issues.append(f"{path}: 占位词 ({text!r}) — 这一拍承不起,改内容或换 layout")
+                break
+        else:
+            min_len = _min_len_for(path)
+            if len(text) < min_len:
+                issues.append(f"{path}: 只有 {len(text)} 字 ({text!r}) — 太短,该 beat 可能不存在")
+            elif text in seen and not path.endswith((".lead", ".tail", ".accent")):
+                issues.append(f"{path}: 与 {seen[text]} 完全相同 ({text!r}) — 这一拍可能不存在")
+            else:
+                seen[text] = path
+    return issues
+
+
+def show_story_case_accents(data: dict, slide_key: str) -> None:
+    """Print accent-bearing fields with the highlight marked (ANSI teal in a
+    TTY, brackets otherwise) for a 1-second 'is the right word emphasized?'."""
+    use_color = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+    hl_o = "\033[1;36m" if use_color else "["
+    hl_c = "\033[0m" if use_color else "]"
+    for label, base in STORY_CASE_ACCENT_PATHS:
+        try:
+            lead   = get_path(data, f"{base}.lead")
+            accent = get_path(data, f"{base}.accent")
+            tail   = get_path(data, f"{base}.tail")
+        except KeyError:
+            continue
+        print(f"  {slide_key} · {label:>5}  ·  {lead}{hl_o}{accent}{hl_c}{tail}")
+
+
 def relpath_from_to(src_dir: Path, dst_dir: Path) -> str:
     return os.path.relpath(dst_dir, start=src_dir).replace(os.sep, "/")
 
@@ -1351,6 +1433,9 @@ def main(argv=None) -> int:
                     help="skip post-render HTML validator (NOT recommended)")
     ap.add_argument("--skip-texts", action="store_true",
                     help="skip texts.md sidecar generation (NOT recommended)")
+    ap.add_argument("--skip-fit-check", action="store_true",
+                    help="skip the content/story-case schema-fit refusal "
+                         "(placeholder / too-short / duplicate beat detection)")
     ap.add_argument("--skip-copy-assets", action="store_true",
                     help="skip copy-assets step — output will reference skill-relative paths "
                          "(works only while output sits in <repo>/runs/<ts>/output/)")
@@ -1389,6 +1474,24 @@ def main(argv=None) -> int:
         print(f"render-deck: deck file not found: {args.deck}", file=sys.stderr); return 2
     except json.JSONDecodeError as e:
         print(f"render-deck: invalid JSON: {e}", file=sys.stderr); return 2
+
+    # 2.5 content/story-case schema-fit refusal (ported from retired render.py).
+    # Schema enforces field presence; this catches placeholder / too-short /
+    # duplicate beats. Opt out with --skip-fit-check.
+    if not args.skip_fit_check:
+        fit_issues = []
+        for i, s in enumerate(deck.get("slides", [])):
+            if (s.get("layout") == "content" and s.get("variant") == "story-case"
+                    and not s.get("_disabled")):
+                for msg in check_story_case_fit(s.get("data", {})):
+                    fit_issues.append(f"  slide[{i}] key='{s.get('key')}' · {msg}")
+        if fit_issues:
+            print("render-deck: content/story-case 内容撑不起 schema (schema-fit refusal):",
+                  file=sys.stderr)
+            print("\n".join(fit_issues), file=sys.stderr)
+            print("  → 改 deck.json 把这些 beat 写实,或换 layout(别硬塞)。"
+                  "确认有意为之就加 --skip-fit-check。", file=sys.stderr)
+            return 4
 
     # 3. Setup output dir
     args.output_dir = args.output_dir.resolve()
@@ -1545,6 +1648,16 @@ def main(argv=None) -> int:
     print(f"       slides: {total}")
     if not args.skip_texts:
         print(f"       sidecar: texts.md")
+
+    # Accent review — for any content/story-case slide, print the highlighted
+    # word so the author can eyeball that the right pivot is emphasized.
+    sc_slides = [s for s in deck.get("slides", [])
+                 if s.get("layout") == "content" and s.get("variant") == "story-case"
+                 and not s.get("_disabled")]
+    if sc_slides:
+        print("\nACCENT 复核 (1 秒目测,被高亮的词是该突出的吗?)")
+        for s in sc_slides:
+            show_story_case_accents(s.get("data", {}), s.get("key", "?"))
     return 0
 
 
