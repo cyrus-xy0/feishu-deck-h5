@@ -25,10 +25,83 @@ Before reading anything else in this file, decide which mode the user is in:
 | Mode | Trigger phrases / signals | What to do |
 |---|---|---|
 | **CHECK-ONLY** | "帮我检查这份 HTML/deck" · "看看这个 deck 合不合规" · "审一下这个 HTML" · "validate this" · "check the deck" · "扫一遍合规问题" · "这个 HTML 哪里不对" · user hands over a path to an existing `.html` and asks for review WITHOUT asking to generate / modify content | **Jump to "CHECK-ONLY MODE" section below.** SKIP PREFLIGHT, SKIP `new-run.sh`, SKIP `copy-assets`, SKIP everything else in this file. |
-| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | Follow the rest of this file starting at PREFLIGHT, **then read DECK GENERATION POLICY** to pick DeckJSON-first (default) vs raw HTML authoring (escape hatch). **If input is a pure text brief** (主题列表 / Q&A 文案 / outline 描述), **also read DESIGN-FIRST POLICY** — produce the per-page layout plan and get user confirmation BEFORE touching any file. |
+| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | **Run the DESIGN PHASE first (default-on, chat-only)** — 标 hero 页、逐页定 path、定补全计划、给 hero 页写 Q0–Q4 + 六维 spec。任何一页走默认 layout 之外的设计就停下确认;全 schema 宣告即走。然后 PREFLIGHT → new-run(落 `DESIGN-PLAN.md`)→ 按 path 生成(Path A schema 见 `DECK GENERATION POLICY`;hero 的 `layout: raw` / bespoke 见同节 + `DESIGN-FIRST POLICY` 词汇库)。 |
 
 If a request is genuinely ambiguous ("can you look at this HTML and improve it?"
 — check or rewrite?), ask the user once to clarify before branching.
+
+---
+
+## DESIGN PHASE (mandatory · default-on) — 设计先行,生成前的第一步
+
+GENERATION mode 的**第一步,默认执行**。它只在 chat 里发生(不创建任何文件,
+所以不和 PREFLIGHT "blocks all work" 冲突)。运行顺序:
+
+> **DESIGN PHASE(chat)→ [按风险确认] → PREFLIGHT → new-run(落 DESIGN-PLAN.md)→ 按 path 生成**
+
+这一节是**编排器**:把下面三条既有 policy(`DECK GENERATION POLICY` /
+`DESIGN-FIRST POLICY` / `CONTENT-DENSITY POLICY`)串成一个阶段,并把默认值
+钉在"**用好 LLM 做设计**"这一侧 —— 因为下限有 validator 兜底,上限只能靠
+LLM 多做创造性工作(补文案、补内容、为高光页写 bespoke layout)。细节仍在
+各自 section,本节只给编排 + 默认值 + 指针。(CHECK-ONLY readers skip this section.)
+
+### 默认执行 = 设计思考 always 跑;确认门按风险触发
+
+- **设计思考永远跑** —— 标 hero、定每页 path、定补全计划、给 hero 页写页级
+  spec。这些 every run 都做,**不因为"用户说直接出"就跳过 thinking**。
+- **确认门是条件触发的**:
+  - 全 deck 都落在默认 Path A schema layouts(15 个之内)→ **宣告方案即可往下走**,
+    不强制停下等批准。
+  - **任何一页走"默认 layout 之外"的设计**(`layout: raw` / bespoke hero /
+    超出用户给定材料的重度内容补全)→ **必须停下,把那几页的设计 spec 逐项
+    摆出来等用户确认**,改了回 Step 1/2,再生成。
+  - 用户明说"直接出 / 别问" → 跳过的是**确认那一下**,不是设计思考。
+- **退化场景**(设计阶段坍缩成一句话,见 `Converting existing material`):
+  Replica PDF 1:1 贴图 / 单页精修(只动这页,标题 verbatim)/ 用户已明确给定 layout。
+
+### 四步
+
+**Step 1 · Deck 级**
+- 叙事弧 + 页数(转换已有材料默认 1:1,见 `Converting existing material` Step 0)。
+- 标 **hero 页**(通常 2–3 张高光:封面 / 那一个大论点 / 关键案例 / 收尾)。
+  这是"放开 LLM"的**作用域开关** —— hero 页才全开 bespoke,其余页求稳,
+  避免把 floor 在全 deck 搞松。
+- 逐页定 **path**:hero → `layout: raw` + 词汇库 pattern(见 Step 2);
+  其余 → Path A schema(见 `DECK GENERATION POLICY`)。
+- **内容/文案补全计划**:默认就**专业补全**(见 `CONTENT-DENSITY POLICY` —
+  默认动作是"补",不是"先问")。只标"哪几页补、补什么方向"。唯一硬护栏:
+  **不编 attributed facts**(具体公司数字 / 具名引语 / 来源出处 —— 见 ONE-PAGER
+  的 no-fabrication 规则)。
+
+**Step 2 · 页级 spec(Q0–Q4 + A 档六维)**
+- **hero 页:必填** Q0–Q4 + 六维 spec(见 `DESIGN-FIRST POLICY` 设计前预检)。
+  且**先翻设计词汇库再落 layout** —— `narrative patterns A–N` + `component
+  utility classes`(见文末两节),挑一个 striking pattern,而不是反射性套 3 卡。
+- **支撑页:轻量** —— 角色判断 + `Decision rule` 选个 schema layout 就够,
+  不必写满六维。
+
+**Step 3 · 输出设计方案**
+- chat 里出 Design pass 表(格式见 `DESIGN-FIRST POLICY` → Design pass output),
+  每行带:角色 / 唯一重点 / path / 是否 hero。
+- hero 页各附一句话 design intent statement。
+
+**Step 4 · 闸门 + 落盘**
+- 有 beyond-default 页 → 等用户确认;全 schema → 宣告即走。
+- 确认/宣告后:PREFLIGHT → new-run → **把锁定的方案写一份
+  `runs/<ts>/output/DESIGN-PLAN.md`**(与 FEEDBACK.md / PROMPTS.md / texts.md
+  同级),生成严格照它走;中途想偏离先回来改 plan,不静默漂移。
+
+### DESIGN-PLAN.md 落盘(mandatory)
+
+new-run 之后立即写 `runs/<ts>/output/DESIGN-PLAN.md`,内容:
+
+1. **方案表** —— Step 3 那张表(逐页:角色 / 唯一重点 / layout 或 path / 是否 hero / 为什么)。
+2. **hero 页 spec** —— 每张 hero 页的 Q0–Q4 + A 档六维 + 选定的 pattern。
+3. **补全计划** —— 哪几页补了内容 / 文案,补的方向,并标注来源性质(公开行业知识 / 产品能力 / 类似客户故事),确认没有 attributed facts。
+
+作用:(1) 生成步有据可依,防 LLM 自己跑偏离开方案(冰红茶 slide 9 那类);
+(2) 用户 / 维护者事后能复盘"这份 deck 当初是怎么设计的";(3) 二次迭代时是 diff 基线。
+随 run 一起走(`package-deliverable.sh` 已含 `*.md`)。
 
 ---
 
@@ -341,7 +414,12 @@ are non-persistent and equally broken for this skill's purpose.
 | Path | When | What you write | What renders |
 |---|---|---|---|
 | **A · DeckJSON-first** *(RECOMMENDED, default)* | The deck fits one of the 15 layouts in `deck-json/deck-schema.json` (12 base + 3 specials: `raw` / `replica` / `iframe-embed`) — covers ~95% of real decks | `runs/<ts>/output/deck.json` per schema | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + texts.md + assets/` automatically |
-| **B · Raw HTML authoring** *(legacy / escape hatch)* | A pattern genuinely doesn't fit any schema layout AND can't be expressed as `raw` block embed | Hand-author `index.html` per the R02 / R06 / R20 / L1-L4 / BF1-BF12 rules below | Skill's existing `validate.py` HARD GATE before delivery |
+| **B · Raw HTML authoring** *(escape hatch · 整页手写 `index.html`,极少用)* | A pattern genuinely doesn't fit any schema layout AND can't be expressed as a `layout: "raw"` slide | Hand-author `index.html` per the R02 / R06 / R20 / L1-L4 / BF1-BF12 rules below | Skill's existing `validate.py` HARD GATE before delivery |
+
+> **注意区分 `layout: "raw"`(Path A 内)与 Path B(整页手写)**:hero 高光页用
+> `layout: "raw"` 单页 bespoke —— 它仍在 deck.json / render-deck.py 管线内、仍过
+> validate.py,是**一等设计工具**(见下「`layout: raw` for hero pages」)。Path B
+> 是连 `layout:"raw"` 都表达不了时才整页手写的最后手段。
 
 **Why Path A is the default**:
 - **Stability**: ~95% of HTML/CSS bugs Path B hits (R20 off-tier font, R06 floors, R12 drop shadows, BF1-BF12 layout traps, R-CSSVAR undefined tokens) are eliminated because you write data, not CSS. Renderer + framework CSS handle them.
@@ -448,9 +526,27 @@ Deck-level theme: `deck.title_style` (4 styles · center-single/center-double/le
 **Worked examples**: `deck-json/examples/sample-deck.json` (14 slides — the 10 core layouts: cover/agenda/section/content/stats/flow/quote/image-text/table/end) · `deck-json/examples/phase-1c-extras.json` (the extras: content-blocks/matrix/before-after, flow-tree/swim, stats-waterfall, logo-wall, arch-stack, replica). `iframe-embed` + `raw` have no example deck yet.
 **Migration notes**: `deck-json/MIGRATION-REPORT.md`
 
-### When to escape to Path B (raw HTML)
+### `layout: raw` for hero pages — 一等工具,不是兜底
 
-Reach for raw HTML authoring **only** when:
+设计阶段标为 **hero 的高光页,主动用 `layout: "raw"` 做 bespoke** —— 这是
+"用好 LLM 做设计"的主战场,不是失败兜底。三件事记牢:
+
+- **raw ≠ 失控**:`layout: "raw"` 仍走 `render-deck.py` + `validate.py` 全套
+  HARD GATE(R10 brand hex / R12 no-drop-shadow / R13 / 4-tier ladder /
+  R-WHITE-TEXT / UI1 … 全在)。floor 由 validator 兜,你只管把 ceiling 做高。
+- **门槛 = Q2 六维 spec**:写 raw 前必须先在 chat 出该 hero 页的 Q0–Q4 + A 档
+  六维(见 `DESIGN-FIRST POLICY` 设计前预检)。六维写不出来 = 还没想清楚 =
+  先别写 raw。
+- **先翻词汇库再硬写**:`narrative patterns A–N`(双手架构 / 铁四角 /
+  scene-grid / 北极星地图 / 5-up 大号数字 …)+ `component utility classes`
+  多半已有现成 pattern,优先复用。
+
+支撑页(非 hero)不要这样 —— 它们走 Path A schema 求稳。把 bespoke 的预算
+**集中花在 2–3 张 hero 页**上,不要全 deck 放开。
+
+### When to escape to Path B (整页手写 HTML)
+
+连 `layout: "raw"` 单页都表达不了时,才整页手写。**only** when:
 
 1. **No schema layout fits the structural shape** — e.g. the "two-hand-architecture" with crown/SVG-arches/base requires highly specific 4-tier vertical DOM that doesn't map cleanly to any layout. Use `layout: "raw"` first; only fall back to full Path B if even `raw` won't suffice.
 2. **One-off design experiment** — you're prototyping a brand-new visual pattern that may or may not become a recurring layout. Path B lets you iterate freely. **If the pattern recurs ≥ 2 decks, propose a schema extension** (see deck-json/MIGRATION-REPORT.md Phase 0.2 process) instead of building 5 raw slides.
@@ -530,10 +626,15 @@ If 1-2 specific slides won't fit the schema but everything else does:
 
 ## DESIGN-FIRST POLICY (mandatory) — 给文案就先出设计方案,别直接动手
 
+> **本节是 `DESIGN PHASE` Step 2 的细节**(per-page 设计预检 + Q0–Q4 + 六维 +
+> Decision rule)。编排、默认值、确认门规则在 `DESIGN PHASE` 那一节;这里讲
+> "每页具体怎么想"。确认门**按风险触发**(全 schema 宣告即走;有 `layout: raw`
+> / bespoke / 重度补全的页才停下确认),不再是无条件"必须等确认"。
+
 When the user hands you **a text brief** (一串提示词 / 文案 / Q&A 大纲 /
 sections 描述 / 主题列表),**do NOT immediately create files**. First
-produce a per-page design plan in chat, get user confirmation, THEN
-generate.
+produce a per-page design plan in chat (DESIGN PHASE Step 1–3), THEN —
+若有 beyond-default 页则等确认、否则宣告即走 — generate.
 
 ### 设计前预检 · 5 个问题(MANDATORY · 每张新 slide / per-page polish)
 
@@ -869,18 +970,24 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
 
 ### Design pass output — markdown table in chat
 
-| # | 页 / 主题 | Layout | 标准 / 自定义 | 为什么 |
-|---|---|---|---|---|
-| P0 | 封面 | `cover` | 标准 | 主标题 + 发起人 + 日期,master 封面 |
-| P1 | 客户三个核心痛点 | `content/3up` | 标准 | 3 个并列点,schema 正合适 |
-| P2 | 客户原话 | `quote` | 标准 | 单句引语 |
-| P3 | Q&A 大问题 + 原声列表 | `.qa-page` | **自定义** | 主问题需多行,schema 无匹配 |
-| P4 | 抽奖 / 礼品 | `end` + 自定义内容 | 半自定义 | 借 framework 花卉背景 + 自加 raffle 内容 |
+| # | 页 / 主题 | 角色 | Layout / path | hero? | 为什么 |
+|---|---|---|---|---|---|
+| P0 | 封面 | 结论 | `cover`(Path A) | — | 主标题 + 发起人 + 日期,master 封面 |
+| P1 | 客户三个核心痛点 | 现象 | `content/3up`(Path A) | — | 3 个并列点,schema 正合适 |
+| P2 | 客户原话 | 证据 | `quote`(Path A) | — | 单句引语 |
+| P3 | 那一个大论点 | 结论 | `layout: raw` · 双手架构 pattern | ★ | 全 deck 高光,schema 表达不了;翻词汇库选了 two-hand-arch |
+| P4 | Q&A 大问题 + 原声列表 | 现象 | `layout: raw` · `.qa-page` | — | 主问题需多行,schema 无匹配 |
 
 每行必须给:
-- **Layout**: 具体 layout 名(标准就是 `cover`/`content-3up`/...;自定义给 class 命名)
-- **标准 / 自定义**: 二选一,半自定义(借标准 layout 改内容)单独标
-- **为什么**: 1 句话依据(为什么标准 fit / 为什么必须自定义)
+- **角色**: Q0 五选一(现象 / 方法论 / 结论 / 对比 / 证据)
+- **Layout / path**: Path A 写具体 schema 名;hero/bespoke 写 `layout: raw` +
+  **从词汇库选定的 pattern 名**(scan `narrative patterns A–N` +
+  `component utility classes`,优先复用现成 pattern,别从零硬写)
+- **hero?**: 标 ★ 的页才全开 bespoke + 必填 Q0–Q4 六维;通常 2–3 张
+- **为什么**: 1 句话依据(为什么这个 layout fit / 为什么必须 bespoke)
+
+> hero 页(★)在表下方各补一句话 design intent statement(见"通过 5 问的标志"),
+> 并把 Q0–Q4 + 六维写进 DESIGN-PLAN.md。
 
 ### Decision rule — "标准 layout 优先" 判断逻辑
 
@@ -927,18 +1034,24 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
    Phase 0.2 的 4-proposal 评估流程,不要直接 raw
 - ❌ "想给每页换不同 accent 颜色" — `data-accent` 属性,不是 layout 改
 
-### Design pass 收尾 — 必须等用户确认
+### Design pass 收尾 — 确认门按风险触发
 
-设计方案 table 输出后,end with:
+设计方案 table 输出后,看方案里有没有 **beyond-default 页**(`layout: raw` /
+bespoke hero / 超出用户给定材料的重度补全):
 
-> 设计方案确认?有要改的告诉我;OK 就开工(PREFLIGHT → new-run → 生成)。
+- **有 → 停下等确认**。把那几页的 spec(Q0–Q4 + 六维 + 选定 pattern)逐项摆出,
+  end with:
+  > 这几张高光页(P_x / P_y)我按上面的设计来,确认?其余 schema 页我直接出。
+- **没有(全 schema)→ 宣告即走**,不强制停:
+  > 方案如上(全用标准 layout),我开工了;有要改的随时说。
 
-**用户回 OK 之前不要做任何文件 create / Edit**,也不要 pre-emptively 跑
-PREFLIGHT。PREFLIGHT 是 post-confirmation generation flow 的第一步。
+无论哪种,**真正开始写文件前不要 pre-emptively 跑 PREFLIGHT**;按
+`DESIGN PHASE` 的顺序:确认/宣告 → PREFLIGHT → new-run → **落 `DESIGN-PLAN.md`**
+→ 生成。
 
-设计方案一旦 lock,生成时直接按那个方案走,**不需要再问一遍**。如果生成
-出来发现某页 layout 设计错了,先跟用户对齐切换 layout(走 SLIDE DELETION
-POLICY 的双确认 + 备份规则),不要静悄悄改设计。
+方案一旦 lock,生成时直接照走,**不需要再问一遍**。生成后发现某页 layout
+设计错了,先跟用户对齐切换(走 SLIDE DELETION POLICY 的双确认 + 备份规则),
+不要静悄悄改设计;偏离 DESIGN-PLAN.md 也先回来改 plan。
 
 ---
 
@@ -1713,42 +1826,40 @@ is the dominant signature of intentional "label" content.
 
 ---
 
-## CONTENT-DENSITY POLICY (mandatory) — confirm before augmenting thin input
+## CONTENT-DENSITY POLICY (mandatory) — augment thin input by default · no-fabrication guardrail
 
 A 飞书 deck slide is **information-dense by design**. Empty space + 3 lines
 of body copy reads as half-finished — the audience reaction is "为什么这页
 这么空,你是不是没准备好"。The skill's defaults aim for slides that look
 *deliberately curated*, not *padded out*。
 
-When the user provides input that is too thin to fill the chosen layout,
-the agent has THREE choices, in priority order:
+**默认动作翻转(2026-05-26)**:旧策略是"输入太薄 → 先停下来问要不要补",
+结果 LLM 习惯性出干瘪 3 行 body,被同学反馈"空 / 不好看"。**专业补全是
+设计工作本身,不是需要审批的增补**。所以默认改成:
 
-1. **Pick a sparser-by-design layout** instead (`quote` / `big-stat` /
-   `cover` / `end` / `image-text`) — these are intentionally minimal,
-   2 lines of copy is plenty.
-2. **Stop and ask the user for more context** — this is the default
-   when the input is genuinely too thin for any layout to carry.
-3. **Augment with relevant industry / product / customer context** —
-   ALLOWED only after **explicit user confirmation**.
+1. **默认就专业补全** —— 把用户输入当 SEED,按真正咨询/战略 deck 的信息密度
+   设计这一页(见下 "What augmentation is allowed")。这是默认动作,不需要先问。
+2. **唯一硬护栏:不编 attributed facts** —— 具体公司数字 / 具名引语 / 来源出处
+   绝不编(见下 + ONE-PAGER no-fabrication 规则)。补的是公开行业知识 / 产品能力
+   / 类似客户故事,且标注来源性质。
+3. **沙化版式兜底** —— 真没东西可补时,换 sparser-by-design layout
+   (`quote` / `big-stat` / `cover` / `end` / `image-text`),2 行也成立。
 
-### The rule (mandatory)
+### The rule (mandatory) — 默认补,只在两种情况停下来问
 
-When the agent detects a thin-input situation on layouts that **need
-density** to look right (`content-2col` / `content-3up` / `stats` /
-`table` / `timeline` / `process`), it MUST:
+检测到薄输入(layouts that **need density**:`content-2col` / `content-3up` /
+`stats` / `table` / `timeline` / `process`)时:
 
-1. **Stop before generating.**
-2. **Tell the user what's thin** — specifically which layout was picked
-   and what the layout expects vs. what the user provided.
-3. **Propose 2-3 concrete augmentation options** the agent can supply
-   from its knowledge: industry benchmarks, common pain points,
-   complementary product capabilities, related customer stories,
-   typical adjacent metrics. Each option a one-line description.
-4. **Wait for the user to pick** — yes-pick-this / no-just-render-thin
-   / no-let-me-add-more-context / change-layout.
+- **默认**:直接专业补全 + 生成,**不停**(补全计划在 DESIGN PHASE Step 1 已
+  写进 DESIGN-PLAN.md,supporting 页随 deck 一起出;hero 页本就会过确认门)。
+- **只在以下两种情况才 STOP-and-ask**:
+  1. **(a) 薄到任何 layout 都撑不住** —— 连补也撑不起一页(用户给的就一个词,
+     既没角色也没具体内容)。
+  2. **(b) 意图本身有歧义** —— 这页的角色 / 唯一重点不明(Q0/Q1 填不出),
+     补什么方向取决于用户想强调什么。这是问**意图**,不是问"能不能补"。
 
-Only after the user confirms which augmentation (if any) to use does
-the agent generate the slide.
+停下来问时,用下面的 Asking-prompt template。注意区分:**问意图 = 该问;
+问"要不要让我补文案" = 不要问,直接补**。
 
 ### What counts as "thin" — heuristic
 
@@ -1824,10 +1935,11 @@ rule (next section) are siblings:
 | Rule | What can never happen | What CAN happen |
 |---|---|---|
 | No fabrication (next section) | Specific facts (story id, source citation, quote attribution) made up | (nothing — facts are either real or absent) |
-| Content-density (this section) | Silently padding a thin slide with industry context the user didn't ask for | Same context, AFTER user explicitly says "yes, augment with that" |
+| Content-density (this section) | Fabricating **attributed** facts while augmenting (company-specific numbers / named quotes / sources the user didn't give) | **Professional augmentation by default** — public industry knowledge / product capability / adjacent stories, tagged as such; **no confirmation needed** |
 
 Both come from the same north star: **the deck must not silently invent
-material that the user couldn't defend in front of the audience**.
+material that the user couldn't defend in front of the audience** —— 但"补到
+信息密度够"和"编造具名事实"是两回事:前者默认做,后者绝不做。
 
 ---
 
