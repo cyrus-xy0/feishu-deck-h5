@@ -340,7 +340,7 @@ are non-persistent and equally broken for this skill's purpose.
 
 | Path | When | What you write | What renders |
 |---|---|---|---|
-| **A · DeckJSON-first** *(RECOMMENDED, default)* | The deck fits one of the 14 layouts in `deck-json/deck-schema.json` (12 base + 2 specials) — covers ~95% of real decks | `runs/<ts>/output/deck.json` per schema | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + texts.md + assets/` automatically |
+| **A · DeckJSON-first** *(RECOMMENDED, default)* | The deck fits one of the 15 layouts in `deck-json/deck-schema.json` (12 base + 3 specials: `raw` / `replica` / `iframe-embed`) — covers ~95% of real decks | `runs/<ts>/output/deck.json` per schema | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + texts.md + assets/` automatically |
 | **B · Raw HTML authoring** *(legacy / escape hatch)* | A pattern genuinely doesn't fit any schema layout AND can't be expressed as `raw` block embed | Hand-author `index.html` per the R02 / R06 / R20 / L1-L4 / BF1-BF12 rules below | Skill's existing `validate.py` HARD GATE before delivery |
 
 **Why Path A is the default**:
@@ -437,6 +437,7 @@ Use DeckJSON whenever the deck consists of slides matching any of:
 | `arch-stack` | — | 2-5 layer architecture diagram (apps / platform / AI / data) |
 | `end` | — | Closing slide (optional `slogan` for branded sign-off) |
 | `replica` | — | PDF page-as-image (for PDF→HTML conversion) |
+| `iframe-embed` | — | Embed a live HTML prototype with a deck title bar + 飞书 wordmark (Prototype embed Mode B) |
 | `raw` | — | Escape hatch for one-off custom slides |
 
 Plus 10 embeddable blocks (pullquote / cta-box / kpi-strip / data-panel / principle-band / verdict-grid / phone-iframe / testimonial-card / mockup-card / persona-card) that compose inside `content/3up` / `content/2col` / `content/blocks`.
@@ -444,7 +445,7 @@ Plus 10 embeddable blocks (pullquote / cta-box / kpi-strip / data-panel / princi
 Deck-level theme: `deck.title_style` (4 styles · center-single/center-double/left-double/left) × `deck.logo_position` (front/back) = 8 master-variant combinations. Per-slide override via `slide.title_style` / `slide.logo_position`.
 
 **Full schema + field reference**: `deck-json/deck-schema.json`
-**Worked examples**: `deck-json/examples/sample-deck.json` (14 slides, every layout)
+**Worked examples**: `deck-json/examples/sample-deck.json` (14 slides — the 10 core layouts: cover/agenda/section/content/stats/flow/quote/image-text/table/end) · `deck-json/examples/phase-1c-extras.json` (the extras: content-blocks/matrix/before-after, flow-tree/swim, stats-waterfall, logo-wall, arch-stack, replica). `iframe-embed` + `raw` have no example deck yet.
 **Migration notes**: `deck-json/MIGRATION-REPORT.md`
 
 ### When to escape to Path B (raw HTML)
