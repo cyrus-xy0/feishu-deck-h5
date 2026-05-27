@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # feishu-deck-h5  ·  package the per-run output into a self-contained zip.
 #
-# Bundles index.html + texts.md + the apply-texts engine + macOS/Windows
-# launchers + a user-facing README into `deck-editable.zip`. The recipient
-# just unzips, edits texts.md, and double-clicks apply.command/apply.bat —
-# no Claude Code / OpenClaw / pip install required (only python3, which
-# ships on macOS by default and is a one-time install on Windows).
+# Bundles index.html + assets/ + texts.md + optional deck.json sidecars +
+# the apply-texts engine + macOS/Windows launchers + a user-facing README
+# into `deck-editable.zip`. The recipient just unzips, edits texts.md, and
+# double-clicks apply.command/apply.bat — no Claude Code / OpenClaw / pip
+# install required (only python3, which ships on macOS by default and is a
+# one-time install on Windows).
 #
 # Usage:
 #     bash assets/package-deliverable.sh runs/<timestamp>/output
@@ -90,17 +91,45 @@ cp "$SKILL_DIR/templates/apply.command"      "$STAGE/apply.command"
 cp "$SKILL_DIR/templates/apply.bat"          "$STAGE/apply.bat"
 cp "$SKILL_DIR/templates/README-deliverable.txt" "$STAGE/README.txt"
 
+ZIP_ITEMS=(
+  index.html
+  texts.md
+  apply-texts.py
+  texts_common.py
+  apply.command
+  apply.bat
+  README.txt
+)
+
+if [ -d "$OUT_DIR/assets" ]; then
+  cp -R "$OUT_DIR/assets" "$STAGE/assets"
+  ZIP_ITEMS+=(assets)
+fi
+
+if [ -f "$OUT_DIR/assets-manifest.yaml" ]; then
+  cp "$OUT_DIR/assets-manifest.yaml" "$STAGE/assets-manifest.yaml"
+  ZIP_ITEMS+=(assets-manifest.yaml)
+fi
+
+if [ -f "$OUT_DIR/deck.json" ]; then
+  cp "$OUT_DIR/deck.json" "$STAGE/deck.json"
+  ZIP_ITEMS+=(deck.json)
+fi
+
+if [ -f "$OUT_DIR/FEEDBACK.md" ]; then
+  cp "$OUT_DIR/FEEDBACK.md" "$STAGE/FEEDBACK.md"
+  ZIP_ITEMS+=(FEEDBACK.md)
+fi
+
 # launchers must be executable on extract; zip preserves the +x bit
 chmod +x "$STAGE/apply.command"
 
 ZIP_PATH="$OUT_DIR/${NAME}.zip"
 rm -f "$ZIP_PATH"
 
-# -X strips extra timestamps; -j flattens (no parent dir) so users see
-# files at the top of the zip when they unpack
-( cd "$STAGE" && zip -q -X "$ZIP_PATH" \
-    index.html texts.md apply-texts.py texts_common.py \
-    apply.command apply.bat README.txt )
+# -X strips extra timestamps. Keep paths relative to STAGE so assets/ remains
+# next to index.html, matching the linked HTML references.
+( cd "$STAGE" && zip -q -X -r "$ZIP_PATH" "${ZIP_ITEMS[@]}" )
 
 if [ ! -f "$ZIP_PATH" ]; then
   echo "ERROR: zip step failed"
