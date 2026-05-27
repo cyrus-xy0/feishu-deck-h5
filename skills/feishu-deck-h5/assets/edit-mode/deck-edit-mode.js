@@ -24,6 +24,7 @@
 
   const deck   = document.querySelector('.deck');
   const isMac  = /Mac/i.test(navigator.platform);
+  const DOWNLOAD_REQUESTED = { download: true };
 
   // ── identify text leaves to make contenteditable ──────────────────────
   function getTextLeaves() {
@@ -137,19 +138,24 @@
           const h = await idbGet(HANDLE_KEY());
           if (h) {
             const perm = await h.queryPermission({ mode: 'readwrite' });
-            cached = (perm === 'granted');
+            if (perm === 'granted') {
+              fileHandle = h;
+              cached = true;
+            }
           }
         } catch {}
         if (cached) {
           showToast('Edit mode · ⌘S 静默保存（已授权） · Esc 退出', 2500);
           console.log('[deck-edit-mode] save mode: FS Access API (handle cached, silent)');
         } else {
-          showToast('Edit mode · 第一次 ⌘S 选当前文件授权一次,之后永远静默 · Esc 退出', 4000);
+          showToast('Edit mode · 第一次保存需授权当前 HTML 文件 · Esc 退出', 4000);
           console.log('[deck-edit-mode] save mode: FS Access API (picker once)');
         }
+        updateSaveButton();
       } else {
         showToast('Edit mode · ⚠ 浏览器不支持原地保存 · ⌘S 会 download · Esc 退出', 4000);
         console.log('[deck-edit-mode] save mode: download fallback');
+        updateSaveButton();
       }
     })();
   }
@@ -301,25 +307,18 @@
     return '<!DOCTYPE html>\n' + clone.outerHTML;
   }
 
-  // First save: open a picker so user authorizes write to the current file.
-  // To skip folder-by-folder navigation, we auto-copy the absolute path to
-  // the clipboard right before the dialog appears, and show a giant toast
-  // telling the user to ⌘⇧G → ⌘V → Enter in the picker. Result: 4 keystrokes
-  // and no navigation, even on the very first save. Handle is then cached
-  // in IndexedDB so this dance is one-time-ever.
+  // First save: explain the browser permission model before opening the native
+  // file picker. The native macOS picker labels the action "Open" even though
+  // the browser is asking for write permission; showing this dialog first keeps
+  // the instructions readable instead of hiding them behind the system window.
   async function pickFileForOverwrite() {
     if (!window.showOpenFilePicker) return null;
     const absPath = decodeURIComponent(location.pathname);
     const currentName = absPath.split('/').pop() || 'index.html';
 
-    // Copy the path so the user can paste it in the picker's "Go to Folder".
-    let clipOk = false;
-    try {
-      await navigator.clipboard.writeText(absPath);
-      clipOk = true;
-    } catch (e) { /* clipboard blocked — fall back to manual instruction */ }
-
-    showHelp(absPath, clipOk);
+    const action = await showFirstSaveDialog(absPath, currentName);
+    if (action === 'download') return DOWNLOAD_REQUESTED;
+    if (action !== 'choose') return null;
 
     try {
       const [h] = await window.showOpenFilePicker({
@@ -327,53 +326,103 @@
         types: [{ description: 'HTML deck', accept: { 'text/html': ['.html', '.htm'] } }],
         startIn: 'documents',
       });
-      hideHelp();
       if (h.name !== currentName) {
-        if (!confirm(`保存到 "${h.name}" 而不是 "${currentName}"?\n按取消重新选。`)) return null;
+        const ok = await confirmDifferentFile(h.name, currentName);
+        if (!ok) return null;
       }
       if ((await h.queryPermission({ mode: 'readwrite' })) !== 'granted') {
         if ((await h.requestPermission({ mode: 'readwrite' })) !== 'granted') return null;
       }
       return h;
     } catch (err) {
-      hideHelp();
       if (err.name !== 'AbortError') console.warn(err);
       return null;
     }
   }
 
-  // Help overlay that surfaces the ⌘⇧G shortcut + the path the user should
-  // paste. Appears WHILE the picker is open so the user can read it through
-  // their attention shift to the dialog.
-  let helpOverlay = null;
-  function showHelp(absPath, clipOk) {
-    if (helpOverlay) hideHelp();
-    helpOverlay = document.createElement('div');
-    helpOverlay.className = 'edit-help-overlay';
-    helpOverlay.innerHTML = `
-      <div class="eho-card">
-        <div class="eho-title">第一次保存 · 4 个按键搞定</div>
-        <ol class="eho-steps">
-          <li>picker 已弹出 → 按 <kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>G</kbd></li>
-          <li>路径${clipOk ? '已复制到剪贴板,按 <kbd>⌘</kbd>+<kbd>V</kbd> 粘贴' : '手动粘贴: <code class="eho-path"></code>'}</li>
-          <li>按 <kbd>Enter</kbd></li>
-          <li>授权后,以后 ⌘S 永远静默,不再弹这个</li>
-        </ol>
-        <div class="eho-path-wrap">
-          <div class="eho-path-label">${clipOk ? '路径已在剪贴板:' : '路径:'}</div>
-          <code class="eho-path">${absPath}</code>
+  function showFirstSaveDialog(absPath, currentName) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'edit-save-dialog';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.innerHTML = `
+        <div class="esd-card">
+          <div class="esd-eyebrow">第一次保存需要浏览器授权</div>
+          <h2 class="esd-title">选择当前 HTML 文件来授权覆盖保存</h2>
+          <p class="esd-copy">
+            Chrome 不能直接改写你用 file:// 打开的文件。下一步系统窗口会显示“打开”,
+            但这里的含义是把写入权限授予当前 deck；选中同一个 HTML 一次后,
+            后续 ${isMac ? '⌘' : 'Ctrl'}S 会静默保存。
+          </p>
+          <ol class="esd-steps">
+            <li>点下面的“选择当前 HTML 文件”。</li>
+            <li>在系统窗口里选中 <strong>${escapeHtml(currentName)}</strong>。</li>
+            <li>系统按钮即使写着“打开”,也代表授权这个文件。</li>
+          </ol>
+          <div class="esd-path-wrap">
+            <div class="esd-path-label">当前文件路径</div>
+            <code class="esd-path">${escapeHtml(absPath)}</code>
+          </div>
+          <div class="esd-status" aria-live="polite"></div>
+          <div class="esd-actions">
+            <button class="esd-btn esd-btn-secondary" type="button" data-action="copy">复制路径</button>
+            <button class="esd-btn esd-btn-secondary" type="button" data-action="download">下载副本</button>
+            <button class="esd-btn esd-btn-secondary" type="button" data-action="cancel">取消</button>
+            <button class="esd-btn esd-btn-primary" type="button" data-action="choose">选择当前 HTML 文件</button>
+          </div>
         </div>
-      </div>
-    `;
-    document.body.appendChild(helpOverlay);
-    // also write the path into any .eho-path placeholders
-    helpOverlay.querySelectorAll('.eho-path').forEach((el) => {
-      if (!el.textContent) el.textContent = absPath;
+      `;
+      document.body.appendChild(overlay);
+
+      const status = overlay.querySelector('.esd-status');
+      const cleanup = (result) => {
+        overlay.remove();
+        resolve(result);
+      };
+
+      overlay.querySelector('[data-action="choose"]').addEventListener('click', () => cleanup('choose'));
+      overlay.querySelector('[data-action="download"]').addEventListener('click', () => cleanup('download'));
+      overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => cleanup('cancel'));
+      overlay.querySelector('[data-action="copy"]').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(absPath);
+          status.textContent = '路径已复制。系统窗口里可用 ⌘⇧G 后粘贴跳转。';
+        } catch {
+          status.textContent = '浏览器未允许复制,请手动选中上方路径复制。';
+        }
+      });
     });
   }
-  function hideHelp() {
-    if (helpOverlay) helpOverlay.remove();
-    helpOverlay = null;
+
+  function confirmDifferentFile(pickedName, currentName) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'edit-save-dialog';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.innerHTML = `
+        <div class="esd-card esd-card-small">
+          <div class="esd-eyebrow">确认保存目标</div>
+          <h2 class="esd-title">你选中的不是当前 HTML 文件</h2>
+          <p class="esd-copy">
+            当前文件是 <strong>${escapeHtml(currentName)}</strong>,你选中了
+            <strong>${escapeHtml(pickedName)}</strong>。继续会把修改写入选中的文件。
+          </p>
+          <div class="esd-actions">
+            <button class="esd-btn esd-btn-secondary" type="button" data-action="cancel">取消</button>
+            <button class="esd-btn esd-btn-primary" type="button" data-action="confirm">继续保存</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const cleanup = (result) => {
+        overlay.remove();
+        resolve(result);
+      };
+      overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => cleanup(false));
+      overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => cleanup(true));
+    });
   }
 
   // ── IndexedDB-persisted file handle ──────────────────────────────────
@@ -450,8 +499,13 @@
           // permission, the handle is cached in IDB and the picker won't
           // come back even after page reload.
           fileHandle = await pickFileForOverwrite();
+          if (fileHandle === DOWNLOAD_REQUESTED) {
+            downloadHtml(html, 'download-copy');
+            return;
+          }
           if (!fileHandle) return;
           await idbPut(HANDLE_KEY(), fileHandle);
+          updateSaveButton();
         } else {
           // re-check permission (some browsers expire it on tab inactive)
           const perm = await fileHandle.queryPermission({ mode: 'readwrite' });
@@ -467,6 +521,7 @@
         await writable.write(html);
         await writable.close();
         showToast('✓ Saved to ' + fileHandle.name, 1200);
+        updateSaveButton();
         return;
       } catch (err) {
         if (err.name === 'AbortError') return;
@@ -477,6 +532,10 @@
     }
 
     // Fallback: download (Safari / Firefox / non-secure context)
+    downloadHtml(html, 'fallback');
+  }
+
+  function downloadHtml(html, reason) {
     const blob = new Blob([html], { type: 'text/html' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -485,7 +544,8 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-    showToast('↓ Downloaded ' + a.download + ' (浏览器不支持原地保存)', 2200);
+    const suffix = reason === 'download-copy' ? ' (未覆盖原文件)' : ' (浏览器不支持原地保存)';
+    showToast('↓ Downloaded ' + a.download + suffix, 2200);
   }
 
   // ── UI bar ─────────────────────────────────────────────────────────────
@@ -502,10 +562,26 @@
     document.body.appendChild(bar);
     bar.querySelector('.edit-bar-save').onclick = save;
     bar.querySelector('.edit-bar-exit').onclick = exitEditMode;
+    updateSaveButton();
   }
   function hideEditBar() {
     if (bar) bar.remove();
     bar = null;
+  }
+  function updateSaveButton() {
+    if (!bar) return;
+    const btn = bar.querySelector('.edit-bar-save');
+    if (!btn) return;
+    if (!window.showOpenFilePicker) {
+      btn.textContent = '↓ Download';
+      btn.title = '浏览器不支持原地覆盖保存,将下载 HTML 副本';
+    } else if (fileHandle) {
+      btn.textContent = '💾 Save';
+      btn.title = `${isMac ? '⌘' : 'Ctrl'}S · 已授权,直接覆盖当前 HTML`;
+    } else {
+      btn.textContent = '🔐 Authorize Save';
+      btn.title = '第一次保存需选择当前 HTML 文件授权覆盖保存';
+    }
   }
 
   // ── left sidebar: slide list (click to scroll + drag to reorder) ───────
@@ -646,6 +722,14 @@
       e.target.tagName === 'INPUT' ||
       e.target.tagName === 'TEXTAREA'
     );
+
+    const saveDialog = document.querySelector('.edit-save-dialog');
+    if (saveDialog && e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      saveDialog.querySelector('[data-action="cancel"]')?.click();
+      return;
+    }
 
     // E to enter edit mode (only when NOT typing)
     if (!editMode && !inField && e.key === 'e' &&

@@ -241,8 +241,8 @@ body.deck-edit-mode .deck[data-mode="scroll"] {
  * windows — bar sits top-right, sidebar sits top-left, no conflict in
  * normal viewport widths. (No CSS needed; both are top-anchored.) */
 
-/* ── first-save help overlay (⌘⇧G + path-paste instructions) ────────── */
-.edit-help-overlay {
+/* ── first-save authorization dialog ────────────────────────────────── */
+.edit-save-dialog {
   position: fixed;
   inset: 0;
   z-index: 2147483645;
@@ -250,59 +250,101 @@ body.deck-edit-mode .deck[data-mode="scroll"] {
   backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
+  box-sizing: border-box;
   font: 500 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC",
         "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
-.eho-card {
-  max-width: 560px;
+.esd-card {
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
   background: rgba(12, 18, 36, 0.98);
   border: 1.5px solid rgba(60, 127, 255, 0.55);
-  border-radius: 14px;
+  border-radius: 10px;
   padding: 28px 32px;
   color: #fff;
   box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.7);
+  box-sizing: border-box;
 }
-.eho-title {
+.esd-card-small { width: min(560px, 100%); }
+.esd-eyebrow {
+  color: #33D6C0;
+  font: 700 11px/1.2 inherit;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.esd-title {
   color: #FFE7B0;
-  font: 700 18px/1.3 inherit;
-  margin-bottom: 18px;
+  font: 700 20px/1.3 inherit;
+  margin: 0 0 12px;
   letter-spacing: 0.02em;
 }
-.eho-steps {
+.esd-copy {
+  margin: 0 0 16px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 14px;
+}
+.esd-steps {
   margin: 0 0 18px 24px;
   padding: 0;
   color: rgba(255, 255, 255, 0.92);
   font-size: 14px;
   line-height: 1.7;
 }
-.eho-steps li { margin-bottom: 4px; }
-.eho-steps kbd {
-  display: inline-block;
-  padding: 2px 8px;
-  background: rgba(60, 127, 255, 0.22);
-  border: 1px solid rgba(60, 127, 255, 0.45);
-  border-radius: 5px;
-  color: #fff;
-  font: 600 12px/1 ui-monospace, "SF Mono", Menlo, monospace;
-  margin: 0 1px;
-}
-.eho-path-wrap {
+.esd-steps li { margin-bottom: 4px; }
+.esd-path-wrap {
   background: rgba(8, 12, 24, 0.6);
   border: 1px solid rgba(60, 127, 255, 0.20);
   border-radius: 8px;
   padding: 12px 14px;
+  margin-bottom: 12px;
 }
-.eho-path-label {
+.esd-path-label {
   color: #33D6C0;
   font: 600 11px/1 inherit;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   margin-bottom: 6px;
 }
-.eho-path {
+.esd-path {
   display: block;
   color: rgba(255, 255, 255, 0.95);
   font: 500 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
   word-break: break-all;
   white-space: pre-wrap;
+}
+.esd-status {
+  min-height: 18px;
+  margin-bottom: 16px;
+  color: #33D6C0;
+  font-size: 12px;
+}
+.esd-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.esd-btn {
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font: 700 13px/1 inherit;
+}
+.esd-btn-primary {
+  background: var(--fs-blue, #3C7FFF);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+.esd-btn-primary:hover { background: #5B93FF; }
+.esd-btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.88);
+}
+.esd-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }

@@ -609,9 +609,11 @@ If 1-2 specific slides won't fit the schema but everything else does:
 > edit-mode">` by default, and copy-assets.py automatically copies the
 > editor into `output/assets/edit-mode/` because the HTML references
 > it. Press **E** to enter edit mode, **Esc** to exit, **Cmd/Ctrl+S**
-> to save (File System Access API → in-place on Chromium-based
-> browsers; download fallback elsewhere). Drag a slide-frame to
-> reorder; click any text leaf to edit it directly. Runs from file://
+> to save. On Chromium-based browsers, the first save shows an
+> authorization dialog, then the native picker; choose the current HTML
+> file once (macOS may label the system button "Open") and later saves
+> overwrite silently via the File System Access API. Other browsers use a
+> download fallback. Drag a slide-frame to reorder; click any text leaf to edit it directly. Runs from file://
 > or https:// — works for `feishusolution`-style GitHub Pages
 > deployments. To opt out for a specific deck (e.g. delivery zip
 > destined for read-only viewers), strip the two edit-mode lines + the
