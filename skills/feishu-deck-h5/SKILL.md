@@ -390,26 +390,123 @@ Output: `runs/<ts>-reskin-<slug>/output/index.html` + `deck.json` +
 `FEEDBACK.md`. Single-file inline delivery: `--inline` on render-deck.py,
 or `build.sh --inline` after.
 
-### What reskin ALWAYS does (8 mandatory transforms)
+### PRECONDITION — source canvas MUST be 1920×1080 (CHECK BEFORE INVOKING)
+
+Reskin **refuses** to process foreign HTML at any canvas size other than
+1920×1080. The check runs as the FIRST step in `reskin.py` (before any
+CSS / DOM rewrites), so misfit input fails fast with a clear message —
+no wasted render + screenshot cycle. **Exit code 3** with actionable
+error; no output produced.
+
+**Why this is a hard precondition** (lesson from a 2026-05-28 reskin
+session that burned 30 minutes discovering the issue late):
+
+- Foreign HTML's CSS px values (paddings, ring sizes, column widths) and
+  JS coords (`buildRing` cx/cy/R, animation positions, etc.) are designed
+  for the source canvas. They're MUTUALLY consistent at that size only.
+- Scaling CSS px without also scaling JS-positioned elements gives
+  **broken layout** (nodes positioned in old-coord-space inside new-size
+  container).
+- `transform: scale()` preserves proportions but **stretches 3-column
+  layouts** so center-column labels overlap into siblings.
+- Letterboxing source at native size in 1920×1080 leaves content small
+  and unfilled.
+- The ONLY actually-correct option is for source to BE 1920×1080 native.
+  Conveniently, that's also feishu standard.
+
+**Agent workflow when receiving foreign HTML**:
+
+1. **BEFORE invoking reskin**: grep the source HTML for canvas-size CSS
+   (`.slide { width: Npx; height: Mpx }` or similar).
+2. If `Npx ≠ 1920` OR `Mpx ≠ 1080`, **tell the user immediately**, BEFORE
+   running reskin:
+   > "Your source HTML is `<W>×<H>`. Reskin needs `1920×1080` native to
+   > produce a faithful result (CSS px + JS coords must be designed for
+   > the same canvas). Want me to ask the original author to redo at
+   > 1920×1080, or are you OK with reskin refusing this run?"
+3. Default = ask user to resize source first. **DON'T** invoke reskin on
+   a mismatched canvas just because the user asked — the engine will
+   refuse and the user has wasted a turn.
+
+**Tip for claude artifacts**: most claude-generated single-page HTMLs
+default to 1280×720 (the assistant's training-era default). When the
+user hands you one, the first turn before reskin is usually a chat round
+with the artifact author asking to redo at 1920×1080, then reskin runs
+clean.
+
+### What reskin ALWAYS does (mechanical transforms)
 
 | # | Action | Source |
 |---|---|---|
 | 1 | Wrap source body in framework shell `.deck > .slide-frame > .slide[data-layout="raw"]` (renderer's `raw.fragment.html` auto-adds these; we emit deck.json with one `layout: "raw"` slide) | SKILL.md "DECK GENERATION POLICY" raw escape hatch |
-| 2 | Scale canvas to 1920×1080. Detect source canvas via `width: Npx; height: Mpx` on `.slide`-like selector; multiply all NON-font px by `1920/source_w` | feishu standard |
-| 3 | Strip foreign logo blocks (any element with class containing `logo` / `brand` / `mark` AND containing `<svg>` or the text 飞书/Lark). Framework's `.wordmark` auto-injects the real colored `lark-logo.png` top-right | SKILL.md L1 |
-| 4 | Strip foreign canvas background (`radial-gradient` / `linear-gradient` on body or `.slide`). Replace with `lark-content-bg.jpg` via `var(--fs-asset-content-bg)`. **No dot-grid overlay** | SKILL.md "Do NOT add .grid-bg by default" |
-| 5 | Extract foreign page title to `.header > h2.title-zh`, position at `top: 62` (aligns baseline with `.wordmark` at `top: 61`), NO hairline under header | learned from this conversation's iteration 6 |
-| 6 | Palette rewrite: fuzzy-match every `#hex` and `rgba()` literal to nearest `--fs-*` token (distance ≤ 80 RGB). Cyan-ish colors (distance < 60 to `#24C3FF`) redirected to `--fs-blue` (R49 — cyan is inline-highlight only) | SKILL.md R10 / R49 |
-| 7 | Font rewrite: every `font-family:` → `var(--fs-font-cjk)`. Every `font-size: Npx` → 4-tier ladder `{16, 24, 28, 48}`. **Selector-aware**: if the selector's class doesn't match chrome hints (eyebrow / pill / tag / footnote / source / caption / page / footer), the floor is 24 (R06 body floor), not 16 | SKILL.md R20 + R06 |
-| 8 | Strip R12 violations: `box-shadow:` values with non-zero offset and not `inset` are dropped. Glow rings (`0 0 Npx ...`) and inset shadows survive | SKILL.md R12 |
+| 2 | Strip foreign logo blocks (any element with class containing `logo` / `brand` / `mark` AND containing `<svg>` or the text 飞书/Lark). Framework's `.wordmark` auto-injects the real colored `lark-logo.png` top-right | SKILL.md L1 |
+| 3 | Apply `lark-content-bg.jpg` background to slide anchor (base64-inlined into per-page CSS — `var(--fs-asset-content-bg)` doesn't work in inline `<style>` because CSS custom property url() is text-substituted then resolved against the HTML document, not the framework CSS) | SKILL.md content-bg, lesson from this convo iter 2 |
+| 4 | Palette rewrite: fuzzy-match every `#hex` and `rgba()` literal to nearest `--fs-*` token (distance ≤ 80 RGB). **Skip grayscale-ish** (max channel diff < 60 — e.g. `#9AA6C2` muted text stays as-is, doesn't false-match to `--fs-violet`). Cyan-ish (distance < 60 to `#24C3FF`) → `--fs-blue` per R49 | SKILL.md R10 / R49 + lesson iter 10 |
+| 5 | `strip_scale_script` — surgical excise of `function fit() { ... }` + its call + `addEventListener('resize', fit)` from inline scripts. **NOT** delete-whole-script (would kill `buildRing` / animation init / other content-bearing code that often lives in the same `<script>` block) | lesson iter 7 |
+| 6 | `prune_empty_wrappers` — drop UNCLASSED empty divs (residue from extracted title/subtitle/logo). Skip empties WITH class/id/style — they're CSS-decorated drawings like `<div class="circle"></div>` (border-radius dashed circle), not residue | lesson iter 6 |
+| 7 | Scope every rewritten rule to `.slide[data-slide-key="reskin-<slug>"]`. **Special cases** in scope step: `.slide` → anchor (NOT `<anchor> .slide` — would target a nested .slide that doesn't exist); `.slide foo` → `<anchor> foo`; `html` / `body` → DROP (foreign global rules conflict with framework chrome); `*` (universal reset) → DROP (would hit `.wordmark` and framework chrome inside slide) | scoping defense |
+| 8 | When mapping source `.slide` → anchor, STRIP `border` / `border-radius` / `box-shadow` declarations from the rule body. Source defines these for "slide card in standalone viewport" (1px ring + drop shadow); inside framework's full-canvas wrap they become visible thin lines at slide top/bottom edges | lesson iter 9 |
+| 9 | Strip R12 violations: `box-shadow:` values with non-zero offset and not `inset` are dropped. Glow rings (`0 0 Npx ...`) and inset shadows survive | SKILL.md R12 |
 
-### What reskin does WITH judgment (3 default-on transforms)
+### Two operating modes depending on source canvas
 
-| # | Action | When it fires |
-|---|---|---|
-| 1 | **Content-context label floor** — 2nd pass after font snap: any rule whose selector contains a `card-class_hints` (card / cell / wheel / tile / node / panel / block / feature / item / stat) AND has `font-size: 16` gets bumped to 24, IF any other selector targeting the same container has `font-size: ≥ 28`. This catches "cards with sub-tier content shouldn't have chrome-tier labels inside" | SKILL.md content-context label floor (2026-05-17 / 2026-05-23) |
-| 2 | **Selectors scoped to slide-key** — every rewritten rule gets prefixed with `.slide[data-slide-key="reskin-<slug>"]` so it doesn't leak. Foreign global rules on `html` / `body` are DROPPED (they conflict with framework chrome) | scoping defense |
-| 3 | **Stage flex column auto-layout** — emit `.stage { display: flex; flex-direction: column; gap: 22px }` so children stack with consistent gaps. Children matching `core` / `main` / `diagram` / `body` (substring) get `flex: 1` to grow into remaining height. Foreign `margin-top: Npx` stacks no longer needed | this conversation's iteration 4 |
+**Mode 1 · `extract_to_header = True`** *(non-1920×1080 source — currently
+unreachable, see PRECONDITION above. Documented here in case the
+precondition is ever relaxed.)*: extract foreign title → `.header >
+h2.title-zh` at `top:62`; foreign body inner content → `<div class="stage">`
+at `top:220` with flex-column auto-layout. Framework font cascades into
+content via `.slide { font-family: var(--fs-font-cjk) }`. Font-size snap +
+label-floor bump runs.
+
+**Mode 2 · `extract_to_header = False`** *(1920×1080 native source —
+the only path reachable today)*: source already has its own title + chrome
+designed for the full canvas. Adding framework `.header` chrome on top
+displaces source content downward → overflow. Native mode:
+
+- **NO framework `.header` / `.stage` chrome wrap** — source title +
+  layout stay at their native coordinates
+- **Capture source's body font-family stack** (usually `"PingFang SC", ...`
+  defined on `html, body`) before scope drops those rules; re-assert it
+  on `.slide[data-slide-key=X]` so framework's `.slide { font-family:
+  var(--fs-font-cjk) }` cascade doesn't change line-heights → ~70px
+  cumulative downward shift would push tagline below 1080
+- **Font-size snap + label-floor bump default ON** (per user choice B,
+  2026-05-28): projector readability per R06/R20 wins over source's
+  pixel-perfect layout. Side effect: source content designed for sub-floor
+  text inflates and may overflow 1080 — caught by post-render overflow check.
+- **`--keep-source-typography` flag** (option A escape): skip snap +
+  label-floor, emit `/* allow:typescale */ /* allow:body-floor */`
+  comments on every font-size rule so validator accepts sub-spec sizes.
+  Use when source's design density genuinely requires its own typography.
+
+### Post-render overflow check (Playwright, last step of reskin.sh)
+
+After validate.py passes, headless-Chromium loads `index.html` at
+1920×1080 and enumerates every LEAF element whose `getBoundingClientRect().
+bottom > 1080`. Reports each with class / text / overflow px:
+
+```
+! content overflow past 1080 boundary (snapped fonts inflated heights):
+  · span.b   +40px  "组织知识"
+  · span.p   +40px  "集团决策"
+  Source content density too high for feishu spec font floors.
+  To fix: have source author reduce content by ~40px vertical,
+  OR re-run reskin with --keep-source-typography (deviates from spec).
+```
+
+The check is non-fatal (warns, doesn't exit) — user needs to either:
+- Have source author trim content density (recommended)
+- Re-run with `--keep-source-typography` (escape hatch)
+- Manually edit `runs/<ts>/output/deck.json`'s per-page CSS to override
+
+### bs4 script-tag quirk (note for maintainers)
+
+When `strip_scale_script` excises fit() and calls `s.string = new_txt` on
+the script tag, bs4's `get_text()` returns empty afterwards (script tags
+treat content as CDATA, not text-nodes — `.string` setter writes content
+correctly but `.get_text()` reads incorrectly). The surviving-scripts
+collection uses `str(s)` and inspects the rendered HTML inner; do NOT use
+`.get_text()` to check whether a script has content post-modification.
 
 ### What reskin REFUSES to do (hard rule, no flag overrides)
 
@@ -435,21 +532,18 @@ input.html
    ↓ new-run.sh reskin-<slug> → runs/<ts>-reskin-<slug>/{input,output}/
    ↓ cp input.html → input/
    ↓ FEEDBACK.md stub (so render-time validate doesn't warn R-FEEDBACK)
-   ↓ reskin.py (8 mandatory + 3 default-on transforms above)
-deck.json {layout: "raw", data: {html: "<style>...</style><div class='header'>...</div><div class='stage'>...</div>"}}
+   ↓ reskin.py canvas preflight (1920×1080 required; else exit 3)
+   ↓ reskin.py transforms (above 9 mandatory + Mode 1/2 split)
+deck.json {layout: "raw", data: {html: "<style>...</style>" + body content}}
    ↓ render-deck.py (auto wraps .deck > .slide-frame > .slide + .wordmark)
 runs/<ts>/output/index.html
    ↓ copy-assets.py (bundle framework CSS/JS into output/)
-   ↓ validate.py (--no-visual by default — visual issues are 1st-pass-expected)
+   ↓ validate.py (--no-visual by default; --visual opt-in)
+   ↓ Playwright overflow check (every leaf element vs y=1080 boundary)
    ↓ ✓ PASS → hand back path to user
+   ↓ ! warn if any element overflows: list class/text/overflow-px,
+     suggest source content trim OR --keep-source-typography re-run
 ```
-
-Empirical (one smoke test on a 1280×720 dual-flywheel source):
-- Static validator → 0 errors, 2 expected warnings (R-ECHO editorial + T00
-  expected for raw layouts without text-id annotations)
-- Tally: palette 6 swaps · fonts 16 snaps · canvas 1.5× · 1 drop-shadow
-  stripped · 1 logo stripped · 3 foreign chrome rules dropped · 40
-  selectors scoped
 
 ### Tuning (non-engineer)
 
@@ -459,12 +553,23 @@ re-run; no code change needed. Knobs:
 | Section | What you change |
 |---|---|
 | `palette` | Add brand colors; nudge RGB if a new feishu accent ships |
-| `palette_match_threshold` | Looser (default 80) = more aggressive swap to `--fs-*`; tighter = preserve more original colors |
+| `palette_match_threshold` | Looser (default 80) = more aggressive swap to `--fs-*`; tighter = preserve more original colors. Grayscale-ish (max channel diff < 60) is hardcoded-skip — change in `_is_grayscale_ish` if needed |
 | `font_size_snap_table` | If you want a 5th tier (e.g. 88 hero) → add row. The 4-tier default matches SKILL.md R20 |
 | `content_label_floor.card_class_hints` | Add class substrings that mark "containers worth applying the floor rule to" |
 | `foreign_chrome.logo_signals` | Brand-text patterns + class hints that identify logo blocks worth stripping |
-| `header_chrome.title_top` / `.stage_top` etc. | Master coords for the rewritten `.header` + `.stage` |
-| `auto_layout.flex_grow_class_substring` | Class substrings whose div should grow to fill stage height |
+| `foreign_chrome.title_candidates` | Tag+class hints reskin uses to find page title (Mode 1 only; Mode 2 leaves title in source) |
+| `header_chrome.*` | Master coords for Mode 1's `.header` + `.stage` placement (Mode 2 ignores all of these) |
+| `auto_layout.flex_grow_class_substring` | Mode 1 only: class substrings whose div should grow to fill stage height |
+
+CLI flags:
+
+| Flag | Effect |
+|---|---|
+| `--slug SLUG` | Slide-key slug (kebab-case). Defaults to input filename stem. |
+| `--strict` | Promote validator warnings to errors. Use for final-pass review. |
+| `--visual` | Also run Playwright visual audits during validate.py (R-VIS-* family). Off by default — reskin output often hits R-VIS-OVERFLOW on dense foreign content; overflow check (last step) catches this separately with more actionable diagnostics. |
+| `--no-visual` | Force visual audits off (default). |
+| `--keep-source-typography` | Mode 2 escape: skip font-size snap + label-floor bump. Source's hierarchy preserved; validator R06/R20 satisfied via auto-emitted `/* allow:typescale */ /* allow:body-floor */` comments. Use when source's design density requires sub-floor text and you accept the spec deviation. |
 
 ### When reskin output still needs human iteration
 
@@ -487,25 +592,60 @@ Reskin is V1 — it handles the mechanical 80%. The remaining ~20% needs eyes:
   "this would be cleaner as a framework block" upgrade. To formalize a
   recurring pattern, use `contribute-catalog` skill to PR a new block
 
-### Why this exists (lesson from a 6-round conversation, 2026-05-28)
+### META-RULE — ask before any non-mechanical trade-off
 
-User had a 1280×720 dual-flywheel HTML built elsewhere, asked to "use
-feishu template". Without RESKIN MODE, the assistant:
+This is the most important lesson from the 2026-05-28 conversation. The
+agent silently picked trade-offs at multiple points and burned hours
+discovering each was wrong only after the user pushed back. The rule:
 
-1. **Iter 1**: just changed colors/fonts on the standalone HTML — didn't
-   touch shell structure. User: "没用模板"
-2. **Iter 2**: wrapped in `.deck > .slide-frame > .slide[data-layout="raw"]`,
-   inlined framework CSS+JS — shell correct, but kept all user's chrome
-   design (logo block / title block / bg gradients). User: "模板就不是这个样子"
-3. **Iter 3**: Pattern H+ Two-hand-arch redesign. User: "搞回去，表现形式不能变"
-4. **Iter 4**: dual-flywheel preserved, framework chrome (`.header` /
-   `.wordmark` / `lark-content-bg`). Then 2 more rounds polishing label
-   floor + title-logo alignment.
+> **Anything that isn't a deterministic mechanical transform — STOP and
+> ask the user before doing it.** Present the trade-off explicitly, list
+> the options, wait for choice. Don't decide for them.
 
-**Root cause**: "用模板" has 3 layers (chrome / shell / pattern). The user
-wanted chrome + shell, NOT pattern. RESKIN MODE makes this the default for
-"foreign HTML → feishu style" requests, with the pattern-swap explicitly
-gated behind GENERATION mode.
+Concrete trigger patterns:
+
+| Trade-off | Wrong (silent) → | Right (ask) |
+|---|---|---|
+| Source canvas ≠ 1920×1080 | "Letterbox it" / "scale-wrap" | "Source is `<W>×<H>`. Reskin requires 1920×1080. Want to ask source author to resize, OR refuse this run?" |
+| Source has own title at native coords | "Extract to framework `.header`" | "Source's title sits at its own native coords. Extracting to framework `.header` will displace content downward. Keep source layout, or use framework chrome?" |
+| Source uses sub-floor fonts (17-23 px) | "Snap to 24 — spec wins" | "Source uses sub-floor body text (e.g. 17/19/23 px). Snapping to spec (R06) inflates heights → overflow. Three options: keep source (sub-spec), snap (overflow), or refuse (have source redesign)." |
+| Source font-family doesn't match framework | Silent swap to `var(--fs-font-cjk)` | "Framework's primary font (方正兰亭黑) has wider CJK metrics than source's PingFang → ~70px cumulative downward shift. Keep source font-family, or swap?" |
+| Foreign HTML has 8 minor R12 violations | "Drop them all silently" | (this one IS mechanical — R12 is a hard framework rule, no judgment needed; drop silently is OK) |
+| Overflow detected after render | Silent margin-trim heuristic | "Tagline overflows 40px. Options: ask source to trim content / try `--keep-source-typography` / let me auto-shrink margins (specify which)" |
+
+**How to apply when uncertain**: if you find yourself writing a comment
+like "for source X we'll do Y as a workaround" — that's a trade-off,
+ask first. If you're snapping `X → Y` purely because spec says Y is the
+floor — that's mechanical, do it silently.
+
+### Why this exists (lesson from a 10+ round conversation, 2026-05-28)
+
+User had a foreign HTML built elsewhere, asked to "use feishu template".
+Across 10+ rounds the agent burned ~3 hours on:
+
+1. **Iter 1-3**: misunderstood "用模板" as either "换皮" (just colors) or
+   "重画 pattern" (use Two-hand-arch). Right answer: chrome + shell, no
+   pattern. **Lesson** → MODE SELECTION table now lists trigger phrases.
+2. **Iter 4-5**: silently picked "letterbox 1280×720" then "scale-wrap"
+   then "scale-canvas" — all bad. **Lesson** → PRECONDITION fails fast
+   at 1920×1080 mismatch (exit 3 with actionable error).
+3. **Iter 6**: framework `.header` chrome displaced source content
+   downward → 1920×1080 native source overflowed. **Lesson** → Mode 2
+   `extract_to_header=False` skips framework header wrap.
+4. **Iter 7-8**: font-family swap caused ~70px cumulative shift; font-size
+   snap inflated heights to overflow. **Lesson** → Mode 2 captures source
+   font + native mode does spec snap with overflow check.
+5. **Iter 9**: thin borders top/bottom of slide. **Lesson** → strip
+   border/box-shadow from source `.slide` (standalone-only chrome).
+6. **Iter 10**: gray muted text mapped to `--fs-violet`. **Lesson** →
+   palette skip grayscale-ish (`max(R,G,B) - min(R,G,B) < 60`).
+7. **Meta**: at every iteration the agent made silent trade-offs the
+   user later rejected. **Lesson** → META-RULE above. Always ask.
+
+**Root cause of the original problem**: "用模板" has 3 layers (chrome /
+shell / pattern). The user wanted chrome + shell, NOT pattern. RESKIN
+MODE makes this the default. The follow-on bugs were all silent
+trade-off decisions cascading.
 
 ---
 
@@ -6561,6 +6701,19 @@ doom-loop("乱了""字小了""重叠了")。这是历史重灾区:旧版把"搬�
    - **不要再 `--skip-validate-html`** —— 它会把溢出这种真故障一起哑掉(星巴克 P3 就这么
      漏了 61px 卡内溢出,直到用户肉眼发现)。
 
+> **raw layout 自动继承母版定位(2026-05-28)**:
+> `data-layout="raw"` 起,**`.header` 和 `.stage` 自动继承母版定位**
+> (`feishu-deck.css` 把 `raw` 加进 unified rules):
+> - `.header { position:absolute; top:61; left:73; right:320; }`
+> - `.stage { position:absolute; top:200; bottom:200; left:96; right:96; flex column center; gap:24; }`
+> - `.slide-frame` 在 present-mode 用 `lark-content-bg.jpg` 填 letterbox(早在 2026-05-08 已是这样)
+>
+> 这意味着 lift 时**通常不需要手补这些定位**,直接搬,框架默认值自动撑住。
+> **特例**:
+> - 源 slide 自己有 `.stage / .header` 的 inline CSS(custom top/bottom/gap 等)→ slide-key 选择器更具体,会覆盖框架默认。源 inline 通常只 override `top/bottom/gap`,依赖框架 cascade 给 `position:absolute + left:96 + right:96` —— 现在框架统一规则补上了,**源 inline 半自含也能工作**。
+> - 源 slide 要全幅(no padding)→ inline `<style>` 写 `.slide { padding: 0 !important }` 或 redeclare `.stage` with `!important`,绝对优先级赢框架默认。
+> - 历史 lift(2026-05-28 之前用 per-slide `.header / .stage` 注入手补的)现在那些注入是冗余的,可以删,但留着也无害(同值不冲突)。
+>
 > **抽取实战坑(2026-05-27 · 复杂 slide 必看)**:
 > - **inner 用 frame 边界切,别 div 计数**:`<div`/`</div>` 平衡计数在大 / 嵌套深的
 >   slide 上会数错、把后面几张 frame 一起吞进来(→ R-DOM 嵌套 + R-KEY 重复)。

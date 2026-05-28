@@ -1,0 +1,164 @@
+# feishu-deck-h5 · reskin-rules.yaml
+#
+# Knobs for the foreign-HTML → feishu-deck reskinner (see reskin.py).
+# Non-engineers can tune palette mappings / font tokens / size ladder
+# without touching .py code. Loaded at startup; no caching.
+#
+# Update workflow:
+#   1. Edit values here.
+#   2. python3 -c "import yaml; yaml.safe_load(open('reskin-rules.yaml'))"
+#      to confirm the file still parses.
+#   3. Re-run reskin.sh on a sample. No code change needed.
+
+# ---------------------------------------------------------------------
+# feishu brand palette (RGB)
+# Used for fuzzy hex→token matching during palette rewrite.
+# ---------------------------------------------------------------------
+palette:
+  # name → (r, g, b, hex, var_name)
+  - { var: "--fs-blue",   hex: "#3C7FFF", rgb: [60,  127, 255] }
+  - { var: "--fs-teal",   hex: "#33D6C0", rgb: [51,  214, 192] }
+  - { var: "--fs-violet", hex: "#9F6FF1", rgb: [159, 111, 241] }
+  - { var: "--fs-purple", hex: "#5C3FFB", rgb: [92,  63,  251] }
+  - { var: "--fs-orange", hex: "#FE7F00", rgb: [254, 127, 0]   }
+
+# Foreign hex within this RGB distance of an --fs-* color → swap to var.
+# Beyond this, keep original (probably a deliberate non-brand color).
+# Distance metric: euclidean on RGB. Threshold 80 empirically covers
+# the common "close but not exact" matches (e.g. #37E0C8 → --fs-teal,
+# distance ~10; #54A8FF → --fs-blue, distance ~25).
+palette_match_threshold: 80
+
+# Cyan is BANNED as a slide accent (SKILL.md R49) — only inline highlight.
+# Foreign cyan accents in body/border/background get mapped to --fs-blue
+# (the closest brand color) regardless of distance.
+cyan_redirect_to: "--fs-blue"
+
+# ---------------------------------------------------------------------
+# 4-tier font-size ladder
+# Snap every foreign font-size to the nearest rung.
+# Mapping: input_range → output_size
+# ---------------------------------------------------------------------
+font_size_ladder: [16, 24, 28, 48]
+
+font_size_snap_table:
+  # Below 16 → 16 (chrome floor); above 48 → 48 cap (hero exceptions
+  # need explicit /* allow:typescale */ which reskin doesn't auto-emit
+  # — those rules survive snap then validate.py R20 warns).
+  - { max: 17, snap: 16 }   # 8 9 10 10.5 11 11.5 12 12.5 13 13.5 14 15 16 17 → 16
+  - { max: 19, snap: 16 }   # 18 19 → 16 (chrome, NOT body)
+  - { max: 26, snap: 24 }   # 20 21 22 23 24 25 26 → 24
+  - { max: 35, snap: 28 }   # 27 28 29 30 31 32 33 34 35 → 28
+  - { max: 999, snap: 48 }  # 36+ → 48
+
+# ---------------------------------------------------------------------
+# Content-context label floor (SKILL.md 2026-05-17, broadened 2026-05-23)
+# When a container has ≥ 28px sub-tier content, sibling/child labels
+# at 16px (chrome) get auto-bumped to 24 (body). 2nd-pass after snap.
+# ---------------------------------------------------------------------
+content_label_floor:
+  # When ANY descendant of a "card" has font-size ≥ floor_anchor_min, any
+  # SIBLING label at 16 (chrome) is bumped to 24 (body).
+  floor_anchor_min: 28
+  bump_target: 24
+  # Classes that mark a container as a "card" worth applying the rule to.
+  # Match selector-substring (lowercase). Extends as patterns recur.
+  card_class_hints:
+    - "card"
+    - "cell"
+    - "wheel"
+    - "tile"
+    - "node"
+    - "panel"
+    - "block"
+    - "feature"
+    - "item"
+    - "stat"
+
+# ---------------------------------------------------------------------
+# Foreign chrome detection
+# Heuristics for what to strip from the source body.
+# ---------------------------------------------------------------------
+foreign_chrome:
+  # Logo blocks to detect + strip. Replaced by framework's .wordmark.
+  logo_signals:
+    # Match if element class CONTAINS one of these AND has either:
+    #   (a) inline <svg>, OR
+    #   (b) text content matching one of brand_text patterns
+    class_substring: ["logo", "brand", "mark", "wordmark"]
+    brand_text:      ["飞书", "Lark", "lark", "LARK"]
+
+  # Page title candidates. The FIRST element matching these wins, gets
+  # extracted to `.header > h2.title-zh`, then removed from body.
+  title_candidates:
+    # Tag name + class hints. Empty class_substring matches any tag instance.
+    - { tag: "h1", class_substring: [] }
+    - { tag: "h2", class_substring: ["title"] }
+    - { tag: "div", class_substring: ["title", "head-title"] }
+
+  # CSS rules to drop entirely (selector or property pattern).
+  # These conflict with framework chrome.
+  drop_rules_re:
+    # Foreign "scale-to-fit" JS often comes with these CSS hooks
+    - "html\\s*,\\s*body\\s*\\{[^}]*overflow:\\s*hidden"
+    - "\\.stage\\s*\\{[^}]*position:\\s*fixed"
+  # CSS background declarations to neutralize (replaced with lark-content-bg)
+  background_neutralize_selectors_substring:
+    - ".slide"          # source's main canvas bg
+    - "body"            # foreign body bg
+
+# ---------------------------------------------------------------------
+# Title / header chrome geometry (feishu master coords + this-conversation
+# learning: title baseline aligned with logo baseline, no hairline).
+# These are the per-page CSS values reskin.py emits for .header.
+# ---------------------------------------------------------------------
+header_chrome:
+  title_top:     62      # was 96 in framework default; 62 aligns with logo
+  title_left:    96
+  title_right:   320     # leave space for logo at right:124 width:160
+  hairline:      false   # R56 retired eyebrow → no hairline under content title
+  stage_top:     220     # leaves room for title (top:62) + optional .page-sub (framework adds 36px margin-top + 28px) under header
+  stage_left:    84
+  stage_right:   84
+  stage_bottom:  44
+
+# ---------------------------------------------------------------------
+# Auto-layout: stage as flex column with gap (replaces margin-top stacking)
+# ---------------------------------------------------------------------
+auto_layout:
+  enable_stage_flex: true
+  stage_gap: 22
+  # Children matching these class-substring patterns get flex:1 (grow to
+  # fill). Typically the "main diagram" of a page. If none match, the
+  # default is to let all children content-size with flex-shrink: 0.
+  flex_grow_class_substring: ["core", "main", "diagram", "body"]
+
+  # Source-canvas handling:
+  #
+  # scale_wrap: true  → wrap source content in a fixed-size <div> and
+  #     transform: scale() it to fit the framework stage. Visually fills
+  #     1920×1080, but foreign 3-column / tight-spaced layouts may show
+  #     overlap (proportional widening of columns pushes labels into
+  #     siblings). All CSS px + JS coords stay native.
+  # scale_wrap: false → letterbox at native source size in the framework
+  #     1920×1080 slide. No overlap, but content looks small in the frame.
+  #     User can later add `transform: scale(N)` manually in per-page CSS.
+  #
+  # scale_canvas: true → rewrite ALL CSS px values by factor 1920/source_w.
+  #     DANGEROUS: JS-positioned elements (e.g. buildRing) use hardcoded
+  #     coords that DON'T get rewritten, so they end up positioned in
+  #     "old size" coordinate space inside a "new size" container.
+  #     Only safe when source has NO JS-positioned elements.
+  scale_wrap: false
+  scale_canvas: false
+
+# ---------------------------------------------------------------------
+# Refusals — what reskin NEVER does (hard rule, no flag overrides)
+# ---------------------------------------------------------------------
+refusals:
+  # Reskin does NOT:
+  - "restructure the foreign layout's semantic hierarchy"
+  - "swap one narrative pattern for another (e.g. dual flywheel → two-hand-arch)"
+  - "drop content that's part of the source's information density"
+  - "add content not present in the source (no LLM augmentation)"
+  - "do anything that requires reading the source's intent rather than its markup"

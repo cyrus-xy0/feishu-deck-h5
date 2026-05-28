@@ -1378,7 +1378,13 @@ body {
 .slide[data-layout="table"] .header,
 .slide[data-layout="timeline"] .header,
 .slide[data-layout="process"] .header,
-.slide[data-layout="big-stat"] .header {
+.slide[data-layout="big-stat"] .header,
+/* 2026-05-28 · `raw` joins the unified .header positioning so native-lift
+   slides (deck.json layout: "raw" with .header inside their data.html)
+   automatically get the master title coord (top:61, left:73, right:320)
+   instead of falling to top:0 static flow. Lifts that want a custom header
+   position can override via the slide's inline <style>. */
+.slide[data-layout="raw"] .header {
   position: absolute; top: 61px; left: 73px; right: 320px;  /* matches logo top */
   padding-bottom: 0; border-bottom: 0;
   display: block;
@@ -1520,7 +1526,17 @@ body {
 .slide[data-layout="timeline"]     > .stage,
 .slide[data-layout="table"]        > .stage,
 .slide[data-layout="agenda"]       > .stage,
-.slide[data-layout="stats"]        > .stage {
+.slide[data-layout="stats"]        > .stage,
+/* 2026-05-28 · `raw` joins the unified .stage positioning so native-lift
+   slides automatically get the master body-zone box (top:200, bottom:200,
+   left:96, right:96, flex column, justify-content:center). Without this,
+   lifted .stage falls to static flow → content goes edge-to-edge ("贴边")
+   because the source slide's inline .stage rule typically only overrides
+   top/bottom/gap and relies on the framework cascade for position/left/right.
+   Lifts that want a full-bleed body (e.g. a chart filling the canvas) can
+   override via the slide's inline <style> with `padding: 0` on .slide,
+   or by redeclaring .stage with their own values + !important. */
+.slide[data-layout="raw"]          > .stage {
   /* 2026-05-15 · symmetric vertical positioning so stage geometric center
      equals slide geometric center (y=540). Asymmetric top/bottom (e.g.
      220/110) shifts the stage center below the slide center, producing
