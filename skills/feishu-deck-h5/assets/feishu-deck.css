@@ -185,7 +185,18 @@ body {
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="table"]),
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="timeline"]),
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="process"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="image-text"]) {
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="image-text"]),
+/* 2026-05-28 · raw + iframe-embed default to content-bg letterbox fill.
+   Without these in the whitelist, the slide-frame keeps the deck-level
+   radial gradient in the letterbox area while .slide itself paints
+   content-bg — luma jump at the slide top edge reads as "标题上方有黑条"
+   on non-16:9 viewports. Most raw slides are content-page-ish; raw
+   slides emulating cover / end / replica can override per-slide.
+   Phase 1.c extras (matrix-2x2 / issue-tree / flow-swim / waterfall /
+   arch-stack / logo-wall / content-before-after) are handled in
+   extra-layouts.css, not duplicated here. */
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="raw"]),
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="iframe-embed"]) {
   background: #000 var(--fs-asset-content-bg) center/cover no-repeat;
 }
 .deck[data-mode="present"] .slide-frame.is-current {
