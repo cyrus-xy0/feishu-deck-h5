@@ -131,7 +131,7 @@
     return false;
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [] };
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [] };
   const slides = document.querySelectorAll('.slide');
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
@@ -744,6 +744,190 @@
         preview: (el.textContent || '').trim().slice(0, 16),
       });
     });
+
+    // ---- R-VIS-BALANCE · 视觉重心 / 留白均衡 (2026-05-28) ----
+    // 在非 hero 页上,正文容器内的内容应大致居中,不应顶到顶部留下半屏空白,
+    // 也不应"中空"——两块内容之间有一条大于 140 px 的死带。Floor 防得很死
+    // 但天花板要靠这条规则推:大量 "上空 / 下空 / 中空" 的反馈被 R-OVERFLOW
+    // 漏过,因为 validator 只看溢出不看留白。
+    //
+    // Skip: HERO_LAYOUTS (cover/section/big-stat/end/quote/image-text — 构图
+    // 本就非居中)。Per-slide opt-out: `data-allow-imbalance`(罕见,例如
+    // 故意"顶天立地"的封面变体)。
+    if (!isHeroLayout && !slide.hasAttribute('data-allow-imbalance')) {
+      // 找正文容器 —— 直接子元素优先 .stage,fallback 到框架已知正文容器
+      let bodyContainer = slide.querySelector(':scope > .stage')
+        || slide.querySelector(':scope > .grid')
+        || slide.querySelector(':scope > .flow')
+        || slide.querySelector(':scope > .nodes')
+        || slide.querySelector(':scope > .toc')
+        || slide.querySelector(':scope > .table-wrap')
+        || slide.querySelector(':scope > .stack');
+      // 若 .stage 只包了一层 .grid / .flow / 等,钻进去——gap 要量在真正的
+      // 内容容器上,不要把 stage→grid 的 padding 误算成内容空隙。
+      while (bodyContainer && bodyContainer.children.length === 1) {
+        const only = bodyContainer.children[0];
+        const rawc = only.className;
+        const clsc = (rawc && rawc.baseVal !== undefined ? rawc.baseVal : (rawc || '')).toString().toLowerCase();
+        if (/\b(grid|flow|nodes|toc|table-wrap|stack)\b/.test(clsc)) {
+          bodyContainer = only;
+        } else { break; }
+      }
+      if (bodyContainer) {
+        const bodyRect = bodyContainer.getBoundingClientRect();
+        // 容器至少要有 200 px 才有"重心"概念
+        if (bodyRect.height >= 200 && bodyRect.width >= 200) {
+          const blocks = [...bodyContainer.children].filter(c => {
+            if (c.tagName === 'STYLE' || c.tagName === 'SCRIPT') return false;
+            const cs = window.getComputedStyle(c);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+            if (cs.position === 'absolute' || cs.position === 'fixed') return false;
+            const r = c.getBoundingClientRect();
+            return r.width > 8 && r.height > 8;
+          }).map(c => ({ el: c, rect: c.getBoundingClientRect() }))
+            .sort((a, b) => a.rect.top - b.rect.top);
+          if (blocks.length > 0) {
+            const contentTop = blocks[0].rect.top;
+            const contentBottom = blocks[blocks.length - 1].rect.bottom;
+            const topGap = contentTop - bodyRect.top;
+            const bottomGap = bodyRect.bottom - contentBottom;
+            const slack = topGap + bottomGap;
+            // 只有当容器有明显富余 (slack ≥ 150 px) 时,失衡才有意义。
+            // 内容塞满了的页,topGap == bottomGap == 0,自然不报。
+            if (slack > 150) {
+              if (bottomGap > topGap + 120) {
+                out.balance.push({
+                  slide_idx,
+                  container_sel: shortSel(bodyContainer),
+                  kind: 'top-heavy',
+                  top_gap: Math.round(topGap),
+                  bottom_gap: Math.round(bottomGap),
+                  body_height: Math.round(bodyRect.height),
+                });
+              } else if (topGap > bottomGap + 120) {
+                out.balance.push({
+                  slide_idx,
+                  container_sel: shortSel(bodyContainer),
+                  kind: 'bottom-heavy',
+                  top_gap: Math.round(topGap),
+                  bottom_gap: Math.round(bottomGap),
+                  body_height: Math.round(bodyRect.height),
+                });
+              }
+            }
+            // 死带:相邻内容块之间的垂直空隙 > 140 px。水平 grid (3-up)
+            // 子元素的 top/bottom 差几乎为 0,自然不会误报;仅对纵向 stack
+            // 有意义。140 px ≈ 13% slide 高,是肉眼能感觉到"中间空一块"
+            // 的阈值。
+            for (let i = 1; i < blocks.length; i++) {
+              const prev = blocks[i - 1].rect;
+              const curr = blocks[i].rect;
+              const gap = curr.top - prev.bottom;
+              if (gap > 140) {
+                out.balance.push({
+                  slide_idx,
+                  container_sel: shortSel(bodyContainer),
+                  kind: 'dead-band',
+                  gap_px: Math.round(gap),
+                  between_a: shortSel(blocks[i - 1].el),
+                  between_b: shortSel(blocks[i].el),
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ---- R-FOCAL-CHECK · 视觉焦点是否清晰 (2026-05-28) ----
+    // 一张内容页应该有"唯一的视觉重点":第一眼能落下来的元素。最简单
+    // 的客观信号是 — 全页只有一个文本元素占据最大字号。如果 ≥3 个元素
+    // 共享最大字号,且无任何元素声明 `.is-hero` / `data-focal`,焦点就
+    // 模糊了(eye 不知道从哪看起)。
+    //
+    // Skip:hero layouts(焦点 == 整张 slide)+ 故意平行结构的 layout
+    // (agenda / logo-wall / arch-stack / table / timeline / process /
+    // stats / iframe-embed / replica)。这些 layout 的 N 元素等大本身
+    // 是设计,不该报。Per-slide opt-out: `data-allow-no-focal`(例如
+    // overview 页有意 N 路平权)。
+    const FOCAL_PARALLEL_LAYOUTS = new Set([
+      'agenda', 'logo-wall', 'arch-stack', 'table', 'timeline', 'process',
+      'stats', 'iframe-embed', 'replica',
+    ]);
+    if (!isHeroLayout
+        && !FOCAL_PARALLEL_LAYOUTS.has(layout)
+        && !slide.hasAttribute('data-allow-no-focal')) {
+      const FOCAL_CHROME_CLASSES = ['wordmark', 'pageno', 'source-footer',
+        'footnote', 'source', 'attrib', 'copyright', 'demo-tag',
+        'deck-progress', 'deck-controls', 'eyebrow', 'caption',
+        'iframe-hint'];
+      const focalCands = [];
+      slide.querySelectorAll('*').forEach(el => {
+        if (!hasOwnText(el)) return;
+        if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+        if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+        if (hasAnyClass(el, FOCAL_CHROME_CLASSES)) return;
+        // Skip mockup-internal
+        let inMock = false;
+        for (let n = el; n && n !== slide; n = n.parentElement) {
+          if (hasAnyClass(n, TIER_MOCK)) { inMock = true; break; }
+        }
+        if (inMock) return;
+        const cs = window.getComputedStyle(el);
+        const px = Math.round(parseFloat(cs.fontSize));
+        // 小于 20 px 的元素一般是 chrome / 注释,不参与焦点计算
+        if (!px || px < 20) return;
+        focalCands.push({ el, px });
+      });
+      if (focalCands.length >= 3) {
+        const maxPx = Math.max(...focalCands.map(c => c.px));
+        const atMax = focalCands.filter(c => c.px === maxPx);
+        // 1 个独享最大字号 → 焦点清晰
+        // 2 个共享 → 通常是 title + 一个 body hero,允许
+        // ≥3 个共享 → 焦点模糊,报告
+        if (atMax.length >= 3) {
+          // 平行模式容器 —— 若 atMax 元素全部共享一个"显式 N 路平权"的祖先
+          // (overview-grid / north-star-map / scene-grid / logo-wall / 等),
+          // 平等大小就是设计本身,不算焦点模糊。
+          const PARALLEL_PATTERN_CONTAINERS = new Set([
+            'overview-grid', 'north-star-map', 'scene-grid', 'logo-wall',
+            'verdict-grid', 'principle-band', 'kpi-strip', 'arch-stack',
+            'arch-hands', 'pipeline', 'steps', 'pills', 'toc',
+            'agenda-stack', 'iron-corners', 'two-hand-arch',
+          ]);
+          const ancestorClassSets = atMax.map(c => {
+            const set = new Set();
+            for (let n = c.el.parentElement; n && n !== slide; n = n.parentElement) {
+              const raw = n.className;
+              const cls = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase().split(/\s+/);
+              cls.forEach(x => { if (x) set.add(x); });
+            }
+            return set;
+          });
+          const commonAncestors = [...ancestorClassSets[0]].filter(
+            c => ancestorClassSets.every(s => s.has(c)));
+          const inParallelPattern = commonAncestors.some(
+            c => PARALLEL_PATTERN_CONTAINERS.has(c));
+          if (inParallelPattern) {
+            // 走人,这页是显式平行模式
+          } else {
+            const declared = atMax.filter(c =>
+              hasAnyClass(c.el, ['is-hero', 'focal', 'hero-anchor'])
+              || (c.el.dataset && c.el.dataset.focal != null));
+            // 声明了至少一个 .is-hero / data-focal → 通过(作者已表态)
+            if (declared.length === 0) {
+              out.focal.push({
+                slide_idx,
+                layout,
+                top_size_px: maxPx,
+                tied_count: atMax.length,
+                examples: atMax.slice(0, 4).map(c => shortSel(c.el)),
+              });
+            }
+          }
+        }
+      }
+    }
   });
 
   return out;

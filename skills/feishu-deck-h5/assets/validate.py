@@ -2588,6 +2588,58 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             '主标签用 `white-space: nowrap` 逼单行,或把尾词(「企划」「部」等)用 '
             '`display:block` 拆成副标行;(3) 改文案让上下两行字数接近。' + no_bal)
 
+    # ---- R-VIS-BALANCE · 视觉重心 / 留白均衡 ----
+    # 三种 sub-kind: top-heavy / bottom-heavy / dead-band。Warn 级别
+    # (不是 err) — 留白判断有主观成分,作者可能故意留;但默认要让作者
+    # 知道这页"上空 / 下空 / 中空",大量"看着空"的反馈都在这里。
+    for entry in report.get('balance', [])[:25]:
+        kind = entry['kind']
+        if kind == 'top-heavy':
+            iss.warn('R-VIS-BALANCE',
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
+                f'上重下空(top-heavy): 顶部留白 {entry["top_gap"]}px,'
+                f'底部留白 {entry["bottom_gap"]}px (容器高 {entry["body_height"]}px) '
+                '— 内容堆在顶部,下半页大块空白。Fix: (1) 容器加 '
+                '`justify-content: center`(框架对 fixed-shape layout 已默认开 R48,'
+                '但 raw / flex column 默认 flex-start,需手动加);(2) 删 `flex: 1` 让'
+                '内容随高度伸展的情况,改成 content-sized + center;(3) 内容确实太少 → '
+                '加 supporting 元素(KPI / pullquote / case ref)填重心。Per-slide '
+                'opt-out: 在 .slide 加 `data-allow-imbalance` 标记为故意。')
+        elif kind == 'bottom-heavy':
+            iss.warn('R-VIS-BALANCE',
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
+                f'下重上空(bottom-heavy): 顶部留白 {entry["top_gap"]}px,'
+                f'底部留白 {entry["bottom_gap"]}px (容器高 {entry["body_height"]}px) '
+                '— 内容沉底,上半页大块空白。Fix: 容器 `justify-content: center` '
+                '或 `align-content: center`;或检查是否有 `margin-top: auto` 把'
+                '内容硬推到底部(BF9 反模式)。')
+        else:  # dead-band
+            iss.warn('R-VIS-BALANCE',
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
+                f'中间留白 {entry["gap_px"]}px(dead-band)— `{entry["between_a"]}` '
+                f'和 `{entry["between_b"]}` 之间有一条 >140px 的空带,'
+                '页面被切成两半。Fix: (1) 容器去掉 `flex: 1` / `justify-content: '
+                'space-between`(BF9 反模式经常制造这种空白);(2) 缩小 gap;(3) '
+                '在中间加一行 supporting 元素(pullquote / KPI / divider);(4) '
+                '确实是设计意图(留白让 hero 呼吸)→ 加 `data-allow-imbalance`。')
+
+    # ---- R-FOCAL-CHECK · 视觉焦点是否清晰 ----
+    # 唯一被诊断的失败模式:≥3 个元素共享最大字号 AND 无任何元素声明 hero。
+    # 通常说明作者把 title + N 个 card title 全做到 48,眼睛没有第一落点。
+    for entry in report.get('focal', [])[:20]:
+        iss.warn('R-FOCAL-CHECK',
+            f'slide {entry["slide_idx"]} (layout `{entry["layout"]}`) · '
+            f'{entry["tied_count"]} 个元素共享最大字号 {entry["top_size_px"]}px '
+            f'(e.g. {", ".join("`"+s+"`" for s in entry["examples"][:3])}…)'
+            f'{"…" if entry["tied_count"] > 3 else ""},视觉焦点模糊 — '
+            '观众第一眼不知道该看哪个。Fix 选一个: (1) 把 N-1 个降一级'
+            '(48→28 或 28→24,按 Card density 规则:≤4 卡 = 48,5-6 卡 = 28,'
+            '≥7 卡 = 28);(2) 给真正的 hero 元素加 `class="is-hero"` 或 '
+            '`data-focal`(明示该元素是焦点,审计放行);(3) 用 brand color / '
+            'border / 不同 padding 把 hero 元素从平行结构里抽出来;(4) 这页确实'
+            '是 overview / 平权矩阵(N 项等大就是设计本身)→ 在 .slide 加 '
+            '`data-allow-no-focal` 跳过审计。')
+
     # (screenshot archival happens inside the Playwright block above; no
     # post-step needed. The previous `if 'shots_dir' in dir(): pass` was
     # dead: `dir()` inside a function returns local names, not what one
