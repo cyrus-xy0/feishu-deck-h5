@@ -18,17 +18,24 @@ description: |
 
 > **🛑 STOP — read this preflight before doing anything else.**
 
-## MODE SELECTION (read this first — pick CHECK-ONLY vs GENERATION)
+## MODE SELECTION (read this first — pick CHECK-ONLY vs GENERATION vs RESKIN)
 
 Before reading anything else in this file, decide which mode the user is in:
 
 | Mode | Trigger phrases / signals | What to do |
 |---|---|---|
 | **CHECK-ONLY** | "帮我检查这份 HTML/deck" · "看看这个 deck 合不合规" · "审一下这个 HTML" · "validate this" · "check the deck" · "扫一遍合规问题" · "这个 HTML 哪里不对" · user hands over a path to an existing `.html` and asks for review WITHOUT asking to generate / modify content | **Jump to "CHECK-ONLY MODE" section below.** SKIP PREFLIGHT, SKIP `new-run.sh`, SKIP `copy-assets`, SKIP everything else in this file. |
-| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | **Run the DESIGN PHASE first (default-on, chat-only)** — 标 hero 页、逐页定 path、定补全计划、给 hero 页写 Q0–Q4 + 六维 spec。任何一页走默认 layout 之外的设计就停下确认;全 schema 宣告即走。然后 PREFLIGHT → new-run(落 `DESIGN-PLAN.md`)→ 按 path 生成(Path A schema 见 `DECK GENERATION POLICY`;hero 的 `layout: raw` / bespoke 见同节 + `DESIGN-FIRST POLICY` 词汇库)。 |
+| **RESKIN** | user hands you a foreign / non-feishu HTML and asks to "换皮 / feishu 化 / 套个飞书模版 / reskin / 改成飞书风格 / 把颜色字体换成飞书 / 用飞书 deck 重做这个" — they want feishu CHROME (palette / font / 4-tier ladder / real lark logo / lark-content-bg / .header / .stage) applied to the SAME visual design, **without redesigning content** | **Jump to "RESKIN MODE" section below.** Run `bash assets/reskin.sh <input.html>` — mechanical chrome rewrite. SKIP DESIGN PHASE (no design judgment is made), SKIP redesigning to a Pattern H+ / N-up / etc. — that's a different ask. |
+| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | **Run the DESIGN PHASE first (default-on, chat-only)** — 标 hero 页、逐页定 path、定补全计划、给 hero 页写 Q0–Q4 + 六维 spec + **density budget**(每页量"装得下吗")。任何一页走默认 layout 之外的设计就停下确认;全 schema 宣告即走。然后 PREFLIGHT → new-run(落 `DESIGN-PLAN.md`)→ 按 path 生成(Path A schema 见 `DECK GENERATION POLICY`;hero 的 `layout: raw` / bespoke 见同节 + `DESIGN-FIRST POLICY` 词汇库)→ **render 后过 Step 5 密度闸门**(纯密度,不查 focal),通不过改回 deck.json 再 render,直到过了再交付。 |
 
 If a request is genuinely ambiguous ("can you look at this HTML and improve it?"
 — check or rewrite?), ask the user once to clarify before branching.
+
+**RESKIN vs GENERATION confusion (this took 6 turns to learn)**: "用飞书模版" /
+"套飞书皮" / "feishu 化" — these mean **chrome only**, NOT "redesign the content
+using Pattern H+ / N-up / arch-stack." If the user gives you an existing HTML and
+asks to "use the feishu template", default to RESKIN. Only ask before redesigning
+content if they say "重新设计 / 重画 / 改 layout / 套个新的 pattern".
 
 ---
 
@@ -73,12 +80,16 @@ LLM 多做创造性工作(补文案、补内容、为高光页写 bespoke layout
   **不编 attributed facts**(具体公司数字 / 具名引语 / 来源出处 —— 见 ONE-PAGER
   的 no-fabrication 规则)。
 
-**Step 2 · 页级 spec(Q0–Q4 + A 档六维)**
+**Step 2 · 页级 spec(Q0–Q4 + A 档六维 + density budget)**
 - **hero 页:必填** Q0–Q4 + 六维 spec(见 `DESIGN-FIRST POLICY` 设计前预检)。
   且**先翻设计词汇库再落 layout** —— `narrative patterns A–N` + `component
   utility classes`(见文末两节),挑一个 striking pattern,而不是反射性套 3 卡。
 - **支撑页:轻量** —— 角色判断 + `Decision rule` 选个 schema layout 就够,
   不必写满六维。
+- **每页必走 density budget** —— Q2 的 A/B/C/D 档分完之后,写一行 page-level
+  量盘子:**核心信息块 X 个 + 支撑信息 Y 个(含下沉策略)≤ layout 自然容量 Z**。
+  装不下不要回头压字号,回 Q1 砍内容(细则见 `DESIGN-FIRST POLICY` Q2)。
+  作用是把"过密"挡在 markup 之前 —— 真正的"挤"问题一半根因都是这一步没量。
 
 **Step 3 · 输出设计方案**
 - chat 里出 Design pass 表(格式见 `DESIGN-FIRST POLICY` → Design pass output),
@@ -90,6 +101,62 @@ LLM 多做创造性工作(补文案、补内容、为高光页写 bespoke layout
 - 确认/宣告后:PREFLIGHT → new-run → **把锁定的方案写一份
   `runs/<ts>/output/DESIGN-PLAN.md`**(与 FEEDBACK.md / PROMPTS.md / texts.md
   同级),生成严格照它走;中途想偏离先回来改 plan,不静默漂移。
+
+**Step 5 · 密度闸门(每次 render 后过一遍,直到通过再交付)**
+
+Q2 的 density budget 是"内容能装下"的预算,但 markup / deck.json 写完
+render 出来后,**实际字数、留白、装饰堆积**还会涨一轮 —— 必须再过一遍密度。
+这一步**只查密度,不再质疑焦点**(focal 由 Q1 唯一主旨 + `R-FOCAL-CHECK` 接管;
+双 hero / 双圆 / 双方块 / 痛 vs 解 等"多 hero"layout 不在本闸门质疑范围)。
+
+**过密信号(命中 ≥1 即过密 · 不分 layout)**:
+- **块内过满**:单个非点题正文 > 30 字 · 或单块塞 ≥ 5 个内联元素(图标 / 标签 / 描述 / 注释 / 边框)
+- **块间憋气**:相邻块间距 < 块自身高度 1/4 · 或核心块距画框 < 60 px
+- **冗余表达**:主副标题同事 · 战略判断 + 正文 + 金句三层重复 · 同概念 ≥ 2 处说
+- **支撑铺开**:底座 / 清单 / 注脚每项 > 1 行 · 或带强装饰(框 / 阴影 / 渐变)
+- **长句铺垫**:顶部 / 中部完整长句占大色块
+
+**降密 4 个方向(都做,不是选一个)**:
+1. **块内压实** —— 长句 → 名词短语,装饰减半,内联元素 ≤ 3
+2. **块间松气** —— 增 gap,核心块四周 ≥ 80 px,禁贴边
+3. **冗余清理** —— 副标题 / 重复结论 / 多余 caption,删
+4. **支撑下沉** —— 细节藏到底部窄带 / cfoot 注脚 / 下一页,每条"名称 + 一行 + 色点"
+
+**症状 → framework 工具(动词级)**:
+
+| 症状 | 用什么 |
+|---|---|
+| 长句铺垫 / 战略判断 | 顶部 `<p class="lede">` · 或 `<div class="data-panel is-blue">`(左 4 px 蓝条 + 灰底) |
+| 散排并列 ≥ 4 无方向 | `flow`(variant: process / timeline)· `arch-stack` · `pipeline` |
+| 中间连接带 3 行字 | 压成单行短标签(箭头 / 连接线上) |
+| 底座 / 清单 / 支撑 | `kpi-strip` 底部窄带 · 每项"名称 + 一行 + 色点" |
+| 金句 / slogan | `quote` layout 整页 · 或 inline `<span class="hl">` 高亮关键词 |
+| 全幅照 + 短句 | `image-text` |
+| 客户案例 4 拍 | `content/story-case`(别手搓 4 拍) |
+| N×M logo | `logo-wall` · N>12 必须按行业 / 阶段分组 |
+
+**量化护栏(纯密度,不含 focal)**:
+- 单个非点题正文 ≤ **30 字** · 点题句(hook / quote / lede / arc / slogan)≤ **50 字**
+- 全页完整句(非点题正文)≤ **2 句** · 单块内联元素 ≤ **3** · 核心块四周呼吸 ≥ **80 px**
+- 底座 / 清单类每项说明 ≤ **1 行** · 同信息重复 = **0 处**
+
+> **documented density exception**:数据表 / 架构图 / 全 case 矩阵 / 4-6 节点
+> 时间轴本来就密。命中:走对应 layout(`table` / `arch-stack` / `scene-grid` /
+> `flow timeline`),允许超阈值,但 4-tier ladder 不能省。
+
+**输出前自检(纯密度,逐条问)**:
+
+- [ ] **眯眼测试**:缩到 1/3 倍率,主结论可识别 AND 装饰糊成一片 → 通过
+- [ ] 块内还有长句 / 整段可压成名词短语?(只看非点题正文)
+- [ ] 块间憋气?能否增 gap?四周能否多留 60-80 px?
+- [ ] 还有副标题 / 重复结论 / 多余 caption 可删?
+- [ ] 底座 / 清单 / 支撑项每条是否压到 1 行 + 1 色点?
+- [ ] 装饰(框线 / 阴影 / 渐变)是否过多,有的可不可以去掉?
+
+> **跟 validator 的分工**:`R-VIS-BALANCE` 自动审"块间憋气"的几何信号,
+> `R-VIS-BODY-FLOOR` 审密集小字,但**字数 / 冗余 / 装饰堆积**这些内容向密度
+> validator 不查(R-COPY-ABSTRACT 已撤,理由 = 用例太杂)。本 Step 5 就是
+> 这块**人工兜底**,作者跑一遍,validator 跑另一半。两半合起来 = 完整密度防线。
 
 ### DESIGN-PLAN.md 落盘(mandatory)
 
@@ -290,6 +357,155 @@ Either dump it in the chat (default) or write to a file the user names.
 When the user asks "what does [Rxx] mean", look up the rule in `validate.py`
 (grep for the code) — every audit function has a docstring + the error message
 explains the fix.
+
+---
+
+## RESKIN MODE — foreign HTML → feishu chrome (mechanical, one-shot)
+
+The user has an existing single-page HTML (built elsewhere — claude artifact,
+hand-coded, output of a non-feishu deck tool, PDF-converted, etc.) and wants
+it "feishu-styled" without redesigning the content. This is a **mechanical
+chrome rewrite**, NOT a content-design pass.
+
+> **The clarifying question** that disambiguates 90% of these requests:
+> "你要换 chrome(标题位置 / 字体 / 字号 / 配色 / logo / 背景) 还是重画内容 /
+> 换 layout?" — RESKIN does the first; GENERATION mode (or Pattern H+ etc.)
+> does the second.
+
+### Entry — one command
+
+```bash
+bash skills/feishu-deck-h5/assets/reskin.sh <input.html> \
+    [--slug SLUG] [--strict] [--visual]
+```
+
+- `<input.html>` — path to foreign HTML (absolute or relative)
+- `--slug SLUG` — slide-key slug (kebab-case). Defaults to filename stem.
+- `--strict` — promote validator warnings to errors (final-pass review)
+- `--visual` — also run Playwright visual audits (off by default; reskin
+  output often hits R-VIS-OVERFLOW / R-VIS-LABEL-FLOOR on dense foreign
+  content, needs human iteration)
+
+Output: `runs/<ts>-reskin-<slug>/output/index.html` + `deck.json` +
+`FEEDBACK.md`. Single-file inline delivery: `--inline` on render-deck.py,
+or `build.sh --inline` after.
+
+### What reskin ALWAYS does (8 mandatory transforms)
+
+| # | Action | Source |
+|---|---|---|
+| 1 | Wrap source body in framework shell `.deck > .slide-frame > .slide[data-layout="raw"]` (renderer's `raw.fragment.html` auto-adds these; we emit deck.json with one `layout: "raw"` slide) | SKILL.md "DECK GENERATION POLICY" raw escape hatch |
+| 2 | Scale canvas to 1920×1080. Detect source canvas via `width: Npx; height: Mpx` on `.slide`-like selector; multiply all NON-font px by `1920/source_w` | feishu standard |
+| 3 | Strip foreign logo blocks (any element with class containing `logo` / `brand` / `mark` AND containing `<svg>` or the text 飞书/Lark). Framework's `.wordmark` auto-injects the real colored `lark-logo.png` top-right | SKILL.md L1 |
+| 4 | Strip foreign canvas background (`radial-gradient` / `linear-gradient` on body or `.slide`). Replace with `lark-content-bg.jpg` via `var(--fs-asset-content-bg)`. **No dot-grid overlay** | SKILL.md "Do NOT add .grid-bg by default" |
+| 5 | Extract foreign page title to `.header > h2.title-zh`, position at `top: 62` (aligns baseline with `.wordmark` at `top: 61`), NO hairline under header | learned from this conversation's iteration 6 |
+| 6 | Palette rewrite: fuzzy-match every `#hex` and `rgba()` literal to nearest `--fs-*` token (distance ≤ 80 RGB). Cyan-ish colors (distance < 60 to `#24C3FF`) redirected to `--fs-blue` (R49 — cyan is inline-highlight only) | SKILL.md R10 / R49 |
+| 7 | Font rewrite: every `font-family:` → `var(--fs-font-cjk)`. Every `font-size: Npx` → 4-tier ladder `{16, 24, 28, 48}`. **Selector-aware**: if the selector's class doesn't match chrome hints (eyebrow / pill / tag / footnote / source / caption / page / footer), the floor is 24 (R06 body floor), not 16 | SKILL.md R20 + R06 |
+| 8 | Strip R12 violations: `box-shadow:` values with non-zero offset and not `inset` are dropped. Glow rings (`0 0 Npx ...`) and inset shadows survive | SKILL.md R12 |
+
+### What reskin does WITH judgment (3 default-on transforms)
+
+| # | Action | When it fires |
+|---|---|---|
+| 1 | **Content-context label floor** — 2nd pass after font snap: any rule whose selector contains a `card-class_hints` (card / cell / wheel / tile / node / panel / block / feature / item / stat) AND has `font-size: 16` gets bumped to 24, IF any other selector targeting the same container has `font-size: ≥ 28`. This catches "cards with sub-tier content shouldn't have chrome-tier labels inside" | SKILL.md content-context label floor (2026-05-17 / 2026-05-23) |
+| 2 | **Selectors scoped to slide-key** — every rewritten rule gets prefixed with `.slide[data-slide-key="reskin-<slug>"]` so it doesn't leak. Foreign global rules on `html` / `body` are DROPPED (they conflict with framework chrome) | scoping defense |
+| 3 | **Stage flex column auto-layout** — emit `.stage { display: flex; flex-direction: column; gap: 22px }` so children stack with consistent gaps. Children matching `core` / `main` / `diagram` / `body` (substring) get `flex: 1` to grow into remaining height. Foreign `margin-top: Npx` stacks no longer needed | this conversation's iteration 4 |
+
+### What reskin REFUSES to do (hard rule, no flag overrides)
+
+- **Restructure the foreign layout's semantic hierarchy** — the source's
+  dual-flywheel stays a dual-flywheel; we don't swap it for Pattern H+
+  Two-hand-arch even if that "fits better"
+- **Swap one narrative pattern for another**
+- **Drop content** that's part of the source's information density (we
+  preserve every card, every label, every row)
+- **Add content** not present in the source (no LLM augmentation — the
+  user's content density is preserved)
+- **Anything requiring reading the source's intent** rather than its markup
+
+If the user actually wants those things, they should ask for GENERATION
+mode with explicit redesign instructions. Reskin is a paint job, not a
+remodel.
+
+### Pipeline (what reskin.sh does internally)
+
+```
+input.html
+   ↓ PREFLIGHT (writable mount check)
+   ↓ new-run.sh reskin-<slug> → runs/<ts>-reskin-<slug>/{input,output}/
+   ↓ cp input.html → input/
+   ↓ FEEDBACK.md stub (so render-time validate doesn't warn R-FEEDBACK)
+   ↓ reskin.py (8 mandatory + 3 default-on transforms above)
+deck.json {layout: "raw", data: {html: "<style>...</style><div class='header'>...</div><div class='stage'>...</div>"}}
+   ↓ render-deck.py (auto wraps .deck > .slide-frame > .slide + .wordmark)
+runs/<ts>/output/index.html
+   ↓ copy-assets.py (bundle framework CSS/JS into output/)
+   ↓ validate.py (--no-visual by default — visual issues are 1st-pass-expected)
+   ↓ ✓ PASS → hand back path to user
+```
+
+Empirical (one smoke test on a 1280×720 dual-flywheel source):
+- Static validator → 0 errors, 2 expected warnings (R-ECHO editorial + T00
+  expected for raw layouts without text-id annotations)
+- Tally: palette 6 swaps · fonts 16 snaps · canvas 1.5× · 1 drop-shadow
+  stripped · 1 logo stripped · 3 foreign chrome rules dropped · 40
+  selectors scoped
+
+### Tuning (non-engineer)
+
+`assets/reskin-rules.yaml` carries every threshold + hint list. Edit and
+re-run; no code change needed. Knobs:
+
+| Section | What you change |
+|---|---|
+| `palette` | Add brand colors; nudge RGB if a new feishu accent ships |
+| `palette_match_threshold` | Looser (default 80) = more aggressive swap to `--fs-*`; tighter = preserve more original colors |
+| `font_size_snap_table` | If you want a 5th tier (e.g. 88 hero) → add row. The 4-tier default matches SKILL.md R20 |
+| `content_label_floor.card_class_hints` | Add class substrings that mark "containers worth applying the floor rule to" |
+| `foreign_chrome.logo_signals` | Brand-text patterns + class hints that identify logo blocks worth stripping |
+| `header_chrome.title_top` / `.stage_top` etc. | Master coords for the rewritten `.header` + `.stage` |
+| `auto_layout.flex_grow_class_substring` | Class substrings whose div should grow to fill stage height |
+
+### When reskin output still needs human iteration
+
+Reskin is V1 — it handles the mechanical 80%. The remaining ~20% needs eyes:
+
+- **Overflow on dense foreign content** — 1280×720 sources scaled 1.5×
+  sometimes exceed framework `.stage` (which expects content sized for
+  1920×1080 native). Fix: trim source content, OR enlarge `.stage` via
+  per-page CSS override
+- **Label-floor missed a class** — `card_class_hints` doesn't cover every
+  foreign class name (e.g. `.unique-thing`). Either add the hint to
+  `reskin-rules.yaml` or manually bump that class's font-size in the
+  rendered output
+- **CJK orphan wrap** — `R-VIS-ORPHAN` warns when a short label wraps to
+  a 1-2 char last line. Fix: widen the container, add `text-wrap: balance`,
+  or shorten the label
+- **Foreign pattern has no framework analog** — e.g. flywheel / cycle /
+  loop diagrams aren't in the catalog (Pattern A–N). Reskin preserves the
+  source's bespoke geometry, which is correct, but the slide loses the
+  "this would be cleaner as a framework block" upgrade. To formalize a
+  recurring pattern, use `contribute-catalog` skill to PR a new block
+
+### Why this exists (lesson from a 6-round conversation, 2026-05-28)
+
+User had a 1280×720 dual-flywheel HTML built elsewhere, asked to "use
+feishu template". Without RESKIN MODE, the assistant:
+
+1. **Iter 1**: just changed colors/fonts on the standalone HTML — didn't
+   touch shell structure. User: "没用模板"
+2. **Iter 2**: wrapped in `.deck > .slide-frame > .slide[data-layout="raw"]`,
+   inlined framework CSS+JS — shell correct, but kept all user's chrome
+   design (logo block / title block / bg gradients). User: "模板就不是这个样子"
+3. **Iter 3**: Pattern H+ Two-hand-arch redesign. User: "搞回去，表现形式不能变"
+4. **Iter 4**: dual-flywheel preserved, framework chrome (`.header` /
+   `.wordmark` / `lark-content-bg`). Then 2 more rounds polishing label
+   floor + title-logo alignment.
+
+**Root cause**: "用模板" has 3 layers (chrome / shell / pattern). The user
+wanted chrome + shell, NOT pattern. RESKIN MODE makes this the default for
+"foreign HTML → feishu style" requests, with the pattern-swap explicitly
+gated behind GENERATION mode.
 
 ---
 
@@ -761,6 +977,32 @@ B 档 [...] (同上 6 维)
 C 档 [...] (同上 6 维)
 D 档 [...] (同上 6 维)
 ```
+
+**Q2 收尾 · density budget(page-level,每页一行,验"装得下"):**
+
+A/B/C/D 档分完后,再写一行 page-level 量盘子。6 维 spec 是"每个元素长什么样"
+的细节,density budget 是"这页总共装得下吗"的总量检查。两步都过了 Q3 黑白
+框架才有意义,否则黑白框架本身就是塞满的草稿,后续被迫靠"压字号 / 缩 gap"救火。
+
+```
+density budget(本页):
+├─ 核心信息块: X 个    (A + B 档加起来)
+├─ 支撑信息:   Y 个    (C 档)+ 下沉策略(底部窄带 / 注脚 / 下一页 / 直接砍)
+└─ layout 容量: Z 个    (layout 的"自然容量":content-3up=3 卡 · stats=4 KPI ·
+                         scene-grid=6 · logo-wall=12+ 必分组 · agenda=4-8 ·
+                         arch-stack=2-5 层 · north-star-map=5 · table=4-6 行 ·
+                         flow timeline=4-6 节点)
+
+判定:X + Y <= Z?
+  ✓ 是  → 继续 Q3 黑白框架
+  ✗ 否  → 不回头压字号,**回 Q1 砍内容**:必上的留下,可下沉的下沉到 C/D 档,
+          可删的删。允许把 Y 降到 0(支撑全下沉)再判一次。仍超 → layout 选小了
+          或这页本来该拆成 2 页。
+```
+
+**反模式**:Q2 装下了 5 张大卡放进 `content-3up`(Z=3),不回 Q1 砍,而是在 Q3 把
+卡 padding 压一半 + 字号从 48 → 28 + 卡片紧贴 —— 出图必然"挤"。Q2 量盘子就是
+为了挡这种事。
 
 **为什么 6 维强制**:
 
