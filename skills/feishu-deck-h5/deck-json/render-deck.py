@@ -1251,6 +1251,125 @@ def _enrich_stats_waterfall(ctx, slide):
         ctx.get("footnote"), snp, "footnote", classes="footnote", indent="        ")
 
 
+_CHART_TOKENS = ["var(--fs-blue)", "var(--fs-teal)", "var(--fs-violet)", "var(--fs-orange)"]
+_CHART_NAMED = {"blue": "var(--fs-blue)", "teal": "var(--fs-teal)",
+                "violet": "var(--fs-violet)", "orange": "var(--fs-orange)",
+                "grey": "rgba(255,255,255,0.45)"}
+
+
+def _chart_color(idx, override=None):
+    """Series/segment color → brand token. Auto-rotates blue/teal/violet/orange
+    by index; optional closed-enum override. Never free hex (stays inside R10)."""
+    if override and override in _CHART_NAMED:
+        return _CHART_NAMED[override]
+    return _CHART_TOKENS[idx % len(_CHART_TOKENS)]
+
+
+def _enrich_chart(ctx, slide):
+    """layout:chart — deterministic data-viz (bar / line / donut) from numeric
+    values. ALL geometry computed here at build time → inline CSS/SVG using
+    brand tokens, no JS, crisp at any scale-to-fit. Author supplies values only;
+    generalizes the stats/waterfall pattern into a chart family."""
+    snp = ctx["slide_no_padded"]
+    variant = slide.get("variant") or "bar"
+    series = ctx.get("series") or []
+    unit = _esc_br(ctx.get("unit", "") or "")
+
+    def vlabel(p):
+        vl = p.get("value_label")
+        if vl:
+            return _esc_br(str(vl))
+        v = p.get("value", 0)
+        if isinstance(v, float) and v.is_integer():
+            v = int(v)
+        return f"{v}{unit}"
+
+    def legend_chips(items):
+        chips = "".join(
+            f'<span class="cl-chip"><i style="background:{c}"></i>{_esc_br(n)}</span>'
+            for c, n in items if n
+        )
+        return f'        <div class="chart-legend">{chips}</div>\n' if chips else ""
+
+    chart_html = ""
+
+    if variant == "bar":
+        pts = (series[0].get("points") if series else []) or []
+        color = _chart_color(0, series[0].get("color") if series else None)
+        vals = [abs(float(p.get("value", 0) or 0)) for p in pts]
+        mx = max(vals) if vals and max(vals) > 0 else 1
+        cols = []
+        for i, p in enumerate(pts):
+            h = max(24, round(vals[i] / mx * 360))
+            cols.append(
+                f'          <div class="cbar">'
+                f'<div class="cval" data-text-id="slide-{snp}.pt-{i+1:02d}.value">{vlabel(p)}</div>'
+                f'<div class="ccol" style="height:{h}px;'
+                f'background:linear-gradient(180deg,{color},color-mix(in srgb,{color} 30%,transparent))"></div>'
+                f'<div class="clabel" data-text-id="slide-{snp}.pt-{i+1:02d}.label">{_esc_br(p.get("label",""))}</div>'
+                f'</div>'
+            )
+        chart_html = (f'        <div class="chart chart-bar" style="--cn:{len(pts) or 1}">\n'
+                      + "\n".join(cols) + "\n        </div>\n")
+
+    elif variant == "line":
+        W, H, PAD = 1000.0, 380.0, 14.0
+        npts = max((len(s.get("points") or []) for s in series), default=0)
+        allvals = [abs(float(p.get("value", 0) or 0)) for s in series for p in (s.get("points") or [])]
+        mx = max(allvals) if allvals and max(allvals) > 0 else 1
+        polylines, leg = [], []
+        for si, s in enumerate(series):
+            pts = s.get("points") or []
+            color = _chart_color(si, s.get("color"))
+            coords = []
+            for i, p in enumerate(pts):
+                x = PAD + (i / (npts - 1) * (W - 2 * PAD) if npts > 1 else 0)
+                y = H - PAD - abs(float(p.get("value", 0) or 0)) / mx * (H - 2 * PAD)
+                coords.append(f"{x:.1f},{y:.1f}")
+            polylines.append(
+                f'<polyline points="{" ".join(coords)}" fill="none" stroke="{color}" '
+                f'stroke-width="3" vector-effect="non-scaling-stroke" '
+                f'stroke-linejoin="round" stroke-linecap="round"/>')
+            leg.append((color, s.get("name")))
+        first = (series[0].get("points") if series else []) or []
+        xlabels = "".join(
+            f'<span data-text-id="slide-{snp}.x-{i+1:02d}">{_esc_br(p.get("label",""))}</span>'
+            for i, p in enumerate(first))
+        chart_html = (
+            f'        <div class="chart chart-line">\n'
+            f'          <svg class="cline-svg" viewBox="0 0 1000 380" preserveAspectRatio="none">'
+            + "".join(polylines) + "</svg>\n"
+            f'          <div class="cline-x">{xlabels}</div>\n'
+            f'        </div>\n' + legend_chips(leg))
+
+    elif variant == "donut":
+        pts = (series[0].get("points") if series else []) or []
+        vals = [abs(float(p.get("value", 0) or 0)) for p in pts]
+        total = sum(vals) or 1
+        R, C, SW, CIRC = 84.0, 120.0, 34.0, 2 * 3.141592653589793 * 84.0
+        segs, leg, cum = [], [], 0.0
+        for i, p in enumerate(pts):
+            color = _chart_color(i, p.get("color"))
+            seg = vals[i] / total * CIRC
+            segs.append(
+                f'<circle cx="{C}" cy="{C}" r="{R:.2f}" fill="none" stroke="{color}" '
+                f'stroke-width="{SW}" stroke-dasharray="{seg:.2f} {CIRC - seg:.2f}" '
+                f'stroke-dashoffset="{-cum:.2f}"/>')
+            cum += seg
+            leg.append((color, f'{_esc_br(p.get("label",""))} {round(vals[i] / total * 100)}%'))
+        center = f'{round(total)}{unit}' if unit else str(round(total))
+        chart_html = (
+            f'        <div class="chart chart-donut">\n'
+            f'          <svg class="cdonut-svg" viewBox="0 0 240 240">'
+            f'<g transform="rotate(-90 120 120)">' + "".join(segs) + '</g></svg>\n'
+            f'          <div class="cdonut-center">{center}</div>\n'
+            f'        </div>\n' + legend_chips(leg))
+
+    ctx["chart_html"] = chart_html
+    ctx["footnote_html"] = _optional_text_node(
+        ctx.get("footnote"), snp, "footnote", classes="footnote", indent="        ")
+
+
 def _enrich_flow_tree(ctx, slide):
     snp = ctx["slide_no_padded"]
     root = ctx.get("root", {}) or {}
@@ -1410,6 +1529,9 @@ ENRICHERS = {
     ("stats",   "row"):          _enrich_stats_row,
     ("stats",   "hero"):         _enrich_stats_hero,
     ("stats",   "waterfall"):    _enrich_stats_waterfall,
+    ("chart",   "bar"):          _enrich_chart,
+    ("chart",   "line"):         _enrich_chart,
+    ("chart",   "donut"):        _enrich_chart,
     ("image-text", None):        _enrich_image_text,
     ("table",   None):           _enrich_table,
     ("logo-wall", None):         _enrich_logo_wall,
