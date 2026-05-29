@@ -292,7 +292,13 @@
       el.classList.remove('dragging', 'drop-target', 'drop-above', 'drop-below');
     });
     clone.querySelectorAll('.edit-bar, .edit-toast, .edit-sidebar').forEach((el) => el.remove());
+    // `clone` is the <html> element; the deck-edit-mode class lives on <body>.
+    // Strip it from BOTH so a deck saved while in edit mode never bakes the
+    // class in — otherwise the blue dashed slide-frame outline + hidden present
+    // chrome persist when the saved file is reopened.
     clone.classList.remove('deck-edit-mode');
+    const cloneBody = clone.querySelector('body');
+    if (cloneBody) cloneBody.classList.remove('deck-edit-mode');
     // Restore deck mode attribute to its pre-edit value
     const deckEl = clone.querySelector('.deck');
     if (deckEl && prevDeckMode) deckEl.setAttribute('data-mode', prevDeckMode);
@@ -780,6 +786,19 @@
     clearTimeout(inputDebounce);
     inputDebounce = setTimeout(() => snapshot('input'), 600);
   });
+
+  // ── boot: never start in edit-mode visual state ───────────────────────
+  // Real edit mode is only ever entered via enterEditMode() (which sets the
+  // editMode flag). A `deck-edit-mode` class on <body> at load time is stale —
+  // baked in by an older authoring template or by a deck saved before the
+  // buildSavedHTML fix. Left alone it keeps the blue dashed slide-frame outline
+  // and hides the present-mode chrome with no way to dismiss it (Esc is a no-op
+  // while editMode is false). Strip it on load so the deck opens clean; the
+  // user still enters edit mode normally with E. This also self-heals decks
+  // that were already delivered with the class baked in.
+  if (document.body && document.body.classList.contains('deck-edit-mode')) {
+    document.body.classList.remove('deck-edit-mode');
+  }
 
   // ── expose a tiny API to the page (useful for debugging / bookmarklets) ──
   window.deckEdit = {
