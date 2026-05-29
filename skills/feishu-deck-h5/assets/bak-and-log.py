@@ -99,9 +99,18 @@ def prepend_changes_md(changes: Path, entry_md: str, dir_label: str):
 
 
 def prune_old_baks(file: Path, tag: str, keep: int = 3) -> int:
-    """Delete .bak-pre-<tag>-* for `file`, keeping the `keep` newest by mtime."""
-    pattern = f'{file.name}.bak-pre-{tag}-'
-    candidates = [p for p in file.parent.iterdir() if p.name.startswith(pattern)]
+    """Delete .bak-pre-<tag>-* for `file`, keeping the `keep` newest by mtime.
+
+    Only backups for THIS exact tag are considered: the trailing timestamp
+    shape (-YYYYMMDD-HHMMSS[.N]) is anchored, so a tag that is a string
+    prefix of another tag does not share its retention slot — e.g. tag
+    'fix' must not prune 'fix-more' backups. (Module docstring: "Other
+    tags' backups are untouched (tags scope the retention slot).")
+    """
+    bak_re = re.compile(
+        rf'^{re.escape(file.name)}\.bak-pre-{re.escape(tag)}-\d{{8}}-\d{{6}}(?:\.\d+)?$'
+    )
+    candidates = [p for p in file.parent.iterdir() if bak_re.match(p.name)]
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     to_delete = candidates[keep:]
     for p in to_delete:
