@@ -404,7 +404,7 @@ def _enrich_mockup_card(block):
     img = block.get("image")
     block["image_html"] = (
         f'              <div class="ui-shot" '
-        f'style="background-image:url(\'{img}\')"></div>'
+        f'style="background-image:url(\'{_esc_br(img)}\')"></div>'
         if img else ""
     )
     cp = block.get("compare_pair") or {}
@@ -435,7 +435,7 @@ def _enrich_persona_card(block):
     portrait = block.get("portrait")
     block["portrait_html"] = (
         f'              <div class="portrait" '
-        f'style="background-image:url(\'{portrait}\')"></div>'
+        f'style="background-image:url(\'{_esc_br(portrait)}\')"></div>'
         if portrait else ""
     )
 
@@ -452,7 +452,7 @@ def _enrich_testimonial_card(block):
     """
     portrait = block.get("portrait")
     block["portrait_html"] = (
-        f'              <div class="portrait" style="background-image:url(\'{portrait}\')"></div>'
+        f'              <div class="portrait" style="background-image:url(\'{_esc_br(portrait)}\')"></div>'
         if portrait else ""
     )
     logo = block.get("company_logo")
@@ -466,7 +466,7 @@ def _enrich_testimonial_card(block):
             # use a sentinel that gets substituted at slide render time via {{ asset_path }}.
             src = f"{{ASSET_PATH}}/shared/clientlogo/{safe}.png"
         block["company_logo_html"] = (
-            f'              <div class="company-logo" style="background-image:url(\'{src}\')"></div>'
+            f'              <div class="company-logo" style="background-image:url(\'{_esc_br(src)}\')"></div>'
         )
     else:
         block["company_logo_html"] = ""
@@ -860,7 +860,7 @@ def _enrich_image_text(ctx, slide):
 
     if file_exists and src:
         ctx["bg_style"] = (
-            f"background-image:url('{src}');"
+            f"background-image:url('{_esc_br(src)}');"
             f"background-size:{fit};"
             f"background-position:{position};"
         )
@@ -934,7 +934,7 @@ def _enrich_logo_wall(ctx, slide):
             logo_divs.append(
                 f'              <div class="logo" '
                 f'data-text-id="slide-{snp}.industry-{i_padded}.logo-{li:02d}" '
-                f'style="background-image:url(\'{src}\')"></div>'
+                f'style="background-image:url(\'{_esc_br(src)}\')"></div>'
             )
         logos_html = "\n".join(logo_divs)
         industry_blocks.append(
@@ -1131,7 +1131,7 @@ def _enrich_content_story_case(ctx, slide):
 
     if file_exists and src:
         bg_style = (
-            f"background-image:url('{src}');"
+            f"background-image:url('{_esc_br(src)}');"
             f"background-size:{fit};"
             f"background-position:{position};"
         )
