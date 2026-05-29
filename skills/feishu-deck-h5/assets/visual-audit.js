@@ -8,7 +8,8 @@
 //   { overflow: [...], tier: [...], hier: [...], align: [...],
 //     label_floor: [...], overlap: [...], body_floor: [...],
 //     card_overflow: [...], opt_out_abuse: [...],
-//     title_position: [...], abspos_dual_anchor: [...], orphan: [...] }
+//     title_position: [...], abspos_dual_anchor: [...], orphan: [...],
+//     balance: [...], focal: [...], slack_flex: [...] }
 //
 // Why on disk (not embedded in validate.py): JS in a Python r"""..."""
 // string is invisible to syntax highlight, gets no `node --check`,
@@ -131,7 +132,7 @@
     return false;
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [] };
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [] };
   const slides = document.querySelectorAll('.slide');
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
@@ -729,8 +730,14 @@
       const last = widths[widths.length - 1];
       const maxw = Math.max(...widths);
       const isOrphan = last <= fs * 1.45;
-      // imbalance 只针对短标签/标题(CJK<=14):长正文 2 行末行天然短,不是缺陷
-      const isImbalanced = widths.length <= 3 && last < maxw * 0.38 && cjk <= 14;
+      // imbalance 针对短标签/标题:长正文 2 行末行天然短,不是缺陷。
+      // CJK 上限按 hero 上下文放宽 — hero 标题字号 ≥ 72px(section 88 /
+      // cover 100 / quote 88+ 都在这一档),一行能放 13-15 CJK 就到 max-width,
+      // 16+ CJK 在 hero 里仍是"短标题"。Body 用 14 字 cap 防长正文误报。
+      // (2026-05-29 · P08 章节标题 16 CJK 漏报触发)
+      const heroFont = fs >= 72;
+      const cjkCap = heroFont ? 25 : 14;
+      const isImbalanced = widths.length <= 3 && last < maxw * 0.38 && cjk <= cjkCap;
       if (!isOrphan && !isImbalanced) return;
       const sel = shortSel(el);
       if (seenOrphan.has(sel)) return;
@@ -837,6 +844,149 @@
           }
         }
       }
+    }
+
+    // ---- R-VIS-SLACK-FLEX · flex:1 子容器撑出内部空白 (2026-05-28) ----
+    // R-VIS-BALANCE 看的是 body container 顶级 children 之间的 sibling gap;
+    // 但视觉"远"还有另一类来源 —— `flex:1`(或 flex-grow ≥ 1)子容器
+    // 抢光剩余空间后,**内部内容比拿到的空间小**,内部 justify-content
+    // (center / flex-end / space-between)把空白分到容器内部上/下/中间。
+    // 这种内部 slack 在 R-VIS-BALANCE 的 sibling gap 检测里看不到(sibling
+    // 之间只有 stage 的 gap,几 px),但视觉上 user 看到的是 flex 子项内部
+    // 末元素到下一 sibling 之间的"大距离"。典型踩坑:`flex:1` arch3 内部
+    // justify-content:center,arch3 拿到 800px,内容 600px,200 px slack 分
+    // 给 arch3 顶/底各 100 px → arch3 最后一行到 sibling closing 的视觉间距
+    // ≈ 100 + stage.gap。Eye 读到"closing 离 arch3 太远"。
+    //
+    // 检测:为每个 flex column 容器的 child,若 child computed flex-grow ≥ 1
+    // 且 child 内部 visible grandchild 存在,measure:
+    //   topSlack    = grandchildFirst.top    - child.contentBox.top
+    //   bottomSlack = child.contentBox.bottom - grandchildLast.bottom
+    // 任一 > 80 px → WARN(80 ≈ slide 8%,肉眼能感觉到)。
+    //
+    // Skip: HERO_LAYOUTS(cover/section/big-stat/end/quote/image-text 构图
+    // 通常不是 flex column)、容器自身 height < 200(不可能有显著 slack)、
+    // grandchild count == 0(空 flex 容器)。
+    // Opt-out: `data-allow-flex-slack` 在 flex container OR flex-grow child
+    // 上(罕见:故意把内容推到某一端,e.g. push-footer-to-bottom layout)。
+    if (!isHeroLayout) {
+      slide.querySelectorAll('*').forEach(container => {
+        const cs = window.getComputedStyle(container);
+        if (cs.display !== 'flex' && cs.display !== 'inline-flex') return;
+        if (!cs.flexDirection.startsWith('column')) return;
+        if (container.hasAttribute('data-allow-flex-slack')) return;
+        const cRect = container.getBoundingClientRect();
+        if (cRect.height < 200) return;
+        // iterate direct children
+        [...container.children].forEach(child => {
+          if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') return;
+          if (child.hasAttribute('data-allow-flex-slack')) return;
+          const ccs = window.getComputedStyle(child);
+          if (ccs.display === 'none' || ccs.visibility === 'hidden') return;
+          const grow = parseFloat(ccs.flexGrow || '0');
+          if (!(grow >= 1)) return;
+          const chRect = child.getBoundingClientRect();
+          if (chRect.height < 200) return;
+          // visible grandchildren — filter style/script and 0-size
+          const gcs = [...child.children].filter(gc => {
+            if (gc.tagName === 'STYLE' || gc.tagName === 'SCRIPT') return false;
+            const gccs = window.getComputedStyle(gc);
+            if (gccs.display === 'none' || gccs.visibility === 'hidden') return false;
+            const r = gc.getBoundingClientRect();
+            return r.height > 4;
+          });
+          if (gcs.length === 0) return;
+          const rects = gcs.map(gc => gc.getBoundingClientRect())
+                            .sort((a, b) => a.top - b.top);
+          // child content box: bbox minus padding (simplified — pad-aware)
+          const padTop    = parseFloat(ccs.paddingTop)    || 0;
+          const padBottom = parseFloat(ccs.paddingBottom) || 0;
+          const contentTop    = chRect.top    + padTop;
+          const contentBottom = chRect.bottom - padBottom;
+          const topSlack    = rects[0].top    - contentTop;
+          const bottomSlack = contentBottom - rects[rects.length - 1].bottom;
+          // threshold 80 px (≈ 7.4% of canvas height)
+          const THRESHOLD = 80;
+          if (topSlack < THRESHOLD && bottomSlack < THRESHOLD) return;
+          out.slack_flex.push({
+            slide_idx,
+            container_sel: shortSel(container),
+            child_sel: shortSel(child),
+            flex_grow: grow,
+            child_height: Math.round(chRect.height),
+            content_height: Math.round(rects[rects.length - 1].bottom - rects[0].top),
+            top_slack: Math.round(topSlack),
+            bottom_slack: Math.round(bottomSlack),
+            justify: ccs.justifyContent,
+          });
+        });
+      });
+    }
+
+    // ---- R-VIS-CARD-MIN-HEIGHT-SPARSE · min-height 撑空 + 没 space-between (2026-05-29) ----
+    // 作者用 `min-height` 撑 card 视觉体量(常见于"5 卡一行"等 grid),但 card
+    // 内是 default `justify-content: flex-start` → 内容堆顶,卡底大量空白。
+    // 正解:加 `class="fs-card-fill"` (= space-between),让 N 个 child 均布。
+    //
+    // 触发 2026-05-29 P15 调试:min-height 540/640 默认 flex-start,卡底
+    // 看着空。space-between 是答案,但 framework 没默认提醒 → 作者不知道。
+    //
+    // 检测(bbox 量法,2026-05-29 修):
+    //   1) flex column 元素
+    //   2) min-height > 50px (作者刻意撑了)
+    //   3) usable_height (clientH - padTop - padBottom) 减去
+    //      content_extent (last_child.bottom - first_child.top)
+    //      > 60px (这是"真"slack — gap/margin 都自动含进 extent)
+    //   4) justify-content 不在 {space-between, space-evenly, space-around}
+    // → WARN(留白判断主观,故 warn 不 error)
+    //
+    // 早期版用 sum(kid heights) + gap 计算 content,但忽略了 `margin` 间距,
+    // 在用 margin-bottom 撑子元素的卡上(P04 bytedance hero)误报 95px slack
+    // (实际只有 10px)。bbox 量法对 gap / margin 一视同仁,不再误报。
+    //
+    // Skip: HERO_LAYOUTS;有 `.fs-card-fill` 类的元素(已 opt-in);
+    // 单 child 元素(没意义);data-allow-min-height-sparse opt-out。
+    if (!isHeroLayout) {
+      slide.querySelectorAll('*').forEach(el => {
+        if (el.classList.contains('fs-card-fill')) return;
+        if (el.hasAttribute('data-allow-min-height-sparse')) return;
+        const cs = window.getComputedStyle(el);
+        if (cs.display !== 'flex' && cs.display !== 'inline-flex') return;
+        if (!cs.flexDirection.startsWith('column')) return;
+        const minH = parseFloat(cs.minHeight) || 0;
+        if (minH < 50) return;
+        const jc = cs.justifyContent;
+        if (jc === 'space-between' || jc === 'space-evenly' || jc === 'space-around') return;
+        // Count visible direct children
+        const kids = [...el.children].filter(c => {
+          if (c.tagName === 'STYLE' || c.tagName === 'SCRIPT') return false;
+          const ccs = window.getComputedStyle(c);
+          if (ccs.display === 'none' || ccs.visibility === 'hidden') return false;
+          return c.getBoundingClientRect().height > 4;
+        });
+        if (kids.length < 2) return;
+        // bbox-based content extent — auto-includes any margin/gap spacing
+        const elRect = el.getBoundingClientRect();
+        const firstTop = kids[0].getBoundingClientRect().top - elRect.top;
+        const lastBottom = kids[kids.length - 1].getBoundingClientRect().bottom - elRect.top;
+        const contentExtent = lastBottom - firstTop;
+        const padTop = parseFloat(cs.paddingTop) || 0;
+        const padBottom = parseFloat(cs.paddingBottom) || 0;
+        const usableH = elRect.height - padTop - padBottom;
+        const slack = usableH - contentExtent;
+        if (slack < 60) return;
+        out.card_min_height_sparse.push({
+          slide_idx,
+          selector: shortSel(el),
+          client_h: Math.round(elRect.height),
+          content_extent: Math.round(contentExtent),
+          usable_h: Math.round(usableH),
+          slack: Math.round(slack),
+          kid_count: kids.length,
+          justify: jc,
+          min_height: Math.round(minH),
+        });
+      });
     }
 
     // ---- R-FOCAL-CHECK · 视觉焦点是否清晰 (2026-05-28) ----
