@@ -732,7 +732,9 @@ _PLACEHOLDER_PATTERNS = [
     re.compile(r"^\s*Presentation\s+Title\s*$", re.IGNORECASE),  # Apple template
     re.compile(r"^\s*Click\s+or\s+tap\s+to", re.IGNORECASE),
     re.compile(r"^\s*(Click|Tap)\s+to\s+(add|edit)", re.IGNORECASE),
-    re.compile(r"^\s*Body\s+(text|level)\s*\d*\s*$", re.IGNORECASE),
+    re.compile(r"^\s*[单点]击此处"),                        # 单击此处编辑标题 / 主标题 / 全标题 (zh "click to edit"); also catches doubled stutters
+    re.compile(r"^\s*Body\s+(text|level)(\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten))?\s*$", re.IGNORECASE),  # "Body Level 1" AND spelled-out "Body Level One".."Five"
+    re.compile(r"^(\s*Body\s+(text|level)(\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten))?\s*\n?)+$", re.IGNORECASE),  # multi-line stack "Body Level One\nBody Level Two\n..." in one text box
     re.compile(r"^\s*Lorem\s+ipsum", re.IGNORECASE),
     re.compile(r"^\s*金句页底图\s*$"),                       # decor placeholder
     re.compile(r"^\s*Section\s+Title\s*$", re.IGNORECASE),
