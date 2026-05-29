@@ -1952,6 +1952,91 @@ def _parse_texts_md_ids(md: str) -> set[str]:
     return ids
 
 
+def audit_lift_style_lost(html: str, iss: Issues):
+    """R-VIS-LIFT-STYLE-LOST: lifted slide with `data-layout="raw"` and near-
+    empty inline `<style>` likely lost framework styling.
+
+    Triggered by 2026-05-29 P14 incident: source #14 was `data-layout="quote"`
+    with NO inline <style> — entire visual (92px blockquote / 30px attrib /
+    stack flex centering) came from framework's `.slide[data-layout="quote"]`
+    rules. Lift to `data-layout="raw"` made those rules stop matching →
+    blockquote rendered at browser default 16px. R-VIS-BODY-FLOOR caught the
+    16px but was downgraded to WARN due to `data-lifted` tag — drowned in the
+    "source's original size choices" warnings. The TRUE bug ("lift broke
+    styling") had no dedicated audit.
+
+    Detection: For each .slide with both `data-lifted` and `data-layout="raw"`,
+    sum the byte size of inline `<style>` blocks. If under 300 bytes AND the
+    slide content uses class names typically styled by a specific framework
+    layout (.stack/.attrib/blockquote for quote; .chapter-num/.pills for
+    section; .author for cover; .num+.copy for big-stat), emit ERROR.
+
+    Recommended fix: re-lift with `assets/lift-slides.py` (which auto-inlines
+    framework CSS for quote/cover/section/big-stat/end since 2026-05-29), OR
+    switch the slide's `layout` field to the schema layout directly.
+    """
+    # Find every .slide tag with data-lifted + data-layout="raw"
+    pat = re.compile(
+        r'<div class="slide"[^>]*?data-layout="raw"[^>]*?>(.*?)(?=<div class="slide-frame"|</div>\s*</div>)',
+        re.DOTALL
+    )
+    # Simpler: find each .slide block manually
+    slide_pat = re.compile(
+        r'<div class="slide"([^>]*)>(.*?)(?=<div class="slide-frame"|</body>)',
+        re.DOTALL
+    )
+    HEAVY_SIGNATURES = {
+        'quote':    ['<blockquote', '<div class="attrib"', '<div class="stack"'],
+        'cover':    ['<div class="author"'],
+        'section':  ['<div class="chapter-num"', '<div class="pills"'],
+        'big-stat': ['<div class="num"', '<div class="copy"'],
+        'end':      ['<div class="slogan"'],
+    }
+
+    body_m = re.search(r'<body[^>]*>(.*)</body>', html, re.S)
+    if not body_m:
+        return
+    body = body_m.group(1)
+
+    # Split body by slide-frame to look at each slide
+    frames = re.findall(r'<div class="slide-frame"[^>]*>(.*?)</div>\s*(?=<div class="slide-frame"|<div class="deck-ui"|$)',
+                        body, re.DOTALL)
+    for frame in frames:
+        m = re.search(r'<div class="slide"([^>]+)>(.*)', frame, re.DOTALL)
+        if not m: continue
+        attrs, inner = m.group(1), m.group(2)
+        if 'data-lifted' not in attrs: continue
+        if 'data-layout="raw"' not in attrs: continue
+        # Sum inline <style> blocks
+        style_total = sum(len(s) for s in re.findall(r'<style[^>]*>(.*?)</style>', inner, re.DOTALL))
+        if style_total >= 300: continue  # has substantial inline CSS, presumably OK
+        # Check for heavy-layout signatures
+        for orig_layout, sigs in HEAVY_SIGNATURES.items():
+            if all(sig in inner for sig in sigs):
+                key_m = re.search(r'data-slide-key="([^"]+)"', attrs)
+                lab_m = re.search(r'data-screen-label="([^"]+)"', attrs)
+                key = key_m.group(1) if key_m else '?'
+                label = lab_m.group(1) if lab_m else '?'
+                iss.err('R-VIS-LIFT-STYLE-LOST',
+                    f'slide `{label}` (data-slide-key={key!r}) is lifted '
+                    f'(data-lifted) + data-layout="raw" + inline `<style>` '
+                    f'{style_total} bytes (<300) + content uses '
+                    f'`{orig_layout}` layout signatures ({sigs}). The source '
+                    f'slide\'s visual depended on framework `.slide[data-layout="'
+                    f'{orig_layout}"]` rules, which no longer match after lifting '
+                    f'to "raw" → slide renders at browser defaults (e.g. quote '
+                    f'blockquote falls 92px → 16px). Fix: (1) re-lift with '
+                    f'`assets/lift-slides.py` (auto-inlines framework CSS for '
+                    f'quote/cover/section/big-stat/end since 2026-05-29), OR '
+                    f'(2) switch the slide\'s layout field to `"{orig_layout}"` '
+                    f'(schema layout, not raw), OR (3) manually inline the '
+                    f'framework rules scoped to this slide-key. '
+                    f'Per `data-lifted` lift-aware downgrade does NOT apply '
+                    f'to this rule — this isn\'t the source\'s own size choices, '
+                    f'it\'s a STYLE-LOSS bug introduced by the lift itself.')
+                break
+
+
 def audit_dom_integrity(html: str, iss: Issues):
     """R-DOM: structural invariants on the .deck DOM tree.
 
@@ -2623,6 +2708,54 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 '在中间加一行 supporting 元素(pullquote / KPI / divider);(4) '
                 '确实是设计意图(留白让 hero 呼吸)→ 加 `data-allow-imbalance`。')
 
+    # ---- R-VIS-SLACK-FLEX · flex:1 子容器撑出内部空白 ----
+    # R-VIS-BALANCE 看的是 body container 顶级 children 之间的 sibling gap;
+    # 这条补的是另一类:`flex:1` 子容器抢光剩余空间后,内部 justify-content
+    # 把空白分到子容器顶/底,导致最后一个 grandchild 离子容器边距远 →
+    # sibling 看上去"远"。典型踩坑:`.arch3 { flex:1; justify-content: center }`
+    # 内部撑出 200px slack。Warn 级(留白判断主观,作者可能有意)。
+    for entry in report.get('slack_flex', [])[:20]:
+        ts, bs = entry['top_slack'], entry['bottom_slack']
+        if ts >= 80 and bs >= 80:
+            kind = f'容器内部居中撑空(top {ts}px / bottom {bs}px)'
+        elif ts >= 80:
+            kind = f'容器内部上方撑空 {ts}px'
+        else:
+            kind = f'容器内部下方撑空 {bs}px(最后一个子元素到容器底距离过大)'
+        iss.warn('R-VIS-SLACK-FLEX',
+            f'slide {entry["slide_idx"]} · `{entry["child_sel"]}` '
+            f'(flex-grow {entry["flex_grow"]}, 高 {entry["child_height"]}px, '
+            f'内容 {entry["content_height"]}px, justify-content: '
+            f'{entry["justify"]}) — {kind}。父 `{entry["container_sel"]}`。'
+            '原因:`flex:1` 把剩余空间给了该子容器,但内部内容比拿到的空间小,'
+            '`justify-content` 把空白分到容器内部,视觉上跟相邻 sibling 间距'
+            '异常大。Fix 选一个: (1) 去掉子容器的 `flex: 1`(改成 content-sized '
+            '+ 父容器 `justify-content: center` 居中整组内容,这是最常见的修法);'
+            '(2) 把子容器 `justify-content` 改成 `flex-start` / `flex-end` 让'
+            '内容靠一端;(3) 内容确实太少 → 加 supporting 元素填重心;(4) '
+            '确实是设计意图(故意让 hero 元素被推到某一端)→ 在子容器或父容器加 '
+            '`data-allow-flex-slack` 跳过审计。')
+
+    # ---- R-VIS-CARD-MIN-HEIGHT-SPARSE · min-height 撑空 + 没 space-between ----
+    # 作者用 `min-height` 撑 card 视觉体量,但 default `justify-content: flex-start`
+    # 让内容堆顶,卡底大量空白 — 视觉上"卡片看着空"。正解:加 `class="fs-card-fill"`
+    # (= space-between),N child 均布。Warn 级(留白判断主观,作者可能故意)。
+    # 触发 2026-05-29 P15 调试:这 pattern 应该是 default 提醒,不靠作者记得。
+    for entry in report.get('card_min_height_sparse', [])[:15]:
+        iss.warn('R-VIS-CARD-MIN-HEIGHT-SPARSE',
+            f'slide {entry["slide_idx"]} · `{entry["selector"]}` '
+            f'(min-height {entry["min_height"]}px, 实际 {entry["client_h"]}px, '
+            f'内容延展 {entry["content_extent"]}px (first→last bbox), '
+            f'可用 {entry["usable_h"]}px (减 padding), 真 slack {entry["slack"]}px, '
+            f'{entry["kid_count"]} children, justify-content: {entry["justify"]}) '
+            f'— 作者设了 min-height 撑卡片体量,但内容堆顶,卡底大量空白。'
+            'Fix: (1) 给该元素加 `class="fs-card-fill"`(框架 utility · 内部 '
+            '`justify-content: space-between !important` · {N children 跨高度均布}'
+            ');(2) 或缩小 min-height 到自然内容高度附近(slack < 30px · 让 '
+            'flex-start 看不出来);(3) 确实是设计意图(顶部 hero + 底部留白)→ '
+            '给元素加 `data-allow-min-height-sparse` 跳过审计。'
+            '完整 pattern 见 `feishu-deck.css` 的 `.fs-card-fill` 注释。')
+
     # ---- R-FOCAL-CHECK · 视觉焦点是否清晰 ----
     # 唯一被诊断的失败模式:≥3 个元素共享最大字号 AND 无任何元素声明 hero。
     # 通常说明作者把 title + N 个 card title 全做到 48,眼睛没有第一落点。
@@ -2738,6 +2871,7 @@ def main():
 
     iss = Issues()
     audit_dom_integrity(html, iss)
+    audit_lift_style_lost(html, iss)
     # All audits emit warn/err at their inherent severity. The global
     # `--strict` flag promotes ALL warnings to errors after the audits
     # complete (see end of main()) — per-audit `strict` branches were

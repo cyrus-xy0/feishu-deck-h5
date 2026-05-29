@@ -1560,6 +1560,59 @@ body {
   top: 220px; bottom: 110px;
 }
 
+/* 2026-05-29 · CARD-FILL utility class.
+   When a flex-column card has `min-height` set for visual presence (so it's
+   taller than its content's natural height), the default `justify-content:
+   flex-start` packs content at the top with empty space at the bottom of
+   the card — feels half-filled. `justify-content: space-between` distributes
+   children evenly across the card's height, so the card content visually
+   fills the frame.
+
+   Use this WHEN the card has min-height larger than its natural content
+   height. If content fills the card naturally (content height ≥ min-height),
+   this has no effect (space-between needs slack).
+
+   This is NOT the same as BF9's "dead-middle space" anti-pattern:
+   BF9 is about ACCIDENTAL stretching (flex:1 / align-items:stretch with sparse
+   content). card-fill is about INTENTIONAL min-height for visual sizing —
+   the slack is by design, and space-between fills it deliberately.
+
+   Triggered by 2026-05-29 P15: 5-card row with min-height 640px for visual
+   presence; content packs at top, ~160px empty at bottom of each card.
+   Applying space-between distributes the 5 children (head + system + doing
+   + stuck + by) evenly. */
+.fs-card-fill {
+  justify-content: space-between !important;
+}
+
+/* 2026-05-29 · ANCHORED-TITLE STAGE pattern.
+   When `.stage` contains a TITLE element as a direct child (.ttl-block,
+   .ttl-main, .header, h1, h2), the default `justify-content: center` on
+   .stage drags the title down to vertical center — wrong: title should
+   stay anchored at TOP, body should fill remaining vertical space.
+
+   Triggered by 2026-05-29 P15 lift: source `kangshifu-8-depts` puts title
+   INSIDE .stage (with `.header { display: none }` hiding the framework
+   default header). My fix initially over-corrected: with grid content-sized,
+   stage's `justify-content: center` pulled the title down with the cards,
+   leaving empty band at top AND bottom but title not at top.
+
+   Fix: when stage has a title direct child, switch to flex-start (anchor
+   title) AND require body container to have `flex: 1 + align-content:
+   center` so it fills the remainder + centers its content within. This
+   is a framework default — authors don't need to think about it.
+
+   The body container is whatever takes flex: 1 (the author's responsibility
+   to set on the body grid / nodes / etc.). Cards inside should set their
+   own min-height for visual presence (sweet-spot ~480-560px). */
+.slide > .stage:has(> .ttl-block),
+.slide > .stage:has(> .ttl-main),
+.slide > .stage:has(> .header),
+.slide > .stage:has(> h1),
+.slide > .stage:has(> h2) {
+  justify-content: flex-start;
+}
+
 /* Inner body containers flow naturally inside .stage — override the
    layout-default absolute positioning. Specificity (0,3,0) > (0,2,0). */
 .slide[data-layout="content-2col"] > .stage > .grid,
@@ -1733,6 +1786,23 @@ body {
     radial-gradient(55% 45% at 92% 8%, rgba(159,111,241,0.30), transparent 60%),
     radial-gradient(55% 45% at 8% 92%, rgba(60,127,255,0.22), transparent 60%);
 }
+/* 2026-05-29 · letterbox-aware decor mirror (BF15.1 framework fix).
+   mix-glow's bright zone is at 92% 8% (top-right) — on non-16:9 fullscreen
+   viewports the slide's ::before tint stops at the slide edge but the
+   letterbox area above stays untinted → visible luma jump = "上面有黑色的边".
+   Mirror decor onto `.slide-frame::after` so it covers letterbox + slide
+   uniformly, and suppress slide's own ::before to prevent double-tint
+   stacking at the slide boundary. */
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="mix-glow"])::after {
+  content: ''; position: absolute; inset: 0;
+  pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(55% 45% at 92% 8%, rgba(159,111,241,0.30), transparent 60%),
+    radial-gradient(55% 45% at 8% 92%, rgba(60,127,255,0.22), transparent 60%);
+}
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="mix-glow"]) > .slide[data-decor~="mix-glow"]::before {
+  background-image: none;
+}
 
 /* teal-glow: bottom-left teal bloom (data / KPI emphasis) */
 .slide[data-decor~="teal-glow"]::before {
@@ -1744,6 +1814,17 @@ body {
 .slide[data-decor~="orange-spark"]::before {
   background-image:
     radial-gradient(40% 32% at 88% 18%, rgba(254,127,0,0.22), transparent 65%);
+}
+/* 2026-05-29 · letterbox-aware decor mirror (BF15.1 framework fix · same as mix-glow).
+   orange-spark bright zone at 88% 18% (top-right) → same letterbox luma jump issue. */
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="orange-spark"])::after {
+  content: ''; position: absolute; inset: 0;
+  pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(40% 32% at 88% 18%, rgba(254,127,0,0.22), transparent 65%);
+}
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="orange-spark"]) > .slide[data-decor~="orange-spark"]::before {
+  background-image: none;
 }
 
 /* aurora: three-color ambient (matches the legacy .has-aurora class) */
