@@ -235,6 +235,14 @@ body {
   border: 1px solid var(--fs-hairline);
   border-radius: 6px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+  /* 2026-05-29 · F-27 perf: skip painting off-screen frames in scroll/browse
+     mode too (present mode already does this at line ~157). No
+     contain-intrinsic-size needed — the base .slide-frame keeps
+     `aspect-ratio:16/9 + width:100% + contain:size`, so each frame's box is
+     sized by layout (not content), reserving correct height with zero
+     scroll-anchor jank. Saves a full 1920×1080 paint per off-screen slide on
+     long decks (esp. mobile browse). */
+  content-visibility: auto;
 }
 
 /* ---- Deck UI overlay (progress bar, mode toggle, bottom controls) ---- */
