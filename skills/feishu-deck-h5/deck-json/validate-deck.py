@@ -35,6 +35,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEFAULT_SCHEMA = HERE / "deck-schema.json"
 
+# PLACEHOLDER_PATTERNS single-sourced in _story_case_fit.py (F-15) — shared
+# with render-deck.py so the two fit-checks can't drift apart.
+sys.path.insert(0, str(HERE))
+from _story_case_fit import PLACEHOLDER_PATTERNS  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Result accumulator
@@ -213,15 +218,6 @@ class SchemaValidator:
 # ---------------------------------------------------------------------------
 # Cross-field business rules
 # ---------------------------------------------------------------------------
-
-PLACEHOLDER_PATTERNS = (
-    r"\b(TBD|TBC|TODO|XXX|N/?A|FIXME)\b",
-    r"(待补|具体待补|占位|稍后补充|有待补充|待定|暂无|未填|None)",
-    r"^[\s\.\-…—_]+$",
-    r"^(\?+|？+)$",
-    r"\.\.\.{2,}|…{2,}",
-)
-
 
 def is_variant(slide: dict, layout: str, variant: str) -> bool:
     return slide.get("layout") == layout and slide.get("variant") == variant

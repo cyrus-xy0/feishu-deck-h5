@@ -39,6 +39,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Story-case fit primitives are single-sourced in _story_case_fit.py (F-15) so
+# render-deck.py and validate-deck.py can't drift apart.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _story_case_fit import (  # noqa: E402
+    get_path,
+    PLACEHOLDER_PATTERNS as _PLACEHOLDER_PATTERNS,
+    STORY_CASE_FIT_CHECK,
+    _min_len_for,
+)
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -107,15 +117,6 @@ def _esc_br(s):
 # Helpers (mirror render.py — kept inline for self-contained script)
 # ---------------------------------------------------------------------------
 
-def get_path(d, dotted: str):
-    cur = d
-    for k in dotted.split("."):
-        if not isinstance(cur, dict) or k not in cur:
-            raise KeyError(dotted)
-        cur = cur[k]
-    return cur
-
-
 # ---------------------------------------------------------------------------
 # content/story-case schema-fit refusal + accent review
 # Ported 2026-05-26 from the retired assets/render.py one-pager pipeline.
@@ -126,34 +127,10 @@ def get_path(d, dotted: str):
 # accent word for a 1-second eyeball. Opt out with --skip-fit-check.
 # ---------------------------------------------------------------------------
 
-_PLACEHOLDER_PATTERNS = (
-    r"\b(TBD|TBC|TODO|XXX|N/?A|FIXME)\b",
-    r"(待补|具体待补|占位|稍后补充|有待补充|待定|暂无|未填|None)",
-    r"^[\s\.\-…—_]+$",
-    r"^(\?+|？+)$",
-    r"\.\.\.{2,}|…{2,}",
-)
-_MIN_LEN_FULL = 10        # arc.pain / arc.conflict / arc.solution
-_MIN_LEN_ACCENT = 2       # *.accent — highlight words
-_MIN_LEN_CONNECTIVE = 1   # *.lead / *.tail — connective tissue
-
-STORY_CASE_FIT_CHECK = (
-    "hook.lead", "hook.accent", "hook.tail",
-    "arc.pain", "arc.conflict", "arc.solution",
-    "arc.value.lead", "arc.value.accent", "arc.value.tail",
-)
 STORY_CASE_ACCENT_PATHS = (
     ("hook",  "hook"),
     ("value", "arc.value"),
 )
-
-
-def _min_len_for(path: str) -> int:
-    if path.endswith(".accent"):
-        return _MIN_LEN_ACCENT
-    if path.endswith((".lead", ".tail")):
-        return _MIN_LEN_CONNECTIVE
-    return _MIN_LEN_FULL
 
 
 def check_story_case_fit(data: dict) -> list:
