@@ -273,12 +273,14 @@ VARIANT_DATA_FIELDS = {
     ("content", "story-case"):  {"title", "industry", "brand", "source", "hook", "arc", "scene"},
     ("content", "blocks"):      {"title", "lede", "body_blocks", "source_footer"},
     ("content", "matrix"):      {"title", "axes", "quadrants"},
+    ("content", "before-after"):{"title", "before", "pivot", "after"},
     ("stats",   "row"):         {"title", "cols", "footnote"},
     ("stats",   "hero"):        {"title", "eyebrow", "stat", "heading", "body"},
     ("stats",   "waterfall"):   {"title", "bars", "footnote", "cols"},
     ("flow",    "timeline"):    {"title", "cols", "nodes"},
     ("flow",    "process"):     {"title", "cols", "steps"},
     ("flow",    "tree"):        {"title", "root", "branches"},
+    ("flow",    "swim"):        {"title", "time_axis", "lanes"},
 }
 
 
@@ -449,6 +451,12 @@ def build_scaffold(layout: str, variant: str | None, key: str) -> dict | None:
                                        "tr": {"ord": "B", "title": "〔象限 B〕", "items": ["〔条目 1〕"]},
                                        "bl": {"ord": "D", "title": "〔象限 D〕", "items": ["〔条目 1〕"]},
                                        "br": {"ord": "C", "title": "〔象限 C〕", "items": ["〔条目 1〕"]}}},
+        ("content", "before-after"):{"title": "〔标题 TODO〕",
+                                    "before": {"tag": "〔现状 · 痛点〕", "items": [
+                                       "〔痛点 1 TODO〕", "〔痛点 2 TODO〕", "〔痛点 3 TODO〕"]},
+                                    "pivot": {"caption": "〔转折说明 TODO〕"},
+                                    "after": {"tag": "〔用飞书之后〕", "items": [
+                                       "〔改善 1 TODO〕", "〔改善 2 TODO〕", "〔改善 3 TODO〕"]}},
         ("stats", "row"):          {"title": "〔标题 TODO〕", "cols": [
                                        {"num": "0", "label": "〔标签 1 TODO〕"},
                                        {"num": "0", "label": "〔标签 2 TODO〕"},
@@ -479,6 +487,14 @@ def build_scaffold(layout: str, variant: str | None, key: str) -> dict | None:
                                     "branches": [
                                        {"ord": "A", "title": "〔分支 A〕", "leaves": ["〔叶子〕"]},
                                        {"ord": "B", "title": "〔分支 B〕", "leaves": ["〔叶子〕"]}]},
+        ("flow", "swim"):          {"title": "〔标题 TODO〕",
+                                    "time_axis": ["〔Q1〕", "〔Q2〕", "〔Q3〕"],
+                                    "lanes": [
+                                       {"name": "〔泳道 1 TODO〕", "milestones": [
+                                          {"quarter": 1, "title": "〔里程碑 TODO〕"},
+                                          {"quarter": 3, "title": "〔里程碑 TODO〕"}]},
+                                       {"name": "〔泳道 2 TODO〕", "milestones": [
+                                          {"quarter": 2, "title": "〔里程碑 TODO〕"}]}]},
         ("end", None):             {},
         ("replica", None):         {"page_image": "page-01.jpg"},
         ("raw", None):             {"html": '<div class="slide" data-layout="raw" data-screen-label="〔TODO〕" data-slide-key="〔TODO〕"><div class="wordmark">飞书</div>〔自由内容 HTML〕</div>'},
