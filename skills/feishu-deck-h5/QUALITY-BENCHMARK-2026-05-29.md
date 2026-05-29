@@ -70,3 +70,23 @@ richness(3.6/3.8)和 quality(3.4/3.6)是**最低的两轴**(一致/变化/契合
 
 ## 7 · 回归用法
 改完 ①/② 后,重跑 `deck-quality-benchmark` 工作流(同 5 brief × 2 模型),对比本基线:richness/quality 应从 ~3.5 往上走,且 Opus−Sonnet 差应缩小。
+
+## 8 · 重跑 #1 结果(richness 三件套之后 · 2026-05-29)
+改动:① `ICON_LIB` 8→43(资源,commit 0b8c309)· ② `R-VIS-NO-IMAGERY` warn_soft 评分器(反应式,e9aadf2)· ③ DESIGN-PHASE Step2 视觉丰富度引导(主动式,16ce565)。同 5 brief × {Opus, Sonnet} 重跑:
+
+| 轴 | Opus 基线→重跑 | Sonnet 基线→重跑 |
+|---|---|---|
+| 一致性 | 4.6 → 4.8 (+0.2) | 4.4 → 4.8 (+0.4) |
+| **丰富 richness** | 3.6 → **4.2** (+0.6) | 3.8 → **4.0** (+0.2) |
+| 质量 quality | 3.6 → 3.6 (+0.0) | 3.4 → 3.8 (+0.4) |
+| 变化 variety | 4.6 → 5.0 (+0.4) | 4.0 → 4.6 (+0.6) |
+| 契合预期 | 4.6 → 5.0 (+0.4) | 4.2 → 4.6 (+0.4) |
+| **总分 /25** | 21.0 → **22.6** (+1.6) | 19.8 → **21.8** (+2.0) |
+
+**结论**:几乎所有轴、两个模型一致上移 → 真信号(非噪声);richness 目标轴 Opus +0.6;Opus−Sonnet 差 1.2→**0.8**(Sonnet 更稳)。Opus 5 份里 3 份主动用了 ICON_LIB 图标。**Caveat**:LLM 评审、每模型 5 份,绝对值有噪声;看趋势一致性而非单点。
+
+**下一 frontier(评审 notes 指 · 未做)**:quality(Opus)卡 3.6 —— deck 仍是"打字卡 + 线条图标",缺**真图表/插画/配图**(data viz/figure);`R-VIS-COLOR-SEMANTIC`(语义色配错,见 §6 待建);卡片皮肤雷同(texture-mono,难静态检测)。
+
+**附:评审抓到的两个"疑似 bug"复核结论(非框架 bug,勿改)**:
+- end 页"丢 title":**by design** —— `data_end.title` schema 注明"for screen_label only",封底母版是 slogan-only;要落一句结语用 `slogan` 字段,不是 `title`。
+- verdict 配色 mis-map:发生在 `layout: raw` hero 页,是**模型手写 HTML 时 `is-*` class 与自定 legend 不自洽**,框架无可修处(属模型 raw-authoring 纪律)。
