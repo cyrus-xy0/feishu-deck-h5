@@ -50,3 +50,16 @@ package-lock.json
 
 # Preflight cache (per-machine cross-clone search results)
 .feishu-deck-h5-preflight-cache
+
+# Python virtualenvs — e.g. pptx-to-html/.venv (108MB, darwin/python3.x-specific,
+# regenerable from requirements). Never commit a materialized env.
+.venv/
+venv/
+env/
+
+# pptx-to-html sub-skill: ignore the heavy regenerable assets (689MB of extracted
+# slide images) + scratch dirs. Keep the lightweight evidence (deck.json, *.md,
+# montage_*.png, index.html) tracked.
+skills/feishu-deck-h5/pptx-to-html/out/
+skills/feishu-deck-h5/pptx-to-html/example/**/assets/
+skills/feishu-deck-h5/pptx-to-html/example/**/sweep/
