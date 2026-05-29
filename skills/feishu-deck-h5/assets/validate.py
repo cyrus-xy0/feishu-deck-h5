@@ -2366,7 +2366,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 
             # ----- One JS evaluation gathers EVERYTHING -----
             # Returns a structured report; Python then formats findings.
-            report = page.evaluate(_VISUAL_AUDIT_JS)
+            report = page.evaluate(_visual_audit_js())
 
             # ----- Optional: archive screenshots -----
             shots_dir = None
@@ -2651,7 +2651,22 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 # Loaded from disk so we get JS syntax highlight, `node --check`
 # in preflight.sh, and line-mapped stack traces. Extracted
 # 2026-05-24 (was a 626-line r"""...""" string embedded here).
-_VISUAL_AUDIT_JS = (Path(__file__).resolve().parent / 'visual-audit.js').read_text()
+#
+# Loaded LAZILY (on first visual-audit run), not at import time, so that
+# importing this module for static-only checks never touches the file.
+# check-only.py does `import validate` and must keep working even if
+# visual-audit.js is absent; a read failure here degrades to the existing
+# R-VISUAL warning inside run_visual_audits() rather than crashing import.
+_VISUAL_AUDIT_JS_CACHE = None
+
+
+def _visual_audit_js():
+    global _VISUAL_AUDIT_JS_CACHE
+    if _VISUAL_AUDIT_JS_CACHE is None:
+        _VISUAL_AUDIT_JS_CACHE = (
+            Path(__file__).resolve().parent / 'visual-audit.js'
+        ).read_text()
+    return _VISUAL_AUDIT_JS_CACHE
 
 
 
