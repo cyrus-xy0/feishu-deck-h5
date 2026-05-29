@@ -2803,6 +2803,48 @@ def _visual_audit_js():
 
 
 
+# ---------------------------------------------------------------------------
+#  Design-quality nudge (2026-05-29) — advisory, never blocks
+# ---------------------------------------------------------------------------
+
+# Layouts that are sparse / imagery-by-nature by design — excluded from the
+# visual-richness nudge so it never false-fires on intentionally-minimal pages.
+_SPARSE_BY_DESIGN = HERO_TITLE_LAYOUTS | {
+    'agenda', 'table', 'replica', 'iframe-embed', 'raw',
+}
+
+
+def audit_visual_richness(slides: list[str], iss: Issues):
+    """R-VIS-NO-IMAGERY (warn_soft · ADVISORY): nudge when a deck reads
+    visually FLAT — most CONTENT slides carry zero imagery (no icon / inline
+    <svg> / <img> / background-image). This is the #1 quality-benchmark gap
+    ('全是彩边文字卡 · 零图标/图像 → richness 卡在 ~3.5/5').
+
+    ADVISORY ONLY — never an error, even under --strict (warn_soft). Richness
+    is a DESIGN-PHASE judgment: the author/LLM decides per slide whether an
+    icon / photo / illustration / bespoke layout:raw page fits. This rule does
+    NOT hardcode a requirement; it just reminds when a whole deck is bare text.
+    Sparse-by-design layouts (cover/section/end/quote/image-text/agenda/table/
+    replica/iframe/raw) are skipped so the nudge targets real flatness only."""
+    content, flat = [], []
+    for i, fr in enumerate(slides, 1):
+        layout = (slide_attr(fr, 'layout') or '').strip()
+        if layout in _SPARSE_BY_DESIGN:
+            continue
+        content.append(i)
+        if not ('<svg' in fr or '<img' in fr or 'background-image' in fr):
+            flat.append((i, layout))
+    if len(content) >= 3 and len(flat) / len(content) >= 0.6:
+        where = ', '.join(f'#{i}({l})' for i, l in flat[:8])
+        iss.warn_soft(
+            'R-VIS-NO-IMAGERY',
+            f'{len(flat)}/{len(content)} content slides have zero imagery '
+            f'(no icon/svg/image/background) — deck reads visually flat & samey. '
+            f'Where it fits, consider an icon (ICON_LIB names) / photo / '
+            f'illustration / bespoke layout:raw page. Flat: {where}. '
+            f'[advisory · richness is a design-phase call · never blocks]')
+
+
 def main():
     p = argparse.ArgumentParser(description='feishu-deck-h5 self-check')
     p.add_argument('html', help='Path to the assembled deck HTML file')
@@ -2916,6 +2958,7 @@ def main():
     audit_slide_keys(slides, iss)
     audit_language_policy(html, slides, iss)
     audit_list_echo(slides, iss)
+    audit_visual_richness(slides, iss)
     audit_perf(html, iss)
     audit_text_ids(html, path, iss)
     audit_feedback_md(path, iss)
