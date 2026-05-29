@@ -721,7 +721,7 @@ def _render_visual(visual, slide_no_padded):
         src = _esc_br(img.get("src", ""))
         alt = _esc_br(img.get("alt", ""))
         fit = visual.get("min_height")
-        style = f'min-height:{fit}px;' if fit else ""
+        style = f'min-height:{_esc_br(fit)}px;' if fit else ""
         return (
             f'              <div role="img" aria-label="{alt}" '
             f'style="background-image:url(\'{src}\');background-size:cover;'
@@ -861,8 +861,8 @@ def _enrich_image_text(ctx, slide):
     if file_exists and src:
         ctx["bg_style"] = (
             f"background-image:url('{_esc_br(src)}');"
-            f"background-size:{fit};"
-            f"background-position:{position};"
+            f"background-size:{_esc_br(fit)};"
+            f"background-position:{_esc_br(position)};"
         )
     else:
         # Fallback: dark radial gradient — placeholder that won't look broken on a projector.
@@ -1132,8 +1132,8 @@ def _enrich_content_story_case(ctx, slide):
     if file_exists and src:
         bg_style = (
             f"background-image:url('{_esc_br(src)}');"
-            f"background-size:{fit};"
-            f"background-position:{position};"
+            f"background-size:{_esc_br(fit)};"
+            f"background-position:{_esc_br(position)};"
         )
     else:
         if src:
