@@ -98,8 +98,11 @@ def enumerate_validate_rules() -> set:
         content = validate_path.read_text(encoding='utf-8')
     except OSError:
         return set()
+    # Match direct iss.err/warn/warn_soft AND the local lev/_lev aliases
+    # (e.g. `_lev = iss.warn if ... else iss.err; _lev('R-VIS-TIER', ...)`),
+    # so indirectly-emitted codes aren't mistaken for gate drift.
     return set(re.findall(
-        r"iss\.(?:err|warn|warn_soft)\(\s*['\"]([A-Za-z0-9][\w-]*)['\"]",
+        r"(?:iss\.(?:err|warn|warn_soft)|_?lev)\(\s*['\"]([A-Za-z0-9][\w-]*)['\"]",
         content))
 
 

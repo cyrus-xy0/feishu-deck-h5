@@ -56,9 +56,31 @@ def test_drift_silent_when_validate_unreadable():
     assert buf.getvalue() == ""
 
 
+def test_enumerate_captures_lev_indirection():
+    """Codes emitted via the lev/_lev aliases (not iss.err/warn directly) must
+    still be captured — else they'd be mis-flagged as gate drift if ever gated."""
+    emitted = CO.enumerate_validate_rules()
+    # R-VIS-TIER is emitted only via _lev(...) in validate.py
+    assert "R-VIS-TIER" in emitted
+
+
 def test_inline_linked_is_shared():
-    """F-14: the helper lives in validate.py and check-only references it."""
+    """F-14: single source — helper lives on validate.py, check-only keeps no
+    copy and references the shared one, and it actually inlines a local link."""
+    import tempfile
     assert callable(getattr(V, "inline_linked", None))
+    assert not hasattr(CO, "_inline_linked")  # no leftover copy
+    src = (ASSETS / "check-only.py").read_text(encoding="utf-8")
+    assert "V.inline_linked(" in src  # call site uses the shared helper
+    # behavioral round-trip: local <link> inlined, external left untouched
+    with tempfile.TemporaryDirectory() as td:
+        d = pathlib.Path(td)
+        (d / "x.css").write_text("body{color:#fff}", encoding="utf-8")
+        html = ('<link rel="stylesheet" href="x.css">'
+                '<link rel="stylesheet" href="https://e.com/y.css">')
+        out = V.inline_linked(html, d)
+        assert '<style data-source="framework">body{color:#fff}</style>' in out
+        assert 'href="https://e.com/y.css"' in out
 
 
 if __name__ == "__main__":

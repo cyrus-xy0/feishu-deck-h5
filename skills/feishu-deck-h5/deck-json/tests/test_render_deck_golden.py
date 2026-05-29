@@ -46,8 +46,9 @@ def _render_normalized() -> str:
 def test_render_output_matches_golden_snapshot():
     current = _render_normalized()
     # normalization must leave no machine-specific absolute path behind
-    assert "/Users/" not in current and "/private/tmp/" not in current, \
-        "normalization missed a machine-specific path"
+    # (cross-platform: macOS /Users, Linux /home, tmp dirs, etc.)
+    leak = re.search(r'(?:href|src)="[^"]*/(?:Users|home|private|tmp|var)/', current)
+    assert leak is None, f"normalization missed a machine-specific path: {leak.group(0)}"
 
     if os.environ.get("FS_UPDATE_SNAPSHOTS") or not SNAP.is_file():
         SNAP_DIR.mkdir(parents=True, exist_ok=True)

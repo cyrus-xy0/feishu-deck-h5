@@ -89,12 +89,33 @@ def test_skip_sublabel_actual():
     assert "R-LANG" not in _codes(slides)
 
 
-def test_skip_ancestor_axis_wrapper():
-    # parent class carries an axis token even when nested
+def test_skip_scaffold_token_among_multiple_classes():
+    # scaffold token recognized even when other classes are present (.split())
     slides = [_slide("matrix-2x2",
-        '<div class="y-axis-cap"><span class="label">VERY HIGH</span>'
+        '<div class="chart y-axis"><span class="label">HIGH</span>'
         '<span class="name">非常重要</span></div>')]
     assert "R-LANG" not in _codes(slides)
+
+
+# ---- regression guards (from adversarial review): the scaffold skip must NOT
+# over-match hyphenated content classes, and there must be no text/year skip
+# that mutes genuine EN headers ----
+def test_hyphenated_content_class_still_fires():
+    # 'scale-section' is a content class, NOT chart scaffold — a real EN pair
+    # inside it must still be caught (the old \b-substring regex swallowed it)
+    slides = [_slide("content-3up",
+        '<div class="scale-section"><span class="t">弹性伸缩</span>'
+        '<span class="n">ELASTIC SCALE</span></div>')]
+    assert "R-LANG" in _codes(slides)
+
+
+def test_en_header_containing_year_still_fires():
+    # a genuine ALL-CAPS EN header that merely contains a year must still fire
+    # (the removed data-label substring predicate wrongly muted these)
+    slides = [_slide("content-3up",
+        '<div class="card"><span class="t">年度回顾</span>'
+        '<span class="n">ANNUAL REVIEW 2025</span></div>')]
+    assert "R-LANG" in _codes(slides)
 
 
 # ---- integration: the bundled example must be R-LANG-clean ----------

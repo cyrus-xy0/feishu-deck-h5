@@ -1373,27 +1373,27 @@ def _walk_text_leaves(fragment: str) -> list[dict]:
     return leaves
 
 
-# F-12: chart/diagram scaffolding and data-coded labels naturally sit beside
-# CJK and are NOT translation tracks. A matrix axis pole (HIGH/LOW), a legend
+# F-12: chart/diagram scaffolding naturally sits beside CJK and is NOT a
+# translation track. A matrix axis pole (HIGH/LOW inside .y-axis), a legend
 # key, a scale cap, or a data sublabel ("2025 Q4 BASELINE") paired with a CJK
-# sibling is expected design — the sibling-pair detector must skip them.
-_CHART_SCAFFOLD_CLASS_RE = re.compile(
-    r'\b(?:[xy]-?axis|axis|legend|scale|tick|gridline|sublabel)\b')
+# sibling is expected design — the sibling-pair detector must skip these.
+#
+# Matched as whole space-delimited class TOKENS, not \b-substrings: '-' is a
+# regex word boundary, so \bscale\b would wrongly hit content classes like
+# 'scale-section' / 'large-scale' / 'legend-item' / 'axis-title' and even the
+# framework's own 'fs-scale' wrapper — silently swallowing genuine EN
+# translation tracks living in those classes (caught in adversarial review).
+# (We deliberately do NOT also skip by text pattern: a standalone year/number
+# is already non-offending via is_offending_latin's all-digit-token exclusion,
+# and a substring year/Qn match would wrongly mute real headers like
+# "ANNUAL REVIEW 2025" / "VISION 2030".)
+_CHART_SCAFFOLD_CLASSES = {
+    'x-axis', 'y-axis', 'axis', 'sublabel', 'legend', 'scale', 'tick', 'gridline',
+}
 
 
 def _is_chart_scaffold_class(cls) -> bool:
-    return bool(cls) and bool(_CHART_SCAFFOLD_CLASS_RE.search(cls))
-
-
-# Year (19xx/20xx), quarter (Q1-Q4), or a pure numeric+unit token (100%, 3.2x)
-# — a data label, not an EN translation of the adjacent CJK.
-_DATA_LABEL_TEXT_RE = re.compile(
-    r'(?:\b(?:19|20)\d{2}\b|\bQ[1-4]\b|^[\d.,]+\s*[%×xX]?$)')
-
-
-def _is_data_label_text(text) -> bool:
-    t = (text or '').strip()
-    return bool(t) and bool(_DATA_LABEL_TEXT_RE.search(t))
+    return bool(cls) and any(t in _CHART_SCAFFOLD_CLASSES for t in cls.split())
 
 
 def audit_translation_track_pairs(html: str, slides: list[str], iss,
@@ -1433,14 +1433,13 @@ def audit_translation_track_pairs(html: str, slides: list[str], iss,
             lat_lvs = [l for l in sibs if is_offending_latin(l['text'])]
             parent_class = sibs[0]['parent_class']
             # F-12: skip chart/diagram scaffolding (axis poles, legend keys,
-            # scale caps) and data-coded labels — beside-CJK by design, not
+            # scale caps, data sublabels) — beside-CJK by design, not
             # translation tracks. Group-skip on a scaffold parent; otherwise
-            # drop individual scaffold-class / data-label Latin leaves.
+            # drop individual scaffold-class Latin leaves.
             if _is_chart_scaffold_class(parent_class):
                 continue
             lat_lvs = [l for l in lat_lvs
-                       if not _is_chart_scaffold_class(l['class'])
-                       and not _is_data_label_text(l['text'])]
+                       if not _is_chart_scaffold_class(l['class'])]
             if not (cjk_lvs and lat_lvs):
                 continue
             # Empty parent class → reference parent by tag for clarity
