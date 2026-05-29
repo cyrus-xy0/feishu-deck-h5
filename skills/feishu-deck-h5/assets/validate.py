@@ -1373,6 +1373,29 @@ def _walk_text_leaves(fragment: str) -> list[dict]:
     return leaves
 
 
+# F-12: chart/diagram scaffolding and data-coded labels naturally sit beside
+# CJK and are NOT translation tracks. A matrix axis pole (HIGH/LOW), a legend
+# key, a scale cap, or a data sublabel ("2025 Q4 BASELINE") paired with a CJK
+# sibling is expected design — the sibling-pair detector must skip them.
+_CHART_SCAFFOLD_CLASS_RE = re.compile(
+    r'\b(?:[xy]-?axis|axis|legend|scale|tick|gridline|sublabel)\b')
+
+
+def _is_chart_scaffold_class(cls) -> bool:
+    return bool(cls) and bool(_CHART_SCAFFOLD_CLASS_RE.search(cls))
+
+
+# Year (19xx/20xx), quarter (Q1-Q4), or a pure numeric+unit token (100%, 3.2x)
+# — a data label, not an EN translation of the adjacent CJK.
+_DATA_LABEL_TEXT_RE = re.compile(
+    r'(?:\b(?:19|20)\d{2}\b|\bQ[1-4]\b|^[\d.,]+\s*[%×xX]?$)')
+
+
+def _is_data_label_text(text) -> bool:
+    t = (text or '').strip()
+    return bool(t) and bool(_DATA_LABEL_TEXT_RE.search(t))
+
+
 def audit_translation_track_pairs(html: str, slides: list[str], iss,
                                    is_offending_latin) -> None:
     """For each slide: collect leaves via `_walk_text_leaves`, group by
@@ -1408,9 +1431,18 @@ def audit_translation_track_pairs(html: str, slides: list[str], iss,
                 continue
             cjk_lvs = [l for l in sibs if _CJK_RE.search(l['text'])]
             lat_lvs = [l for l in sibs if is_offending_latin(l['text'])]
+            parent_class = sibs[0]['parent_class']
+            # F-12: skip chart/diagram scaffolding (axis poles, legend keys,
+            # scale caps) and data-coded labels — beside-CJK by design, not
+            # translation tracks. Group-skip on a scaffold parent; otherwise
+            # drop individual scaffold-class / data-label Latin leaves.
+            if _is_chart_scaffold_class(parent_class):
+                continue
+            lat_lvs = [l for l in lat_lvs
+                       if not _is_chart_scaffold_class(l['class'])
+                       and not _is_data_label_text(l['text'])]
             if not (cjk_lvs and lat_lvs):
                 continue
-            parent_class = sibs[0]['parent_class']
             # Empty parent class → reference parent by tag for clarity
             parent_ref = (f'class="{parent_class[:60]}"' if parent_class
                           else f'<{parent_tag}>')
@@ -1975,16 +2007,7 @@ def audit_lift_style_lost(html: str, iss: Issues):
     framework CSS for quote/cover/section/big-stat/end since 2026-05-29), OR
     switch the slide's `layout` field to the schema layout directly.
     """
-    # Find every .slide tag with data-lifted + data-layout="raw"
-    pat = re.compile(
-        r'<div class="slide"[^>]*?data-layout="raw"[^>]*?>(.*?)(?=<div class="slide-frame"|</div>\s*</div>)',
-        re.DOTALL
-    )
-    # Simpler: find each .slide block manually
-    slide_pat = re.compile(
-        r'<div class="slide"([^>]*)>(.*?)(?=<div class="slide-frame"|</body>)',
-        re.DOTALL
-    )
+    # Find each .slide block manually via `frames = re.findall(...)` below.
     HEAVY_SIGNATURES = {
         'quote':    ['<blockquote', '<div class="attrib"', '<div class="stack"'],
         'cover':    ['<div class="author"'],
@@ -2845,6 +2868,36 @@ def audit_visual_richness(slides: list[str], iss: Issues):
             f'[advisory · richness is a design-phase call · never blocks]')
 
 
+def inline_linked(html_text, base_dir):
+    """Inline <link rel=stylesheet> / <script src> into the HTML so audits can
+    see framework CSS/JS content. External (http/https/data:) refs and missing
+    files are left untouched. Shared by main() here and check-only.py — was
+    copy-pasted in both, unified per F-14."""
+    def repl_link(m):
+        href = m.group(1)
+        if href.startswith(('http:', 'https:', 'data:')): return m.group(0)
+        target = (base_dir / href).resolve()
+        if not target.is_file(): return m.group(0)
+        return ('<style data-source="framework">'
+                + target.read_text(encoding='utf-8')
+                + '</style>')
+    html_text = re.sub(
+        r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>',
+        repl_link, html_text)
+    def repl_script(m):
+        src = m.group(1)
+        if src.startswith(('http:', 'https:', 'data:')): return m.group(0)
+        target = (base_dir / src).resolve()
+        if not target.is_file(): return m.group(0)
+        return ('<script data-source="framework">'
+                + target.read_text(encoding='utf-8')
+                + '</script>')
+    html_text = re.sub(
+        r'<script[^>]*src="([^"]+)"[^>]*>\s*</script>',
+        repl_script, html_text)
+    return html_text
+
+
 def main():
     p = argparse.ArgumentParser(description='feishu-deck-h5 self-check')
     p.add_argument('html', help='Path to the assembled deck HTML file')
@@ -2896,33 +2949,7 @@ def main():
     # themselves to author markup and skip framework rules they shouldn't
     # police. Audits that DO want to see framework (R29-R32 runtime chrome,
     # R36 centering pattern, R10 hex palette) can ignore the attribute.
-    def inline_linked(html_text, base_dir):
-        # <link rel="stylesheet" href="...css">
-        def repl_link(m):
-            href = m.group(1)
-            if href.startswith(('http:', 'https:', 'data:')): return m.group(0)
-            target = (base_dir / href).resolve()
-            if not target.is_file(): return m.group(0)
-            return ('<style data-source="framework">'
-                    + target.read_text(encoding='utf-8')
-                    + '</style>')
-        html_text = re.sub(
-            r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>',
-            repl_link, html_text)
-        # <script src="...js"></script>
-        def repl_script(m):
-            src = m.group(1)
-            if src.startswith(('http:', 'https:', 'data:')): return m.group(0)
-            target = (base_dir / src).resolve()
-            if not target.is_file(): return m.group(0)
-            return ('<script data-source="framework">'
-                    + target.read_text(encoding='utf-8')
-                    + '</script>')
-        html_text = re.sub(
-            r'<script[^>]*src="([^"]+)"[^>]*>\s*</script>',
-            repl_script, html_text)
-        return html_text
-    html = inline_linked(html, path.parent)
+    html = inline_linked(html, path.parent)  # module-level helper (F-14)
 
     slides = extract_slides(html)
 
