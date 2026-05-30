@@ -2920,6 +2920,55 @@ def inline_linked(html_text, base_dir):
     return html_text
 
 
+# F-10/F-08 · single registry of static audits, iterated by BOTH main() here
+# and check-only.py — so the two entry points can never run different audit
+# sets (check-only historically skipped 6 audits silently). Each entry is
+# (audit_fn, arg-order); the runner passes the named context values
+# positionally. Order matches the historical main() sequence (audits are
+# independent — each only reads html/slides/path and appends to iss — so order
+# is cosmetic). Adding/removing an audit = one registry line, both entries.
+STATIC_AUDITS = [
+    (audit_dom_integrity,      ('html', 'iss')),
+    (audit_lift_style_lost,    ('html', 'iss')),
+    (audit_structure,          ('slides', 'iss')),
+    (audit_titles_one_line,    ('slides', 'iss')),
+    (audit_brand_chrome,       ('slides', 'iss')),
+    (audit_copy_rules,         ('html', 'iss')),
+    (audit_font_sizes,         ('html', 'iss')),
+    (audit_type_ladder,        ('html', 'iss')),
+    (audit_undefined_css_vars, ('html', 'iss')),
+    (audit_white_text,         ('html', 'iss')),
+    (audit_no_drop_shadows,    ('html', 'iss')),
+    (audit_data_decor,         ('slides', 'iss')),
+    (audit_hex_palette,        ('html', 'iss')),
+    (audit_bullet_dash,        ('html', 'iss')),
+    (audit_runtime_chrome,     ('html', 'iss', 'path')),
+    (audit_centering_pattern,  ('html', 'iss')),
+    (audit_layout_integrity,   ('html', 'iss')),
+    (audit_default_centering,  ('html', 'iss')),
+    (audit_empty_header_zone,  ('html', 'iss')),
+    (audit_hierarchy,          ('html', 'iss')),
+    (audit_variant_discipline, ('html', 'iss')),
+    (audit_ui_mocks_are_html,  ('slides', 'iss')),
+    (audit_no_cyan_accent,     ('slides', 'iss')),
+    (audit_header_minimal,     ('slides', 'iss')),
+    (audit_slide_keys,         ('slides', 'iss')),
+    (audit_language_policy,    ('html', 'slides', 'iss')),
+    (audit_list_echo,          ('slides', 'iss')),
+    (audit_visual_richness,    ('slides', 'iss')),
+    (audit_perf,               ('html', 'iss')),
+    (audit_text_ids,           ('html', 'path', 'iss')),
+    (audit_feedback_md,        ('path', 'iss')),
+]
+
+
+def run_static_audits(audits, *, html, slides, path, iss):
+    """Run a registry of (audit_fn, arg-order) entries against one context."""
+    ctx = {'html': html, 'slides': slides, 'path': path, 'iss': iss}
+    for fn, sig in audits:
+        fn(*(ctx[a] for a in sig))
+
+
 def main():
     p = argparse.ArgumentParser(description='feishu-deck-h5 self-check')
     p.add_argument('html', help='Path to the assembled deck HTML file')
@@ -2976,41 +3025,12 @@ def main():
     slides = extract_slides(html)
 
     iss = Issues()
-    audit_dom_integrity(html, iss)
-    audit_lift_style_lost(html, iss)
     # All audits emit warn/err at their inherent severity. The global
     # `--strict` flag promotes ALL warnings to errors after the audits
     # complete (see end of main()) — per-audit `strict` branches were
-    # redundant and removed 2026-05-18.
-    audit_structure(slides, iss)
-    audit_titles_one_line(slides, iss)
-    audit_brand_chrome(slides, iss)
-    audit_copy_rules(html, iss)
-    audit_font_sizes(html, iss)
-    audit_type_ladder(html, iss)
-    audit_undefined_css_vars(html, iss)
-    audit_white_text(html, iss)
-    audit_no_drop_shadows(html, iss)
-    audit_data_decor(slides, iss)
-    audit_hex_palette(html, iss)
-    audit_bullet_dash(html, iss)
-    audit_runtime_chrome(html, iss, path)
-    audit_centering_pattern(html, iss)
-    audit_layout_integrity(html, iss)
-    audit_default_centering(html, iss)
-    audit_empty_header_zone(html, iss)
-    audit_hierarchy(html, iss)
-    audit_variant_discipline(html, iss)
-    audit_ui_mocks_are_html(slides, iss)
-    audit_no_cyan_accent(slides, iss)
-    audit_header_minimal(slides, iss)
-    audit_slide_keys(slides, iss)
-    audit_language_policy(html, slides, iss)
-    audit_list_echo(slides, iss)
-    audit_visual_richness(slides, iss)
-    audit_perf(html, iss)
-    audit_text_ids(html, path, iss)
-    audit_feedback_md(path, iss)
+    # redundant and removed 2026-05-18. Audits run from the shared
+    # STATIC_AUDITS registry so check-only.py runs the identical set (F-10/F-08).
+    run_static_audits(STATIC_AUDITS, html=html, slides=slides, path=path, iss=iss)
 
     if args.visual:
         run_visual_audits(path, iss, want_screenshots=args.screenshots)
