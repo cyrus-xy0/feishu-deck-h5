@@ -235,10 +235,11 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
         return
 
     # ----- Format findings from the JS report -----
-    # L1: imported/foreign raw deck → computed font-rule violations (tier /
-    # body-floor / label-floor) are advisory (its typography is the author's
-    # design). Overflow/layout defects stay strict regardless of origin.
-    _imported = _deck_imported(html_path.read_text(encoding="utf-8", errors="ignore"))
+    # NOTE (2026-05-30, L1 reverted): font-size violations are NOT exempted for
+    # imported/foreign decks. Small body text is unreadable regardless of who
+    # designed it, and an off-size hero is still wrong — the validator flags
+    # both; the RIGHT fix is enlarge-to-floor + grow-box (small body) / hero at
+    # the layout's defined size, never snap-and-overflow nor advisory-and-ignore.
     for entry in report.get('overflow', [])[:20]:
         bits = []
         delta_h = entry['h'] - 1080
@@ -260,9 +261,8 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             '正文→压字数，条目过多→删条目/减列。')
 
     for entry in report.get('tier', [])[:20]:
-        _lev = iss.warn if (_imported or entry.get('lifted')) else iss.err
-        _note = (' — IMPORTED deck (foreign typography); 降为建议' if _imported else
-                 ' — LIFTED slide (verbatim from another deck); downgraded '
+        _lev = iss.warn if entry.get('lifted') else iss.err
+        _note = (' — LIFTED slide (verbatim from another deck); downgraded '
                  'to WARNING, you choose whether to fix.' if entry.get('lifted') else '')
         _lev('R-VIS-TIER',
             f'slide {entry["slide_idx"]} · `{entry["selector"]}` renders '
@@ -374,7 +374,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'bleeding into siblings.')
 
     for entry in report.get('label_floor', [])[:20]:
-        _lev = iss.warn if (_imported or entry.get('lifted')) else iss.err
+        _lev = iss.warn if entry.get('lifted') else iss.err
         _lev('R-VIS-LABEL-FLOOR',
             (('LIFTED slide (verbatim) — downgraded to WARNING, you choose whether to bump. ')
              if entry.get('lifted') else '') +
@@ -389,7 +389,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'color, not by shrinking the size.')
 
     for entry in report.get('body_floor', [])[:20]:
-        _lev = iss.warn if (_imported or entry.get('lifted')) else iss.err
+        _lev = iss.warn if entry.get('lifted') else iss.err
         _lev('R-VIS-BODY-FLOOR',
             (('LIFTED slide (verbatim from another deck) — downgraded to '
               'WARNING, you choose whether to bump. ') if entry.get('lifted') else '') +

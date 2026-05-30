@@ -20,7 +20,7 @@
 
 外来 raw / 导入 deck 只有两条干净路,**没有"snap 到档"这条中间路**:
 
-- **(A) 保留原设计** —— 规则当**建议(advisory)**,不强制、不变换。它 off-我们的-档 ≠ 错。
+- **(A) 保留原设计 + 把字号修对** —— validator **照报**字号问题(小正文 / 错 hero **不豁免**,谁设计的小字都看不清);修法不是降 advisory、更不是盲 snap px,而是 **enlarge 小正文到下限 24 + 框自动长高(grow-box,改大自动拉高)/ hero 走 layout 尺寸**,框架重 bundle 修 crowd。
 - **(B) 重生成走 schema** —— 字号按**角色**分配(重点→hero、正文→24、chrome→框架),内容与字号**一起设计、天生适配** = 真·一次做对。
 
 技能要把这个 fork **显式化**(导入时就问/判:keep-as-imported vs regenerate),**绝不假装一个变换能把 A 变成合规**。
@@ -30,8 +30,8 @@
 #### [L1] 字号是语义/角色的,绝不按 px 盲 snap
 - 现象:封面 82→48、各 hero/强调标题被当 off-tier 砍小;同时 18/22 正文被抬到 24 → 撑爆。
 - 根因:盲 snap 按"当前 px"扫,**分不出"合法大重点" vs "该改小杂项"**(都按 off-tier 处理),也分不出"为适配小框而选的小字"。
-- 技能层修法:① **外来 raw/导入 deck 的 R06/R20 一律降为 advisory** —— 扩展 validate.py 现有的 `lifted` slide 降级机制(`entry.get('lifted')` → warn),把它从"单页 lifted"扩到"整份导入 raw"(deck 级 `data-imported` / `data-foreign-type` 标记)。② **永不提供"snap 字号"的工具/动作**。字号"强制"只在生成时按角色做。
-- 状态:[ ] 待做。
+- 技能层修法(🔄 **2026-05-30 修正**):~~① 外来 raw/导入 deck 的 R06/R20 一律降为 advisory~~ —— **这条实现了又撤回**。降 advisory = 把"小正文 / 错 hero"这些**真问题藏起来**(用户当场指出 slide 3 字小、封面字小都"应该拦住");小字投影看不清、hero 尺寸不对,**谁设计的都是问题,validator 一律照报**。真正的教训是 ② **永不提供"snap 字号 px 完事不管框"的工具/动作** —— 字号"修"靠 **enlarge 小正文到下限 24 + 框自动长高(grow-box)** / **hero 走 layout 尺寸**,不是降严重度、也不是盲 snap。
+- 状态:[x] L1 降级已**撤回**(imported 字号照报,167 测试绿);grow-box / hero-layout-size 修法见 L4 / L2(进行中)。
 
 #### [L2] 重点/hero 字号是 layout 定义的,要突出
 - 现象:金句、章节、5-up 角色名、4 步标签等强调字被压到 48 → "没有重点"。

@@ -5,14 +5,19 @@ pass) WITHOUT touching its design.
 
 This is the SAFE增益 path for an imported deck (see SKILL.md "导入外来 raw HTML
 deck" + IMPORT-RAW-DECK-LESSONS):
-  · stamps `<meta name="fs-deck-origin" content="imported">` so the validator
-    treats the deck's typography as the author's design (font rules → advisory,
-    NOT errors — never snap a foreign deck onto our ladder);
   · swaps in the current feishu-deck.js so the runtime auto-balance fixes
     box-crowd (文字贴底) on load. Fonts / chrome / content are untouched.
+  · stamps `<meta name="fs-deck-origin" content="imported">` purely as a
+    PROVENANCE marker (records that the deck is a foreign import).
 
-NOTE: auto-balance currently corrects box-CROWD; full canvas-centering (L1
-offset) is a separate auto-balance enhancement. Re-bundle never changes fonts.
+NOTE (2026-05-30): the stamp does NOT downgrade font severity. The earlier L1
+behavior (imported → font rules advisory) was REVERTED — small body text is
+unreadable regardless of origin and an off-size hero is still wrong, so the
+validator flags them for every deck. The right font fix is enlarge-to-floor +
+grow-box (small body) / hero at the layout's size — NOT a severity downgrade,
+and NOT a px-snap that ignores the box. This tool only re-bundles the runtime
+(auto-balance box-crowd); it never changes fonts. Full canvas-centering (L1
+offset) is a separate auto-balance enhancement.
 
 Usage:
   python3 assets/rebundle-import.py <deck.html>            # writes <deck>-rebundled.html
@@ -42,11 +47,12 @@ def main():
     html = deck.read_text(encoding="utf-8")
     notes = []
 
-    # 1. stamp imported origin → validator font rules become advisory (L1)
+    # 1. stamp imported origin as a PROVENANCE marker (no font-severity effect;
+    #    L1's "imported → font advisory" was reverted — see module docstring)
     if "fs-deck-origin" not in html:
         html = html.replace(
             "</head>", '<meta name="fs-deck-origin" content="imported">\n</head>', 1)
-        notes.append("stamped <meta fs-deck-origin=imported> (字号规则→建议)")
+        notes.append("stamped <meta fs-deck-origin=imported>(来源标记;不改字号严重度)")
     else:
         notes.append("已是 imported,跳过 stamp")
 
@@ -84,7 +90,7 @@ def main():
         print("  ·", n)
     print("  → 写出", out)
     print("  （auto-balance 加载时修 box-crowd;字号/chrome/内容零改动。"
-          "全画布居中=auto-balance 后续增强项。）")
+          "字号问题仍由 validator 照报;修小字=enlarge+grow-box,修 hero=layout 尺寸。）")
 
 
 if __name__ == "__main__":

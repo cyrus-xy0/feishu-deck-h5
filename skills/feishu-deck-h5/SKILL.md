@@ -879,17 +879,17 @@ Enforced by `validate.py` rule **R48** (`audit_default_centering`) — blocks de
 
 > 📎 细节见 `references/layout-recipes.md`
 
-## 导入外来 raw HTML deck:标记 imported,二选一,绝不 snap 字号
+## 导入外来 raw HTML deck:字号问题照报,修法二选一,绝不盲 snap
 
 拿到 / 导入一份**外来手搓 HTML deck**(不是本技能 schema 生成的)时:
 
-1. **先 stamp**:给它 `<head>` 加 `<meta name="fs-deck-origin" content="imported">`。validator 据此把它的排版当**作者自己的设计** —— R06 / R20 / R-VIS-TIER / 字号下限**全降为 advisory(不再是 error)**。你**没有义务**让一份外来 deck 去过我们的 4 档字号梯子。
-2. **二选一,没有"snap 到合规"的中间路**(把外来 deck 的字号 snap 到我们的档 = **拍平它的重点/hero + 撑爆适配** —— 见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`):
-   - **(A) 保留原设计** —— 只做**安全增益**:`python3 assets/rebundle-import.py <deck.html>` 一键(stamp imported + 换当前框架 JS,**auto-balance 加载修 box-crowd〔文字贴底〕,零字号/chrome 触碰**;全画布居中是 auto-balance 后续增强项);只对**真伤阅读**的溢出对症(文字溢出框 → **拉高框** / 标题换行 / 压字 / 删条目,**永不缩字号**)。
+1. **字号问题照报,imported 不豁免**(2026-05-30 修正,曾错把 imported 的字号降 advisory,等于把问题藏了 —— 已撤回)。小正文(<24)投影看不清、hero 尺寸不对,**谁设计的都是问题,validator 照报 R06/R20/R-VIS-TIER/下限**。`<meta name="fs-deck-origin" content="imported">` 现在只是**来源标记**(不改字号严重度)。
+2. **错在「修法」,不在「报」。snap = 把字号 px 拍到 4 档却不管框** → 撑爆适配 / 把 hero 压小、丢重点(见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`)。正确修法二选一:
+   - **(A) 保留原设计 + 把字号修对** —— ① 换当前框架 JS:`python3 assets/rebundle-import.py <deck.html>`(auto-balance 加载修 box-crowd〔文字贴底〕,零字号/chrome 触碰);② **小正文 → 提到下限 24 + 框自动长高(改大自动拉高;画布有空间就拉高框,没空间才压内容/删条目),永不缩字号**;③ **hero/封面 → 走 layout 定义的 hero 尺寸**(该大就大,不是随便一个 82);④ chrome 永远排除。
    - **(B) 重生成走 schema** —— 按 `deck.json`(Path A)重做,字号**按角色**给(重点→hero、正文→24、chrome→框架),内容与字号一起设计、天生适配 = correct-by-construction。
-3. **绝不**把 imported deck 的字号「snap 到 4 档」—— 这是拍平设计、级联溢出的**类别错误**。chrome(翻页器/全屏提示/wordmark/pageno)永远不是内容,任何变换都排除它。
+3. **绝不**「snap 字号 px 完事不管框」—— 这是拍平设计、级联溢出的**类别错误**。修小字靠 **enlarge + grow-box**;修 hero 靠 **layout 尺寸**;chrome(翻页器/全屏提示/wordmark/pageno)永远不是内容,任何变换/检查都排除它。
 
-> 📎 复盘见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`(L1–L6 工单)
+> 📎 复盘见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`(L1 已撤回,见文内修正记)
 
 ## Variant override discipline
 

@@ -212,14 +212,13 @@ def audit_font_sizes(html: str, iss: Issues):
                     chrome_violations.append((size, selector))
 
     lifted_keys = _lifted_slide_keys(html)
-    imported = _deck_imported(html)
     def _lev(sel):
-        """Pick severity for an R06 violation. L1: imported/foreign raw decks →
-        WARN (typography is the author's design — advisory, don't snap it onto
-        our ladder). Lifted-slide selectors → WARN. Everything else → ERROR."""
-        if imported:
-            return iss.warn, (' — IMPORTED deck (foreign typography); 降为建议, '
-                '别把外来 deck 的字号 snap 到我们的字号档(会拍平层级/撑爆适配)')
+        """Pick severity for an R06 violation. R06 is a READABILITY floor (text
+        too small to read on a projector). It is strict for EVERY deck —
+        including imported/foreign ones: small body/label text is unreadable
+        regardless of who designed it, and the right fix is enlarge-to-floor +
+        grow-box, NOT 'leave it small' nor 'mark it advisory because it's
+        imported' (that just hides the problem). Lifted slides → WARN."""
         if any(f'data-slide-key="{k}"' in sel for k in lifted_keys):
             return iss.warn, (' — LIFTED slide (verbatim from another deck); '
                 'downgraded to WARNING, you choose whether to bump the font')
@@ -281,8 +280,6 @@ def audit_type_ladder(html: str, iss: Issues):
     simulations inside .ui-window).
     """
     seen = set()
-    imported = _deck_imported(html)   # L1: foreign deck → off-tier is advisory
-    _lev = iss.warn if imported else iss.err
     comment_re = re.compile(r'/\*.*?\*/', re.S)
     for style_m in re.finditer(r'<style[^>]*>(.*?)</style>', html, re.S):
         # Single-pass scan: walk raw CSS with comment-tolerant rule regex
@@ -316,7 +313,7 @@ def audit_type_ladder(html: str, iss: Issues):
                     continue
                 seen.add(key)
                 nearest = min(TYPE_LADDER_PX, key=lambda r: abs(r - size))
-                _lev('R20',
+                iss.err('R20',
                     f'font-size {size}px on `{selector[:80]}` is off-tier; '
                     f'nearest tier = {nearest}px '
                     f'(allowed: 16 Foot / 24 Body / 28 Sub / 48 Title — '

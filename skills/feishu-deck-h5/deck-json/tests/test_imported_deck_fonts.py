@@ -1,13 +1,15 @@
-"""L1 + L3 (2026-05-30) — imported/foreign raw deck font handling.
+"""Imported/foreign raw deck font handling (2026-05-30, L1 REVERTED).
 
-L1: an imported deck (`<meta name="fs-deck-origin" content="imported">`) has the
-    author's own typography. Our 4-tier ladder / floor rules (R06 / R20) are
-    ADVISORY for it (warn), NOT errors — so we never "snap a foreign deck onto
-    our ladder" (which flattens its hero/emphasis and breaks its fit).
-    See IMPORT-RAW-DECK-LESSONS-2026-05-30.md.
+History: L1 originally made font rules ADVISORY for an imported deck
+(`<meta name="fs-deck-origin" content="imported">`). That was WRONG — it hid
+the very problems the user wants caught: small body text is unreadable no
+matter who designed it, and an off-size hero is still wrong. So font-size
+violations are NOT exempted for imported decks; the validator flags them and
+the RIGHT fix is enlarge-to-floor + grow-box (small body) / hero at the
+layout's defined size — never snap-and-overflow, never advisory-and-ignore.
 
-L3: present-mode UI chrome (pager / fullscreen-hint / mode-toggle / mobile nav)
-    is framework UI, NOT slide content — excluded from R06 (检查只查内容).
+L3 (still valid): present-mode UI chrome (pager / fullscreen-hint / mode-toggle
+    / mobile nav) is framework UI, NOT slide content — excluded from R06.
 
 Static — no Chromium needed.
 """
@@ -50,28 +52,27 @@ def test_normal_deck_font_violations_are_errors():
     assert "R06" in err and "R20" in err, f"expected R06/R20 errors, got {err}"
 
 
-def test_imported_deck_font_violations_are_advisory():
-    """L1: same violations, but the deck is imported → WARN, not ERROR."""
+def test_imported_deck_font_violations_still_error():
+    """L1 REVERTED: being imported does NOT exempt fonts. Small body (R06) and
+    off-size hero (R20) STILL error — being a foreign deck is not a license for
+    unreadable text. The fix is enlarge+grow-box / hero-layout-size, not a
+    severity downgrade."""
     err, warn = _run(_META + _CONTENT)
-    assert "R06" not in err and "R20" not in err, \
-        f"imported deck still has font ERRORS (should be warns): {err}"
-    assert "R06" in warn and "R20" in warn, \
-        f"imported deck should DOWNGRADE font violations to warn, got warns={warn}"
+    assert "R06" in err, f"imported deck small-body must still ERROR (got err={err})"
+    assert "R20" in err, f"imported deck off-size hero must still ERROR (got err={err})"
 
 
 def test_present_mode_chrome_excluded_from_r06():
     """L3: pager / hint / mode-toggle / mobile nav fonts are framework chrome,
-    never flagged as content font-floor violations."""
-    err, warn = _run(_CONTENT)
-    # The chrome rules use 11-13px (below the 16 chrome floor) but must NOT fire
-    # R06 — they're excluded by selector. R06 here is only the 18px .cbody body.
-    r06_msgs = [m for c, m in Issues().errors]  # placeholder; check via full run
-    i = Issues()
-    audit_font_sizes(_CONTENT, i)
-    chrome_hits = [m for c, m in i.errors + i.warnings
-                   if c == "R06" and ("pager" in m or "nav-hint" in m
-                                      or "mode-toggle" in m or "fs-mobile" in m)]
-    assert not chrome_hits, f"present-mode chrome wrongly flagged by R06: {chrome_hits}"
+    never flagged as content font-floor violations — even though they sit below
+    the chrome floor (11-13px). Holds regardless of imported origin."""
+    for html in (_CONTENT, _META + _CONTENT):
+        i = Issues()
+        audit_font_sizes(html, i)
+        chrome_hits = [m for c, m in i.errors + i.warnings
+                       if c == "R06" and ("pager" in m or "nav-hint" in m
+                                          or "mode-toggle" in m or "fs-mobile" in m)]
+        assert not chrome_hits, f"present-mode chrome wrongly flagged by R06: {chrome_hits}"
 
 
 if __name__ == "__main__":
