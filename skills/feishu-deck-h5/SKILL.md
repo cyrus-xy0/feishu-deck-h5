@@ -618,10 +618,6 @@ North star: **the deck must not silently invent material the user couldn't defen
 
 > 📎 一页纸客户案例:**skip cover · 用 content/story-case · 绝不编造 STORY id/来源**。详见 `references/one-pager-case.md`
 
-## Layer-1 patterns (RETIRED 2026-05-26) — quote / big-stat / multi-case-bundle
-
-> 🗂 历史/叙事已移至 `CHANGES.md#Layer-1 patterns (RETIRED`(可执行部分已固化进 feishu-deck.css / validate.py)。
-
 ## RUN-FEEDBACK CAPTURE (mandatory) — auto-generated `FEEDBACK.md` per run
 
 > 📎 详见 `references/run-artifacts.md`
@@ -864,10 +860,6 @@ The validator is a hard gate, not a checklist for reading pleasure. Before decla
 
 > 📎 详见 `references/layout-recipes.md`
 
-## Production deck layout fixes (BF1-BF4 — v1.4, 2026-05-02)
-
-> 🗂 历史/叙事已移至 `CHANGES.md#Production deck layout fixes (BF1`(可执行部分已固化进 feishu-deck.css / validate.py)。
-
 ## Prototype / standalone-page embed modes (mandatory) — pick BEFORE you write any code
 
 > 📎 嵌入已有 HTML/原型/别的 slide:**别默认 iframe — feishu slide→native lift;外来 demo→iframe A/B;简单内容→re-author C**。详见 `references/prototype-embed.md`
@@ -879,18 +871,6 @@ The validator is a hard gate, not a checklist for reading pleasure. Before decla
 ## Narrative patterns (DESIGN.md §9 — A through K)
 
 > 📎 详见 `references/narrative-patterns.md`
-
-## BF10–12 — Alignment defenses (2026-05-16)
-
-> 🗂 历史/叙事已移至 `CHANGES.md#BF10`(可执行部分已固化进 feishu-deck.css / validate.py)。
-
-## Slide media auto-restart + auto-sound on enter (framework behavior, 2026-05-24 · sound 2026-05-25)
-
-> 🗂 历史/叙事已移至 `CHANGES.md#Slide media auto-restart`(可执行部分已固化进 feishu-deck.css / validate.py)。
-
-## CJK 换行平衡 / 末行孤字防治 (2026-05-25)
-
-> 🗂 历史/叙事已移至 `CHANGES.md#CJK 换行平衡`(可执行部分已固化进 feishu-deck.css / validate.py)。
 
 ## Copy / numbering 规范
 

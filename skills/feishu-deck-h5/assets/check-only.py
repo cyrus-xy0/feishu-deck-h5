@@ -95,12 +95,23 @@ def load_business_rules() -> dict:
 
 
 def enumerate_validate_rules() -> set:
-    """Best-effort set of rule codes emitted by validate.py (literal first arg
-    of iss.err/warn/warn_soft). Used to detect gate drift (F-18)."""
-    validate_path = Path(__file__).resolve().parent / 'validate.py'
-    try:
-        content = validate_path.read_text(encoding='utf-8')
-    except OSError:
+    """Best-effort set of rule codes emitted by the validator (literal first arg
+    of iss.err/warn/warn_soft). Used to detect gate drift (F-18).
+
+    F-10 · the validator was split into a clean DAG of three source files
+    (validate.py = orchestrator, _validate_audits.py = the audit functions,
+    _validate_common.py = shared kernel). The `iss.err(...)` emit sites now
+    live mostly in _validate_audits.py, so scan all three sibling modules — a
+    single-file scan of validate.py alone would miss ~20 codes after the split.
+    """
+    here = Path(__file__).resolve().parent
+    content = ''
+    for name in ('validate.py', '_validate_audits.py', '_validate_common.py'):
+        try:
+            content += here.joinpath(name).read_text(encoding='utf-8') + '\n'
+        except OSError:
+            continue
+    if not content:
         return set()
     # Match direct iss.err/warn/warn_soft AND the local lev/_lev aliases
     # (e.g. `_lev = iss.warn if ... else iss.err; _lev('R-VIS-TIER', ...)`),
