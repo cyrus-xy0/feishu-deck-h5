@@ -110,5 +110,33 @@ inner HTML from source `index.html`, port back into `deck.json` `data.html`.
 ~150 lines of one-shot Python. `sync-index-to-deck.py` exists so this is
 one CLI invocation next time.
 
+### Single-slide lift (deck.json-native) — and why `custom_css` ends the postmortem above
+
+Forking a WHOLE deck is the section above. Lifting ONE page into the current
+deck is `deck-cli.py paste` (LIFT-ARCHITECTURE L3):
+
+```bash
+python3 .../deck-cli.py DST/deck.json paste --from SRC/deck.json --key <key> [POS]
+```
+
+It deep-copies the slide OBJECT (not DOM out of `index.html`), copies referenced
+`input/`/`prototypes/` assets to target-relative paths, auto-de-collides the key,
+strips source-bound `data-text-id`, and stamps `lifted` provenance. Because it
+operates on `deck.json`, the agent never reads the source `index.html` or the
+3491-line `feishu-deck.css`. For a FOREIGN deck with no `custom_css`, use
+`assets/lift-slides.py --index` (list) / `--key K` (select) instead — it
+tree-shakes framework CSS out of the rendered HTML inside the tool process.
+
+**The doctrine that makes this safe — per-slide CSS lives in `slide.custom_css`,
+never in a head/page `<style>`.** The renderer scopes `custom_css` to
+`.slide[data-slide-key=KEY]` and emits it as a co-located `<style
+data-fs-custom-css>` first-child of the slide, so it travels with the slide
+object on paste/clone and round-trips through `sync-index-to-deck.py`
+(which skips that block on extraction). The 2026-05-24 postmortem — animation
+keyframes living in `index.html` but not `deck.json`, lost on fork — **cannot
+recur for slides authored with `custom_css`**: the keyframes are part of the
+slide object. Authoring rule: put `@keyframes`/`@media`/per-slide rules in
+`custom_css`, write selectors WITHOUT a scope prefix (the renderer adds it).
+
 ---
 

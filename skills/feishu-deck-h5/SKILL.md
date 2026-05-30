@@ -296,7 +296,9 @@ python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title
 python3 deck-json/deck-cli.py runs/<ts>/output/deck.json clone three-pillars three-pillars-v2
 python3 deck-json/deck-cli.py runs/<ts>/output/deck.json reorder 5 2
 python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set-variant kpi-4up hero
-# 14 subcommands total — see deck-json/DECK-CLI-README.md
+# lift a page FROM another deck (deck.json-native, +assets, auto de-collide key):
+python3 deck-json/deck-cli.py DST/deck.json paste --from SRC/deck.json --key five-judgments
+# 15 subcommands total — see deck-json/DECK-CLI-README.md
 
 # Option C · WYSIWYG · edit the rendered HTML directly in your browser
 # (default-on since 2026-05-21: every rendered deck auto-loads
@@ -437,9 +439,10 @@ If 1-2 specific slides won't fit the schema but everything else does:
 | Tool | Use case | Doc |
 |---|---|---|
 | `deck-json/render-deck.py` | Render deck.json → HTML (always runs first) | inline help: `--help` |
-| `deck-json/deck-cli.py` | 14 atomic ops on deck.json (set / set-accent / set-decor / set-variant / reorder / move-key / insert / delete / clone / render / list / get / show / lint) — auto-backup + revalidate + rollback | `deck-json/DECK-CLI-README.md` |
+| `deck-json/deck-cli.py` | 15 atomic ops on deck.json (set / set-accent / set-decor / set-variant / reorder / move-key / insert / delete / clone / **paste** / render / list / get / show / lint) — auto-backup + revalidate + rollback. **`paste --from SRC --key K` is the deck.json-native lift** (copy a slide from another deck + its assets) | `deck-json/DECK-CLI-README.md` |
 | `deck-json/validate-deck.py` | Standalone schema lint of deck.json (called by render-deck.py + deck-cli.py automatically) | inline help |
 | `deck-json/sync-index-to-deck.py` | **Detect + recover post-render drift** — port edits made directly to index.html back into deck.json so re-render is byte-identical. Run before any fork / library ingest / delivery. | see ROUND-TRIP INTEGRITY section |
+| `assets/lift-slides.py` | Lift a slide from a FOREIGN / legacy deck (no `custom_css`) — `--index` lists slides, `--key K` selects, tree-shakes framework CSS + copies assets into a `layout:raw` entry | see LIFTING section |
 | `assets/check-only.sh` | Audit an EXISTING `.html` deck (Path A or B output) against all framework rules | see CHECK-ONLY MODE section above |
 
 > *Visual editing — default on since 2026-05-21*. Every rendered deck
@@ -707,6 +710,27 @@ BEFORE any delete-slide / insert-slide / reorder-slide / custom-layout edit, run
 - **B 半(fork / clone / download 侧)**:从既有 deck 派生时,**拷整个 output 文件夹**(同时带 `deck.json` 和 `index.html`),不要只拷 `deck.json`(那样会静默丢掉原作者的所有 post-render 编辑)。fork 后先跑 `python3 deck-json/sync-index-to-deck.py <new>/output/index.html <new>/output/deck.json --dry-run` 查 drift,有就去掉 `--dry-run` 回灌,再 re-render 验证,然后才开始编辑。
 
 > 📎 细节见 `references/round-trip-integrity.md`
+
+## LIFTING A SLIDE FROM ANOTHER DECK (mandatory route) — deck.json-native first, never read the monolith
+
+把别的 deck 的一页拎进当前 deck。**默认走 deck.json,绝不为了找/拆一页去读源 `index.html` 或 3491 行 `feishu-deck.css`**(那是被弃用的老路,慢且费 token)。按源 deck 形态二选一:
+
+- **源是本技能产出的 deck.json(常态)→ `deck-cli.py paste`**:
+  ```bash
+  python3 deck-json/deck-cli.py SRC/deck.json show <key>                          # 可选:先看这一页(~2-4KB 对象)
+  python3 deck-json/deck-cli.py DST/deck.json paste --from SRC/deck.json --key <key> [POS]
+  python3 deck-json/render-deck.py DST/deck.json DST/                              # custom_css 随对象 travel,自动 scope
+  ```
+  纯 JSON 对象复制 —— 自动拷 `input/`、`prototypes/` 资源、key 冲突自动改名、剥离源绑定的 `data-text-id`、写 `lifted` 溯源、自动备份 + 复校。要按 key 浏览源 deck 看 `SRC/slide-index.json`(render 自动产出的清单)。
+- **源是外来 / 老 deck(没有 `custom_css` 的页)→ `assets/lift-slides.py`**:
+  ```bash
+  python3 assets/lift-slides.py SRC/index.html --index                            # 列清单挑 key(不读正文)
+  python3 assets/lift-slides.py SRC/index.html --key <key> DST/deck.json           # tree-shake 框架 CSS + 拷资源 → layout:raw
+  ```
+
+**配套硬规矩 —— 每页的定制 CSS 只放 `slide.custom_css`,绝不放 `<head>` / page-level `<style>`**:渲染器会把 `custom_css` 自动 scope 到 `.slide[data-slide-key=KEY]` 并 co-locate 进该 slide(`<style data-fs-custom-css>`),这样它能随 lift/clone/paste travel 且 round-trip 不丢。写无前缀选择器即可(`.card{…}`),`@keyframes`/`@media` 也放这里。head 里塞每页 CSS = republish 静默蒸发(`fs-deck-page-anim` 旧坑),已被本路径取代。
+
+> 📎 架构/根因/路线图(L1–L7)见 `LIFT-ARCHITECTURE-2026-05-30.md`;round-trip 细节见 `references/round-trip-integrity.md`。
 
 ## Operational notes (gotchas)
 
