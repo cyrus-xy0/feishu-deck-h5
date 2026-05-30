@@ -146,28 +146,59 @@ _COLLECT_JS = r"""
 """
 
 
-def _rewrite_rule(html, selector, old_px, new_px):
-    """In `html`, find the CSS block(s) for `selector` and bump the font px
-    `old_px`→`new_px` inside font-size: / font: shorthand. Returns (html, n)."""
-    sel_re = re.escape(selector)
-    # selector may have flexible whitespace in source vs CSSOM-normalized form
-    sel_re = sel_re.replace(r'\ ', r'\s+').replace(r'\>', r'\s*>\s*').replace(r'\,', r'\s*,\s*')
-    block_re = re.compile(sel_re + r'\s*\{([^{}]*)\}')
+_STYLE_RE = re.compile(r'(<style[^>]*>)(.*?)(</style>)', re.S)
+_RULE_RE = re.compile(r'([^{}]*)\{([^{}]*)\}')          # flat rule (no nesting); linear, no backtracking
+
+
+def _normalize_sel(s):
+    """Canonical form for matching CSSOM selectorText against SOURCE selectors:
+    strip inline comments, unify quotes, collapse whitespace, tighten
+    combinators. Makes `[data-page="04"] /* … */ .slide .card-tag` and
+    `[data-slide-key='feiling-product']` compare equal to their CSSOM forms."""
+    s = re.sub(r'/\*.*?\*/', ' ', s, flags=re.S)
+    s = s.replace("'", '"')
+    s = re.sub(r'\s+', ' ', s).strip()
+    s = re.sub(r'\s*([>+~,])\s*', r'\1', s)
+    return s
+
+
+def _bump_font_in_body(body, old_px, new_px):
+    """Bump font px `old_px`→`new_px` inside a single rule body (font-size: and
+    `font:` shorthand size token). `\b` guards against 18→ touching 118."""
+    b = re.sub(r'(font-size\s*:\s*)' + str(old_px) + r'px',
+               lambda m: m.group(1) + f'{new_px}px', body)
+    b = re.sub(r'(font\s*:\s*[^;{}]*?)\b' + str(old_px) + r'px',
+               lambda m: m.group(1) + f'{new_px}px', b)
+    return b
+
+
+def _apply_changes(html, changes):
+    """Apply all (selectorText, old_px, new_px) bumps in ONE linear pass over the
+    <style> blocks only (never the 2.3 MB slide markup / <script> JS). Tokenizes
+    each style block into flat rules and matches by normalized selector — no
+    whole-doc regex, no catastrophic backtracking."""
+    want = {}
+    for sel, old, new in changes:
+        want.setdefault(_normalize_sel(sel), []).append((int(old), int(new)))
     n = [0]
 
-    def _block(m):
-        body = m.group(1)
-        # font-size: OLDpx
-        body2 = re.sub(r'(font-size\s*:\s*)' + str(old_px) + r'px',
-                       lambda mm: mm.group(1) + f'{new_px}px', body)
-        # font: <...> OLDpx (the size token in shorthand, before optional /lh)
-        body2 = re.sub(r'(font\s*:\s*[^;{}]*?)\b' + str(old_px) + r'px',
-                       lambda mm: mm.group(1) + f'{new_px}px', body2)
-        if body2 != body:
+    def _rule(rm):
+        sel_raw, body = rm.group(1), rm.group(2)
+        pairs = want.get(_normalize_sel(sel_raw))
+        if not pairs:
+            return rm.group(0)
+        nb = body
+        for old, new in pairs:
+            nb = _bump_font_in_body(nb, old, new)
+        if nb != body:
             n[0] += 1
-        return m.group(0).replace(body, body2) if body2 != body else m.group(0)
+            return f'{sel_raw}{{{nb}}}'
+        return rm.group(0)
 
-    return block_re.sub(_block, html), n[0]
+    def _style(sm):
+        return sm.group(1) + _RULE_RE.sub(_rule, sm.group(2)) + sm.group(3)
+
+    return _STYLE_RE.sub(_style, html), n[0]
 
 
 def main():
@@ -218,10 +249,7 @@ def main():
     html = deck.read_text(encoding="utf-8")
     changes = [(r["sel"], r["oldPx"], r["newPx"]) for r in bump] + \
               [(r["sel"], r["oldPx"], r["newPx"]) for r in hero]
-    total = 0
-    for sel, old, new in changes:
-        html, n = _rewrite_rule(html, sel, old, new)
-        total += n
+    html, total = _apply_changes(html, changes)
     ts = time.strftime("%Y%m%d-%H%M%S")
     bak = deck.with_name(deck.stem + f".bak-pre-growfit-{ts}" + deck.suffix)
     shutil.copy2(deck, bak)
