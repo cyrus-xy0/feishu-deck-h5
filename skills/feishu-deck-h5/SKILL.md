@@ -869,6 +869,28 @@ Enforced by `validate.py` rule **R48** (`audit_default_centering`) — blocks de
 
 > 📎 细节见 `references/layout-recipes.md`
 
+## 布局正确性 = 一次做对(correct-by-construction)优先,校验是安全网
+
+**目标:deck 生成出来本身布局就对,而不是每次靠校验抓出来再改。** 优先级:
+
+1. **生成即对(主力)** —— 居中、内容尺寸、卡片分布等布局正确性由**框架 CSS / schema 默认**保证(`.stage` 居中;版式 scoped 默认,如 content-3up / process / matrix / before-after / logo-wall 的"内容尺寸 + 共享中线 + 卡内垂直居中")。schema 路径理想是"零 finding":你描述 *what*,框架负责 *layout*,不手调字号/位置去凑。
+2. **校验(R48 / R-VIS-BALANCE / R-VIS-CROWD / L1–L4 …)= 安全网,不是主力** —— 只兜 construction 保证不了的(`layout: raw` 手写页、极端内容、外来 deck)。理想状态它越来越安静;**靠校验反复抓同一类布局问题 = 信号:该把它修进框架默认**。
+3. **反复出现的版式缺陷 → 修框架,别只加检测、更别每个 deck 局部 workaround。** 维护者标准打法:对该版式写 **scoped CSS 默认**(覆盖该 `data-layout`,不动全局 legacy 规则)→ 用 `assets/check-distribution.py`(三层 name-free 几何分布审计:画布/组/框;`--css` 注入测、`--fix` gated 修正)在**不均内容**上验证 findings 下降 **且其它版式零回归** → 再合;能升 schema 默认就别留给人手调。豁免要几何/结构判定(如 stats KPI 列顶基线对齐),**不要按版式名开白名单**。
+
+> 📎 细节见 `references/layout-recipes.md`
+
+## 导入外来 raw HTML deck:标记 imported,二选一,绝不 snap 字号
+
+拿到 / 导入一份**外来手搓 HTML deck**(不是本技能 schema 生成的)时:
+
+1. **先 stamp**:给它 `<head>` 加 `<meta name="fs-deck-origin" content="imported">`。validator 据此把它的排版当**作者自己的设计** —— R06 / R20 / R-VIS-TIER / 字号下限**全降为 advisory(不再是 error)**。你**没有义务**让一份外来 deck 去过我们的 4 档字号梯子。
+2. **二选一,没有"snap 到合规"的中间路**(把外来 deck 的字号 snap 到我们的档 = **拍平它的重点/hero + 撑爆适配** —— 见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`):
+   - **(A) 保留原设计** —— 只做**安全增益**:重 bundle 当前框架 JS(auto-balance 加载即居中/去 crowd,**零字号触碰**);只对**真伤阅读**的溢出对症(文字溢出框 → **拉高框** / 标题换行 / 压字 / 删条目,**永不缩字号**)。
+   - **(B) 重生成走 schema** —— 按 `deck.json`(Path A)重做,字号**按角色**给(重点→hero、正文→24、chrome→框架),内容与字号一起设计、天生适配 = correct-by-construction。
+3. **绝不**把 imported deck 的字号「snap 到 4 档」—— 这是拍平设计、级联溢出的**类别错误**。chrome(翻页器/全屏提示/wordmark/pageno)永远不是内容,任何变换都排除它。
+
+> 📎 复盘见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`(L1–L6 工单)
+
 ## Variant override discipline
 
 > 📎 详见 `references/layout-recipes.md`

@@ -96,7 +96,7 @@ from _validate_common import (
 # imported BEFORE that registry is built.
 from _validate_audits import *
 from _validate_audits import (
-    _lifted_slide_keys, _parse_texts_md_ids, _SPARSE_BY_DESIGN,
+    _lifted_slide_keys, _parse_texts_md_ids, _SPARSE_BY_DESIGN, _deck_imported,
 )
 
 # ---------------------------------------------------------------------------
@@ -235,20 +235,34 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
         return
 
     # ----- Format findings from the JS report -----
+    # L1: imported/foreign raw deck → computed font-rule violations (tier /
+    # body-floor / label-floor) are advisory (its typography is the author's
+    # design). Overflow/layout defects stay strict regardless of origin.
+    _imported = _deck_imported(html_path.read_text(encoding="utf-8", errors="ignore"))
     for entry in report.get('overflow', [])[:20]:
         bits = []
         delta_h = entry['h'] - 1080
         delta_w = entry['w'] - 1920
         if delta_h > 0: bits.append(f'height +{delta_h} px')
         if delta_w > 0: bits.append(f'width +{delta_w} px')
-        iss.err('R-OVERFLOW',
+        # Severity tiering (2026-05-30): not all canvas overflow hurts reading.
+        # <24px (≈half a line, space is fine) = benign advisory; 24-60px = warn;
+        # >60px = content genuinely clipped/lost → error. Only the harmful tier
+        # blocks delivery.
+        _ov = max(delta_h, delta_w)
+        _lev = iss.err if _ov > 60 else iss.warn if _ov >= 24 else iss.warn_soft
+        _sev = ('严重 · 内容被切，必修' if _ov > 60
+                else '临界 · 约 1-2 行' if _ov >= 24
+                else '可忽略 · 半行内，空间够，不阻断')
+        _lev('R-OVERFLOW',
             f'slide {entry["idx"]} ({entry["label"]}): content overflows '
-            f'canvas — {", ".join(bits)}. Reduce content density, drop '
-            'cards/rows, increase column count, or shorten body copy.')
+            f'canvas — {", ".join(bits)}（{_sev}）. 对症修：标题溢出→换行/加宽容器，'
+            '正文→压字数，条目过多→删条目/减列。')
 
     for entry in report.get('tier', [])[:20]:
-        _lev = iss.warn if entry.get('lifted') else iss.err
-        _note = (' — LIFTED slide (verbatim from another deck); downgraded '
+        _lev = iss.warn if (_imported or entry.get('lifted')) else iss.err
+        _note = (' — IMPORTED deck (foreign typography); 降为建议' if _imported else
+                 ' — LIFTED slide (verbatim from another deck); downgraded '
                  'to WARNING, you choose whether to fix.' if entry.get('lifted') else '')
         _lev('R-VIS-TIER',
             f'slide {entry["slide_idx"]} · `{entry["selector"]}` renders '
@@ -307,8 +321,17 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 
     for entry in report.get('card_overflow', [])[:20]:
         direction = entry.get('direction', 'vertical')
+        # Severity tiering: visible spill <24px is benign; clipped content (lost)
+        # escalates sooner. >60px (or >24px clipped) = error; else warn / advisory.
+        _px = entry.get('overflow_px', 0)
+        # Content spilling OUT of / clipped BY a styled box is a VISIBLE defect
+        # (text sitting outside its card) — harmful even at small px, unlike
+        # benign canvas-EDGE slack (R-OVERFLOW). The earlier 24-60px=warn tiering
+        # wrongly hid real card spills (e.g. a 42px hero-card spill). Only a tiny
+        # <16px (descender / rounding) is advisory here.
+        _lev = iss.err if _px > 16 else iss.warn
         if direction == 'horizontal':
-            iss.err('R-VIS-CARD-OVERFLOW',
+            _lev('R-VIS-CARD-OVERFLOW',
                 f'slide {entry["slide_idx"]} · `{entry["selector"]}` is a '
                 f'flex/grid container with nowrap children — total children '
                 f'width ({entry["content_h"]} px) exceeds container width '
@@ -318,7 +341,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'child to a separate line (display:block sibling), set '
                 '`flex-wrap: wrap`, or widen the container.')
         elif direction == 'vertical-visible':
-            iss.err('R-VIS-CARD-OVERFLOW',
+            _lev('R-VIS-CARD-OVERFLOW',
                 f'slide {entry["slide_idx"]} · `{entry["selector"]}` content '
                 f'({entry["content_h"]} px) is {entry["overflow_px"]} px taller '
                 f'than its box ({entry["card_h"]} px) and overflow is NOT hidden '
@@ -329,7 +352,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'tighten padding / gap, or give the box more height. (Geometry — '
                 'stays ERROR even on lifted slides; a visible spill is a real defect.)')
         else:
-            iss.err('R-VIS-CARD-OVERFLOW',
+            _lev('R-VIS-CARD-OVERFLOW',
                 f'slide {entry["slide_idx"]} · `{entry["selector"]}` has '
                 f'`overflow:hidden` but content ({entry["content_h"]} px) is '
                 f'{entry["overflow_px"]} px taller than the container '
@@ -351,7 +374,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'bleeding into siblings.')
 
     for entry in report.get('label_floor', [])[:20]:
-        _lev = iss.warn if entry.get('lifted') else iss.err
+        _lev = iss.warn if (_imported or entry.get('lifted')) else iss.err
         _lev('R-VIS-LABEL-FLOOR',
             (('LIFTED slide (verbatim) — downgraded to WARNING, you choose whether to bump. ')
              if entry.get('lifted') else '') +
@@ -366,7 +389,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'color, not by shrinking the size.')
 
     for entry in report.get('body_floor', [])[:20]:
-        _lev = iss.warn if entry.get('lifted') else iss.err
+        _lev = iss.warn if (_imported or entry.get('lifted')) else iss.err
         _lev('R-VIS-BODY-FLOOR',
             (('LIFTED slide (verbatim from another deck) — downgraded to '
               'WARNING, you choose whether to bump. ') if entry.get('lifted') else '') +
@@ -446,6 +469,18 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'space-between`(BF9 反模式经常制造这种空白);(2) 缩小 gap;(3) '
                 '在中间加一行 supporting 元素(pullquote / KPI / divider);(4) '
                 '确实是设计意图(留白让 hero 呼吸)→ 加 `data-allow-imbalance`。')
+
+    # ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
+    # 框内文字离卡片可见底边过近且明显下偏 = "文字离下面太近"(qingdao 3up 等高卡
+    # 实测离底 5px / 顶部 34px)。几何 name-free,不按版式名:松(下方大留白,如
+    # KPI 列顶基线对齐)下内距大、不触发,stats 类天然豁免。warn 级(--strict 升 err)。
+    for entry in report.get('crowd', [])[:20]:
+        iss.warn('R-VIS-CROWD',
+            f'slide {entry["idx"]} · `{entry["sel"]}` 框内文字贴底 —— 内容离框可见底边'
+            f'只剩 {entry["bottom_px"]}px,顶部却留 {entry["top_px"]}px,文字被挤到框底。'
+            'Fix: 让卡片按内容尺寸 + 垂直居中(参考 content-3up `align-self: center; '
+            'justify-content: center`),或给框一个最小下内距 / 减少该框内容;'
+            '若等高框内文字贴底是刻意设计 → 在 `.slide` 加 `data-allow-imbalance`。')
 
     # ---- R-VIS-SLACK-FLEX · flex:1 子容器撑出内部空白 ----
     # R-VIS-BALANCE 看的是 body container 顶级 children 之间的 sibling gap;

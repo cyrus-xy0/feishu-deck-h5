@@ -769,6 +769,16 @@ body {
   text-transform: uppercase; color: var(--fs-text-48);
 }
 .slide[data-layout="content-3up"] .card .cfoot svg { color: var(--fs-accent); }
+/* 规范 L3 落地(2026-05-30):content-3up 卡片按内容尺寸 + 共享中线 + 卡内垂直
+   居中,取代全局 `.slide .grid .card { align-self: stretch }` 的强制等高。等高会把
+   内容最多的那张卡片文字挤到底边(实测下内距 −27px 溢出,两侧却空 113px)。改后:
+   稀疏卡片居中、留白均衡;最满的卡片长高吃下内容,不再贴底。只覆盖 content-3up,
+   不动 1712 行的全局 legacy stretch(其它版式仍依赖它)。
+   验证:assets/check-distribution.py 在青啤 slide 3 上 3 findings → 0,全 deck 零回归。 */
+.slide[data-layout="content-3up"] .grid .card {
+  align-self: center;
+  justify-content: center;
+}
 
 /* ============================================================================
    LAYOUT 04 — Content 2-column (text + visual)
@@ -3488,4 +3498,28 @@ body {
   }
   .deck[data-mode="present"] ~ .fs-mobile-back,
   .deck[data-mode="present"] ~ .fs-mobile-pageno { display: block; }
+}
+
+/* ============================================================================
+   规范 L3 分布修复 sweep(2026-05-30)— 把 content-3up 的"内容尺寸+居中"
+   correct-by-construction 打法推广到其它多卡/多块版式。每条都 scoped 到该版式的
+   渲染结构,不动全局 1722 行 legacy stretch;均经 assets/check-distribution.py
+   注入测 + 真渲染验证:目标版式不均内容 findings 下降、零回归。
+   (content-3up 的那条在 ~778 行;extras 版式 matrix/before-after/logo-wall 在
+    deck-json/templates/extra-layouts.css 末尾同名 sweep 块。
+    stats 故意不改 —— KPI 列顶基线对齐是正确阅读结构,几何"均衡"反而破坏它。)
+   ============================================================================ */
+
+/* content-2col:两列都含 framed box 时 un-stretch,让框共享竖直中线(治左高右低)。
+   :not(:has(> .col-visual[min-height])) 守住 BF7 raw hero-image(它靠 stretch 让
+   col-text space-between 贴到图片上下沿)。canonical 2col 本就免疫,这是 hardening。 */
+.slide[data-layout="content-2col"] .grid:not(:has(> .col-visual[style*="min-height"])) {
+  align-items: center;
+}
+
+/* process:步骤卡同 content-3up —— 按内容尺寸 + 共享中线 + 卡内垂直居中,
+   消除内容最多那张挤底、其余顶锚空一大片。 */
+.slide[data-layout="process"] .flow > .step {
+  align-self: center;
+  justify-content: center;
 }

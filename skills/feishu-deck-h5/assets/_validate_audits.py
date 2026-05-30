@@ -122,6 +122,19 @@ def _lifted_slide_keys(html: str) -> set:
     return keys
 
 
+def _deck_imported(html: str) -> bool:
+    """L1 (2026-05-30): an imported / foreign raw deck stamps
+    `<meta name="fs-deck-origin" content="imported">`. Its typography is the
+    ORIGINAL author's design — our 4-tier ladder / floor rules (R06 / R20 /
+    R-VIS-TIER) are ADVISORY for it, not errors. Snapping a foreign deck onto
+    our ladder flattens its hierarchy (kills hero/emphasis) and breaks its fit;
+    see IMPORT-RAW-DECK-LESSONS-2026-05-30.md. Foreign raw decks keep their own
+    design (rules = advisory) or get regenerated via schema — there is no
+    mechanical 'snap to pass' path."""
+    return bool(re.search(
+        r'<meta\s+name=["\']fs-deck-origin["\']\s+content=["\']imported["\']', html))
+
+
 def audit_font_sizes(html: str, iss: Issues):
     """R06: font-size minimums on slide content.
 
@@ -154,10 +167,15 @@ def audit_font_sizes(html: str, iss: Issues):
         for rule_m in re.finditer(r'([^{}]+)\{([^}]+)\}', css):
             selector = rule_m.group(1).strip()
             block    = rule_m.group(2)
-            # Skip auxiliary deck chrome (overlay outside slide canvas)
+            # Skip auxiliary deck chrome (present-mode UI overlay outside the
+            # slide canvas — pager / fullscreen-hint / mode-toggle / progress /
+            # mobile nav). L3: these are framework UI, NOT deck content — the
+            # validator checks slide CONTENT only.
             if '.deck-ui' in selector or '.deck-controls' in selector \
                or '.deck-progress' in selector or '.mode-toggle' in selector \
-               or '.nav-hint' in selector or '@' in selector:
+               or '.nav-hint' in selector or '.pager' in selector \
+               or '.hint' in selector or '.fs-mobile' in selector \
+               or '.fullscreen' in selector or '@' in selector:
                 continue
             # Only check rules that target slide content
             if '.slide' not in selector and '.card' not in selector \
@@ -194,9 +212,14 @@ def audit_font_sizes(html: str, iss: Issues):
                     chrome_violations.append((size, selector))
 
     lifted_keys = _lifted_slide_keys(html)
+    imported = _deck_imported(html)
     def _lev(sel):
-        """Pick severity for an R06 violation: lifted-slide selectors warn
-        (human chooses to bump), everything else errors. Returns (fn, note)."""
+        """Pick severity for an R06 violation. L1: imported/foreign raw decks →
+        WARN (typography is the author's design — advisory, don't snap it onto
+        our ladder). Lifted-slide selectors → WARN. Everything else → ERROR."""
+        if imported:
+            return iss.warn, (' — IMPORTED deck (foreign typography); 降为建议, '
+                '别把外来 deck 的字号 snap 到我们的字号档(会拍平层级/撑爆适配)')
         if any(f'data-slide-key="{k}"' in sel for k in lifted_keys):
             return iss.warn, (' — LIFTED slide (verbatim from another deck); '
                 'downgraded to WARNING, you choose whether to bump the font')
@@ -229,8 +252,9 @@ def audit_font_sizes(html: str, iss: Issues):
         for m in re.finditer(r'style="[^"]*font-size:\s*(\d+)px', body):
             size = int(m.group(1))
             if size < FLOOR_CHROME_PX:
-                iss.err('R06',
-                    f'inline font-size {size}px below {FLOOR_CHROME_PX}px floor')
+                lev, note = _lev('')   # inline — no selector context
+                lev('R06',
+                    f'inline font-size {size}px below {FLOOR_CHROME_PX}px floor{note}')
 
 
 
@@ -257,6 +281,8 @@ def audit_type_ladder(html: str, iss: Issues):
     simulations inside .ui-window).
     """
     seen = set()
+    imported = _deck_imported(html)   # L1: foreign deck → off-tier is advisory
+    _lev = iss.warn if imported else iss.err
     comment_re = re.compile(r'/\*.*?\*/', re.S)
     for style_m in re.finditer(r'<style[^>]*>(.*?)</style>', html, re.S):
         # Single-pass scan: walk raw CSS with comment-tolerant rule regex
@@ -290,7 +316,7 @@ def audit_type_ladder(html: str, iss: Issues):
                     continue
                 seen.add(key)
                 nearest = min(TYPE_LADDER_PX, key=lambda r: abs(r - size))
-                iss.err('R20',
+                _lev('R20',
                     f'font-size {size}px on `{selector[:80]}` is off-tier; '
                     f'nearest tier = {nearest}px '
                     f'(allowed: 16 Foot / 24 Body / 28 Sub / 48 Title — '

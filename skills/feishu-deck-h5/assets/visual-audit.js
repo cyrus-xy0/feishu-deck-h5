@@ -136,13 +136,75 @@
     return false;
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [] };
+  // ---- box-distribution helpers (R-VIS-CROWD · 2026-05-30) ----
+  // Union bbox of visible TEXT-bearing leaves under root (decoration excluded).
+  const _contentUnion = (root) => {
+    let t = Infinity, b = -Infinity, any = false;
+    for (const el of root.querySelectorAll('*')) {
+      if (el.tagName === 'SVG' || el.tagName === 'svg' ||
+          el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+      if (!hasOwnText(el)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      any = true; t = Math.min(t, r.top); b = Math.max(b, r.bottom);
+    }
+    return any ? { top: t, bottom: b } : null;
+  };
+  // A visibly "framed" box (border / bg color / bg image) — text sits INSIDE a frame.
+  const _isFramedBox = (el) => {
+    const cs = getComputedStyle(el);
+    const hb = ['Top', 'Right', 'Bottom', 'Left'].some(s =>
+      parseFloat(cs['border' + s + 'Width'] || 0) > 0 &&
+      !/transparent|rgba\(0, 0, 0, 0\)/.test(cs['border' + s + 'Color']));
+    const bg = cs.backgroundColor, hbg = bg && !/transparent|rgba\(0, 0, 0, 0\)/.test(bg);
+    const hbi = cs.backgroundImage && cs.backgroundImage !== 'none';
+    return hb || hbg || hbi;
+  };
+  // Media tiles carry an intentionally edge-placed caption — excluded from crowd.
+  const _isMediaBox = (el) => {
+    const cs = getComputedStyle(el);
+    if (cs.backgroundImage && cs.backgroundImage !== 'none' && !/gradient/i.test(cs.backgroundImage)) return true;
+    if (el.querySelector('img,iframe,canvas,video,picture')) return true;
+    const raw = el.className;
+    const c = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString();
+    return /\b(photo|image|img|visual|mock|thumb|avatar|portrait|media|phone|screen)\b/i.test(c);
+  };
+
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [], crowd: [] };
   const slides = document.querySelectorAll('.slide');
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
     const label = slide.getAttribute('data-screen-label') || `slide-${slide_idx}`;
     const layout = slide.getAttribute('data-layout') || '';
     const isHeroLayout = HERO_LAYOUTS.has(layout);
+
+    // ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
+    // name-free 几何:framed 非媒体框,其文字内容离框"可见底边"很近(< 10px)
+    // 且明显比顶部更挤(下偏 ≥ 16px)= 文字被挤到框底(qingdao 3up 等高卡的
+    // "文字离下面太近"实测离底 3px / 顶部 38px)。与"松"(下方大留白,如 KPI 列
+    // 顶基线对齐,实测离底 16px+/262px)区分开 —— 松不触发,所以 stats 类天然
+    // 豁免,无需按版式名白名单。阈值 10px 给两侧各 ~6px 余量(校准:挤底 3/6px
+    // 触发、stats 16px 放行)。Hero 版式 / data-allow-imbalance 跳过。
+    if (!isHeroLayout && !slide.hasAttribute('data-allow-imbalance')) {
+      const _scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+      const _framed = [...slide.querySelectorAll('*')].filter(el =>
+        _isFramedBox(el) && !_isMediaBox(el) && el.getBoundingClientRect().height > 80 * _scale);
+      const _boxes = _framed.filter(el => !_framed.some(o => o !== el && o.contains(el)));
+      for (const box of _boxes) {
+        const cu = _contentUnion(box); if (!cu) continue;
+        const r = box.getBoundingClientRect();
+        const distTop = (cu.top - r.top) / _scale;       // text → box visible top edge
+        const distBottom = (r.bottom - cu.bottom) / _scale; // text → box visible bottom edge
+        if (distBottom < 10 && distTop > distBottom + 16) {
+          out.crowd.push({
+            idx: slide_idx, label, sel: shortSel(box),
+            top_px: Math.round(distTop), bottom_px: Math.round(distBottom),
+          });
+        }
+      }
+    }
 
     // ---- Overflow ----
     if (slide.scrollHeight > 1080 || slide.scrollWidth > 1920) {

@@ -1101,3 +1101,28 @@
   position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
   font: 700 56px/1 var(--fs-font-latin); color: #fff; letter-spacing: -0.02em;
 }
+
+/* ============================================================================
+   规范 L3 分布修复 sweep(2026-05-30)— extras 版式。配套 feishu-deck.css 末尾
+   同名 sweep 块。每条 scoped 到各自渲染结构,经 assets/check-distribution.py 注入
+   测 + 真渲染零回归验证。
+   ============================================================================ */
+
+/* content/matrix(matrix-2x2):quad 必须继续填满固定 1fr 格子(位置=象限语义),
+   不能 un-stretch;只把框内 flex 列垂直居中,消除"贴顶 + 下方空 220px"不均。 */
+.slide[data-layout="matrix-2x2"] .quad {
+  justify-content: center;
+}
+
+/* content/before-after:两栏 un-stretch 共享中线,消除稀疏那栏顶锚 + 大片空带。 */
+.slide[data-layout="content-before-after"] .stage {
+  align-items: center;
+}
+
+/* logo-wall:整墙垂直居中,行块不被拉伸(消除内容偏上、下方大留白)。 */
+.slide[data-layout="logo-wall"] .stage {
+  justify-content: center;
+}
+.slide[data-layout="logo-wall"] .industries {
+  flex: 0 0 auto;
+}

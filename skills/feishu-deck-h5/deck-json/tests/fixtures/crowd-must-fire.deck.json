@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "deck": {
+    "title": "R-VIS-CROWD 框内文字贴底 · must-fire fixture",
+    "author": "validator-fixture",
+    "date": "2026-05"
+  },
+  "slides": [
+    {
+      "key": "crowd-rawfire",
+      "layout": "raw",
+      "screen_label": "crowd-rawfire",
+      "data": {
+        "title": "框内文字贴底 must-fire",
+        "html": "<div class=\"stage\" style=\"position:absolute;inset:0;display:flex;align-items:center;justify-content:center;\"><div class=\"crowd-card\" style=\"box-sizing:border-box;width:560px;height:280px;padding:70px 36px 3px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.30);border-radius:16px;display:flex;flex-direction:column;justify-content:flex-end;color:#fff;\"><p style=\"margin:0;font-size:22px;line-height:1.5;\">这是一段被挤到卡片底边的正文文字。卡片是固定高度的 framed 卡片,内容用 flex-end 推到底部,正文底边距离卡片可见底边只剩约 3px,而卡片顶部留有大片空白,因此 distBottom 远小于 distTop,触发 R-VIS-CROWD 框内文字贴底的几何信号。</p></div></div>"
+      }
+    }
+  ]
+}
