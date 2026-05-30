@@ -7,6 +7,7 @@ Also a light guard that the shared V.inline_linked (F-14) is importable.
 import contextlib
 import importlib.util
 import io
+import re
 import sys
 import pathlib
 
@@ -107,6 +108,21 @@ def test_all_emitted_codes_documented_in_families():
     undocumented = sorted(emitted - fam)
     assert not undocumented, \
         f"rule codes emitted by validate.py but missing from FAMILIES: {undocumented}"
+
+
+def test_validator_rules_reference_documents_every_code():
+    """F-03: references/validator-rules.md must document every rule code the
+    validator emits — so the human rule reference can't silently drift from the
+    code. (Complements the FAMILIES guard above; both doc surfaces stay synced.)"""
+    ref = (ASSETS.parent / "references" / "validator-rules.md").read_text(encoding="utf-8")
+    documented = set(re.findall(r'\b(R-[A-Z][A-Z0-9-]*|R\d+|L\d+|T\d+|P\d+|UI1)\b', ref))
+    for m in re.finditer(r'\bP(\d+)-P?(\d+)\b', ref):          # P50-P55 → P50..P55
+        documented |= {f'P{n}' for n in range(int(m.group(1)), int(m.group(2)) + 1)}
+    if 'R29-R32' in ref or 'R29-32' in ref:                    # range token alias
+        documented.add('R29-32')
+    undocumented = sorted(CO.enumerate_validate_rules() - documented)
+    assert not undocumented, \
+        f"emitted but undocumented in validator-rules.md: {undocumented}"
 
 
 def test_families_cover_newly_surfaced_codes():
