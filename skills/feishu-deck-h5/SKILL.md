@@ -730,6 +730,8 @@ BEFORE any delete-slide / insert-slide / reorder-slide / custom-layout edit, run
 
 **配套硬规矩 —— 每页的定制 CSS 只放 `slide.custom_css`,绝不放 `<head>` / page-level `<style>`**:渲染器会把 `custom_css` 自动 scope 到 `.slide[data-slide-key=KEY]` 并 co-locate 进该 slide(`<style data-fs-custom-css>`),这样它能随 lift/clone/paste travel 且 round-trip 不丢。写无前缀选择器即可(`.card{…}`),`@keyframes`/`@media` 也放这里。head 里塞每页 CSS = republish 静默蒸发(`fs-deck-page-anim` 旧坑),已被本路径取代。
 
+**老 deck 里已有 head `<style>` per-slide CSS** → 用 codemod 一键搬进 `custom_css`:`python3 deck-json/migrate-head-css-to-custom-css.py <out>/index.html <out>/deck.json --dry-run`(先看)→ 去掉 `--dry-run` 加 `--render`(自带 `.bak`、幂等;`[data-page=N]` 按渲染 DOM 实际对应映射;不可归属的规则只报告不动)。`R-SELF-CONTAINED`(advisory)会标出还没搬的 head 泄漏。
+
 > 📎 架构/根因/路线图(L1–L7)见 `LIFT-ARCHITECTURE-2026-05-30.md`;round-trip 细节见 `references/round-trip-integrity.md`。
 
 ## Operational notes (gotchas)

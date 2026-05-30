@@ -4,8 +4,8 @@
 > **方法**: 多 agent workflow —— 5 个并行 reader 测绘现状(CSS 注入路径 / scoping 模型 / lift 工具链 / raw slide 自包含度 / slide-library locator)→ 4 个独立架构师按不同切入角出方案 → 1 个对抗式综合。10 agent、~686K tokens、255 工具调用。关键根因(`custom_css` 死字段)由人工直接复核实锤。
 > **北极星**: 把"从别的 deck 拎一页到新 deck"从"读两个大文件 + 人肉拆 CSS"变成"复制一个 JSON 对象",代价 ~零 agent token,且不产生破 CSS/资源。
 
-> **📌 本次会话已实现并验证(分支 `lift-architecture`,off main,**未提交,待 review**)**:
-> **L1–L6 六步全部落地 + 测试绿**。详见下「落地状态」。仅 L7(存量 codemod + 提 err)deferred(设计已固化在本文档,按 ID 执行)。
+> **📌 本次会话已实现并验证(分支 `lift-architecture`,off main)**:
+> **L1–L6 全做完 + 已推 PR#7**;**L7 codemod 工具已建+测**(`migrate-head-css-to-custom-css.py`)。唯一剩余:把 `R-SELF-CONTAINED` 的 head-leak 检查从 `warn_soft` 提成 `err` —— 这一步**需先用本 codemod 扫完你的存量 back-catalog**(在别的 repo / slide-library,本 repo `runs/` 无可扫 deck),否则会误伤未迁移老 deck(决策 2)。
 
 ---
 
@@ -50,7 +50,8 @@
 | **L4** | 渲染吐 `slide-index.json`(key→frame_index/layout/label/bytes/assets);`lift-slides.py --index` 出外来 deck 清单 + `--key` 按 slide-key 选页(legacy 位置参数仍兼容) | S | ✅ **本次完成** |
 | **L5** | `R-SELF-CONTAINED` validator(`warn_soft` 非阻塞):head/deck 级 `<style>` 引用 `[data-slide-key]`/`[data-page]` 且在 slide 外 → 报告 page-anim 泄漏;framework + in-slide 块豁免;`--strict` 也不升级(到 L7 codemod 后再提 `err`) | M | ✅ **本次完成** |
 | **L6** | tree-shaker 通用化(`lift-slides.py --shake`):`[data-layout=X]` 抽取从硬编码 5-heavy 扩到**该 slide 真实 layout(任意 ~15,含 extra-layouts/patterns 三表)** + **source-head `@keyframes` 闭包**(按 slide 引用拉回会蒸发的 page-anim keyframes)。**故意不做全局 class 扫描**(经实测 `.ns-card`/`.north-star-map` 等是全局 `.slide .foo` 规则,任何 link feishu-deck.css 的目标 deck 都在,无需内联,避免特异性/retheme 风险)。无 `--shake` 时对非 heavy layout 打印 hint;legacy 行为不变 | M | ✅ **本次完成** |
-| **L7** | `migrate-head-css-to-custom-css.py` codemod + head-leak 提 ERROR + SKILL.md/editing-discipline.md 更新(退役 data-page 指引) | L | ⏸ deferred(需决策 1 拍板 + `.bak`) |
+| **L7a** | `deck-json/migrate-head-css-to-custom-css.py` codemod —— 把存量 deck 的 head/page `<style>` per-slide 规则搬进对应 slide 的 `custom_css`(`[data-slide-key]` 直接映射;`[data-page=N]` 按**渲染后 DOM 实际对应**映射,非猜顺序,解掉决策 1 顾虑)+ 拉回引用的 `@keyframes`;跳过无 per-slide 选择器的通用/shell 块;`.bak` + `--dry-run` + `--render` + 幂等;不可归属规则/`@media` 只报告不动 | M | ✅ **本次完成** |
+| **L7b** | 用 L7a 扫完存量 back-catalog 后,把 `R-SELF-CONTAINED` head-leak 从 `warn_soft` 提成 `err` | S | ⏸ gated(需先扫你别的 repo 的存量 deck;本 repo `runs/` 无可扫) |
 
 **本次改动文件**(分支 `lift-architecture`,未提交):
 - 新增 `deck-json/_css_utils.py`、`deck-json/tests/test_css_utils.py`
@@ -91,7 +92,7 @@ lift-slides.py --shake --key <key> SRC/index.html DST/deck.json       # tree-sha
 
 ---
 
-## 六、验证证据(本次 L1–L6)
+## 六、验证证据(本次 L1–L6 + L7a)
 
 - `pytest deck-json/tests/test_css_utils.py` → **17 passed**(逗号组 / @media 递归 / @keyframes verbatim / 已 scope 幂等 / `[data-page]` 重写 / `.slide` 根合并 / `:is()`·`[attr]` 逗号陷阱)。
 - `pytest deck-json/tests/` 全套 → **155 passed**(无回归)。
@@ -101,11 +102,13 @@ lift-slides.py --shake --key <key> SRC/index.html DST/deck.json       # tree-sha
 - **L4**:渲染吐出的 `slide-index.json` 含 key/frame_index/layout/variant/label/bytes/assets;`lift-slides.py --index` 打印外来 deck 清单;`--key three-pillars` 正确解析到 frame 2 并 lift;**legacy 位置参数 `SRC 1 DST` 仍兼容**(连 cover 的 framework CSS 自动内联也照旧);missing-key 报错 + 显示清单 + exit 1;加 sidecar 后 **155 测试仍全绿**(copy-assets / package-deliverable 不受影响)。
 - **L5**:`R-SELF-CONTAINED` 5 个 must-fire/must-not-fire 单测全过(head `[data-slide-key]` 泄漏触发 / `[data-page]` 触发 / co-located `data-fs-custom-css` 不触发 / framework 块不触发 / 无 per-slide 选择器不触发);co-located custom_css 的 deck A 校验 0 触发;注入 head 泄漏后触发 `warn_soft` 但 **exit 0(`--strict` 也 0,不阻塞)**;补 FAMILIES + `validator-rules.md` 文档后 **F-03 治理测试通过**,合计 **160 测试全绿**;扫 runs/ 下 9 份 deck **0 误报**(只针对真正的 head 泄漏,对已自包含的 deck 静默)。
 - **L6**:构造外来源 deck(CSS 在 head,无 custom_css)实测:① 非 heavy 的 `content-3up` 不带 `--shake` → 打印 shake hint、不内联;② 带 `--shake` → 该 layout CSS 内联并 rescope 到 slide-key(753→5319 bytes);③ 带 `--shake` lift 引用 `myfade` 动画的 slide → 从 head 拉回 `@keyframes myfade`;把两页 `--shake` lift 进真 deck 后 **render exit 0 / 0 err 0 warn**,rescoped CSS + pulled keyframe 都在产物里;**back-compat:legacy `SRC 1 DST`(cover heavy)无 `--shake` 仍自动内联**;**160 测试全绿**。
+- **L7a**:构造 legacy deck(`data-page="2"` 贴 pillars frame + 2 个 head `fs-deck-page-anim` 块,含 `[data-slide-key]` 选择器 + `@keyframes zoomin` + `[data-page="2"]` 选择器)实测:R-SELF-CONTAINED 先报泄漏 → codemod **正确跳过通用 R48 shell 块**(无 per-slide 选择器)→ 只迁 pillars 的 3 个构造(`.card` 规则 + `zoomin` keyframe + `[data-page=2]`→pillars 的 `.num` 规则)→ `.bak` + 写 deck.json + re-render → **head 块清零、keyframe 已 co-locate 进 `data-fs-custom-css`、R-SELF-CONTAINED 0 报、render PASS**;**幂等**(再跑=no-op);data-page 按渲染 DOM 实际对应映射(非猜顺序)验证正确。
 
 ---
 
 ## 七、下一步
 
-- **合并 L1–L6**:本分支 `lift-architecture` 待 review;确认后 squash/合 main。
-- **仅剩 L7(L · 需你拍板)**:`migrate-head-css-to-custom-css.py` codemod —— 把存量 deck 的 head/page `<style>` per-slide 规则按渲染顺序搬进对应 slide 的 `custom_css`(决策 1:确认渲染顺序唯一、无手工错号;跑前 `.bak`)。完成后把 `R-SELF-CONTAINED` 的 head-leak 检查从 `warn_soft` 提成 `err`(决策 2)。这是唯一需要你点头的破坏性步骤,故 deferred。
-- **SKILL.md 同步已完成**(本会话):新 lift 正道已写进 SKILL.md「LIFTING」+ `references/round-trip-integrity.md` + `references/prototype-embed.md` + `DECK-CLI-README.md` + `references/validator-rules.md`。
+- **PR #7**(`lift-architecture`)含 L1–L6 + docs;**L7a codemod 是本轮新增**(单独新文件 `deck-json/migrate-head-css-to-custom-css.py`,跟并行的 R-VIS 线零耦合)。
+- **唯一剩余 = L7b**(S):用 L7a 扫完你别的 repo / slide-library 的存量 deck(`--dry-run` 先看,再实跑 `--render`,自带 `.bak`),确认无遗漏后,把 `R-SELF-CONTAINED` head-leak 从 `warn_soft` 一行改成 `err`。本 repo `runs/` 无可扫 deck,所以这步要在存量所在的地方做。
+- **决策 1 已被 L7a 设计解掉**:codemod 的 `[data-page=N]` 映射读**渲染后 DOM 的实际 data-page↔data-slide-key 对应**,不靠猜渲染顺序;手工错号 deck 也能正确归属。
+- **docs 同步已完成**:SKILL.md「LIFTING」+ `references/round-trip-integrity.md` + `prototype-embed.md` + `DECK-CLI-README.md` + `validator-rules.md`。
