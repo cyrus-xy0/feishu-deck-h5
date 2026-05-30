@@ -22,6 +22,54 @@ import functools, re, sys, argparse
 from collections import Counter
 from pathlib import Path
 
+# ===========================================================================
+#  VALIDATOR MAP — the 32 static audits by family (F-10 navigability index).
+#  Find a rule fast: rule code → audit function → `grep "def <name>"`. The audit
+#  SET is data-driven via the STATIC_AUDITS registry (just above main()); this
+#  map is the human index into the monolith. Visual/Playwright rules (R-OVERFLOW,
+#  R-VIS-TIER/BODY-FLOOR/BALANCE…) live in run_visual_audits + visual-audit.js.
+#
+#  STRUCTURE / DOM
+#    audit_structure             R02,R07          frame/deck nesting, required blocks
+#    audit_dom_integrity         R-DOM            balanced divs, 1 .slide per frame
+#    audit_slide_keys            R-KEY            unique kebab data-slide-key
+#  TYPOGRAPHY / COPY
+#    audit_titles_one_line       R13              title one line (hero layouts exempt)
+#    audit_copy_rules            R05              punctuation / placeholder hygiene
+#    audit_font_sizes            R06              body 24 / chrome 16 floors
+#    audit_type_ladder           R20              per-page sizes on {16,24,28,48}
+#    audit_white_text            R-WHITE-TEXT     low-opacity white on dark
+#    audit_hierarchy             R-HIERARCHY      meta not larger than body
+#    audit_header_minimal        R56              eyebrow on a non-hero header
+#    audit_bullet_dash           R-BULLET-DASH    ad-hoc dash bullets
+#    audit_list_echo             R-ECHO           summary leaf echoes sibling prefixes
+#  BRAND / PALETTE / CHROME
+#    audit_brand_chrome          R07              wordmark / logo chrome
+#    audit_hex_palette           R10              hex outside brand palette
+#    audit_no_drop_shadows       R12              drop shadows (glow/inset exempt)
+#    audit_data_decor            R38              decor data-attr usage
+#    audit_no_cyan_accent        R49              cyan reserved for inline highlight
+#    audit_runtime_chrome        R29-32           present-mode runtime chrome present
+#  LANGUAGE
+#    audit_language_policy       R-LANG           zh-only; no EN translation tracks
+#    audit_translation_track_pairs R-LANG         sibling-pair detector (called above)
+#  LAYOUT
+#    audit_centering_pattern     R36              default-centering markup
+#    audit_default_centering     R48              centerable layouts declare centering
+#    audit_layout_integrity      L1,L2,L4         logo / balance / attr-density
+#    audit_variant_discipline    R47              variant CSS alignment
+#    audit_empty_header_zone     R-EMPTY-HEADER-ZONE   empty header band
+#    audit_lift_style_lost       R-VIS-LIFT-STYLE-LOST lifted raw slide lost framework CSS
+#  CSS / TECHNICAL
+#    audit_undefined_css_vars    R-CSSVAR         var(--x) with no def/fallback
+#  UI-MOCK · texts.md · RICHNESS · PERF · DELIVERY
+#    audit_ui_mocks_are_html     UI1              mock UIs are HTML, not images
+#    audit_text_ids              T00-T03          data-text-id format + texts.md sync
+#    audit_visual_richness       R-VIS-NO-IMAGERY deck reads flat (advisory)
+#    audit_perf                  P50-P55          inline-size / asset budgets
+#    audit_feedback_md           R-FEEDBACK       FEEDBACK.md present at hand-off
+# ===========================================================================
+
 # ---------------------------------------------------------------------------
 #  规范 thresholds (hard floors)
 # ---------------------------------------------------------------------------
