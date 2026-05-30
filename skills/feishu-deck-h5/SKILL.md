@@ -629,6 +629,30 @@ North star: **the deck must not silently invent material the user couldn't defen
 
 > 📎 详见 `references/run-artifacts.md`
 
+## MAKING-OF LOG (default-on) — `log/` per run · 制作全过程纪录片
+
+记录一份 deck 是怎么一步步做出来的(给同学还原过程 + 给自己诊断 skill bug),
+平行存放在 `runs/<deck>/log/`,**绝不进 `out/`**。工具:`log-tool/deck-log.py`
+(schema/细节见 `log-tool/README.md`)。**默认开**;`deck-log off` 全局停录。
+
+固定动作(做 GENERATION 类 deck 时按部就班执行,无需用户提醒):
+
+1. **开工**(建好 WORKSPACE 后):`deck-log init <run-dir> --title "<deck 名>"`
+   → 搭 `log/` 骨架、记下当前会话 transcript 路径、设为活跃 deck。**每个回合的输入+我的
+   原始回复无需手动记**:它们本就在会话 transcript 里,`render` 时自动捞 `start_ts` 之后
+   那段(0 token,纯文件读;**不挂任何常驻 hook**)。自动找错了用 `init --transcript <path>`。
+2. **每出一版**:`deck-log snapshot <run-dir> --label "<这版做了啥>"`
+   → 冻结副本 + Playwright 截全套图(每页 1920×1080)+ 跑 check-distribution 校验。
+3. **用户吐槽某页 / 我发现问题**:`deck-log event <run-dir> --type problem --slide N
+   --msg "<问题>" --said "<用户原话>"`;修好后 `--type fix --resolves "<那个问题>"`。
+   (这条 problem→fix 因果链是后面 `diagnose` 判断"哪些是框架 bug"的关键。)
+4. **可选**给关键回合补一行摘要:`deck-log event <run-dir> --type summary
+   --json '{"n":<回合号>,"msg":"<一句话>"}'`。
+5. **收尾**:`deck-log render <run-dir>` → 生成 `log/making-of.html`(双击即看;
+   `--inline` 出可分享单文件)。告诉用户路径。
+6. **诊断**(用户问"哪些是 skill 该修的 bug"时):`deck-log diagnose <run-dir>` 出
+   digest,**丢给 subagent 分析**,按 `AUDIT-*.md` 的 F-NN 工单格式产出候选工单。
+
 Generate a dark, cinematic Lark / 飞书 brand-aligned **HTML deck** at 1920×1080 in a single
 self-contained file that:
 
