@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="fs-language" content="zh-only">
+  <title>先进团队的工作方式 · DeckJSON 样例 · 飞书</title>
+  <link rel="stylesheet" href="SKILL/assets/feishu-deck.css">
+  <!-- In-browser edit mode (press E to toggle). Optional but ships by
+       default so every rendered deck can be edited in the browser. -->
+  <link rel="stylesheet" href="SKILL/assets/edit-mode/deck-edit-mode.css">
+  <!-- Phase 1.c — extra layouts (matrix-2x2, waterfall, issue-tree, replica)
+       not yet in framework feishu-deck.css. Lives next to the renderer. -->
+  <link rel="stylesheet" href="SKILL/deck-json/templates/extra-layouts.css">
+  <link rel="stylesheet" href="SKILL/assets/feishu-deck-patterns.css">
+  <style>
+    /* Defensive R48 re-assertions — validator audits each <style> block
+       independently. No-op visually. */
+    .slide[data-layout="content-3up"] .grid { align-content: center; }
+    .slide[data-layout="content-2col"] .grid { align-content: center; }
+    .slide[data-layout="agenda"] .toc { align-content: center; }
+    .slide[data-layout="quote"] .stack { justify-content: center; }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <div class="slide-frame">
+      <div class="slide" data-layout="cover"  data-screen-label="01 Cover" data-slide-key="cover">
+        <div class="wordmark">飞书</div>
+        <div class="stage">
+          <h1 class="title title-zh" data-text-id="slide-01.title">先进团队的<br>工作方式</h1>
+
+        </div>
+        <div class="author">
+          <span data-text-id="slide-01.author">杰森</span><br>
+          <span data-text-id="slide-01.date">客户提案 · 2026.05.20</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="agenda" data-accent="blue" data-screen-label="02 Agenda" data-slide-key="agenda">
+        <div class="wordmark">飞书</div>
+
+        <div class="toc">
+        <div class="item"><div class="n">01</div><div><div class="title-zh" data-text-id="slide-02.item-01">背景与挑战</div></div></div>
+        <div class="item"><div class="n">02</div><div><div class="title-zh" data-text-id="slide-02.item-02">先进团队的工作方式</div></div></div>
+        <div class="item"><div class="n">03</div><div><div class="title-zh" data-text-id="slide-02.item-03">飞书平台能力</div></div></div>
+        <div class="item"><div class="n">04</div><div><div class="title-zh" data-text-id="slide-02.item-04">客户实证</div></div></div>
+        <div class="item"><div class="n">05</div><div><div class="title-zh" data-text-id="slide-02.item-05">部署与服务</div></div></div>
+        <div class="item"><div class="n">06</div><div><div class="title-zh" data-text-id="slide-02.item-06">下一步</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="section"  data-screen-label="03 Section · 先进团队" data-slide-key="section-advanced-team">
+        <div class="wordmark">飞书</div>
+
+        <div class="chapter-num" data-text-id="slide-03.chapter-num">02.</div>
+        <h2 class="title title-zh" data-text-id="slide-03.title">先进团队的工作方式</h2>
+        <p class="lede" data-text-id="slide-03.lede">即时同步 · 共识对齐 · 闭环交付</p>
+        <div class="pills">
+          <span class="pill" data-text-id="slide-03.pill-01">飞书消息</span>
+          <span class="pill" data-text-id="slide-03.pill-02">飞书文档</span>
+          <span class="pill" data-text-id="slide-03.pill-03">飞书多维表格</span>
+          <span class="pill" data-text-id="slide-03.pill-04">飞书知识库</span>
+          <span class="pill" data-text-id="slide-03.pill-05">飞书视频会议</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="content-3up" data-accent="blue" data-screen-label="04 三大能力" data-slide-key="three-pillars">
+        <div class="wordmark">飞书</div>
+        <div class="header">
+          <h2 class="title-zh" data-text-id="slide-04.title">先进团队的三大工作方式</h2>
+        </div>
+        <div class="stage">
+
+          <div class="grid">
+      <div class="card">
+        <div class="head">
+          <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="num">01</div>
+        </div>
+        <h3 class="ctitle" data-text-id="slide-04.card-01.title">即时同步</h3>
+        <p class="cbody" data-text-id="slide-04.card-01.body">30 万人组织,一封消息触达全员,3 秒内全部已读。</p>
+        <div class="cfoot"><span data-allow-body-floor>MESSENGER · DOCS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+      <div class="card">
+        <div class="head">
+          <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+          <div class="num">02</div>
+        </div>
+        <h3 class="ctitle" data-text-id="slide-04.card-02.title">共识对齐</h3>
+        <p class="cbody" data-text-id="slide-04.card-02.body">所有讨论沉淀进 Wiki,决策可追溯,新成员第一天就能看到全貌。</p>
+        <div class="cfoot"><span data-allow-body-floor>WIKI · BASE</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+      <div class="card">
+        <div class="head">
+          <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+          <div class="num">03</div>
+        </div>
+        <h3 class="ctitle" data-text-id="slide-04.card-03.title">闭环交付</h3>
+        <p class="cbody" data-text-id="slide-04.card-03.body">从需求到上线,流程在 Base 中自动流转,每一步都有责任人和时间戳。</p>
+        <div class="cfoot"><span data-allow-body-floor>BASE · MEETINGS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+          </div>
+          <p class="pullquote">不是把工具堆给团队,是让团队的工作方式本身被升级。</p>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="content-2col" data-accent="blue" data-screen-label="05 Lark Base" data-slide-key="lark-base-tour">
+        <div class="wordmark">飞书</div>
+        <div class="header">
+          <h2 class="title-zh" data-text-id="slide-05.title">让流程在表格里运转</h2>
+        </div>
+        <div class="stage">
+          <div class="grid">
+            <div class="col-text">
+              <p class="lede" data-text-id="slide-05.text.lede">Lark Base 把任务、工单、合同、人员、审批,统一到一个可视化的多维表格。</p>
+              <ul class="feature-list">
+                <li data-text-id="slide-05.text.feature-01">看板、甘特、日历、卡片视图,一份数据多种视角。</li>
+                <li data-text-id="slide-05.text.feature-02">关联字段把分散的表打成网,数据不再孤立。</li>
+                <li data-text-id="slide-05.text.feature-03">触发器 + 自动化,把人手操作变成系统行为。</li>
+                <li data-text-id="slide-05.text.feature-04">开放 API,与 ERP、CRM、自研系统双向同步。</li>
+              </ul>
+
+            </div>
+            <div class="col-visual">
+          <div class="data-panel">
+            <h4>销售战区 · 04-28 实时面板</h4>
+            <hr>
+            <div class="row"><span class="lbl">华东 · 大润发周末堆头</span><span class="val">ROI 3.2×</span></div>
+            <div class="row"><span class="lbl">华北 · 餐饮渠道返点</span><span class="val warn">ROI 0.6×</span></div>
+            <div class="row"><span class="lbl">本周自动核销</span><span class="val">1,284 单 · ↑ 47%</span></div>
+          </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="quote" data-accent="blue" data-decor="blue-glow" data-screen-label="06 客户原声" data-slide-key="quote-30k-team">
+        <div class="wordmark">飞书</div>
+        <div class="stack">
+          <hr class="keyline">
+          <blockquote><span data-text-id="slide-06.quote.lead">飞书让 30 万人 </span><span class="accent-text" data-text-id="slide-06.quote.accent">像一个团队</span><span data-text-id="slide-06.quote.tail"> 一样工作</span></blockquote>
+          <div class="attrib" data-text-id="slide-06.attribution">某头部互联网公司 · CIO · 2024</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="stats" data-accent="teal" data-screen-label="07 可量化结果" data-slide-key="kpi-4up">
+        <div class="wordmark">飞书</div>
+        <div class="header">
+          <h2 class="title-zh" data-text-id="slide-07.title">飞书带来的可量化结果</h2>
+        </div>
+        <div class="grid">
+          <div class="col">
+            <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+            <span class="trend" data-text-id="slide-07.col-01.trend">↑ 触达</span>
+            <div class="num" data-text-id="slide-07.col-01.num">3<span class="unit">秒</span></div>
+            <div class="label" data-text-id="slide-07.col-01.label">30 万人组织全员消息送达时延</div>
+            <div class="source" data-text-id="slide-07.col-01.source">Source · 内部传输实测 2024 Q4</div>
+          </div>
+          <div class="col">
+            <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span class="trend" data-text-id="slide-07.col-02.trend">↑ 已读</span>
+            <div class="num" data-text-id="slide-07.col-02.num">98<span class="unit">%</span></div>
+            <div class="label" data-text-id="slide-07.col-02.label">关键通知 30 分钟内已读率</div>
+            <div class="source" data-text-id="slide-07.col-02.source">Source · 12 家头部企业平均</div>
+          </div>
+          <div class="col">
+            <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
+            <span class="trend" data-text-id="slide-07.col-03.trend">↑ ROI</span>
+            <div class="num" data-text-id="slide-07.col-03.num">3.2<span class="unit">×</span></div>
+            <div class="label" data-text-id="slide-07.col-03.label">部署 12 个月后协同 ROI 中位数</div>
+            <div class="source" data-text-id="slide-07.col-03.source">Source · IDC 2024 商务白皮书</div>
+          </div>
+          <div class="col">
+            <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+            <span class="trend" data-text-id="slide-07.col-04.trend">↓ 决策</span>
+            <div class="num" data-text-id="slide-07.col-04.num">&lt;60<span class="unit">秒</span></div>
+            <div class="label" data-text-id="slide-07.col-04.label">关键决策从发起到对齐时长</div>
+            <div class="source" data-text-id="slide-07.col-04.source">Source · 客户访谈 N=24</div>
+          </div>
+        </div>
+        <p class="footnote" data-text-id="slide-07.footnote">数据样本: 12 家中国头部企业, 2024 Q3-Q4 实测, 口径见附录 A.</p>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="big-stat" data-accent="blue" data-decor="blue-glow" data-screen-label="08 极限规模" data-slide-key="scale-30k">
+        <div class="wordmark">飞书</div>
+        <div class="stage">
+          <div class="num"><span data-text-id="slide-08.stat.number">30</span><span class="unit">万人</span></div>
+          <div class="copy">
+            <div class="eyebrow" data-text-id="slide-08.eyebrow">SCALE · 极限规模</div>
+            <h2 data-text-id="slide-08.heading">单一组织,统一协同</h2>
+            <p data-text-id="slide-08.body">飞书的消息、文档、视频会议在 30 万人量级下保持秒级响应,且不依赖私有部署。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="image-text" data-accent="blue" data-screen-label="09 现场决策" data-slide-key="image-onsite-decision" style="background:radial-gradient(circle at 78% 22%, rgba(60,127,255,0.85), rgba(15,26,74,0.95) 45%, #000 100%),linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.65));background-color:#000;">
+        <div class="wordmark">飞书</div>
+        <div class="stage">
+          <h2 class="title title-zh" data-text-id="slide-09.title">现场决策,<br>从未离线</h2>
+          <p class="lede" data-text-id="slide-09.lede">门店、产线、出差、远程,飞书让每一处节点都能即时被看到、被对齐。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="table" data-accent="blue" data-screen-label="10 平台对比" data-slide-key="comparison-vs-traditional">
+        <div class="wordmark">飞书</div>
+        <div class="header">
+          <h2 class="title-zh" data-text-id="slide-10.title">飞书与传统办公套件</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th data-text-id="slide-10.head-01">能力</th><th data-text-id="slide-10.head-02">飞书 Lark</th><th data-text-id="slide-10.head-03">传统套件 A</th><th data-text-id="slide-10.head-04">传统套件 B</th></tr>
+            </thead>
+            <tbody>
+              <tr><td data-text-id="slide-10.row-01.cell-01">消息 + 文档 + 表格 + 会议 一体化</td><td data-text-id="slide-10.row-01.cell-02">原生集成</td><td data-text-id="slide-10.row-01.cell-03">多产品拼接</td><td data-text-id="slide-10.row-01.cell-04">多产品拼接</td></tr>
+              <tr><td data-text-id="slide-10.row-02.cell-01">多维表格 (Base) 自动化</td><td data-text-id="slide-10.row-02.cell-02">核心能力</td><td data-text-id="slide-10.row-02.cell-03">第三方插件</td><td data-text-id="slide-10.row-02.cell-04">不支持</td></tr>
+              <tr><td data-text-id="slide-10.row-03.cell-01">30 万人级消息触达</td><td data-text-id="slide-10.row-03.cell-02">3 秒内全员</td><td data-text-id="slide-10.row-03.cell-03">未公开</td><td data-text-id="slide-10.row-03.cell-04">未公开</td></tr>
+              <tr><td data-text-id="slide-10.row-04.cell-01">跨域中英双语支持</td><td data-text-id="slide-10.row-04.cell-02">原生</td><td data-text-id="slide-10.row-04.cell-03">需配置</td><td data-text-id="slide-10.row-04.cell-04">需配置</td></tr>
+              <tr><td data-text-id="slide-10.row-05.cell-01">开放 API + Webhook</td><td data-text-id="slide-10.row-05.cell-02">全量开放</td><td data-text-id="slide-10.row-05.cell-03">受限</td><td data-text-id="slide-10.row-05.cell-04">受限</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="timeline" data-accent="blue" data-screen-label="11 12 周路径" data-slide-key="roadmap-12week" style="--cols:4">
+        <div class="wordmark">飞书</div>
+        <div class="header">
+          <h2 class="title-zh" data-text-id="slide-11.title">12 周落地路径</h2>
+        </div>
+        <div class="nodes">
+          <div class="node"><div class="when" data-text-id="slide-11.node-01.when">W1-2</div><div class="what" data-text-id="slide-11.node-01.what">需求蓝图</div><div class="desc" data-text-id="slide-11.node-01.desc">访谈 6 部门,输出协同地图与目标 KPI。</div></div>
+          <div class="node"><div class="when" data-text-id="slide-11.node-02.when">W3-5</div><div class="what" data-text-id="slide-11.node-02.what">关键流程上线</div><div class="desc" data-text-id="slide-11.node-02.desc">销售、HR、财务三条核心流在 Base 中先跑通。</div></div>
+          <div class="node"><div class="when" data-text-id="slide-11.node-03.when">W6-8</div><div class="what" data-text-id="slide-11.node-03.what">全员推广</div><div class="desc" data-text-id="slide-11.node-03.desc">分层培训,关键岗位 100% 接入,数据搬迁完成。</div></div>
+          <div class="node"><div class="when" data-text-id="slide-11.node-04.when">W9-12</div><div class="what" data-text-id="slide-11.node-04.what">数据复盘</div><div class="desc" data-text-id="slide-11.node-04.desc">复盘 KPI,调整流程,形成长期治理机制。</div></div>
+        </div>
+        <div class="axis"></div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="process" data-accent="blue" data-screen-label="12 协同闭环" data-slide-key="process-4step" style="--cols:4">
+        <div class="wordmark">飞书</div>
+        <div class="header">
+          <h2 class="title-zh" data-text-id="slide-12.title">需求到交付,四步成型</h2>
+        </div>
+        <div class="flow">
+          <div class="step"><div class="stnum" data-text-id="slide-12.step-01.num">01</div><h3 data-text-id="slide-12.step-01.title">提出</h3><p data-text-id="slide-12.step-01.body">任意一线员工在 Messenger 发起,自动落入 Base 队列。</p></div>
+          <div class="step"><div class="stnum" data-text-id="slide-12.step-02.num">02</div><h3 data-text-id="slide-12.step-02.title">对齐</h3><p data-text-id="slide-12.step-02.body">相关方在 Docs 留痕讨论,关键决策沉淀到 Wiki。</p></div>
+          <div class="step"><div class="stnum" data-text-id="slide-12.step-03.num">03</div><h3 data-text-id="slide-12.step-03.title">交付</h3><p data-text-id="slide-12.step-03.body">负责人在 Base 中流转,责任人 + 时间戳每一步可追溯。</p></div>
+          <div class="step"><div class="stnum" data-text-id="slide-12.step-04.num">04</div><h3 data-text-id="slide-12.step-04.title">复盘</h3><p data-text-id="slide-12.step-04.body">会后 Meetings 自动生成纪要,关键指标进入下个周期。</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide story-case" data-layout="content-2col" data-accent="blue" data-decor="blue-glow" data-screen-label="13 瑞幸案例" data-slide-key="luckin-case">
+        <div class="wordmark">飞书</div>
+        <div class="header">
+          <h2 class="title-zh" data-text-id="slide-13.title">瑞幸营建 · 萃取隐形经验避免新店返工</h2>
+        </div>
+        <div class="stage">
+          <div class="grid">
+            <div class="col-text">
+              <span class="industry-tag" data-text-id="slide-13.industry">连锁零售 · 新店筹建 · 客户案例</span>
+              <p class="story-hook"><span data-text-id="slide-13.hook.lead">新店垃圾桶距出餐窄 1 米,按 SOP 必须 </span><span class="accent" data-text-id="slide-13.hook.accent">砸墙返工</span><span data-text-id="slide-13.hook.tail"> —— 老专家随手两招就解决。</span></p>
+              <div class="story-arc">
+                <div class="row"><span class="lbl">痛点</span><p data-text-id="slide-13.arc.pain">连锁零售新店筹建,大量老专家经验不在 SOP,新人犯错返工成本高、耽误开店周期。</p></div>
+                <div class="row"><span class="lbl is-orange">冲突</span><p data-text-id="slide-13.arc.conflict">瑞幸新店验收发现垃圾桶位置距出餐区窄了 1 米,按标准 SOP 必须砸墙返工。</p></div>
+                <div class="row"><span class="lbl is-teal">解法</span><p data-text-id="slide-13.arc.solution">几十年经验的营建老专家随手两招:装玻璃隔离 / 换踩弹式自动关闭垃圾桶 —— 不动装修就能合规。</p></div>
+                <div class="row"><span class="lbl is-violet">价值</span><p><span data-text-id="slide-13.arc.value.lead">飞书把这种不在手册里的隐形经验萃取到 </span><span class="accent" data-text-id="slide-13.arc.value.accent">企业 AI 知识库</span><span data-text-id="slide-13.arc.value.tail">,新人遇到问题直接搜就能得到解法 —— 老专家脑子里的资产,变成全组织可复用的能力。</span></p></div>
+              </div>
+            </div>
+            <div class="col-visual">
+              <div class="scene-frame" role="img" aria-label="瑞幸新店验收现场:营建老专家指着垃圾桶向新人讲解不动装修的解法" style="background:radial-gradient(circle at 50% 50%, rgba(60,127,255,0.25), rgba(15,26,74,0.85) 60%, #000 100%);background-color:#000;">
+                <span class="scene-cap" data-text-id="slide-13.scene.caption">现场 · 营建老专家拆解 SOP 之外的隐形经验</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-frame">
+      <div class="slide" data-layout="end" data-screen-label="14 End" data-slide-key="closing">
+        <div class="wordmark">飞书</div>
+
+        <div class="slogan slogan-default" role="img" aria-label="先进团队 先用飞书"></div>
+        <div class="contact" data-text-id="slide-14.contact">contact@feishu.cn  ·  feishu.cn</div>
+      </div>
+    </div>
+
+  </div>
+  <script src="SKILL/assets/feishu-deck.js"></script>
+  <script src="SKILL/assets/edit-mode/deck-edit-mode.js" defer></script>
+</body>
+</html>

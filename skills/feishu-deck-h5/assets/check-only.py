@@ -90,6 +90,38 @@ def load_business_rules() -> dict:
     return yaml.safe_load(yaml_path.read_text(encoding='utf-8'))
 
 
+def enumerate_validate_rules() -> set:
+    """Best-effort set of rule codes emitted by validate.py (literal first arg
+    of iss.err/warn/warn_soft). Used to detect gate drift (F-18)."""
+    validate_path = Path(__file__).resolve().parent / 'validate.py'
+    try:
+        content = validate_path.read_text(encoding='utf-8')
+    except OSError:
+        return set()
+    # Match direct iss.err/warn/warn_soft AND the local lev/_lev aliases
+    # (e.g. `_lev = iss.warn if ... else iss.err; _lev('R-VIS-TIER', ...)`),
+    # so indirectly-emitted codes aren't mistaken for gate drift.
+    return set(re.findall(
+        r"(?:iss\.(?:err|warn|warn_soft)|_?lev)\(\s*['\"]([A-Za-z0-9][\w-]*)['\"]",
+        content))
+
+
+def warn_on_gate_rule_drift(yaml_rules, emitted_rules) -> None:
+    """F-18: the ingest gate keeps only errors whose code is in
+    business-rules.yaml. If a rule code is renamed in validate.py but the yaml
+    isn't updated, that rule silently drops out of the gate (and it can exit 0).
+    Surface the drift loudly instead of failing silently. Informational only —
+    never blocks the gate. Skips quietly if validate.py couldn't be scanned."""
+    if not emitted_rules:
+        return
+    orphaned = sorted(set(yaml_rules) - emitted_rules)
+    if orphaned:
+        print('⚠️  business-rules.yaml 含 validate.py 已不再发出的规则码: '
+              f'{", ".join(orphaned)} —— 这些码永远不会触发入库门. '
+              '可能是 validate.py 改名了规则码, 或 yaml 该更新了 (F-18).',
+              file=sys.stderr)
+
+
 def _extract_location(msg: str) -> str:
     """从技术 msg 里抽取定位信息. 返回 '· ' 分隔的简短串."""
     parts = []
@@ -363,34 +395,8 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
 #  通用: 资产 inline + 跑所有 audits
 # ---------------------------------------------------------------------------
 
-def _inline_linked(html_text: str, base_dir: Path) -> str:
-    """把 <link rel=stylesheet> / <script src> 内联进 html, 让审计能看到
-    framework CSS/JS 内容 (跟 validate.py main() 同逻辑)."""
-    def repl_link(m):
-        href = m.group(1)
-        if href.startswith(('http:', 'https:', 'data:')):
-            return m.group(0)
-        target = (base_dir / href).resolve()
-        if not target.is_file():
-            return m.group(0)
-        return ('<style data-source="framework">'
-                + target.read_text(encoding='utf-8') + '</style>')
-    html_text = re.sub(
-        r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>',
-        repl_link, html_text)
-
-    def repl_script(m):
-        src = m.group(1)
-        if src.startswith(('http:', 'https:', 'data:')):
-            return m.group(0)
-        target = (base_dir / src).resolve()
-        if not target.is_file():
-            return m.group(0)
-        return ('<script data-source="framework">'
-                + target.read_text(encoding='utf-8') + '</script>')
-    return re.sub(
-        r'<script[^>]*src="([^"]+)"[^>]*>\s*</script>',
-        repl_script, html_text)
+# _inline_linked was a byte-for-byte copy of validate.py's helper — unified
+# per F-14. Use V.inline_linked (single source).
 
 
 def _run_all_audits(html: str, slides: list, path: Path,
@@ -463,7 +469,7 @@ def main() -> int:
         return 2
 
     html = path.read_text(encoding='utf-8')
-    html = _inline_linked(html, path.parent)
+    html = V.inline_linked(html, path.parent)
     slides = V.extract_slides(html)
     iss = V.Issues()
 
@@ -482,6 +488,9 @@ def main() -> int:
     # 渲染报告
     if is_gate:
         rules = load_business_rules()
+        # F-18: warn (don't block) if yaml lists a code validate.py no longer
+        # emits — otherwise that rule silently drops out of the gate.
+        warn_on_gate_rule_drift(set(rules.keys()), enumerate_validate_rules())
         # 只保留 yaml 里覆盖的规则 (21 条必修)
         kept = [(c, m) for c, m in iss.errors if c in rules]
         report = build_gate_report(path, len(slides), kept, rules)
