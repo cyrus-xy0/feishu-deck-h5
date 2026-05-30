@@ -885,7 +885,7 @@ Enforced by `validate.py` rule **R48** (`audit_default_centering`) — blocks de
 
 1. **字号问题照报,imported 不豁免**(2026-05-30 修正,曾错把 imported 的字号降 advisory,等于把问题藏了 —— 已撤回)。小正文(<24)投影看不清、hero 尺寸不对,**谁设计的都是问题,validator 照报 R06/R20/R-VIS-TIER/下限**。`<meta name="fs-deck-origin" content="imported">` 现在只是**来源标记**(不改字号严重度)。
 2. **错在「修法」,不在「报」。snap = 把字号 px 拍到 4 档却不管框** → 撑爆适配 / 把 hero 压小、丢重点(见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`)。正确修法二选一:
-   - **(A) 保留原设计 + 把字号修对** —— ① 换当前框架 JS:`python3 assets/rebundle-import.py <deck.html>`(auto-balance 加载修 box-crowd〔文字贴底〕,零字号/chrome 触碰);② **小正文 → 提到下限 24 + 框自动长高(改大自动拉高;画布有空间就拉高框,没空间才压内容/删条目),永不缩字号**;③ **hero/封面 → 走 layout 定义的 hero 尺寸**(该大就大,不是随便一个 82);④ chrome 永远排除。
+   - **(A) 保留原设计 + 把字号修对** —— ① 换当前框架 JS:`python3 assets/rebundle-import.py <deck.html>`(auto-balance 加载修 box-crowd〔文字贴底〕,零字号/chrome 触碰);② **字号一键修对**:`python3 assets/grow-box-fit.py <deck.html>`(先 dry-run 看计划,`--apply` 落盘+备份+前后截图)—— 浏览器实测几何,**小正文<24 且画布有空间 → 提到 24 并让框自动长高(改大自动拉高),没空间的只标出来让你压内容/删条目;hero/封面 off-ladder 大字 → 向上吸附到最近 hero 档(82→88…);永不缩任何字号,chrome 硬排除**;③ 仍有真伤阅读的溢出再对症(标题换行 / 压字 / 删条目)。
    - **(B) 重生成走 schema** —— 按 `deck.json`(Path A)重做,字号**按角色**给(重点→hero、正文→24、chrome→框架),内容与字号一起设计、天生适配 = correct-by-construction。
 3. **绝不**「snap 字号 px 完事不管框」—— 这是拍平设计、级联溢出的**类别错误**。修小字靠 **enlarge + grow-box**;修 hero 靠 **layout 尺寸**;chrome(翻页器/全屏提示/wordmark/pageno)永远不是内容,任何变换/检查都排除它。
 
