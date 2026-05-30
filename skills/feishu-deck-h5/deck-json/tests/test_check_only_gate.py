@@ -83,6 +83,29 @@ def test_inline_linked_is_shared():
         assert 'href="https://e.com/y.css"' in out
 
 
+def test_check_only_runs_full_audit_registry():
+    """F-08: check-only runs the SAME static audit set as validate.py — both
+    iterate V.STATIC_AUDITS, so they can't diverge (check-only used to silently
+    skip 6 audits)."""
+    assert len(V.STATIC_AUDITS) >= 31
+    fns = {fn.__name__ for fn, _ in V.STATIC_AUDITS}
+    for name in ('audit_lift_style_lost', 'audit_undefined_css_vars',
+                 'audit_bullet_dash', 'audit_empty_header_zone',
+                 'audit_list_echo', 'audit_visual_richness'):
+        assert name in fns  # the 6 that check-only historically skipped
+    src = (ASSETS / "check-only.py").read_text(encoding="utf-8")
+    assert "run_static_audits(V.STATIC_AUDITS" in src  # dispatches via registry
+
+
+def test_families_cover_newly_surfaced_codes():
+    """The previously-skipped audits' codes must be categorized in FAMILIES so
+    check-only's review groups them instead of dumping to '未分类'."""
+    fam_codes = {c for _, codes in CO.FAMILIES for c in codes}
+    for code in ('R-ECHO', 'R-BULLET-DASH', 'R-CSSVAR',
+                 'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST'):
+        assert code in fam_codes, f"{code} not categorized in FAMILIES"
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

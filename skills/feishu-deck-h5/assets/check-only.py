@@ -34,9 +34,11 @@ import validate as V
 FAMILIES = [
     ('结构 / DOM',           ['R02', 'R07', 'R-DOM']),
     ('排版 / 文案',          ['R05', 'R06', 'R13', 'R20', 'R56',
-                              'R-WHITE-TEXT', 'R-HIERARCHY']),
+                              'R-WHITE-TEXT', 'R-HIERARCHY', 'R-ECHO',
+                              'R-BULLET-DASH']),
     ('品牌 / 调色板',        ['L1', 'R10', 'R12', 'R38', 'R49', 'R-LANG']),
-    ('布局完整性',           ['L2', 'L4', 'R36', 'R47', 'R48']),
+    ('布局完整性',           ['L2', 'L4', 'R36', 'R47', 'R48', 'R-CSSVAR',
+                              'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
     ('texts.md 联动',        ['T00', 'T01', 'T02', 'T03']),
@@ -45,7 +47,8 @@ FAMILIES = [
                               'R-VIS-LABEL-FLOOR', 'R-VIS-BODY-FLOOR',
                               'R-VIS-ALIGN', 'R-VIS-ABSPOS-DUAL-ANCHOR',
                               'R-VIS-CARD-OVERFLOW', 'R-VIS-OPT-OUT-ABUSE',
-                              'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL']),
+                              'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL',
+                              'R-VIS-NO-IMAGERY']),
     ('交付物附件',           ['R-FEEDBACK']),
 ]
 
@@ -403,31 +406,13 @@ def _run_all_audits(html: str, slides: list, path: Path,
                      iss: V.Issues, strict: bool, visual: bool) -> None:
     """触发全部 audits. strict 影响哪些规则报 err vs warn,
     visual 控制是否调 Playwright."""
-    V.audit_dom_integrity(html, iss)
-    V.audit_structure(slides, iss)
-    V.audit_titles_one_line(slides, iss)
-    V.audit_brand_chrome(slides, iss)
-    V.audit_copy_rules(html, iss)
-    V.audit_font_sizes(html, iss)
-    V.audit_type_ladder(html, iss)
-    V.audit_white_text(html, iss)
-    V.audit_no_drop_shadows(html, iss)
-    V.audit_data_decor(slides, iss)
-    V.audit_hex_palette(html, iss)
-    V.audit_runtime_chrome(html, iss, path)
-    V.audit_centering_pattern(html, iss)
-    V.audit_layout_integrity(html, iss)
-    V.audit_default_centering(html, iss)
-    V.audit_hierarchy(html, iss)
-    V.audit_variant_discipline(html, iss)
-    V.audit_ui_mocks_are_html(slides, iss)
-    V.audit_no_cyan_accent(slides, iss)
-    V.audit_header_minimal(slides, iss)
-    V.audit_slide_keys(slides, iss)
-    V.audit_language_policy(html, slides, iss)
-    V.audit_perf(html, iss)
-    V.audit_text_ids(html, path, iss)
-    V.audit_feedback_md(path, iss)
+    # F-08 · run the SAME static audit set as validate.py main(), via the
+    # shared registry. This helper previously omitted 6 audits
+    # (lift_style_lost / undefined_css_vars / bullet_dash / empty_header_zone /
+    # list_echo / visual_richness) despite the "全部 audits" docstring — silent
+    # under-reporting in default review mode. The ingest gate is unaffected
+    # (it keeps only the 21 business-rules.yaml codes).
+    V.run_static_audits(V.STATIC_AUDITS, html=html, slides=slides, path=path, iss=iss)
     if visual:
         V.run_visual_audits(path, iss, want_screenshots=False)
 
