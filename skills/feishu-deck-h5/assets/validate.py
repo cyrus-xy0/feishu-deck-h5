@@ -22,12 +22,83 @@ import functools, re, sys, argparse
 from collections import Counter
 from pathlib import Path
 
+# ===========================================================================
+#  VALIDATOR MAP — the 32 static audits by family (F-10 navigability index).
+#  Find a rule fast: rule code → audit function → `grep "def <name>"`. The audit
+#  SET is data-driven via the STATIC_AUDITS registry (just above main()); this
+#  map is the human index into the monolith. Visual/Playwright rules (R-OVERFLOW,
+#  R-VIS-TIER/BODY-FLOOR/BALANCE…) live in run_visual_audits + visual-audit.js.
+#
+#  STRUCTURE / DOM
+#    audit_structure             R02,R07          frame/deck nesting, required blocks
+#    audit_dom_integrity         R-DOM            balanced divs, 1 .slide per frame
+#    audit_slide_keys            R-KEY            unique kebab data-slide-key
+#  TYPOGRAPHY / COPY
+#    audit_titles_one_line       R13              title one line (hero layouts exempt)
+#    audit_copy_rules            R05              punctuation / placeholder hygiene
+#    audit_font_sizes            R06              body 24 / chrome 16 floors
+#    audit_type_ladder           R20              per-page sizes on {16,24,28,48}
+#    audit_white_text            R-WHITE-TEXT     low-opacity white on dark
+#    audit_hierarchy             R-HIERARCHY      meta not larger than body
+#    audit_header_minimal        R56              eyebrow on a non-hero header
+#    audit_bullet_dash           R-BULLET-DASH    ad-hoc dash bullets
+#    audit_list_echo             R-ECHO           summary leaf echoes sibling prefixes
+#  BRAND / PALETTE / CHROME
+#    audit_brand_chrome          R07              wordmark / logo chrome
+#    audit_hex_palette           R10              hex outside brand palette
+#    audit_no_drop_shadows       R12              drop shadows (glow/inset exempt)
+#    audit_data_decor            R38              decor data-attr usage
+#    audit_no_cyan_accent        R49              cyan reserved for inline highlight
+#    audit_runtime_chrome        R29-32           present-mode runtime chrome present
+#  LANGUAGE
+#    audit_language_policy       R-LANG           zh-only; no EN translation tracks
+#    audit_translation_track_pairs R-LANG         sibling-pair detector (called above)
+#  LAYOUT
+#    audit_centering_pattern     R36              default-centering markup
+#    audit_default_centering     R48              centerable layouts declare centering
+#    audit_layout_integrity      L1,L2,L4         logo / balance / attr-density
+#    audit_variant_discipline    R47              variant CSS alignment
+#    audit_empty_header_zone     R-EMPTY-HEADER-ZONE   empty header band
+#    audit_lift_style_lost       R-VIS-LIFT-STYLE-LOST lifted raw slide lost framework CSS
+#  CSS / TECHNICAL
+#    audit_undefined_css_vars    R-CSSVAR         var(--x) with no def/fallback
+#  UI-MOCK · texts.md · RICHNESS · PERF · DELIVERY
+#    audit_ui_mocks_are_html     UI1              mock UIs are HTML, not images
+#    audit_text_ids              T00-T03          data-text-id format + texts.md sync
+#    audit_visual_richness       R-VIS-NO-IMAGERY deck reads flat (advisory)
+#    audit_perf                  P50-P55          inline-size / asset budgets
+#    audit_feedback_md           R-FEEDBACK       FEEDBACK.md present at hand-off
+# ===========================================================================
+
 # ---------------------------------------------------------------------------
 #  规范 thresholds (hard floors)
 # ---------------------------------------------------------------------------
 
-FLOOR_BODY_PX        = 24   # body text on content pages (was 22 pre-2026-05-16 · 4-tier spec rung 3)
-FLOOR_CHROME_PX      = 16   # corner metadata / footnote / pill / tag (was 14 pre-2026-05-16 · 4-tier rung 4)
+# F-02 · single source of truth for the 4-tier font ladder. Derive it from the
+# framework CSS :root --fs-* tokens (the values that actually RENDER) instead of
+# re-typing 16/24/28/48 here AND in feishu-deck.css AND in SKILL.md. The parity
+# test (tests/test_type_tokens_ssot.py) fails if CSS drifts from the fallback
+# below; the fallback keeps the validator working if the CSS can't be read.
+_FS_TOKEN_FALLBACK = {'--fs-foot': 16, '--fs-body': 24, '--fs-sub': 28, '--fs-title': 48}
+
+
+def _load_fs_tokens() -> dict:
+    """Parse `--fs-{title,sub,body,foot}: Npx` from the framework CSS :root."""
+    css = Path(__file__).resolve().parent / 'feishu-deck.css'
+    try:
+        text = css.read_text(encoding='utf-8')
+    except OSError:
+        return dict(_FS_TOKEN_FALLBACK)
+    found = {f'--fs-{n}': int(px)
+             for n, px in re.findall(r'--fs-(title|sub|body|foot)\s*:\s*(\d+)px', text)}
+    # require all four; otherwise fall back (defensive against a future rename)
+    return found if _FS_TOKEN_FALLBACK.keys() <= found.keys() else dict(_FS_TOKEN_FALLBACK)
+
+
+_FS_TOKENS = _load_fs_tokens()
+
+FLOOR_BODY_PX   = _FS_TOKENS['--fs-body']   # body text on content pages (4-tier rung 3)
+FLOOR_CHROME_PX = _FS_TOKENS['--fs-foot']   # corner metadata / footnote / pill / tag (rung 4)
 # FLOOR_HEADER_PX / FLOOR_TABLE_TH_PX / FLOOR_STATS_TREND_PX were defined but
 # never read (R20 enforces the 4-tier ladder directly). Removed 2026-05-18.
 
@@ -51,6 +122,13 @@ ALLOWED_DECOR = {
 # normal content-page header. Master spec may revisit this — if so,
 # update both the recipe in templates/slide-recipes.html and SKILL.md
 # §"Available layouts" together with this set.
+# F-13 · This is NOT the same set as visual-audit.js HERO_LAYOUTS — do not
+# "sync" them. HERO_TITLE_LAYOUTS = layouts whose page TITLE/header is
+# hero/flexible (multi-line title allowed in R13, header-minimal exempt in
+# R56). big-stat is intentionally ABSENT: it has no hero title (only .num /
+# .copy). The JS HERO_LAYOUTS answers a different question — "is the WHOLE
+# slide a hero zone where hero font sizes are allowed anywhere" — and correctly
+# includes big-stat.
 HERO_TITLE_LAYOUTS = {'cover', 'image-text', 'end', 'section', 'quote'}
 # `section` ships hero `.chapter-num` (160) + `<h2 class="title">` (88) where
 # 2-line chapter titles are common ("绿氢革命<br>2026"). `quote` ships
@@ -460,20 +538,13 @@ def audit_font_sizes(html: str, iss: Issues):
                     f'inline font-size {size}px below {FLOOR_CHROME_PX}px floor')
 
 
-TYPE_LADDER_PX = {
-    # 4-tier strict (2026-05-16) — CONTENT pages use ONLY these four:
-    16,                    # Foot — footnote, eyebrow, pill, tag, attrib, source
-    24,                    # Body — paragraphs, list items, table cells, captions
-    28,                    # Sub  — subtitle, column-title, lede (optional tier)
-    48,                    # Title — Action Title on content pages
-    # Mockup-internal text (Lark Doc / dashboard simulations) opts out via
-    # /* allow:typescale */ — no longer in the default ladder.
-    # Hero exceptions (cover 100, section 88/160, big-stat 132+, quote 88+)
-    # also live OUTSIDE this ladder. They must be tagged with
-    # /* allow:typescale */ when they appear in per-page <style> blocks.
-    # Framework CSS itself is exempt from R20 (R20 only audits per-page
-    # rules scoped to [data-page=...]).
-}
+# 4-tier strict (2026-05-16) — CONTENT pages use ONLY these four {16,24,28,48}.
+# Derived from the framework CSS --fs-* tokens (single source, F-02), not
+# re-typed here. Mockup-internal text opts out via /* allow:typescale */; hero
+# exceptions (cover 100, section 88/160, big-stat 132+, quote 88+) live OUTSIDE
+# this ladder and must be tagged /* allow:typescale */ in per-page <style>
+# blocks. Framework CSS itself is exempt (R20 only audits [data-page=...] rules).
+TYPE_LADDER_PX = set(_FS_TOKENS.values())
 
 
 def audit_type_ladder(html: str, iss: Issues):
@@ -2897,6 +2968,55 @@ def inline_linked(html_text, base_dir):
     return html_text
 
 
+# F-10/F-08 · single registry of static audits, iterated by BOTH main() here
+# and check-only.py — so the two entry points can never run different audit
+# sets (check-only historically skipped 6 audits silently). Each entry is
+# (audit_fn, arg-order); the runner passes the named context values
+# positionally. Order matches the historical main() sequence (audits are
+# independent — each only reads html/slides/path and appends to iss — so order
+# is cosmetic). Adding/removing an audit = one registry line, both entries.
+STATIC_AUDITS = [
+    (audit_dom_integrity,      ('html', 'iss')),
+    (audit_lift_style_lost,    ('html', 'iss')),
+    (audit_structure,          ('slides', 'iss')),
+    (audit_titles_one_line,    ('slides', 'iss')),
+    (audit_brand_chrome,       ('slides', 'iss')),
+    (audit_copy_rules,         ('html', 'iss')),
+    (audit_font_sizes,         ('html', 'iss')),
+    (audit_type_ladder,        ('html', 'iss')),
+    (audit_undefined_css_vars, ('html', 'iss')),
+    (audit_white_text,         ('html', 'iss')),
+    (audit_no_drop_shadows,    ('html', 'iss')),
+    (audit_data_decor,         ('slides', 'iss')),
+    (audit_hex_palette,        ('html', 'iss')),
+    (audit_bullet_dash,        ('html', 'iss')),
+    (audit_runtime_chrome,     ('html', 'iss', 'path')),
+    (audit_centering_pattern,  ('html', 'iss')),
+    (audit_layout_integrity,   ('html', 'iss')),
+    (audit_default_centering,  ('html', 'iss')),
+    (audit_empty_header_zone,  ('html', 'iss')),
+    (audit_hierarchy,          ('html', 'iss')),
+    (audit_variant_discipline, ('html', 'iss')),
+    (audit_ui_mocks_are_html,  ('slides', 'iss')),
+    (audit_no_cyan_accent,     ('slides', 'iss')),
+    (audit_header_minimal,     ('slides', 'iss')),
+    (audit_slide_keys,         ('slides', 'iss')),
+    (audit_language_policy,    ('html', 'slides', 'iss')),
+    (audit_list_echo,          ('slides', 'iss')),
+    (audit_visual_richness,    ('slides', 'iss')),
+    (audit_perf,               ('html', 'iss')),
+    (audit_text_ids,           ('html', 'path', 'iss')),
+    (audit_feedback_md,        ('path', 'iss')),
+]
+
+
+def run_static_audits(audits, *, html, slides, path, iss):
+    """Run a registry of (audit_fn, arg-order) entries against one context."""
+    ctx = {'html': html, 'slides': slides, 'path': path, 'iss': iss}
+    for fn, sig in audits:
+        fn(*(ctx[a] for a in sig))
+
+
 def main():
     p = argparse.ArgumentParser(description='feishu-deck-h5 self-check')
     p.add_argument('html', help='Path to the assembled deck HTML file')
@@ -2953,41 +3073,12 @@ def main():
     slides = extract_slides(html)
 
     iss = Issues()
-    audit_dom_integrity(html, iss)
-    audit_lift_style_lost(html, iss)
     # All audits emit warn/err at their inherent severity. The global
     # `--strict` flag promotes ALL warnings to errors after the audits
     # complete (see end of main()) — per-audit `strict` branches were
-    # redundant and removed 2026-05-18.
-    audit_structure(slides, iss)
-    audit_titles_one_line(slides, iss)
-    audit_brand_chrome(slides, iss)
-    audit_copy_rules(html, iss)
-    audit_font_sizes(html, iss)
-    audit_type_ladder(html, iss)
-    audit_undefined_css_vars(html, iss)
-    audit_white_text(html, iss)
-    audit_no_drop_shadows(html, iss)
-    audit_data_decor(slides, iss)
-    audit_hex_palette(html, iss)
-    audit_bullet_dash(html, iss)
-    audit_runtime_chrome(html, iss, path)
-    audit_centering_pattern(html, iss)
-    audit_layout_integrity(html, iss)
-    audit_default_centering(html, iss)
-    audit_empty_header_zone(html, iss)
-    audit_hierarchy(html, iss)
-    audit_variant_discipline(html, iss)
-    audit_ui_mocks_are_html(slides, iss)
-    audit_no_cyan_accent(slides, iss)
-    audit_header_minimal(slides, iss)
-    audit_slide_keys(slides, iss)
-    audit_language_policy(html, slides, iss)
-    audit_list_echo(slides, iss)
-    audit_visual_richness(slides, iss)
-    audit_perf(html, iss)
-    audit_text_ids(html, path, iss)
-    audit_feedback_md(path, iss)
+    # redundant and removed 2026-05-18. Audits run from the shared
+    # STATIC_AUDITS registry so check-only.py runs the identical set (F-10/F-08).
+    run_static_audits(STATIC_AUDITS, html=html, slides=slides, path=path, iss=iss)
 
     if args.visual:
         run_visual_audits(path, iss, want_screenshots=args.screenshots)
