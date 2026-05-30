@@ -26,8 +26,31 @@ from pathlib import Path
 #  规范 thresholds (hard floors)
 # ---------------------------------------------------------------------------
 
-FLOOR_BODY_PX        = 24   # body text on content pages (was 22 pre-2026-05-16 · 4-tier spec rung 3)
-FLOOR_CHROME_PX      = 16   # corner metadata / footnote / pill / tag (was 14 pre-2026-05-16 · 4-tier rung 4)
+# F-02 · single source of truth for the 4-tier font ladder. Derive it from the
+# framework CSS :root --fs-* tokens (the values that actually RENDER) instead of
+# re-typing 16/24/28/48 here AND in feishu-deck.css AND in SKILL.md. The parity
+# test (tests/test_type_tokens_ssot.py) fails if CSS drifts from the fallback
+# below; the fallback keeps the validator working if the CSS can't be read.
+_FS_TOKEN_FALLBACK = {'--fs-foot': 16, '--fs-body': 24, '--fs-sub': 28, '--fs-title': 48}
+
+
+def _load_fs_tokens() -> dict:
+    """Parse `--fs-{title,sub,body,foot}: Npx` from the framework CSS :root."""
+    css = Path(__file__).resolve().parent / 'feishu-deck.css'
+    try:
+        text = css.read_text(encoding='utf-8')
+    except OSError:
+        return dict(_FS_TOKEN_FALLBACK)
+    found = {f'--fs-{n}': int(px)
+             for n, px in re.findall(r'--fs-(title|sub|body|foot)\s*:\s*(\d+)px', text)}
+    # require all four; otherwise fall back (defensive against a future rename)
+    return found if _FS_TOKEN_FALLBACK.keys() <= found.keys() else dict(_FS_TOKEN_FALLBACK)
+
+
+_FS_TOKENS = _load_fs_tokens()
+
+FLOOR_BODY_PX   = _FS_TOKENS['--fs-body']   # body text on content pages (4-tier rung 3)
+FLOOR_CHROME_PX = _FS_TOKENS['--fs-foot']   # corner metadata / footnote / pill / tag (rung 4)
 # FLOOR_HEADER_PX / FLOOR_TABLE_TH_PX / FLOOR_STATS_TREND_PX were defined but
 # never read (R20 enforces the 4-tier ladder directly). Removed 2026-05-18.
 
@@ -460,20 +483,13 @@ def audit_font_sizes(html: str, iss: Issues):
                     f'inline font-size {size}px below {FLOOR_CHROME_PX}px floor')
 
 
-TYPE_LADDER_PX = {
-    # 4-tier strict (2026-05-16) — CONTENT pages use ONLY these four:
-    16,                    # Foot — footnote, eyebrow, pill, tag, attrib, source
-    24,                    # Body — paragraphs, list items, table cells, captions
-    28,                    # Sub  — subtitle, column-title, lede (optional tier)
-    48,                    # Title — Action Title on content pages
-    # Mockup-internal text (Lark Doc / dashboard simulations) opts out via
-    # /* allow:typescale */ — no longer in the default ladder.
-    # Hero exceptions (cover 100, section 88/160, big-stat 132+, quote 88+)
-    # also live OUTSIDE this ladder. They must be tagged with
-    # /* allow:typescale */ when they appear in per-page <style> blocks.
-    # Framework CSS itself is exempt from R20 (R20 only audits per-page
-    # rules scoped to [data-page=...]).
-}
+# 4-tier strict (2026-05-16) — CONTENT pages use ONLY these four {16,24,28,48}.
+# Derived from the framework CSS --fs-* tokens (single source, F-02), not
+# re-typed here. Mockup-internal text opts out via /* allow:typescale */; hero
+# exceptions (cover 100, section 88/160, big-stat 132+, quote 88+) live OUTSIDE
+# this ladder and must be tagged /* allow:typescale */ in per-page <style>
+# blocks. Framework CSS itself is exempt (R20 only audits [data-page=...] rules).
+TYPE_LADDER_PX = set(_FS_TOKENS.values())
 
 
 def audit_type_ladder(html: str, iss: Issues):
