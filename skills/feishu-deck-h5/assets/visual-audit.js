@@ -51,6 +51,10 @@
   // big-stat, end-slogan, quote with big blockquote, image-text cinematic).
   // 2026-05-20 · added 'image-text' — title is master-spec 88 px (hero),
   // sits over a full-bleed image. Documented in SKILL.md "Hero exception".
+  // F-13 · NOT the same as Python validate.py HERO_TITLE_LAYOUTS (do not sync):
+  // this is the hero-ZONE set (hero sizes anywhere) and INCLUDES big-stat; the
+  // Python set is the hero-TITLE set (flexible header) and excludes big-stat
+  // because it has no title. Different questions, intentionally different members.
   const HERO_LAYOUTS = new Set([
     'cover', 'section', 'big-stat', 'end', 'quote', 'image-text'
   ]);
@@ -469,19 +473,12 @@
       'contact', 'eyebrow', 'pill', 'tag', 'chip', 'badge', 'demo-tag',
       'demo-label', 'caption-meta', 'cite',
     ];
-    const MOCK_CONTAINERS = [
-      'ui-window', 'ui-screen', 'ui-chat', 'ui-body', 'ui-toolbar',
-      'ui-sidebar', 'ui-grid', 'ui-cell', 'ui-list-item', 'ui-msg',
-      'phone', 'phone-screen', 'p22-ph', 'p17-phone', 'fs-phone',
-      'chat-body', 'chat-header', 'p22-chat', 'p22-noti', 'p22-know',
-      'p22-task', 'ph-bar', 'ph-status', 'ph-chat', 'msg-ai', 'msg-user',
-      'dash', 'mini-ui', 'browser-mock', 'p17-xhs', 'p17-dy', 'p17-flow-card',
-      'page-replica',  // replica mode = full PDF image, no text leaves
-      // 2026-05-19 · doc / report mockups (Lark Doc / Wiki preview at small px)
-      'report-toc', 'report-mock', 'doc-mock', 'doc-preview', 'wiki-mock',
-      'feishu-doc', 'lark-doc-mock',
-      'doc-grid', 'doc-stage', 'doc-card',
-    ];
+    // F-13: single source — the body-floor mock set IS the tier mock set (the
+    // TIER_MOCK comment says "Shared with R-VIS-BODY-FLOOR below"). They had
+    // silently drifted: `pd-card` was added to TIER_MOCK (2026-05-19) but not
+    // here, so .pd-card's ≤13px nodes were exempt from TIER/ORPHAN/FOCAL yet
+    // wrongly policed by BODY-FLOOR. Alias keeps them in lockstep forever.
+    const MOCK_CONTAINERS = TIER_MOCK;
     const seenBodyFloor = new Set();
     textEls.forEach(el => {
       // Skip SVG (different size semantics)

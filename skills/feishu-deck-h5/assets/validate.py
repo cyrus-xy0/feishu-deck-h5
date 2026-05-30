@@ -74,6 +74,13 @@ ALLOWED_DECOR = {
 # normal content-page header. Master spec may revisit this — if so,
 # update both the recipe in templates/slide-recipes.html and SKILL.md
 # §"Available layouts" together with this set.
+# F-13 · This is NOT the same set as visual-audit.js HERO_LAYOUTS — do not
+# "sync" them. HERO_TITLE_LAYOUTS = layouts whose page TITLE/header is
+# hero/flexible (multi-line title allowed in R13, header-minimal exempt in
+# R56). big-stat is intentionally ABSENT: it has no hero title (only .num /
+# .copy). The JS HERO_LAYOUTS answers a different question — "is the WHOLE
+# slide a hero zone where hero font sizes are allowed anywhere" — and correctly
+# includes big-stat.
 HERO_TITLE_LAYOUTS = {'cover', 'image-text', 'end', 'section', 'quote'}
 # `section` ships hero `.chapter-num` (160) + `<h2 class="title">` (88) where
 # 2-line chapter titles are common ("绿氢革命<br>2026"). `quote` ships
