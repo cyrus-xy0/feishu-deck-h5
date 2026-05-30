@@ -885,7 +885,7 @@ Enforced by `validate.py` rule **R48** (`audit_default_centering`) — blocks de
 
 1. **先 stamp**:给它 `<head>` 加 `<meta name="fs-deck-origin" content="imported">`。validator 据此把它的排版当**作者自己的设计** —— R06 / R20 / R-VIS-TIER / 字号下限**全降为 advisory(不再是 error)**。你**没有义务**让一份外来 deck 去过我们的 4 档字号梯子。
 2. **二选一,没有"snap 到合规"的中间路**(把外来 deck 的字号 snap 到我们的档 = **拍平它的重点/hero + 撑爆适配** —— 见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`):
-   - **(A) 保留原设计** —— 只做**安全增益**:重 bundle 当前框架 JS(auto-balance 加载即居中/去 crowd,**零字号触碰**);只对**真伤阅读**的溢出对症(文字溢出框 → **拉高框** / 标题换行 / 压字 / 删条目,**永不缩字号**)。
+   - **(A) 保留原设计** —— 只做**安全增益**:`python3 assets/rebundle-import.py <deck.html>` 一键(stamp imported + 换当前框架 JS,**auto-balance 加载修 box-crowd〔文字贴底〕,零字号/chrome 触碰**;全画布居中是 auto-balance 后续增强项);只对**真伤阅读**的溢出对症(文字溢出框 → **拉高框** / 标题换行 / 压字 / 删条目,**永不缩字号**)。
    - **(B) 重生成走 schema** —— 按 `deck.json`(Path A)重做,字号**按角色**给(重点→hero、正文→24、chrome→框架),内容与字号一起设计、天生适配 = correct-by-construction。
 3. **绝不**把 imported deck 的字号「snap 到 4 档」—— 这是拍平设计、级联溢出的**类别错误**。chrome(翻页器/全屏提示/wordmark/pageno)永远不是内容,任何变换都排除它。
 
