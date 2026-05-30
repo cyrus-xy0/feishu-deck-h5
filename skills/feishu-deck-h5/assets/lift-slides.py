@@ -31,11 +31,13 @@ USAGE:
     --key KEY[,KEY]  — select slides by semantic data-slide-key instead of a
                        1-indexed frame number (resolved via the manifest).
     --shake          — tree-shake framework CSS for the slide's ACTUAL layout
-                       (any of ~15, not just the 5 heavy) + pull source-head
-                       @keyframes the slide references. For FOREIGN/legacy decks
-                       whose per-slide CSS isn't in custom_css. Global
-                       `.slide .foo` rules are NOT inlined — they apply in any
-                       target deck that links feishu-deck.css.
+                       (any of ~15, not just the 5 heavy) + RECOVER the source's
+                       HEAD per-slide rules (the page-anim pattern:
+                       `[data-slide-key=K]` / `[data-page=N]` rules in a head
+                       <style>) + pull the @keyframes they reference. So an OLD
+                       deck lifts CLEAN with no pre-fix / no migrate codemod.
+                       Global `.slide .foo` rules are NOT inlined — they apply in
+                       any target deck that links feishu-deck.css.
     DEST_DECK_JSON   — destination deck.json (slides appended)
     OUTPUT_DIR       — optional; defaults to dirname(DEST_DECK_JSON).
                        Assets are copied to OUTPUT_DIR/input/ and
@@ -197,6 +199,43 @@ def _source_author_css(full_html):
     return "\n".join(out)
 
 
+def _page_to_key(full_html):
+    """Map data-page → data-slide-key by reading each rendered frame's DOM (so
+    [data-page=N] head rules can be re-pointed at the right lifted slide)."""
+    out = {}
+    for fm in re.finditer(r'<div\b[^>]*class="[^"]*\bslide-frame\b[^"]*"[^>]*>',
+                          full_html):
+        seg = full_html[fm.start():fm.end() + 1500]
+        pm = re.search(r'data-page="?([\w-]+)"?', seg)
+        km = re.search(r'data-slide-key="([^"]+)"', seg)
+        if pm and km:
+            out[pm.group(1)] = km.group(1)
+    return out
+
+
+def extract_head_slide_rules(src_head_css, slide_key, page_map):
+    """Pull source HEAD/deck-level rules that target THIS slide — via
+    `[data-slide-key="K"]` or `[data-page="N"]` (N→K through page_map) — and
+    rewrite any `[data-page="N"]` token to `[data-slide-key="K"]` so the rule
+    still matches the lifted raw slide (which carries the slide-key, not
+    data-page). This recovers the page-anim head pattern at lift time, so OLD
+    decks lift clean WITHOUT first running the migrate codemod. @keyframes the
+    rules reference are pulled by the closure step (5.6). Over-inclusive: a
+    multi-target rule is kept whole when this slide is one of its targets."""
+    keep = []
+    for selector, body in iter_css_rules(src_head_css):
+        keys = set(re.findall(r'\[data-slide-key="([^"]+)"\]', selector))
+        for n in re.findall(r'\[data-page="?([\w-]+)"?\]', selector):
+            mapped = page_map.get(n)
+            if mapped:
+                keys.add(mapped)
+        if slide_key in keys:
+            new_sel = re.sub(r'\[data-page="?[\w-]+"?\]',
+                             f'[data-slide-key="{slide_key}"]', selector)
+            keep.append(f"{new_sel} {{ {body} }}")
+    return "\n".join(keep)
+
+
 def find_frame_lines(src_lines):
     """Return list of (1-indexed) line numbers where `<div class="slide-frame"`
     appears, in document order. The Nth entry is the start of the Nth slide."""
@@ -256,7 +295,7 @@ def extract_one(src_lines, frame_start, frame_end):
 
 def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
               report, orig_layout=None, slide_key=None, shake=False,
-              src_head_css=""):
+              src_head_css="", page_map=None):
     """Apply rescope + asset-rewrite + asset-copy transforms to inner HTML.
     `report` is a dict to accumulate per-slide asset-copy log.
     `orig_layout` + `slide_key`: auto-inline the framework's `[data-layout=X]`
@@ -327,6 +366,21 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
             # non-heavy layout, no --shake → this CSS would be lost on lift-to-raw
             report.setdefault("shake_hint", []).append(orig_layout)
 
+    # 5.55) Recover source HEAD per-slide rules for this slide (--shake). The
+    # page-anim pattern writes `.slide[data-slide-key=K] .x{…}` / `[data-page=N]…`
+    # into a head <style>; those aren't in the slide DOM, so without this they're
+    # lost on lift. Recover + rewrite `[data-page=N]`→`[data-slide-key=K]` so OLD
+    # decks lift clean WITHOUT the migrate codemod. (Keyframes pulled by 5.6.)
+    if shake and src_head_css and slide_key:
+        head_rules = extract_head_slide_rules(src_head_css, slide_key, page_map or {})
+        if head_rules:
+            inner = (
+                '<style>\n/* AUTO-RECOVERED source-head per-slide CSS '
+                '(lift-slides.py --shake · page-anim pattern) */\n'
+                + head_rules + '\n</style>\n' + inner
+            )
+            report.setdefault("head_css_recovered", []).append(slide_key)
+
     # 5.6) Keyframe closure (--shake): pull @keyframes the lifted slide references
     # from the source's AUTHOR head/deck <style> blocks (which vanish on lift —
     # the page-anim loss, cf. round-trip-integrity postmortem). Framework
@@ -374,9 +428,11 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
 
     src_lines = src_html_path.read_text().splitlines(keepends=True)
     starts = find_frame_lines(src_lines)
-    # Source author head/deck CSS (non-framework <style> blocks) — keyframe
-    # closure source for --shake (the page-anim styles that vanish on lift).
-    src_head_css = _source_author_css("".join(src_lines)) if shake else ""
+    # Source author head/deck CSS (non-framework <style> blocks) + data-page→key
+    # map — used by --shake to recover the page-anim head pattern on lift.
+    full_src_html = "".join(src_lines)
+    src_head_css = _source_author_css(full_src_html) if shake else ""
+    page_map = _page_to_key(full_src_html) if shake else {}
     src_stem = src_html_path.parent.name.replace(" ", "")  # e.g. "merged-49pages 2" → "merged-49pages2"
 
     if dst_deck_json.exists():
@@ -407,7 +463,8 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
                           dst_input_dir, dst_proto_dir, report,
                           orig_layout=info.get("orig_layout"),
                           slide_key=info.get("key"),
-                          shake=shake, src_head_css=src_head_css)
+                          shake=shake, src_head_css=src_head_css,
+                          page_map=page_map)
         # Verify no nested .slide
         if '<div class="slide"' in inner:
             print(f"  ⚠ frame {one_indexed} ({info['key']}): nested .slide remains in inner — "
@@ -434,6 +491,8 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if miss: print(f"    ✗ input/ MISSING in source: {miss}")
         inlined = report.get("inlined_layout_css", [])
         if inlined: print(f"    auto-inlined framework CSS for: {inlined}")
+        rec = report.get("head_css_recovered", [])
+        if rec: print(f"    recovered source-head per-slide CSS for: {rec}")
         kf = report.get("keyframes_pulled", [])
         if kf: print(f"    pulled @keyframes from source head: {kf}")
         hint = report.get("shake_hint", [])
@@ -514,9 +573,10 @@ def main():
                     help="comma-separated slide-keys to lift (alternative to positional FRAMES)")
     ap.add_argument("--shake", action="store_true",
                     help="tree-shake: inline framework [data-layout=X] CSS for the slide's "
-                         "ACTUAL layout (any of ~15, not just the 5 heavy) + pull source-head "
-                         "@keyframes the slide references. Use for FOREIGN/legacy decks whose "
-                         "per-slide CSS isn't in custom_css. Over-inclusive by design.")
+                         "ACTUAL layout (any of ~15) + RECOVER source-head per-slide rules "
+                         "([data-slide-key]/[data-page] page-anim pattern) + pull referenced "
+                         "@keyframes. Lets OLD/foreign decks lift CLEAN with no pre-fix codemod. "
+                         "Over-inclusive by design.")
     args = ap.parse_args()
 
     if args.index:

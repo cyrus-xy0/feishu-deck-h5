@@ -722,15 +722,16 @@ BEFORE any delete-slide / insert-slide / reorder-slide / custom-layout edit, run
   python3 deck-json/render-deck.py DST/deck.json DST/                              # custom_css 随对象 travel,自动 scope
   ```
   纯 JSON 对象复制 —— 自动拷 `input/`、`prototypes/` 资源、key 冲突自动改名、剥离源绑定的 `data-text-id`、写 `lifted` 溯源、自动备份 + 复校。要按 key 浏览源 deck 看 `SRC/slide-index.json`(render 自动产出的清单)。
-- **源是外来 / 老 deck(没有 `custom_css` 的页)→ `assets/lift-slides.py`**:
+- **源是外来 / 老 deck(没有 `custom_css` 的页)→ `assets/lift-slides.py … --shake`**:
   ```bash
   python3 assets/lift-slides.py SRC/index.html --index                            # 列清单挑 key(不读正文)
-  python3 assets/lift-slides.py SRC/index.html --key <key> DST/deck.json           # tree-shake 框架 CSS + 拷资源 → layout:raw
+  python3 assets/lift-slides.py SRC/index.html --key <key> DST/deck.json --shake   # tree-shake → layout:raw
   ```
+  **`--shake` 让任何老 deck 直接切干净、无需预先修**:内联该页真实 layout 的框架 CSS + **把源 head 里属于这页的 per-slide 规则(`[data-slide-key]`/`[data-page]` page-anim 老坑)搬进来并把 `[data-page=N]` 改写成 `[data-slide-key]`** + 拉回引用的 `@keyframes`。全局 `.slide .foo` 规则不内联(任何目标 deck 都有)。
 
 **配套硬规矩 —— 每页的定制 CSS 只放 `slide.custom_css`,绝不放 `<head>` / page-level `<style>`**:渲染器会把 `custom_css` 自动 scope 到 `.slide[data-slide-key=KEY]` 并 co-locate 进该 slide(`<style data-fs-custom-css>`),这样它能随 lift/clone/paste travel 且 round-trip 不丢。写无前缀选择器即可(`.card{…}`),`@keyframes`/`@media` 也放这里。head 里塞每页 CSS = republish 静默蒸发(`fs-deck-page-anim` 旧坑),已被本路径取代。
 
-**老 deck 里已有 head `<style>` per-slide CSS** → 用 codemod 一键搬进 `custom_css`:`python3 deck-json/migrate-head-css-to-custom-css.py <out>/index.html <out>/deck.json --dry-run`(先看)→ 去掉 `--dry-run` 加 `--render`(自带 `.bak`、幂等;`[data-page=N]` 按渲染 DOM 实际对应映射;不可归属的规则只报告不动)。`R-SELF-CONTAINED`(advisory)会标出还没搬的 head 泄漏。
+**切老 deck 不用预先修**(`--shake` 会在切的时候就地恢复 head per-slide CSS)。`migrate-head-css-to-custom-css.py` codemod 是**可选**的、用来**把源 deck 自己修 durable**(让它自己 re-render/republish 不再丢动画,且之后可走 native `paste`):`python3 deck-json/migrate-head-css-to-custom-css.py <out>/index.html <out>/deck.json --dry-run`(先体检,`nothing to migrate`=干净)→ 去掉 `--dry-run` 加 `--render`(自带 `.bak`、幂等;`[data-page=N]` 按渲染 DOM 实际对应映射;不可归属的规则只报告不动)。`R-SELF-CONTAINED`(advisory)标出还在 head 的泄漏。
 
 > 📎 架构/根因/路线图(L1–L7)见 `LIFT-ARCHITECTURE-2026-05-30.md`;round-trip 细节见 `references/round-trip-integrity.md`。
 
