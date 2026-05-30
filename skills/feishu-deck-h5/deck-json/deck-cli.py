@@ -24,6 +24,10 @@ Write commands (auto-backup + revalidate + rollback on schema fail):
   insert POSITION L [V] KEY   insert a scaffold slide at POSITION
   delete KEY                  remove slide. MANDATORY confirm + backup.
   clone KEY NEW_KEY [POSITION]  duplicate KEY → NEW_KEY at POSITION (default after KEY)
+  paste --from SRC --key K [--new-key NK] [POS]
+                              copy a slide from another deck.json into this one (deck.json-
+                              native lift) — deep-copies the slide object + its input/ &
+                              prototypes/ assets, auto-suffixes key collisions
 
 Render pipeline:
   render OUTPUT_DIR [--inline] [--skip-...]   wrap render-deck.py
@@ -46,6 +50,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -414,6 +419,158 @@ def cmd_clone(deck: dict, args) -> tuple[int, dict | None]:
     return 0, deck
 
 
+def _strip_text_ids(obj):
+    """Recursively strip `data-text-id="..."` from every string in a slide. These
+    ids are position-bound (`slide-NN.field`) to the SOURCE deck, so they'd
+    collide / mismatch in the target's texts.md (T03). Same call lift-slides.py
+    makes. Returns the cleaned object + the count removed."""
+    count = 0
+
+    def walk(v):
+        nonlocal count
+        if isinstance(v, str):
+            new = re.sub(r'\s+data-text-id="[^"]*"', '', v)
+            count += len(re.findall(r'data-text-id="[^"]*"', v))
+            return new
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+
+    return walk(obj), count
+
+
+def _slide_asset_text(slide: dict) -> str:
+    """Concatenate all string values in a slide (custom_css + every string in
+    `data`, recursively) so asset references can be scanned without JSON-escape
+    noise."""
+    parts: list[str] = []
+    cc = slide.get("custom_css")
+    if isinstance(cc, str):
+        parts.append(cc)
+
+    def walk(v):
+        if isinstance(v, str):
+            parts.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    walk(slide.get("data", {}))
+    return "\n".join(parts)
+
+
+def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
+    """Copy a pasted slide's referenced LOCAL assets from the source deck dir to
+    the destination deck dir, preserving deck-relative paths (`input/<file>`,
+    `prototypes/<slug>/`). Skill-relative (`../../../skills/...`) and shared-pool
+    refs resolve identically in both decks, so they need no copy. Returns a
+    report dict {input, prototypes, missing}."""
+    text = _slide_asset_text(slide)
+    copied = {"input": [], "prototypes": [], "missing": []}
+    for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
+        s = src_dir / "input" / fname
+        d = dst_dir / "input" / fname
+        if s.is_file():
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
+                shutil.copy2(s, d)
+            copied["input"].append(fname)
+        else:
+            copied["missing"].append(f"input/{fname}")
+    for slug in sorted(set(re.findall(r"prototypes/([^/\s\"'<>()\\?#]+)/", text))):
+        s = src_dir / "prototypes" / slug
+        d = dst_dir / "prototypes" / slug
+        if s.is_dir():
+            if not d.exists():
+                shutil.copytree(s, d)
+            copied["prototypes"].append(slug)
+        else:
+            copied["missing"].append(f"prototypes/{slug}/")
+    return copied
+
+
+def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
+    """Copy one slide from ANOTHER deck.json (args.from_deck) into this deck.
+
+    This is the deck.json-native lift (LIFT-ARCHITECTURE step 3): for decks whose
+    per-slide CSS lives in `custom_css` (self-contained-by-construction), pasting
+    is a pure object copy — no index.html parsing, no CSS tree-shaking. Local
+    assets (input/, prototypes/) are copied; key collisions auto-suffix."""
+    src_path: Path = args.from_deck
+    if not src_path.exists():
+        print(f"deck-cli: source deck not found: {src_path}", file=sys.stderr)
+        return 2, None
+    try:
+        src_deck = json.loads(src_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"deck-cli: source deck invalid JSON: {e}", file=sys.stderr)
+        return 2, None
+
+    src_slides = src_deck.get("slides", [])
+    matches = [s for s in src_slides if s.get("key") == args.key]
+    if not matches:
+        avail = ", ".join(s.get("key", "?") for s in src_slides) or "(none)"
+        print(f"deck-cli: slide-key '{args.key}' not found in source deck.\n"
+              f"  available keys: {avail}", file=sys.stderr)
+        return 1, None
+    if len(matches) > 1:
+        print(f"deck-cli: source has {len(matches)} slides keyed '{args.key}'; "
+              f"taking the first.", file=sys.stderr)
+
+    slide = copy.deepcopy(matches[0])
+
+    # De-collide the key against the destination deck
+    requested = args.new_key or slide.get("key", "pasted")
+    existing = {s.get("key") for s in deck.get("slides", [])}
+    new_key = requested
+    if new_key in existing:
+        i = 2
+        while f"{requested}-{i}" in existing:
+            i += 1
+        new_key = f"{requested}-{i}"
+        print(f"  key collision: '{requested}' already in target → renamed '{new_key}'")
+    slide["key"] = new_key
+
+    # Strip source-deck-bound data-text-id attrs (else T03 collision in target).
+    slide, n_ids = _strip_text_ids(slide)
+
+    # Provenance — the validator downgrades typography/color violations to
+    # warnings for slides carrying `lifted` (same contract as lift-slides.py).
+    slide["lifted"] = f"{src_path.parent.name}#{matches[0].get('key')}"
+
+    # Copy referenced local assets to target-relative paths
+    src_dir = src_path.resolve().parent
+    dst_dir = args.deck.resolve().parent
+    report = _copy_slide_assets(slide, src_dir, dst_dir)
+
+    slides = deck.setdefault("slides", [])
+    n = len(slides)
+    pos = args.position if args.position else n + 1
+    if not (1 <= pos <= n + 1):
+        print(f"deck-cli: position out of range (1..{n+1})", file=sys.stderr)
+        return 1, None
+    slides.insert(pos - 1, slide)
+
+    variant = f"/{slide['variant']}" if slide.get("variant") else ""
+    print(f"  pasted '{matches[0].get('key')}' from {src_path.name} → position {pos} "
+          f"as '{new_key}' (layout={slide.get('layout')}{variant})")
+    if n_ids:
+        print(f"    stripped {n_ids} source-bound data-text-id attr(s) "
+              f"(re-render regenerates the sidecar)")
+    if report["input"]:
+        print(f"    input/ copied: {report['input']}")
+    if report["prototypes"]:
+        print(f"    prototypes/ copied: {report['prototypes']}")
+    if report["missing"]:
+        print(f"    ⚠ assets MISSING in source (broken refs after paste): {report['missing']}")
+    return 0, deck
+
+
 # ---------------------------------------------------------------------------
 # Scaffold templates
 # ---------------------------------------------------------------------------
@@ -567,6 +724,15 @@ def main(argv=None) -> int:
     sp.add_argument("key"); sp.add_argument("new_key")
     sp.add_argument("position", type=int, nargs="?", default=None)
 
+    sp = sub.add_parser("paste", help="copy a slide from another deck.json into this one (+assets)")
+    sp.add_argument("--from", dest="from_deck", type=Path, required=True, metavar="SRC",
+                    help="source deck.json to copy from")
+    sp.add_argument("--key", required=True, help="slide-key to copy from SRC")
+    sp.add_argument("--new-key", dest="new_key", default=None,
+                    help="rename pasted slide (default: keep key, auto-suffix on collision)")
+    sp.add_argument("position", type=int, nargs="?", default=None,
+                    help="1-indexed insert position (default: append at end)")
+
     sp = sub.add_parser("render", help="render to HTML (wrap render-deck.py)")
     sp.add_argument("output_dir", type=Path)
     sp.add_argument("--inline", action="store_true")
@@ -602,6 +768,7 @@ def main(argv=None) -> int:
         "insert":      cmd_insert,
         "delete":      cmd_delete,
         "clone":       cmd_clone,
+        "paste":       cmd_paste,
     }
     handler = WRITE_CMDS.get(args.cmd)
     if not handler:

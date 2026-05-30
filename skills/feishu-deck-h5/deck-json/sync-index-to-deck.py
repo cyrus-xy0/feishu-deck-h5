@@ -88,6 +88,14 @@ def extract_slide_inner(html: str, slide_key: str) -> str | None:
         j += nm.end()
 
     inner_full = html[i : j - len("</div>")]
+    # strip the leading per-slide custom_css block (render-deck.py injects it as
+    # the FIRST child of .slide, marked data-fs-custom-css). It is sourced from
+    # the deck.json `custom_css` field, NOT data.html, so it must NOT be folded
+    # back into data.html on sync — else re-render would double it.
+    cc = re.match(r'\s*<style[^>]*\bdata-fs-custom-css\b[^>]*>.*?</style>\s*',
+                  inner_full, re.S)
+    if cc:
+        inner_full = inner_full[cc.end():]
     # strip the leading wordmark div (added by raw.fragment.html / cover.fragment.html / etc)
     wm = re.match(r'\s*<div class="wordmark"[^>]*>.*?</div>\s*', inner_full, re.S)
     if wm:

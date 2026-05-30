@@ -48,6 +48,9 @@ from _story_case_fit import (  # noqa: E402
     STORY_CASE_FIT_CHECK,
     _min_len_for,
 )
+# scope_selectors co-locates per-slide custom_css scoped to its slide-key
+# (LIFT-ARCHITECTURE step 2) so the CSS travels with the slide on lift/clone.
+from _css_utils import scope_selectors  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -1524,6 +1527,16 @@ ENRICHERS = {
 }
 
 
+_ASSET_REF_RE = re.compile(r"(?:input|prototypes)/[^\s\"'<>()\\?#]+")
+
+
+def _scan_slide_assets(slide_html: str) -> list:
+    """Deck-local asset refs (input/<file>, prototypes/<slug>/...) a slide
+    carries — the ones a lift must copy. Shared/framework refs resolve in any
+    deck so they're not listed. Used for the slide-index.json manifest."""
+    return sorted(set(_ASSET_REF_RE.findall(slide_html)))
+
+
 def render_slide(slide: dict, slide_index: int, total: int, asset_path: str, deck_dir: Path | None = None) -> str:
     layout  = slide["layout"]
     variant = slide.get("variant")
@@ -1566,7 +1579,41 @@ def render_slide(slide: dict, slide_index: int, total: int, asset_path: str, dec
     if enricher:
         enricher(ctx, slide)
 
-    return render_template(tpl_path.read_text(encoding="utf-8"), ctx)
+    rendered = render_template(tpl_path.read_text(encoding="utf-8"), ctx)
+
+    # Co-locate per-slide custom_css as a <style> scoped to the slide-key, as the
+    # FIRST child of .slide (LIFT-ARCHITECTURE step 2). This gives every slide a
+    # round-tripping home for its deviation CSS — no head/page-level <style> that
+    # vanishes on republish — and makes the slide self-contained so a deck.json
+    # paste/clone carries its styling with no CSS hunting.
+    custom_css = slide.get("custom_css")
+    if isinstance(custom_css, str) and custom_css.strip():
+        rendered = _inject_custom_css(rendered, slide["key"], custom_css)
+
+    return rendered
+
+
+def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
+    """Insert a `<style data-slide-key=K data-fs-custom-css>` block (selectors
+    scoped to the slide-key) as the first child of `.slide`. A `<style>` is
+    display:none in the UA sheet so it adds no layout, and no framework rule
+    targets a direct child of `.slide` positionally, so first-child is safe.
+    The `data-fs-custom-css` marker lets sync-index-to-deck.py skip it on
+    round-trip (it lives in the deck.json `custom_css` field, not data.html)."""
+    scoped = scope_selectors(custom_css, slide_key)
+    if not scoped.strip():
+        return slide_html
+    block = (f'<style data-slide-key="{slide_key}" data-fs-custom-css>\n'
+             f'{scoped}\n'
+             f'        </style>')
+    # `class="slide"` (closing quote pins the class to exactly "slide", so this
+    # never matches `class="slide-frame"`). First match is the real .slide open.
+    new_html, n = re.subn(
+        r'(<div class="slide"[^>]*>)',
+        lambda m: m.group(0) + "\n        " + block,
+        slide_html, count=1,
+    )
+    return new_html if n else slide_html
 
 
 # ---------------------------------------------------------------------------
@@ -1719,6 +1766,31 @@ def main(argv=None) -> int:
 
     out_html = args.output_dir / "index.html"
     out_html.write_text(final, encoding="utf-8")
+
+    # 5.4 — Emit slide-index.json: a compact {key→frame_index,layout,label,bytes,
+    #       assets} manifest so a downstream "lift" can pick a slide by semantic
+    #       key from a ~300-token table instead of reading the whole index.html
+    #       to find a frame number (LIFT-ARCHITECTURE L4).
+    slide_index = {
+        "version": "1.0",
+        "deck": deck["deck"].get("title", ""),
+        "slides": [
+            {
+                "key":         slide.get("key"),
+                "frame_index": new_idx + 1,
+                "layout":      slide.get("layout"),
+                "variant":     slide.get("variant"),
+                "label":       slide.get("screen_label") or _derive_screen_label(slide),
+                "bytes":       len(slides_html[new_idx]),
+                "assets":      _scan_slide_assets(slides_html[new_idx]),
+            }
+            for new_idx, (orig_idx, slide) in enumerate(active_slides)
+        ],
+    }
+    (args.output_dir / "slide-index.json").write_text(
+        json.dumps(slide_index, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     # 5.5 — Generate texts.md sidecar (kills T03 warning, lets users edit copy
     #       without touching HTML markup).

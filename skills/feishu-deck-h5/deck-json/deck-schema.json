@@ -107,7 +107,7 @@
         },
         "custom_css": {
           "type": "string",
-          "description": "ESCAPE HATCH. Per-slide raw CSS scoped under [data-page=NN]. Use sparingly — drives R20/R06 drift."
+          "description": "Per-slide CSS, authored WITHOUT a scope prefix. The renderer wraps each selector in `.slide[data-slide-key=KEY]` and emits it as a co-located `<style data-fs-custom-css>` block inside the slide, so the CSS travels with the slide on lift/clone/paste and round-trips (never a head/page `<style>` that vanishes on republish). Already `[data-slide-key=]`-scoped selectors pass through; legacy `[data-page=NN]` selectors are rewritten to the slide-key scope; `@media`/`@supports` recurse; `@keyframes`/`@font-face` pass verbatim. Use sparingly — still subject to R20/R06 type-ladder rules."
         },
         "notes": {
           "type": "string",
