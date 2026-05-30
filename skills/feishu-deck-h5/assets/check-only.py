@@ -39,7 +39,7 @@ FAMILIES = [
     ('品牌 / 调色板',        ['L1', 'R10', 'R12', 'R38', 'R49', 'R-LANG']),
     ('布局完整性',           ['L2', 'L4', 'R36', 'R47', 'R48', 'R-CSSVAR',
                               'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST',
-                              'R-SELF-CONTAINED']),
+                              'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
     ('texts.md 联动',        ['T00', 'T01', 'T02', 'T03']),
@@ -51,7 +51,9 @@ FAMILIES = [
                               'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL',
                               'R-VIS-NO-IMAGERY', 'R-FOCAL-CHECK', 'R-VIS-BALANCE',
                               'R-VIS-CARD-MIN-HEIGHT-SPARSE', 'R-VIS-SLACK-FLEX',
-                              'R-VIS-CROWD']),
+                              'R-VIS-CROWD', 'R-VIS-TITLE-GAP', 'R-VIS-PEER-SIZE',
+                              'R-VIS-GUTTER', 'R-VIS-HERO-FLOOR',
+                              'R-VIS-SHORT-LABEL-FLOOR']),
     ('交付物附件',           ['R-FEEDBACK']),
 ]
 

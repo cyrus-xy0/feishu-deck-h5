@@ -304,6 +304,18 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'left:73px; right:320px`) so title aligns with the master '
             'spec across all layouts.')
 
+    for entry in report.get('title_gap', [])[:20]:
+        # < 12px (or negative) = colliding/crowding the title → err;
+        # 12-24px = tight breathing room → warn (advisory).
+        _lev = iss.err if entry["gap_px"] < 12 else iss.warn
+        _lev('R-VIS-TITLE-GAP',
+            f'slide {entry["slide_idx"]} (layout `{entry["layout"]}`) · content '
+            f'sits only {entry["gap_px"]}px below the title (< 24px / overlapping). '
+            'The body grew or overflowed UP toward `.header` — it is crowding / '
+            'colliding with the title. Fix: shorten or shrink the content so it '
+            'fits, OR move the content block DOWN (adjust the stage top / vertical '
+            'centering). 死规矩:标题/副标题位置不动,压内容或下移正文,绝不动标题。')
+
     for entry in report.get('opt_out_abuse', [])[:20]:
         ex_str = (f' (e.g. {", ".join(entry["examples"])})'
                   if entry.get('examples') else '')
@@ -558,6 +570,54 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             '是 overview / 平权矩阵(N 项等大就是设计本身)→ 在 .slide 加 '
             '`data-allow-no-focal` 跳过审计。')
 
+    for entry in report.get('peer_size', [])[:20]:
+        _off = ", ".join(f'`{o["sel"]}`={o["px"]}px' for o in entry.get('offenders', [])[:3])
+        iss.warn('R-VIS-PEER-SIZE',
+            f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` 内同角色 '
+            f'`{entry["role"]}` 字号不一致:多数 {entry["majority_px"]}px,'
+            f'但 {_off} 偏离(本组出现 {sorted(entry["sizes"])} 多种尺寸)。'
+            '同一并列容器里同角色的 sibling 应等大 —— "有大有小"靠这条抓。'
+            'Fix:把偏离者统一到多数派字号(按角色给一档);若确为有意不同 → '
+            '元素或祖先加 `data-allow-peer-size`。')
+
+    for entry in report.get('gutter', [])[:20]:
+        # 间距判断有主观成分 → warn;lifted 页(逐字搬运)降 warn_soft。
+        _lev = iss.warn_soft if entry.get('lifted') else iss.warn
+        _pre = ('LIFTED slide(逐字搬运)— 降为软提示。 ' if entry.get('lifted') else '')
+        if entry['kind'] == 'gutter':
+            _lev('R-VIS-GUTTER', _pre +
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` 同组相邻框'
+                f'({entry["axis"]})间距不等:{entry["gutters"]}px(min {entry["min_px"]} / '
+                f'max {entry["max_px"]})。同组框 gutter 应相等才齐整(P7 #3:卡片左右 '
+                '28px 但到下面只 8px)。Fix:把 gap 统一;故意不均 → .slide 加 '
+                '`data-allow-imbalance`。')
+        else:
+            _lev('R-VIS-GUTTER', _pre +
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` 同 tag '
+                f'`{entry["cell_tag"]}` 组框的内 padding 不一致:{entry["pads"]}px'
+                f'(min {entry["min_px"]} / max {entry["max_px"]})。同类 cell 内容到'
+                '边框的距离应一致才好看(P7 #4)。Fix:统一 padding / 让内容等距居中。')
+
+    for entry in report.get('hero_floor', [])[:20]:
+        _lev = iss.warn_soft if entry.get('lifted') else iss.warn
+        _lev('R-VIS-HERO-FLOOR',
+            f'slide {entry["slide_idx"]} (layout `{entry["layout"]}`) · '
+            f'{entry["role"]} `{entry["selector"]}` 渲染 {entry["rendered_px"]}px,'
+            f'低于该版式 hero 下限 {entry["floor_px"]}px(master 规格约 '
+            f'{entry["spec_px"]}px)→ 偏小、不够大气(P11 封面 82<100)。方向是'
+            '"够不够大"不是"在不在白名单":hero 主元素该走 layout 规定尺寸。'
+            'Fix:放大到 master 规格;若刻意做小变体 → 加 `data-allow-typescale`。')
+
+    for entry in report.get('short_label_floor', [])[:20]:
+        _lev = iss.warn_soft if entry.get('lifted') else iss.warn
+        _svg = ' (SVG 轴标)' if entry.get('is_svg') else ''
+        _lev('R-VIS-SHORT-LABEL-FLOOR',
+            f'slide {entry["slide_idx"]} · `{entry["selector"]}`{_svg} 短标签 '
+            f'"{entry["text"]}"({entry["char_count"]} 字)渲染 {entry["rendered_px"]}px '
+            '< 18px,投影看不清。R-VIS-BODY-FLOOR 的「≥8 字」门槛放过了这种短轴标/'
+            '分类标签,这条专补(含 SVG 轴标)。Fix:放大到 ≥18(图表轴标)/24(正文);'
+            '若确为单位/装饰 → 元素加 `data-allow-body-floor`。')
+
     # (screenshot archival happens inside the Playwright block above; no
     # post-step needed. The previous `if 'shots_dir' in dir(): pass` was
     # dead: `dir()` inside a function returns local names, not what one
@@ -646,7 +706,7 @@ STATIC_AUDITS = [
     (audit_empty_header_zone,  ('html', 'iss')),
     (audit_hierarchy,          ('html', 'iss')),
     (audit_variant_discipline, ('html', 'iss')),
-    (audit_ui_mocks_are_html,  ('slides', 'iss')),
+    (audit_ui_mocks_are_html,  ('html', 'iss')),
     (audit_no_cyan_accent,     ('slides', 'iss')),
     (audit_header_minimal,     ('slides', 'iss')),
     (audit_slide_keys,         ('slides', 'iss')),
@@ -654,6 +714,7 @@ STATIC_AUDITS = [
     (audit_list_echo,          ('slides', 'iss')),
     (audit_visual_richness,    ('slides', 'iss')),
     (audit_self_contained,     ('html', 'iss')),
+    (audit_autobalance_present, ('html', 'iss')),
     (audit_perf,               ('html', 'iss')),
     (audit_text_ids,           ('html', 'path', 'iss')),
     (audit_feedback_md,        ('path', 'iss')),

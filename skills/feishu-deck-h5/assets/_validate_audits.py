@@ -1507,32 +1507,56 @@ def audit_variant_discipline(html: str, iss: Issues):
                     'directional property explicitly — cascade does not auto-reset them.')
 
 
-def audit_ui_mocks_are_html(slides: list[str], iss: Issues):
+_UI1_BRAND = ('lark-logo', 'lark-slogan', 'lark-cover', 'lark-section',
+              'lark-content', 'wordmark')
+_UI1_UI_HINTS = re.compile(
+    r'(screen|screenshot|\bui\b|dashboard|console|panel|chat|window|mock|'
+    r'prototype|figma|wireframe|interface)', re.I)
+_UI1_RASTER = re.compile(r'\.(png|jpe?g|webp|gif|bmp)(\?|#|$)', re.I)
+
+
+def _ui1_brand(s: str) -> bool:
+    return any(h in s for h in _UI1_BRAND)
+
+
+def audit_ui_mocks_are_html(html, iss: Issues):
     """Rule UI1: System UI / screenshots must be re-rendered as HTML, not raster.
 
-    We scan slide markup for <img> tags whose src looks like a UI screenshot
-    (jpg/png file referenced from a non-photo path). Photographic content
-    via data-decor="photo-bg" or .col-visual / image-text full-bleed bg
-    is fine — that's a real photograph, not a UI mock.
-    Any inline <img> inside slide content is a yellow flag — usually it's
-    a developer who pasted a screenshot instead of building HTML. WARN.
+    P9 升级 (2026-05-31): 整页截图当正文 → 图里的 8-10px 字号 DOM 字号检查够不到,
+    只能从源头禁止贴栅格。内容版式上的非品牌 `<img>` / 含 UI 特征的 raster
+    background-image → ERR(强制改 HTML 重建);正文 `<iframe>` → WARN(内嵌文字
+    不可控)。replica-mode(PDF 截图入框)与 imported 外来 deck → 降为 warn(沿用
+    降级惯例,不把整批搬运/截图卡在交付门上)。纯照片(brand 资产 / data: URI)豁免。
     """
+    imported = _deck_imported(html)
+    slides = extract_slides(html)
     for i, fr in enumerate(slides, 1):
+        replica = ('page-replica' in fr or 'data-layout="replica"' in fr)
+        is_iframe_layout = 'data-layout="iframe-embed"' in fr
+        _lev = iss.warn if (replica or imported) else iss.err
+        # (a) content <img> raster screenshots
         for m in re.finditer(r'<img\s[^>]*src="([^"]+)"', fr):
             src = m.group(1)
-            # Allow data: URIs (likely intentional inline asset)
-            if src.startswith('data:'): continue
-            # Allow the brand asset dir (logo, slogan)
-            if 'lark-logo' in src or 'lark-slogan' in src or 'lark-cover' in src \
-               or 'lark-section' in src or 'lark-content' in src:
+            if src.startswith('data:') or _ui1_brand(src):
                 continue
-            # Otherwise: probably a UI screenshot — recreate as HTML instead
+            _lev('UI1',
+                f'slide {i}: <img src="{src}"> 当正文 — 系统 UI / 截图请用 .ui-* '
+                '原语重建成 HTML(window/sidebar/toolbar/list/cell…),别贴栅格:'
+                '图里的字号检查够不到、投影会糊。纯照片用 data-decor="photo-bg" 声明。')
+        # (b) raster background-image carrying a UI smell
+        for m in re.finditer(r"""background(?:-image)?\s*:[^;}"']*url\(\s*['"]?([^'")]+)""", fr, re.I):
+            url = m.group(1)
+            if url.startswith('data:') or _ui1_brand(url):
+                continue
+            if _UI1_RASTER.search(url) and _UI1_UI_HINTS.search(url):
+                _lev('UI1',
+                    f'slide {i}: background-image url({url}) 像 UI 截图当正文 — '
+                    '用 HTML 重建,别用栅格背景塞 UI。')
+        # (c) content <iframe> (exempt the legit iframe-embed layout) → warn
+        if not is_iframe_layout and re.search(r'<iframe\b', fr):
             iss.warn('UI1',
-                f'slide {i}: <img src="{src}"> in slide content — if this is a '
-                'system UI / app screenshot, recreate it as HTML using the .ui-* '
-                'primitives (window/sidebar/toolbar/list/cell/etc.) instead of '
-                'raster. HTML mocks scale crisply, harmonize with brand fonts, '
-                'and avoid pixelation in fullscreen. Pure photographs are fine.')
+                f'slide {i}: <iframe> 正文嵌入 — 内嵌文字字号检查够不到、不可控。'
+                '把要呈现的内容用 HTML/.ui-* 重建,或只作示意缩略图(非 iframe-embed 版式)。')
 
 
 TEXT_ID_RE = re.compile(r'data-text-id="([^"]+)"')
@@ -2142,3 +2166,35 @@ def audit_self_contained(html: str, iss: Issues):
             f'behind on lift). See SKILL.md "LIFTING A SLIDE FROM ANOTHER DECK" / '
             f'LIFT-ARCHITECTURE-2026-05-30.md. [advisory · non-blocking until L7]')
 
+
+
+# ---- R-AUTOBALANCE-PRESENT · auto-balance runtime 指纹硬闸 (2026-05-31) ----
+# 当前 runtime auto-balance 指纹 = balanceSlide 函数声明(assets/feishu-deck.js:101)。
+_AUTOBALANCE_SIG = 'function balanceSlide(slide)'
+
+
+def audit_autobalance_present(html, iss):
+    """R-AUTOBALANCE-PRESENT (err · 根因硬闸): deck 必须内联/链接当前 feishu-deck.js
+    的 auto-balance runtime,否则运行时这段 0 行没跑 → box-crowd(文字贴底)加载时
+    不会被自动修 —— 本会话最致命的流程根因(青啤 raw deck 实测 0 行 auto-balance)。
+
+    schema 渲染的 deck 由 render-deck.py 内联当前框架 JS → 天然带指纹,永不触发;
+    只打 raw / legacy / 手搓 / 旧版 deck。inline_linked() 在 main()/check-only 里已把
+    <script src=…feishu-deck.js> 内联,所以 linked 与 inlined 两种模式都被子串搜命中。
+    修法只有一条正道:python3 assets/rebundle-import.py <deck.html> --inplace。
+    豁免:非 deck(无 .deck 容器,replica/片段);deck 标 data-no-autobalance(作者显式关)。"""
+    if not re.search(r'class="(?:[^"]*\s)?deck(?:\s[^"]*)?"', html):
+        return
+    deck_open = re.search(r'<div\b[^>]*\bclass="(?:[^"]*\s)?deck(?:\s[^"]*)?"[^>]*>', html)
+    if deck_open and 'data-no-autobalance' in deck_open.group(0):
+        return
+    if _AUTOBALANCE_SIG in html:
+        return
+    iss.err(
+        'R-AUTOBALANCE-PRESENT',
+        'deck 未内联当前 feishu-deck.js 的 auto-balance runtime'
+        f'(找不到指纹 `{_AUTOBALANCE_SIG}`)。raw/legacy deck 没 re-bundle → '
+        '运行时 auto-balance 0 行没跑,"文字贴底"等 box-crowd 加载时不会被自动修。'
+        '正道:`python3 assets/rebundle-import.py <deck.html> --inplace` 重新内联'
+        '当前框架 runtime(字号/chrome/内容零改动)。若该 deck 刻意不要 auto-balance,'
+        '在 .deck 上加 data-no-autobalance 显式声明即可豁免本闸。')

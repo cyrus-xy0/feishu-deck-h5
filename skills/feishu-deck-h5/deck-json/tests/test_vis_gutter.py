@@ -1,0 +1,74 @@
+"""R-VIS-GUTTER · 同组相邻框间距不等 / 框内 padding 不一致 (2026-05-31, P7).
+
+#3 卡片左右 28px 但到下面 strap 仅 8px;#4 同组 cell padding 不一。≥3 framed
+组框的 gutter 应相等;双闸 max>min*1.8 且差>10px。
+"""
+import sys
+import pathlib
+
+HERE = pathlib.Path(__file__).resolve()
+ASSETS = HERE.parents[2] / "assets"
+AUDIT = ASSETS / "visual-audit.js"
+VALIDATE = ASSETS / "validate.py"
+DOC = HERE.parents[2] / "references" / "validator-rules.md"
+
+
+def test_gutter_wired():
+    js = AUDIT.read_text(encoding="utf-8")
+    assert "gutter: []" in js and "out.gutter.push" in js
+    assert "report.get('gutter'" in VALIDATE.read_text(encoding="utf-8")
+    assert "R-VIS-GUTTER" in DOC.read_text(encoding="utf-8")
+
+
+def _run(html):
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return None
+    audit = AUDIT.read_text(encoding="utf-8")
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
+            pg.set_content(html); pg.wait_for_timeout(150)
+            rep = pg.evaluate("(" + audit + ")()")
+            b.close()
+    except Exception:
+        return None
+    return [g for g in rep.get("gutter", []) if g["kind"] == "gutter"]
+
+
+def _row(m1, m2):
+    box = 'border:1px solid #888;width:200px;height:100px'
+    return ('<div class="slide"><div class="stage"><div style="display:flex">'
+            f'<div class="card" style="{box};margin-right:{m1}px"></div>'
+            f'<div class="card" style="{box};margin-right:{m2}px"></div>'
+            f'<div class="card" style="{box}"></div>'
+            '</div></div></div>')
+
+
+def test_gutter_fires_on_uneven_gaps():
+    hits = _run(_row(10, 50))   # gutters [10,50] → 50>10*1.8 & diff 40>10
+    if hits is None:
+        import pytest; pytest.skip("Chromium/Playwright unavailable")
+    assert len(hits) >= 1, f"不等 gutter (10/50) 未抓: {hits}"
+
+
+def test_gutter_quiet_on_even_gaps():
+    hits = _run(_row(24, 24))   # gutters [24,24] → equal
+    if hits is None:
+        import pytest; pytest.skip("Chromium/Playwright unavailable")
+    assert hits == [], f"false positive on even gutters: {hits}"
+
+
+if __name__ == "__main__":
+    import traceback
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    failed = 0
+    for fn in fns:
+        try:
+            fn(); print(f"  ok  {fn.__name__}")
+        except Exception:
+            failed += 1; print(f"FAIL  {fn.__name__}"); traceback.print_exc()
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    sys.exit(1 if failed else 0)
