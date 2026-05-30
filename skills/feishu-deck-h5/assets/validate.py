@@ -321,49 +321,93 @@ _RULE_WITH_COMMENTS_RE = re.compile(
 )
 
 
-_AT_RULE_RE = re.compile(r'@[a-zA-Z-]+[^{]*\{(?:[^{}]|\{[^{}]*\})*\}', re.S)
+# F-11 · @media handling. The previous approach DELETED every @-rule before
+# flat-rule scanning, which hid real violations (sub-floor font / off-palette
+# hex / drop shadow) written INSIDE @media. But blindly auditing all @media
+# would false-positive on legitimate responsive overrides (e.g. a smaller font
+# in `@media (max-width:768px)`) that never render — the deck is a FIXED
+# 1920×1080 canvas. So resolve @media against that viewport: an @media that
+# WOULD be active is unwrapped (its inner rules join the flat scan and get
+# audited); one that wouldn't (responsive mobile / print) is dropped, as before.
+# Other at-rules (@keyframes/@font-face/@supports/@page) carry no auditable
+# selector rules and are dropped unchanged.
+_DECK_VW, _DECK_VH = 1920, 1080
+_MQ_FEATURE_RE = re.compile(r'\(\s*(min|max)-(width|height)\s*:\s*(\d+)\s*px\s*\)')
+
+
+def _media_query_matches(query: str, vw: int = _DECK_VW, vh: int = _DECK_VH) -> bool:
+    """Would this @media query be active at the deck's fixed viewport? Unknown /
+    unparseable features default to True (audit it — don't hide a violation)."""
+    q = (query or '').strip().lower()
+    if not q:
+        return True
+    for branch in q.split(','):                 # comma = OR
+        b = branch.strip()
+        if not b:
+            return True
+        active = True
+        for part in re.split(r'\band\b', b):    # 'and' = AND
+            p = part.strip()
+            if not p or p in ('all', 'screen', 'only screen', 'only all'):
+                continue
+            if p in ('print', 'speech') or p.startswith('only print'):
+                active = False; break
+            if p.startswith('not '):
+                active = ('print' in p or 'speech' in p)  # not-print → screen
+                break
+            m = _MQ_FEATURE_RE.search(p)
+            if m:
+                kind, dim, val = m.group(1), m.group(2), int(m.group(3))
+                cur = vw if dim == 'width' else vh
+                if (kind == 'min' and cur < val) or (kind == 'max' and cur > val):
+                    active = False; break
+            # unknown feature (orientation / resolution / prefers-*) → keep active
+        if active:
+            return True
+    return False
 
 
 @functools.lru_cache(maxsize=64)
 def _strip_nested_at_rules(css: str) -> str:
-    """Remove `@media`, `@keyframes`, `@supports`, `@font-face` blocks
-    (and any other `@thing { ... }`) from CSS before flat-rule scanning.
-
-    The audits use `([^{}]+)\\{([^}]+)\\}` to extract `selector { block }`
-    pairs. That regex assumes no nested braces — but real CSS has `@media`
-    / `@keyframes` blocks that wrap inner rules with their own braces.
-    Without stripping, the regex either:
-        a) captures the @media wrapper as a "selector" with the FIRST
-           inner brace pair as its "block", missing every other rule
-           inside that @block, OR
-        b) captures inner rules but with the @-rule still semantically
-           wrapping them, so e.g. R20's `[data-page]` scope check
-           accidentally matches `@media` query expressions.
-
-    Stripping nested @-rules before the scan gives every audit a clean
-    flat CSS to walk. We do this destructively (no preservation) because
-    the audits only need to evaluate top-level rule blocks; nested rules
-    inside @media etc. are responsive variants that aren't subject to
-    the body-floor / type-ladder / drop-shadow rules anyway.
-
-    Cached (perf fix 2026-05-16): 7 audits each call this on the same
-    `<style>` block contents per validate run. With LRU caching keyed on
-    the raw CSS string, the strip runs once per unique input; subsequent
-    calls (~85% on a CTG-sized deck) hit the cache. Cache lifetime is
-    process-scoped; one validate run = one process, so no cross-deck
-    leak. Cache size 64 covers any realistic deck (a deck has ≤ 20
-    distinct `<style>` blocks even after framework inlining).
+    """Resolve nested @-rules before flat `selector { block }` scanning (F-11).
+    @media that would be active at the deck's 1920×1080 viewport is UNWRAPPED so
+    its inner rules get audited; inactive @media + @keyframes/@font-face/
+    @supports/@page are dropped. Balanced-brace aware (recurses into nested
+    @media), unlike the old regex which couldn't. Name kept for its 9 callers.
+    Cached: the same `<style>` block is scanned by ~9 audits per run; LRU keyed
+    on the raw CSS makes the resolve run once per unique input.
     """
-    # Iterate until no change — pathological inputs would converge slowly,
-    # so cap at 10 passes.
-    prev = None
-    out = css
-    for _ in range(10):
-        prev = out
-        out = _AT_RULE_RE.sub('', out)
-        if out == prev:
-            break
-    return out
+    out = []
+    n = len(css)
+    i = 0
+    while True:
+        at = css.find('@', i)
+        if at == -1:
+            out.append(css[i:]); break
+        out.append(css[i:at])
+        brace = css.find('{', at)
+        if brace == -1:                          # malformed @-rule (no body)
+            out.append(css[at:]); break
+        prelude = css[at:brace]
+        depth, j = 0, brace
+        while j < n:                             # find the matching close brace
+            c = css[j]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        body = css[brace + 1:j]
+        mk = re.match(r'@([a-zA-Z-]+)\s*(.*)', prelude, re.S)
+        kind = mk.group(1).lower() if mk else ''
+        cond = mk.group(2) if mk else ''
+        if kind == 'media' and _media_query_matches(cond):
+            out.append(_strip_nested_at_rules(body))   # unwrap (+ recurse nesting)
+        # else: drop (inactive @media, @keyframes/@font-face/@supports/@page…)
+        i = j + 1
+    return ''.join(out)
 
 
 # Body content classes — selectors matching these get the 22 px BODY floor.
