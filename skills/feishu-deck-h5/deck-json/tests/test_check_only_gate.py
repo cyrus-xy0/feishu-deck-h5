@@ -97,6 +97,18 @@ def test_check_only_runs_full_audit_registry():
     assert "run_static_audits(V.STATIC_AUDITS" in src  # dispatches via registry
 
 
+def test_all_emitted_codes_documented_in_families():
+    """F-03 anti-drift: every rule code validate.py can emit must be
+    categorized in check-only's FAMILIES table — so a new rule can't ship
+    undocumented (it would otherwise dump into the '未分类' fallback). This is
+    the single guard that keeps the rule docs in lockstep with the code."""
+    emitted = CO.enumerate_validate_rules()
+    fam = {c for _, codes in CO.FAMILIES for c in codes}
+    undocumented = sorted(emitted - fam)
+    assert not undocumented, \
+        f"rule codes emitted by validate.py but missing from FAMILIES: {undocumented}"
+
+
 def test_families_cover_newly_surfaced_codes():
     """The previously-skipped audits' codes must be categorized in FAMILIES so
     check-only's review groups them instead of dumping to '未分类'."""

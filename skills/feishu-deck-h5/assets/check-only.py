@@ -48,7 +48,8 @@ FAMILIES = [
                               'R-VIS-ALIGN', 'R-VIS-ABSPOS-DUAL-ANCHOR',
                               'R-VIS-CARD-OVERFLOW', 'R-VIS-OPT-OUT-ABUSE',
                               'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL',
-                              'R-VIS-NO-IMAGERY']),
+                              'R-VIS-NO-IMAGERY', 'R-FOCAL-CHECK', 'R-VIS-BALANCE',
+                              'R-VIS-CARD-MIN-HEIGHT-SPARSE', 'R-VIS-SLACK-FLEX']),
     ('交付物附件',           ['R-FEEDBACK']),
 ]
 
