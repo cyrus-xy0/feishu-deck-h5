@@ -155,6 +155,8 @@
           "then": { "required": ["variant"], "properties": { "variant": { "enum": ["row", "hero", "waterfall"] } } } },
         { "if": { "properties": { "layout": { "const": "flow" } }, "required": ["layout"] },
           "then": { "required": ["variant"], "properties": { "variant": { "enum": ["timeline", "process", "tree", "swim"] } } } },
+        { "if": { "properties": { "layout": { "const": "chart" } }, "required": ["layout"] },
+          "then": { "required": ["variant"], "properties": { "variant": { "enum": ["bar", "line", "donut"] } } } },
 
         { "if": { "properties": { "layout": { "const": "content" }, "variant": { "const": "3up" } },         "required": ["layout", "variant"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_content_3up" } },         "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "content" }, "variant": { "const": "2col" } },        "required": ["layout", "variant"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_content_2col" } },        "required": ["data"] } },
@@ -168,7 +170,8 @@
         { "if": { "properties": { "layout": { "const": "stats" }, "variant": { "const": "hero" } },          "required": ["layout", "variant"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_stats_hero" } },           "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "flow" }, "variant": { "const": "timeline" } },       "required": ["layout", "variant"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_flow_timeline" } },        "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "flow" }, "variant": { "const": "process" } },        "required": ["layout", "variant"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_flow_process" } },         "required": ["data"] } },
-        { "if": { "properties": { "layout": { "const": "flow" }, "variant": { "const": "swim" } },           "required": ["layout", "variant"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_flow_swim" } },            "required": ["data"] } }
+        { "if": { "properties": { "layout": { "const": "flow" }, "variant": { "const": "swim" } },           "required": ["layout", "variant"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_flow_swim" } },            "required": ["data"] } },
+        { "if": { "properties": { "layout": { "const": "chart" } }, "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_chart" } }, "required": ["data"] } }
       ]
     },
 
@@ -284,12 +287,47 @@
       }
     },
 
+    "data_chart": {
+      "description": "chart layout — deterministic data-viz (variants bar/line/donut) computed from numeric values. Author supplies values only; renderer computes geometry → inline SVG/CSS with brand tokens (no JS). bar/donut use series[0]; line allows 1-3 series for comparison.",
+      "type": "object",
+      "required": ["title", "series"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "unit": { "type": "string", "description": "Optional value suffix, e.g. '%' / '万' / '×'." },
+        "series": {
+          "type": "array", "minItems": 1, "maxItems": 3,
+          "description": "1 series for bar/donut; 1-3 for line (multi-line comparison).",
+          "items": {
+            "type": "object", "required": ["points"], "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "description": "Legend label (needed when >1 series)." },
+              "color": { "enum": ["blue", "teal", "violet", "orange", "grey"], "description": "Optional series color; else auto-rotate by index." },
+              "points": {
+                "type": "array", "minItems": 2, "maxItems": 8,
+                "items": {
+                  "type": "object", "required": ["label", "value"], "additionalProperties": false,
+                  "properties": {
+                    "label": { "type": "string", "minLength": 1 },
+                    "value": { "type": "number" },
+                    "color": { "enum": ["blue", "teal", "violet", "orange", "grey"], "description": "Donut-segment color override; else auto-rotate." },
+                    "value_label": { "type": "string", "description": "Optional formatted display override, e.g. '¥3.2M'." }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "footnote": { "type": "string" }
+      }
+    },
+
     "layout_enum": {
       "enum": [
         "cover", "agenda", "section",
         "content", "stats", "flow",
         "quote", "image-text", "table",
-        "logo-wall", "arch-stack",
+        "logo-wall", "arch-stack", "chart",
         "iframe-embed",
         "end",
         "replica", "raw"
