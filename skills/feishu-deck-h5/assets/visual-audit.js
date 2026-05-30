@@ -171,6 +171,32 @@
     const c = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString();
     return /\b(photo|image|img|visual|mock|thumb|avatar|portrait|media|phone|screen)\b/i.test(c);
   };
+  // grow-box verdict (改大自动拉高) for a sub-floor body element: if its font is
+  // bumped to FLOOR (24), how much taller does it get, and is there room — the
+  // box's own bottom slack PLUS canvas space below the box — to GROW THE BOX
+  // instead of shrinking the font? Pure measurement, no mutation. Lets the
+  // R-VIS-BODY-FLOOR finding say "提到 24 → 框可长高装得下" vs "无空间,需压内容".
+  const _growBox = (el, slide, scale) => {
+    const FLOOR = 24;
+    const px = parseFloat(getComputedStyle(el).fontSize) || FLOOR;
+    if (px >= FLOOR) return null;
+    const elH = el.getBoundingClientRect().height / scale;
+    const growNeeded = Math.round(elH * (FLOOR / px - 1)); // ∝ line-height bump
+    let node = el.parentElement, framed = null;
+    while (node && node !== slide) {
+      if (_isFramedBox(node) && !_isMediaBox(node)) { framed = node; break; }
+      node = node.parentElement;
+    }
+    const target = framed || slide;
+    const br = target.getBoundingClientRect();
+    const cu = _contentUnion(target);
+    const innerSlack = cu ? Math.max(0, (br.bottom - cu.bottom) / scale) : 0;
+    const sr = slide.getBoundingClientRect();
+    const canvasBelow = framed ? Math.max(0, (sr.bottom - br.bottom) / scale) : 0;
+    const room = Math.round(innerSlack + canvasBelow);
+    return { grow_needed_px: growNeeded, room_px: room,
+             can_grow: growNeeded <= room, in_box: !!framed };
+  };
 
   const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [], crowd: [] };
   const slides = document.querySelectorAll('.slide');
@@ -179,6 +205,7 @@
     const label = slide.getAttribute('data-screen-label') || `slide-${slide_idx}`;
     const layout = slide.getAttribute('data-layout') || '';
     const isHeroLayout = HERO_LAYOUTS.has(layout);
+    const _scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
 
     // ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
     // name-free 几何:framed 非媒体框,其文字内容离框"可见底边"很近(< 10px)
@@ -188,7 +215,6 @@
     // 豁免,无需按版式名白名单。阈值 10px 给两侧各 ~6px 余量(校准:挤底 3/6px
     // 触发、stats 16px 放行)。Hero 版式 / data-allow-imbalance 跳过。
     if (!isHeroLayout && !slide.hasAttribute('data-allow-imbalance')) {
-      const _scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
       const _framed = [...slide.querySelectorAll('*')].filter(el =>
         _isFramedBox(el) && !_isMediaBox(el) && el.getBoundingClientRect().height > 80 * _scale);
       const _boxes = _framed.filter(el => !_framed.some(o => o !== el && o.contains(el)));
@@ -585,6 +611,8 @@
         char_count: directText.length,
         preview: directText.length > 40 ? directText.slice(0, 40) + '…' : directText,
         lifted: !!el.closest('[data-lifted]'),
+        // grow-box verdict: can we 改大自动拉高 (enlarge font + grow box) here?
+        ...(_growBox(el, slide, _scale) || {}),
       });
     });
 

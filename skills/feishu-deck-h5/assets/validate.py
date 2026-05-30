@@ -390,6 +390,18 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 
     for entry in report.get('body_floor', [])[:20]:
         _lev = iss.warn if entry.get('lifted') else iss.err
+        # grow-box verdict (改大自动拉高): if the box has room, enlarging to the
+        # floor + growing the box is the fix; if not, content must be cut.
+        _cg = entry.get('can_grow')
+        if _cg is True:
+            _fix = (f' 修法→ 提到 24 + 框自动长高(改大自动拉高):需约 '
+                    f'{entry.get("grow_needed_px","?")}px,框/画布余 '
+                    f'{entry.get("room_px","?")}px,装得下。永不缩字号。')
+        elif _cg is False:
+            _fix = (f' 修法→ 提到 24 后空间不够(需 {entry.get("grow_needed_px","?")}px,'
+                    f'仅余 {entry.get("room_px","?")}px):压字数/删条目,而非缩字号。')
+        else:
+            _fix = ' 修法→ 提到 24(优先),内容超框则拉高框 / 压字数,永不缩字号。'
         _lev('R-VIS-BODY-FLOOR',
             (('LIFTED slide (verbatim from another deck) — downgraded to '
               'WARNING, you choose whether to bump. ') if entry.get('lifted') else '') +
@@ -397,12 +409,11 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             f'{entry["rendered_px"]}px but its direct text is '
             f'{entry["char_count"]} chars ("{entry["preview"]}"). '
             'Body content (≥ 8 chars of sentence-like text outside mockup '
-            'containers and chrome classes) must be ≥ 24 px on projector. '
-            'Bump to 24 (preferred), OR rename to a chrome class '
-            '(.eyebrow / .footnote / .source / .pill / .tag / .chip / '
-            '.badge / .pageno / .demo-tag) if it really is chrome, OR set '
-            '`data-allow-body-floor` on the element for a documented '
-            'exception (e.g. legend annotation by design).')
+            'containers and chrome classes) must be ≥ 24 px on projector.' +
+            _fix +
+            ' (Or rename to a chrome class .eyebrow/.footnote/.source/.pill/'
+            '.tag/.chip/.badge/.pageno/.demo-tag if it really is chrome, OR set '
+            '`data-allow-body-floor` for a documented exception.)')
 
     for entry in report.get('abspos_dual_anchor', [])[:20]:
         iss.err('R-VIS-ABSPOS-DUAL-ANCHOR',
