@@ -2055,3 +2055,67 @@ def audit_visual_richness(slides: list[str], iss: Issues):
             f'illustration / bespoke layout:raw page. Flat: {where}. '
             f'[advisory · richness is a design-phase call · never blocks]')
 
+
+# R-SELF-CONTAINED — per-slide CSS must live INSIDE the slide it styles.
+_DIV_TOKEN_RE = re.compile(r'<div\b[^>]*>|</div>')
+# A per-slide selector that, in a head/deck-level <style>, signals the page-anim
+# leak: [data-slide-key="K"] or [data-page="N"] / [data-page=N].
+_PERSLIDE_SEL_RE = re.compile(
+    r'\[data-slide-key="([^"]+)"\]|\[data-page=["\']?([\w-]+)["\']?\]')
+
+
+def _slide_frame_spans(html: str):
+    """(start, end) char-range of each <div class="slide-frame">…</div>, by
+    depth-matching divs. Lets an audit tell an IN-slide <style> (good: co-located
+    custom_css) from a head/deck-level <style> (the page-anim leak)."""
+    spans = []
+    for fm in _SLIDE_FRAME_OPEN_RE.finditer(html):
+        depth, end = 1, len(html)
+        for dm in _DIV_TOKEN_RE.finditer(html, fm.end()):
+            depth += 1 if dm.group(0)[1] != '/' else -1
+            if depth == 0:
+                end = dm.start()
+                break
+        spans.append((fm.start(), end))
+    return spans
+
+
+def audit_self_contained(html: str, iss: Issues):
+    """R-SELF-CONTAINED (warn_soft · ADVISORY until L7 codemod): per-slide CSS
+    must live INSIDE the slide it styles. The renderer puts `slide.custom_css`
+    into a `<style data-fs-custom-css>` scoped to the slide-key and co-located
+    as a child of `.slide` — that block travels with the slide on lift/clone and
+    round-trips. A head/deck-level `<style>` that references a
+    `[data-slide-key=…]` / `[data-page=…]` is the page-anim anti-pattern: it
+    sits OUTSIDE the slide, so it silently vanishes on re-render/republish and is
+    left behind when the slide is lifted.
+
+    Shipped NON-escalating (warn_soft) so it never blocks the existing back
+    catalog under --strict; LIFT-ARCHITECTURE L7 (a head-CSS → custom_css
+    codemod) sweeps the catalog and only THEN is this promoted to an error.
+    Framework-inlined CSS (`data-source="framework"`) and any block co-located
+    inside a `.slide` are exempt."""
+    frame_spans = _slide_frame_spans(html)
+
+    def inside_a_slide(pos: int) -> bool:
+        return any(a <= pos < b for a, b in frame_spans)
+
+    for m in _STYLE_BLOCK_RE.finditer(html):
+        if 'data-source="framework"' in (m.group('attrs') or ''):
+            continue                       # inlined framework CSS — generic, not per-slide
+        if inside_a_slide(m.start()):
+            continue                       # co-located inside a slide → the GOOD pattern
+        refs = _PERSLIDE_SEL_RE.findall(m.group('body') or '')
+        if not refs:
+            continue
+        keys = sorted({(r[0] or ('data-page=' + r[1])) for r in refs})
+        iss.warn_soft(
+            'R-SELF-CONTAINED',
+            f'head/deck-level <style> targets per-slide selector(s) {keys[:6]} '
+            f'but sits OUTSIDE the slide. Move those rules into the slide\'s '
+            f'`custom_css` (deck.json) — the renderer scopes + co-locates them '
+            f'inside .slide so they travel on lift/clone and survive republish '
+            f'(a head/page <style> silently vanishes on re-render and is left '
+            f'behind on lift). See SKILL.md "LIFTING A SLIDE FROM ANOTHER DECK" / '
+            f'LIFT-ARCHITECTURE-2026-05-30.md. [advisory · non-blocking until L7]')
+
