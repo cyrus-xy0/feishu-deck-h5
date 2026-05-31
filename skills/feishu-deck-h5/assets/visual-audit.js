@@ -1005,6 +1005,35 @@
                 });
               }
             }
+            // 横向失衡 / 单侧空壳 (2026-05-31 · P10):真实内容(text+media 叶子,
+            // 空框不计)挤向一侧,另一侧 ≥22% 横向空。右侧若有图(media 计入)则
+            // 不报 → 只揪真空(#36「右半空壳面板」/ 内容偏左右侧空)。raw px,
+            // 与上面纵向阈值一致。横向 3-up 内容铺满 → 两侧 slack 都小,不报。
+            const contentEls = [...bodyContainer.querySelectorAll('*')].filter(el => {
+              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return false;
+              const cs = getComputedStyle(el);
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+              const r = el.getBoundingClientRect();
+              if (r.width < 8 || r.height < 8) return false;
+              const hasText = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+              const isMedia = el.matches('img,video,canvas,iframe,picture,svg')
+                || (cs.backgroundImage && cs.backgroundImage !== 'none' && !/gradient/i.test(cs.backgroundImage));
+              return hasText || isMedia;
+            });
+            if (contentEls.length) {
+              let cl = Infinity, cr = -Infinity;
+              for (const el of contentEls) { const r = el.getBoundingClientRect(); cl = Math.min(cl, r.left); cr = Math.max(cr, r.right); }
+              const leftSlack = cl - bodyRect.left, rightSlack = bodyRect.right - cr, bw = bodyRect.width;
+              if (leftSlack + rightSlack > 0.22 * bw
+                  && Math.abs(leftSlack - rightSlack) > 0.22 * bw
+                  && Math.abs(leftSlack - rightSlack) > 200) {
+                out.balance.push({
+                  slide_idx, container_sel: shortSel(bodyContainer), kind: 'side-empty',
+                  left_slack: Math.round(leftSlack), right_slack: Math.round(rightSlack),
+                  body_width: Math.round(bw),
+                });
+              }
+            }
           }
         }
       }

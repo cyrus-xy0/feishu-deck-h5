@@ -483,7 +483,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 '— 内容沉底,上半页大块空白。Fix: 容器 `justify-content: center` '
                 '或 `align-content: center`;或检查是否有 `margin-top: auto` 把'
                 '内容硬推到底部(BF9 反模式)。')
-        else:  # dead-band
+        elif kind == 'dead-band':
             iss.warn('R-VIS-BALANCE',
                 f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
                 f'中间留白 {entry["gap_px"]}px(dead-band)— `{entry["between_a"]}` '
@@ -492,6 +492,17 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'space-between`(BF9 反模式经常制造这种空白);(2) 缩小 gap;(3) '
                 '在中间加一行 supporting 元素(pullquote / KPI / divider);(4) '
                 '确实是设计意图(留白让 hero 呼吸)→ 加 `data-allow-imbalance`。')
+        elif kind == 'side-empty':
+            _side = '右侧' if entry['right_slack'] > entry['left_slack'] else '左侧'
+            iss.warn('R-VIS-BALANCE',
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
+                f'横向失衡 / 单侧空壳(side-empty): 左空 {entry["left_slack"]}px / '
+                f'右空 {entry["right_slack"]}px(容器宽 {entry["body_width"]}px)— '
+                f'真实内容(文字/图)挤向一边,{_side}一大块空(空框不算内容)。'
+                '常见 #36「右半是个空壳面板」/ 内容偏左。Fix: (1) 给空的一侧填真内容 '
+                '(图示 / 截图重建 / 要点);(2) 缩窄空面板、让内容两栏铺满;(3) 单列'
+                '窄条飘着 → 加宽或配伴随块。真有图但被判空说明图是 media→已计入不会误报;'
+                '故意留白 → `data-allow-imbalance`。')
 
     # ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
     # 框内文字离卡片可见底边过近且明显下偏 = "文字离下面太近"(qingdao 3up 等高卡
