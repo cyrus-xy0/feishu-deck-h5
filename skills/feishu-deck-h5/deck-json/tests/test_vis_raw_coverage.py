@@ -12,11 +12,10 @@ Methodology mirrors the sibling per-rule tests (``test_vis_gutter`` etc.): read
 minimal, geometry-self-contained fixture (all sizes inline — no framework CSS), and
 inspect the report bucket.
 
-Empirically verified raw coverage (workflow wgry1zvgg, real render + Chromium). 4 of the
-5 gaps were FIXED 2026-05-31 with selector fallbacks that add raw coverage WITHOUT
-changing schema behavior (each fallback only fires when the framework class is absent /
-the slide is raw — verified zero new findings on sample-deck + phase-1c). The 5th
-(PEER-SIZE) was tried, REVERTED, and is now a documented limitation.
+Empirically verified raw coverage (workflow wgry1zvgg, real render + Chromium). All 5
+gaps were FIXED 2026-05-31 — name-free fallbacks that add raw coverage WITHOUT changing
+schema behavior (each only engages when the framework class is absent / the slide is raw;
+verified zero new findings on sample-deck + phase-1c via the example-deck baseline gate).
 
   COVERED out of the box — name-free geometry:
     R-VIS-GUTTER            _isFramedBox geometry, any flex/grid container
@@ -38,14 +37,11 @@ the slide is raw — verified zero new findings on sample-deck + phase-1c). The 
                         has no HERO_FLOORS entry and is correctly NOT judged as a hero —
                         a raw hero must declare its role via _orig_layout (→ data-layout=
                         cover/section/…).
-
-  DOCUMENTED LIMITATION — class-role-gated by design, not safely fixable:
-    R-VIS-PEER-SIZE     compares the SAME semantic role (body vs body, num vs num) across
-                        parallel cards. A name-free tag/flex fallback was tried and reverted:
-                        it conflated title / EN-subtitle / hero-number (all <div>) into one
-                        role and produced 8 false findings on sample-deck + phase-1c. Its
-                        raw test is xfail(strict) — it documents the gap and will flag (xpass)
-                        if a geometric peer-role inference is ever built.
+    R-VIS-PEER-SIZE     roleOf falls back to the EXACT class signature (not tag): two siblings
+                        sharing one class (even an arbitrary raw `zztext`) are compared; a
+                        title vs EN-subtitle vs number — DIFFERENT classes — are NOT. That
+                        kills the cross-class conflation an earlier `tag:div` fallback caused
+                        (8 false findings); the exact-class version adds zero (baseline gate).
 
 Each FIXED rule keeps a ``*_schema_control`` (proves the fixture geometry fires under the
 framework class, so a passing raw test is not hiding a weak fixture) plus a ``*_raw_fires``
@@ -202,15 +198,11 @@ def test_peer_size_schema_control():
     assert len(hits) >= 1, f"control: peer-size must fire on verdict-grid .desc 30/18px; got {hits}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "R-VIS-PEER-SIZE is class-role-gated by design — it compares the SAME semantic role "
-    "across parallel cards. A name-free tag/flex fallback was tried and REVERTED (it conflated "
-    "title / EN-subtitle / hero-number, all <div>, and produced 8 false findings on sample-deck "
-    "+ phase-1c). Raw arbitrary-class markup is a documented limitation; if a geometric peer-role "
-    "inference is ever built, this xpasses → drop the marker."))
 def test_peer_size_raw_fires():
+    # FIXED 2026-05-31: roleOf falls back to the EXACT class signature (not tag), so raw peers
+    # sharing one arbitrary class are compared, while cross-class hierarchy is never conflated.
     hits = _bucket(_slide("raw", _peer_inner("zzgrid", "zztext")), "peer_size")
-    assert len(hits) >= 1, f"R-VIS-PEER-SIZE does not fire on raw arbitrary-class peers (documented); got {hits}"
+    assert len(hits) >= 1, f"R-VIS-PEER-SIZE should fire on raw same-class peers; got {hits}"
 
 
 # ---- R-VIS-BALANCE (side-empty) ----

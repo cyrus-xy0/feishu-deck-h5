@@ -1335,19 +1335,35 @@
         const raw = el.className;
         return (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase();
       };
-      // roleOf is class-based ON PURPOSE: peer-size compares the SAME SEMANTIC role
-      // across parallel cards (body vs body, num vs num). A name-free tag fallback
-      // ('tag:div') conflates a title, its EN subtitle and a hero number — all <div> —
-      // into one "role" and floods real decks with false positives (title 28 vs sub 16
-      // vs num 48 flagged as "should be equal"). So raw markup with arbitrary class
-      // names is a DOCUMENTED limitation here, NOT a fixable gap. (Verified: a tag/
-      // flex-anchor fallback added 8 false findings across sample-deck + phase-1c.)
-      const roleOf = (el) => { const c = _cls(el); for (const k of ROLE_KEYS) if (c.includes(k)) return k; return null; };
+      // roleOf — three tiers, fine→coarse, picking "same role" without ever conflating
+      // distinct roles:
+      //   1. a KNOWN semantic keyword (body / desc / num / …) — schema behaviour, UNCHANGED.
+      //   2. else the element's EXACT class signature (sorted class tokens). Two siblings
+      //      that share the SAME class (even an arbitrary raw one like `zztext`) are the
+      //      same role; a title vs its EN-subtitle vs a number — DIFFERENT classes — are
+      //      NOT compared. This is the distinction the earlier `tag:div` fallback lost
+      //      (it merged all <div> into one role → 8 false findings); exact class keeps
+      //      them apart. Raw decks that label their peers with ANY consistent class are
+      //      now covered; cross-class hierarchy is never flagged.
+      //   3. else (no class at all) null — too ambiguous to assign a role geometrically.
+      const roleOf = (el) => {
+        const c = _cls(el);
+        for (const k of ROLE_KEYS) if (c.includes(k)) return k;
+        const sig = c.trim().split(/\s+/).filter(Boolean).sort().join('.');
+        return sig || null;
+      };
+      // parallelAnchor: a known parallel / grid / card class first (schema, unchanged);
+      // else the nearest flex / grid container (same geometry GUTTER uses) so raw peers in
+      // an unnamed flex/grid row still anchor. Null only when no such container exists.
       const parallelAnchor = (el) => {
         for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
           const toks = _cls(n).split(/\s+/).filter(Boolean);
           if (toks.some(t => PEER_PARALLEL.has(t) || GRID_KEYS.includes(t) || CARD_KEYS.includes(t))) return n;
           if (CARD_SUFFIXES.some(suf => toks.some(t => t.endsWith(suf)))) return n;
+        }
+        for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
+          const d = getComputedStyle(n).display;
+          if (d === 'flex' || d === 'inline-flex' || d === 'grid' || d === 'inline-grid') return n;
         }
         return null;
       };
