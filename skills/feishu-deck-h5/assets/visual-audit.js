@@ -394,7 +394,14 @@
     if (!TITLE_SKIP_LAYOUTS.has(layout)) {
       const header = slide.querySelector(':scope > .header');
       const titleEl = slide.querySelector(':scope > .header > .title-zh, :scope > .header > h1.title-zh, :scope > .header > h2.title-zh, :scope > .header h2.title-zh, :scope > .header h1.title-zh');
-      if (header && titleEl) {
+      // The framework intentionally hides the header in some layouts (e.g.
+      // agenda without the `with-header` variant: `.header { display:none }`).
+      // A display:none element reports an all-zero bbox → top:0, which would
+      // false-fail the expected-61 check below. getClientRects().length === 0
+      // is the canonical "not rendered" test (true for display:none / detached);
+      // there is no visible title to position-check, so skip it.
+      const headerRendered = !!header && header.getClientRects().length > 0;
+      if (header && titleEl && headerRendered) {
         const headerTop = Math.round(header.getBoundingClientRect().top - slide.getBoundingClientRect().top);
         const expectedTop = 61;
         const tolerance = 8;
@@ -419,7 +426,10 @@
       // zero schema regression.
       let tgTitleRect = null, tgTitleSel = null, tgContentTop = Infinity;
       const tgStage = slide.querySelector(':scope > .stage');
-      if (header && tgStage) {
+      // Same display:none guard: a hidden header has no visible title for
+      // content to crowd — skip the named path (fall through to neither branch
+      // when the header exists but isn't rendered).
+      if (headerRendered && tgStage) {
         tgTitleRect = header.getBoundingClientRect();
         tgTitleSel = shortSel(header);
         for (const el of tgStage.querySelectorAll('*')) {

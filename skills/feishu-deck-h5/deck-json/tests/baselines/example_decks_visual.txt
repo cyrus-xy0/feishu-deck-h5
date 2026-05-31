@@ -4,7 +4,6 @@ phase-1c	8	R-FOCAL-CHECK
 phase-1c	9	R-VIS-BALANCE
 sample-deck	10	R-VIS-BALANCE
 sample-deck	2	R-VIS-OPT-OUT-ABUSE
-sample-deck	2	R-VIS-TITLE-POSITION
 sample-deck	4	R-FOCAL-CHECK
 sample-deck	5	R-VIS-BALANCE
 sample-deck	6	R-VIS-ORPHAN
