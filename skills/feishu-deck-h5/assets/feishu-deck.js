@@ -79,15 +79,17 @@
     const all = [...slide.querySelectorAll('*')].filter((el) =>
       _abFramed(el) && !_abMedia(el) && el.getBoundingClientRect().height > 80 * scale);
     const boxes = all.filter((el) => !all.some((o) => o !== el && o.contains(el)));
-    let severity = 0, spill = 0; const crowded = [];
+    let severity = 0, spill = 0, overflow = 0; const crowded = [], overflowed = [];
     for (const box of boxes) {
       const r = box.getBoundingClientRect();
       spill = Math.max(spill, (r.bottom - sb) / scale);
       const cu = _abTextUnion(box); if (!cu) continue;
       const distTop = (cu.top - r.top) / scale, distBottom = (r.bottom - cu.bottom) / scale;
+      // 文字溢出框底(distBottom<0)= grow-box 的对象:框被写死/挤扁,内容掉出去。
+      if (distBottom < -1) { overflow += (-distBottom); overflowed.push([box, -distBottom]); }
       if (distBottom < 10 && distTop > distBottom + 16) { crowded.push(box); severity += (16 - distBottom); }
     }
-    return { severity, spill, crowded };
+    return { severity, spill, overflow, crowded, overflowed };
   }
   // HARD RULE (death rule): auto-balance must NEVER move a content-page title
   // or subtitle. These positions are snapshotted before any correction and
@@ -102,7 +104,7 @@
     const layout = slide.getAttribute('data-layout') || '';
     if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return;
     const before = _abMeasure(slide);
-    if (before.severity === 0) return;                 // already balanced → no-op (schema decks)
+    if (before.severity === 0 && before.overflow === 0) return;  // balanced → no-op (schema decks)
     // Snapshot title/subtitle positions — they may not move (hard rule).
     const titleSnap = _abTitleEls(slide).map((el) => {
       const r = el.getBoundingClientRect(); return [el, r.top, r.left];
@@ -127,12 +129,30 @@
         box.style.justifyContent = 'center';
       }
     });
+    // GROW-BOX (2026-05-31): a box whose text overflows its bottom (written-in /
+    // squeezed-flat height) → raise its min-height to contain the content (the
+    // runtime version of grow-box-fit's 拉高框). We grow OPTIMISTICALLY here;
+    // the measure-or-revert guard below is the safety net — if growing pushes
+    // the slide past its edge (no canvas room) or moves the title, the whole
+    // thing reverts (incl. these min-heights). Never shrinks; never touches fonts.
+    const scaleAB = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+    before.overflowed.forEach(([box, over]) => {
+      const r = box.getBoundingClientRect();
+      touched.push([box, 'minHeight', box.style.minHeight]);
+      box.style.minHeight = Math.ceil(r.height / scaleAB + over + 6) + 'px';
+    });
     const after = _abMeasure(slide);
     const titleMoved = titleSnap.some(([el, t, l]) => {
       const r = el.getBoundingClientRect();
       return Math.abs(r.top - t) > 1 || Math.abs(r.left - l) > 1;
     });
-    const improved = after.severity < before.severity - 0.5 &&
+    // Keep if EITHER crowd OR overflow got meaningfully better, AND neither got
+    // worse, AND no new canvas spill, AND the title didn't move (death rule).
+    const crowdBetter = after.severity < before.severity - 0.5;
+    const overflowBetter = after.overflow < before.overflow - 2;
+    const improved = (crowdBetter || overflowBetter) &&
+                     after.severity <= before.severity + 0.5 &&
+                     after.overflow <= before.overflow + 2 &&
                      after.spill <= Math.max(before.spill, 2) && !titleMoved;
     if (improved) {
       slide.setAttribute('data-fs-autobalanced', '');

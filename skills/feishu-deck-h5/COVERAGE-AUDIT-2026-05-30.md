@@ -51,10 +51,10 @@
 - [ ] **card-overflow 改 `Range.getClientRects()`**(P2/P8,`visual-audit.js:284`):去掉 `el.children.length>0` 依赖,用文本叶子自身行盒 union bottom vs 父 border-box bottom(沿用 orphan 已有 Range 量法),纯文本叶子溢出也能测,且避开大字号 line-box 假阳。
 - [ ] **gutter 相等性**(P7):把 check-distribution.py 的 L2-DEADBAND/L2-CROSSAXIS/L3-BOXROW 提进 `validate.py` 硬闸,阈值改相对(max gap >2×min gap)抓 28↔8px 量级;R-VIS-ALIGN 增「等 gutter」维度。
 - [ ] **R-VIS-HERO-FLOOR**(P11):cover/section/big-stat 的 hero 主元素 computed < 该 layout 规定 hero 尺寸(读 layout token,如封面 ≥100)→ warn;方向从「白名单」改「尺寸下限」。
-- [ ] **R-VIS-BALANCE 横向 dead-band / 单侧空壳**(P10):当前仅纵向;或把 L1-UNDERFILL-H 提进硬闸。
+- [x] **R-VIS-BALANCE 横向 dead-band / 单侧空壳**(P10)✅ side-empty (2026-05-31):当前仅纵向;或把 L1-UNDERFILL-H 提进硬闸。
 
-### 大工程(large,可选但是治本)
-- [ ] 给 `feishu-deck.js` 的 **balanceSlide 加 grow-box 能力**(复用 `grow-box-fit.py` 逻辑):auto-balance 真能把写死高度的框「长高」容纳大字,而不只 `align-self:center`。这是 P2 的运行时治本。
+### 大工程(large)— ✅ 已做 (2026-05-31)
+- [x] 给 `feishu-deck.js` 的 **balanceSlide 加 grow-box 能力**(复用 `grow-box-fit.py` 逻辑):auto-balance 真能把写死高度的框「长高」容纳大字,而不只 `align-self:center`。这是 P2 的运行时治本。
 
 ## 配套:本会话验证的方法(青啤逐页修用的,也该进 doctrine)
 
