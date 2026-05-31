@@ -123,14 +123,18 @@ def _lifted_slide_keys(html: str) -> set:
 
 
 def _deck_imported(html: str) -> bool:
-    """L1 (2026-05-30): an imported / foreign raw deck stamps
-    `<meta name="fs-deck-origin" content="imported">`. Its typography is the
-    ORIGINAL author's design — our 4-tier ladder / floor rules (R06 / R20 /
-    R-VIS-TIER) are ADVISORY for it, not errors. Snapping a foreign deck onto
-    our ladder flattens its hierarchy (kills hero/emphasis) and breaks its fit;
-    see IMPORT-RAW-DECK-LESSONS-2026-05-30.md. Foreign raw decks keep their own
-    design (rules = advisory) or get regenerated via schema — there is no
-    mechanical 'snap to pass' path."""
+    """True if the deck stamps `<meta name="fs-deck-origin" content="imported">`
+    (an imported / foreign raw deck, not schema-generated).
+
+    NOTE (2026-05-31): this is now ONLY a downgrade signal for the UI1
+    raster-as-content audit (see audit at line ~1531) — an imported deck of
+    full-page screenshots gets UI1 lowered err→warn, same as replica mode, so a
+    bulk import isn't blocked at the delivery gate. It does NOT exempt typography:
+    L1 (the old imported font / 4-tier-ladder exemption) was REVERTED 2026-05-30 —
+    R06 / R20 / R-VIS-TIER fire on imported decks exactly like any other (small
+    projected text is a real problem whoever designed it; fix via grow-box-fit or
+    schema regen, never a mechanical 'snap to pass'). See
+    IMPORT-RAW-DECK-LESSONS-2026-05-30.md and test_imported_deck_fonts.py."""
     return bool(re.search(
         r'<meta\s+name=["\']fs-deck-origin["\']\s+content=["\']imported["\']', html))
 

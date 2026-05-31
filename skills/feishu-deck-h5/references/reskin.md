@@ -24,7 +24,7 @@ bash skills/feishu-deck-h5/assets/reskin.sh <input.html> \
 - `--slug SLUG` — slide-key slug (kebab-case). Defaults to filename stem.
 - `--strict` — promote validator warnings to errors (final-pass review)
 - `--visual` — also run Playwright visual audits (off by default; reskin
-  output often hits R-VIS-OVERFLOW / R-VIS-LABEL-FLOOR on dense foreign
+  output often hits R-OVERFLOW / R-VIS-LABEL-FLOOR on dense foreign
   content, needs human iteration)
 
 Output: `runs/<ts>-reskin-<slug>/output/index.html` + `deck.json` +
@@ -208,7 +208,7 @@ CLI flags:
 |---|---|
 | `--slug SLUG` | Slide-key slug (kebab-case). Defaults to input filename stem. |
 | `--strict` | Promote validator warnings to errors. Use for final-pass review. |
-| `--visual` | Also run Playwright visual audits during validate.py (R-VIS-* family). Off by default — reskin output often hits R-VIS-OVERFLOW on dense foreign content; overflow check (last step) catches this separately with more actionable diagnostics. |
+| `--visual` | Also run Playwright visual audits during validate.py (R-VIS-* family). Off by default — reskin output often hits R-OVERFLOW on dense foreign content; overflow check (last step) catches this separately with more actionable diagnostics. |
 | `--no-visual` | Force visual audits off (default). |
 | `--keep-source-typography` | Mode 2 escape: skip font-size snap + label-floor bump. Source's hierarchy preserved; validator R06/R20 satisfied via auto-emitted `/* allow:typescale */ /* allow:body-floor */` comments. Use when source's design density requires sub-floor text and you accept the spec deviation. |
 

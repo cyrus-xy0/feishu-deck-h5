@@ -1645,8 +1645,8 @@ def main(argv=None) -> int:
                     help="single-file delivery mode — base64-inline all CSS/JS/images. "
                          "Mutually exclusive with copy-assets (auto-skips it).")
     ap.add_argument("--visual", action="store_true",
-                    help="run Playwright visual audits after render (R-VIS-OVERFLOW / "
-                         "R-VIS-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR). Adds ~5-10s. "
+                    help="run Playwright visual audits after render (R-OVERFLOW / "
+                         "R-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR). Adds ~5-10s. "
                          "Requires `pip install playwright && python -m playwright install chromium`.")
     args = ap.parse_args(argv)
 
@@ -1807,7 +1807,7 @@ def main(argv=None) -> int:
     # 6. HTML validator gate
     if not args.skip_validate_html:
         # If --visual, run validate.py WITHOUT --no-visual so Playwright audits
-        # (R-VIS-OVERFLOW / R-VIS-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR) fire.
+        # (R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR) fire.
         # Otherwise default behaviour: static checks only.
         validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html)]
         if not args.visual:
