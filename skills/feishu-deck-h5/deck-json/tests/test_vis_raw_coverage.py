@@ -52,7 +52,9 @@ See SKILL.md "raw = markup 不采用标准框架 class 骨架" and the LIFT/raw 
 """
 import pathlib
 
-import pytest
+# NOTE: pytest is imported LAZILY inside helpers (not at module top) so this file
+# imports cleanly under the CI's `unittest` discovery, where pytest is not installed.
+# Matches the convention of the sibling test_vis_*.py files.
 
 HERE = pathlib.Path(__file__).resolve()
 ASSETS = HERE.parents[2] / "assets"
@@ -87,6 +89,7 @@ def _run(html):
 def _bucket(html, name, kind=None):
     rep = _run(html)
     if rep is None:
+        import pytest
         pytest.skip("Chromium/Playwright unavailable")
     rows = rep.get(name, [])
     if kind is not None:

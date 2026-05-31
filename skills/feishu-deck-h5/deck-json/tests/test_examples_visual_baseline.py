@@ -37,7 +37,9 @@ import subprocess
 import sys
 import tempfile
 
-import pytest
+# pytest is imported LAZILY inside the test fn (not at module top) so this file imports
+# cleanly under the CI's `unittest` discovery, where pytest is not installed. Matches the
+# sibling test_vis_*.py convention.
 
 HERE = pathlib.Path(__file__).resolve()
 SKILL = HERE.parents[2]
@@ -119,6 +121,7 @@ def _write_baseline(sigs):
 
 
 def test_visual_findings_match_baseline():
+    import pytest
     if not _chromium_ok():
         pytest.skip("Chromium/Playwright unavailable")
     baseline = _read_baseline()
