@@ -136,7 +136,7 @@ def get_framework_css():
             here / 'feishu-deck-patterns.css',
         ]
         _FRAMEWORK_CSS = "\n".join(
-            p.read_text() for p in sheets if p.exists())
+            p.read_text(encoding="utf-8") for p in sheets if p.exists())
     return _FRAMEWORK_CSS
 
 
@@ -426,7 +426,7 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
     dst_input_dir = output_dir / "input"
     dst_proto_dir = output_dir / "prototypes"
 
-    src_lines = src_html_path.read_text().splitlines(keepends=True)
+    src_lines = src_html_path.read_text(encoding="utf-8").splitlines(keepends=True)
     starts = find_frame_lines(src_lines)
     # Source author head/deck CSS (non-framework <style> blocks) + data-page→key
     # map — used by --shake to recover the page-anim head pattern on lift.
@@ -436,7 +436,7 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
     src_stem = src_html_path.parent.name.replace(" ", "")  # e.g. "merged-49pages 2" → "merged-49pages2"
 
     if dst_deck_json.exists():
-        deck = json.loads(dst_deck_json.read_text())
+        deck = json.loads(dst_deck_json.read_text(encoding="utf-8"))
     else:
         deck = {"version": "1.0", "deck": {}, "slides": []}
 
@@ -501,7 +501,7 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
                   f"lift-to-raw — re-run with --shake to inline it")
 
     dst_deck_json.write_text(
-        json.dumps(deck, ensure_ascii=False, indent=2) + "\n")
+        json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"\n✓ {appended} slides appended to {dst_deck_json.name} "
           f"(total {len(deck['slides'])})")
     print(f"Now run: python3 deck-json/render-deck.py {dst_deck_json} {output_dir}/ --visual")
@@ -514,7 +514,7 @@ def build_manifest(src_html_path):
     table for FOREIGN decks that have no slide-index.json sidecar (LIFT-
     ARCHITECTURE L4)."""
     src_html_path = Path(src_html_path).resolve()
-    src_lines = src_html_path.read_text().splitlines(keepends=True)
+    src_lines = src_html_path.read_text(encoding="utf-8").splitlines(keepends=True)
     starts = find_frame_lines(src_lines)
     rows = []
     for i in range(len(starts)):

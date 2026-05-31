@@ -1470,7 +1470,7 @@ def main():
         print(f"✗ input not found: {input_path}", file=sys.stderr)
         sys.exit(1)
     try:
-        rules = yaml.safe_load(Path(args.rules).read_text())
+        rules = yaml.safe_load(Path(args.rules).read_text(encoding="utf-8"))
     except Exception as e:
         print(f"✗ failed to load rules YAML: {e}", file=sys.stderr)
         sys.exit(4)
@@ -1479,7 +1479,7 @@ def main():
 
     try:
         result = reskin(
-            input_path.read_text(), slug, rules,
+            input_path.read_text(encoding="utf-8"), slug, rules,
             keep_source_typography=args.keep_source_typography,
         )
     except SystemExit:
@@ -1489,7 +1489,7 @@ def main():
         sys.exit(2)
 
     output_path = Path(args.output)
-    output_path.write_text(json.dumps(result["deck_json"], ensure_ascii=False, indent=2))
+    output_path.write_text(json.dumps(result["deck_json"], ensure_ascii=False, indent=2), encoding="utf-8")
 
     # Print warnings to stderr (deck-cli style)
     print(f"✓ wrote {output_path}", file=sys.stderr)

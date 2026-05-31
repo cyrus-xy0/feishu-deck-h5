@@ -4,6 +4,12 @@
 > If you are a Claude (or any AI agent) and the user asked you to install
 > this skill from a git URL, follow these steps in order.
 > If you are a human, [README.md](./README.md) is friendlier.
+>
+> **云端 agent 平台 / 只读挂载 / Linux 容器（Mira、Codex 等)**：本文讲的是从 git URL
+> 装到 Claude Code。那类场景（无 git/SSH、RO 挂载、用 lean tarball 分发）请改看
+> [`skills/feishu-deck-h5/INSTALL-CLOUD.md`](./skills/feishu-deck-h5/INSTALL-CLOUD.md)
+> ——含经核实的依赖矩阵、`package-skill.sh` 精简打包、PREFLIGHT 退出码排障、
+> CJK 字体 / UTF-8 locale / Chromium 系统库等容器专属注意事项。
 
 ## TL;DR for the user
 

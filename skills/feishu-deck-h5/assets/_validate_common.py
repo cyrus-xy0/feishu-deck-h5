@@ -98,8 +98,8 @@ class Issues:
       - errors:   hard-fail (return code 1)
       - warnings: soft (return code 0 unless --strict promotes them)
       - soft_warnings: editorial advisories that NEVER promote to errors
-                       under --strict (e.g. R-FEEDBACK "consider adding a
-                       sidecar", R-VIS-ALIGN "4 px tolerance is fuzzy").
+                       under --strict (e.g. R-VIS-NO-IMAGERY "deck reads
+                       flat", R-SELF-CONTAINED "head CSS not co-located").
                        Rendered indistinguishably from warnings, but
                        protected from --strict promotion.
     """

@@ -10,7 +10,7 @@
 #   bash skills/feishu-deck-h5/assets/check-mira.sh
 #
 # Exit codes:
-#   0 — all 7 checks passed (or only optional checks warned)
+#   0 — all 8 checks passed (or only optional checks warned)
 #   1 — at least one MANDATORY check failed; the harness can't run this skill
 #       reliably until the failure is fixed
 #
@@ -50,7 +50,7 @@ else
 fi
 
 # ---- State ----------------------------------------------------------------
-TOTAL_GROUPS=7
+TOTAL_GROUPS=8
 PASSED_GROUPS=0
 FAIL_COUNT=0
 WARN_COUNT=0
@@ -315,6 +315,35 @@ fi
 group_end
 
 # ─────────────────────────────────────────────────────────────────────────
+# Check 8 · Container readiness (cloud / Linux) — UTF-8 locale + CJK fonts
+# WARN-only (never blocks): the skill still RUNS without these, but on a slim
+# cloud container a non-UTF-8 locale or missing CJK fonts silently degrade
+# Chromium screenshots + the geometry visual-audits. The default deck render
+# path itself is now locale-independent (all text I/O pins encoding='utf-8'),
+# so these are correctness-of-CJK-rendering warnings, not crash gates.
+# See INSTALL-CLOUD.md §7.
+# ─────────────────────────────────────────────────────────────────────────
+group_start 8 "Container readiness (cloud)"
+loc="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+if echo "$loc" | grep -qiE 'utf-?8'; then
+  mark_ok "locale = $loc (UTF-8)"
+elif command -v locale >/dev/null 2>&1 && locale 2>/dev/null | grep -qiE 'utf-?8'; then
+  mark_ok "locale reports UTF-8"
+else
+  mark_warn "locale '${loc:-unset}' is not UTF-8 — set LANG=C.UTF-8 / PYTHONUTF8=1 for correct CJK rendering (INSTALL-CLOUD.md §7)"
+fi
+if command -v fc-list >/dev/null 2>&1; then
+  if [ -n "$(fc-list :lang=zh 2>/dev/null | head -1)" ]; then
+    mark_ok "CJK fonts present (fc-list :lang=zh)"
+  else
+    mark_warn "no CJK fonts — Chromium renders 中文 as tofu, corrupting screenshots + geometry audits; apt-get install fonts-noto-cjk (INSTALL-CLOUD.md §7)"
+  fi
+else
+  mark_skip "fc-list (fontconfig) not installed — can't verify CJK fonts; install it if you run visual audits on this host"
+fi
+group_end
+
+# ─────────────────────────────────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────────────────────────────────
 printf '\n──────────────────────────────────\n'
@@ -324,6 +353,7 @@ if [ "$FAIL_COUNT" -eq 0 ]; then
   if [ "$WARN_COUNT" -gt 0 ]; then
     printf '%s  (warnings above are non-blocking — review them if features feel missing)%s\n' "$C_DIM" "$C_RESET"
   fi
+  printf '%s  cloud / container install + dependency notes: %s/INSTALL-CLOUD.md%s\n' "$C_DIM" "$SKILL_ROOT" "$C_RESET"
   exit 0
 else
   printf '%s✗ %d/%d groups OK%s · %d failures · %d warnings\n' \

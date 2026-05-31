@@ -36,20 +36,29 @@ runs/
 phase-1c-extras-out/
 
 # Skill distribution artifacts from package-skill.sh — regenerable,
-# binary, dated. Don't commit.
+# binary, dated. Don't commit. (.tar.gz + dist/ are the lean-package
+# outputs; the dated .zip are the older full-repo snapshots.)
 feishu-deck-h5-*.zip
+feishu-deck-h5-*.tar.gz
+dist/
 
 # Node (if you ever add tooling)
 node_modules/
 package-lock.json
 
-# Backup files
+# Backup files — *.bak alone misses dated snapshots like
+# `SKILL.md.bak-pre-slim-20260529` / `feishu-deck.css.bak-pre-l3-sweep-...`
+# (they end in the date, not in `.bak`), so match the `.bak-*` suffix too.
 *.bak
+*.bak-*
 *.orig
 *~
 
-# Preflight cache (per-machine cross-clone search results)
+# Preflight cache (per-machine cross-clone search results) + the RO-mount
+# bootstrap workspace preflight.sh mirrors into when the skill is mounted
+# read-only (Mira et al.). Both are per-machine + regenerable.
 .feishu-deck-h5-preflight-cache
+.feishu-deck-h5-workspace/
 
 # Python virtualenvs — e.g. pptx-to-html/.venv (108MB, darwin/python3.x-specific,
 # regenerable from requirements). Never commit a materialized env.

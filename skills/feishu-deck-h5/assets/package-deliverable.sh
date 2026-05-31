@@ -116,11 +116,6 @@ if [ -f "$OUT_DIR/deck.json" ]; then
   ZIP_ITEMS+=(deck.json)
 fi
 
-if [ -f "$OUT_DIR/FEEDBACK.md" ]; then
-  cp "$OUT_DIR/FEEDBACK.md" "$STAGE/FEEDBACK.md"
-  ZIP_ITEMS+=(FEEDBACK.md)
-fi
-
 # launchers must be executable on extract; zip preserves the +x bit
 chmod +x "$STAGE/apply.command"
 

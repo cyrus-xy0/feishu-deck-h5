@@ -198,7 +198,7 @@
              can_grow: growNeeded <= room, in_box: !!framed };
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [], crowd: [], title_gap: [], peer_size: [], gutter: [], hero_floor: [], short_label_floor: [] };
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [], crowd: [], title_gap: [], peer_size: [], gutter: [], hero_floor: [], short_label_floor: [], canvas_center: [] };
   const slides = document.querySelectorAll('.slide');
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
@@ -1581,6 +1581,63 @@
       }
     }
     _heroFloorCheck([KPI_FLOOR]);
+
+    // ---- R-VIS-CANVAS-CENTER · 内容并集相对画布垂直居中 (2026-05-31) ----
+    // 现状漏洞:R-VIS-BALANCE 只看内容在 .stage 内部的上下留白是否均衡。当
+    // .stage 自身相对"画布"偏上(对称 top:200/bottom:200 → 中心 540,画布中心
+    // ~597),容器内 topGap≈bottomGap → 漏报。这里直接量【内容并集中心】对
+    // 【画布中心 (header.bottom + 1080)/2】的垂直偏移,绕开容器。
+    //   offset = canvasMid - contentMid  (>0 内容偏上, <0 内容偏下)
+    //   is_full = 内容高 / (1080 - header.bottom) > 0.72  → 满铺豁免(顶对齐铺满是对的)
+    // 所有坐标先减 slide 顶、再 / _scale 还原成设计 px,与 1080 同系。
+    if (!isHeroLayout && !slide.hasAttribute('data-allow-imbalance')) {
+      const _ccSr = slide.getBoundingClientRect();
+      const _ccSlideTop = _ccSr.top;
+      const ccHeader = slide.querySelector(':scope > .header');
+      const ccHeaderRendered = !!ccHeader && ccHeader.getClientRects().length > 0;
+      const _ccHb = ccHeaderRendered
+        ? (ccHeader.getBoundingClientRect().bottom - _ccSlideTop) / _scale
+        : 0;
+      let ccTop = Infinity, ccBot = -Infinity, ccAny = false;
+      slide.querySelectorAll('*').forEach((el) => {
+        if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+        if (ccHeader && (el === ccHeader || ccHeader.contains(el))) return;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+        if (cs.position === 'absolute' || cs.position === 'fixed') return;
+        const tag = el.tagName;
+        const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg'
+          || tag === 'CANVAS' || tag === 'VIDEO';
+        const isLeaf = el.children.length === 0;
+        if (!hasOwnText(el) && !isMedia && !isLeaf) return;
+        const r = el.getBoundingClientRect();
+        if (r.width < 6 || r.height < 6) return;
+        const t = (r.top - _ccSlideTop) / _scale;
+        const b = (r.bottom - _ccSlideTop) / _scale;
+        if (t < ccTop) ccTop = t;
+        if (b > ccBot) ccBot = b;
+        ccAny = true;
+      });
+      if (ccAny) {
+        const contentMid = (ccTop + ccBot) / 2;
+        const canvasMid = (_ccHb + 1080) / 2;
+        const offset = canvasMid - contentMid;   // >0 偏上, <0 偏下
+        const contentH = ccBot - ccTop;
+        const bandH = 1080 - _ccHb;
+        const isFull = bandH > 0 ? (contentH / bandH) > 0.72 : false;
+        out.canvas_center.push({
+          slide_idx,
+          container_sel: shortSel(slide),
+          content_mid: Math.round(contentMid),
+          canvas_mid: Math.round(canvasMid),
+          offset: Math.round(offset),
+          is_full: isFull,
+          top: Math.round(ccTop),
+          bot: Math.round(ccBot),
+          hb: Math.round(_ccHb),
+        });
+      }
+    }
 
     // ---- R-VIS-SHORT-LABEL-FLOOR · 1–7 字短标签 / SVG 轴标 < 18px (2026-05-31) ----
     // R-VIS-BODY-FLOOR 有 directText.length<8 → return 门槛(豁免图标/单位/短数字),

@@ -15,7 +15,7 @@ What it does:
 
 1. Runs the full `validate.py` rule set (R02 / R05 / R06 / R10 / R12 / R13 /
    R20 / R29-32 / R36 / R38 / R47 / R48 / R49 / R56 / L1-L4 / UI1 / R-LANG /
-   R-KEY / R-DOM / R-WHITE-TEXT / R-HIERARCHY / T00-T03 / P50-P55 / R-FEEDBACK).
+   R-KEY / R-DOM / R-WHITE-TEXT / R-HIERARCHY / T00-T03 / P50-P55).
 2. Auto-resolves linked `<link rel="stylesheet">` / `<script src="">` so a
    non-inlined deck validates correctly (same logic as `validate.py`).
 3. Groups issues by **family** (结构/DOM · 排版/文案 · 品牌/调色板 · 布局完整性
@@ -24,8 +24,8 @@ What it does:
 4. Auto-detects deck mode via heuristics (Replica `.page-replica` /
    inline `fs-deck-mode=inline` / bilingual `fs-language=zh-en`) and prints
    a hints block at the top of the report.
-5. Flags **context-dependent rules** (T00 / T03 / UI1 / P50 / R29-32 /
-   R-FEEDBACK) — these often false-positive when a deck is a Replica, an
+5. Flags **context-dependent rules** (T00 / T03 / UI1 / P50 / R29-32) —
+   these often false-positive when a deck is a Replica, an
    external HTML, or a non-`new-run`-flow artifact. The report shows them
    but explains when they're safe to ignore.
 
@@ -101,11 +101,11 @@ Differences from default mode:
 - `R-HIERARCHY` 次要字段比主要醒目
 - `L1` logo 配色错
 
-#### 与入库无关 (10 条, gate 模式直接屏蔽)
+#### 与入库无关 (gate 模式直接屏蔽)
 
-`T00` · `T03` · `R-FEEDBACK` · `UI1` · `P50` · `P51-P55` · `R29-32` · `R36` · `R-LANG` (单条 title-en warn)
+`T00` · `T03` · `UI1` · `P50` · `P51-P55` · `R29-32` · `R36` · `R-LANG` (单条 title-en warn)
 
-这 10 条要么是生成流程产物 (texts.md / FEEDBACK.md), 要么是交付格式选择
+这几条要么是生成流程产物 (texts.md), 要么是交付格式选择
 (inline vs linked / Replica vs Rewrite), 要么是浏览器性能预算 —— 都跟
 slide-library 入库后能否被检索 / 复用 / 追溯无关.
 
@@ -162,8 +162,7 @@ Either dump it in the chat (default) or write to a file the user names.
 | 演示模式 / 运行时 | R29-32 | `.deck-progress`, `.deck-controls`, prev/next/fs buttons, `requestFullscreen`, `fullscreenchange`, idle fade |
 | texts.md 联动 | T00 / T01 / T02 / T03 | data-text-id present; valid `slide-NN.field` shape; unique; paired `texts.md` synced |
 | 性能预算 | P50-P55 | base64 budget; blur radius; single ResizeObserver; AbortController; GPU layers |
-| 视觉 (Playwright, default-on since 2026-05-18) | R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-BODY-FLOOR / R-VIS-ALIGN / **R-VIS-ABSPOS-DUAL-ANCHOR** / **R-VIS-ORPHAN** / **R-VIS-BALANCE** / **R-FOCAL-CHECK** | canvas overflow; **sibling bbox overlap** (catches "column bleeds into legend" — internal overlap within canvas); computed `fontSize` on ladder; meta ≤ body; **renderer-aware body-content < 24 px detection** (R-VIS-BODY-FLOOR · 2026-05-19 · catches ambiguous short class names like `.rt` / `.d` / `.ind-tag` that pass static R20/R06 because 16 is on the ladder and short class names match neither chrome nor body heuristic — checks actual rendered fontSize + ≥ 8 chars of direct text + not inside mockup containers; opt out per element with `data-allow-body-floor`); grid-children equal height; **dual-anchor pill stretch** (R-VIS-ABSPOS-DUAL-ANCHOR · 2026-05-23 · catches the cascade footgun where an override declares `top:` on a `position: absolute` chrome element without resetting an inherited `bottom:`, so the pill / badge / hint stretches to most of the parent height — see BF14 below; mutation-tests every absolutely-positioned non-layout-container element by temporarily setting `style.bottom = 'auto'` and checking if height collapses; layout shells like `.stage / .stack / .iframe-wrap / .panel` are excluded by class denylist; opt-out per element with `data-allow-dual-anchor`); **CJK orphan / 上长下短 wrap** (R-VIS-ORPHAN · 2026-05-25 · WARN · CJK leaf text wrapping to a lonely ~1-char last line, or a short ≤14-CJK label whose last line < 38% of the widest — the residue `text-wrap: balance` can't fix in fixed-width / `<br>`-broken containers; skips block-child sub-labels / SVG / mockup / nowrap; deck slides only, not iframe prototypes — see "CJK 换行平衡 / 末行孤字防治"); **视觉重心 / 留白均衡**(R-VIS-BALANCE · 2026-05-28 · WARN · 量正文容器的内容 bbox,三种 sub-kind:top-heavy(顶部留白 0、底部 256+px)、bottom-heavy(反向)、dead-band(相邻内容块之间 >140 px 死带)。捕捉"上空 / 下空 / 中空"反馈——这些页 validator floor 全 PASS 但视觉上"摆不平"。Skip hero layouts;per-slide opt-out `data-allow-imbalance`);**视觉焦点**(R-FOCAL-CHECK · 2026-05-28 · WARN · 非 hero / 非平行模式页上,≥3 个文本元素共享全页最大字号 → 焦点模糊报告。捕捉用户最常反馈的"信息平铺无重点"——典型 = 页 title 48 + 3 张 card title 48,眼睛不知道第一眼看哪。Skip:hero layouts、parallel-pattern containers(overview-grid / north-star-map / scene-grid / logo-wall / kpi-strip / arch-stack / pipeline / 等"显式 N 路平权"祖先)、声明 `.is-hero` / `data-focal` 的元素、`data-allow-no-focal` slide。Fix: 降级 N-1 个元素;或一个 `.is-hero`;或 brand color / border 差异化;或 `data-allow-no-focal` 显式平权). ~2 s overhead. Use `--no-visual` to skip (CI without Chromium); gracefully skips if playwright is not installed |
-| 交付物附件 | R-FEEDBACK | `FEEDBACK.md` sidecar present (relevant ONLY for new-run flow) |
+| 视觉 (Playwright, default-on since 2026-05-18) | R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-BODY-FLOOR / **R-VIS-ABSPOS-DUAL-ANCHOR** / **R-VIS-ORPHAN** / **R-VIS-BALANCE** / **R-FOCAL-CHECK** | canvas overflow; **sibling bbox overlap** (catches "column bleeds into legend" — internal overlap within canvas); computed `fontSize` on ladder; meta ≤ body; **renderer-aware body-content < 24 px detection** (R-VIS-BODY-FLOOR · 2026-05-19 · catches ambiguous short class names like `.rt` / `.d` / `.ind-tag` that pass static R20/R06 because 16 is on the ladder and short class names match neither chrome nor body heuristic — checks actual rendered fontSize + ≥ 8 chars of direct text + not inside mockup containers; opt out per element with `data-allow-body-floor`); grid-children equal height; **dual-anchor pill stretch** (R-VIS-ABSPOS-DUAL-ANCHOR · 2026-05-23 · catches the cascade footgun where an override declares `top:` on a `position: absolute` chrome element without resetting an inherited `bottom:`, so the pill / badge / hint stretches to most of the parent height — see BF14 below; mutation-tests every absolutely-positioned non-layout-container element by temporarily setting `style.bottom = 'auto'` and checking if height collapses; layout shells like `.stage / .stack / .iframe-wrap / .panel` are excluded by class denylist; opt-out per element with `data-allow-dual-anchor`); **CJK orphan / 上长下短 wrap** (R-VIS-ORPHAN · 2026-05-25 · WARN · CJK leaf text wrapping to a lonely ~1-char last line, or a short ≤14-CJK label whose last line < 38% of the widest — the residue `text-wrap: balance` can't fix in fixed-width / `<br>`-broken containers; skips block-child sub-labels / SVG / mockup / nowrap; deck slides only, not iframe prototypes — see "CJK 换行平衡 / 末行孤字防治"); **视觉重心 / 留白均衡**(R-VIS-BALANCE · 2026-05-28 · WARN · 量正文容器的内容 bbox,三种 sub-kind:top-heavy(顶部留白 0、底部 256+px)、bottom-heavy(反向)、dead-band(相邻内容块之间 >140 px 死带)。捕捉"上空 / 下空 / 中空"反馈——这些页 validator floor 全 PASS 但视觉上"摆不平"。Skip hero layouts;per-slide opt-out `data-allow-imbalance`);**视觉焦点**(R-FOCAL-CHECK · 2026-05-28 · WARN · 非 hero / 非平行模式页上,≥3 个文本元素共享全页最大字号 → 焦点模糊报告。捕捉用户最常反馈的"信息平铺无重点"——典型 = 页 title 48 + 3 张 card title 48,眼睛不知道第一眼看哪。Skip:hero layouts、parallel-pattern containers(overview-grid / north-star-map / scene-grid / logo-wall / kpi-strip / arch-stack / pipeline / 等"显式 N 路平权"祖先)、声明 `.is-hero` / `data-focal` 的元素、`data-allow-no-focal` slide。Fix: 降级 N-1 个元素;或一个 `.is-hero`;或 brand color / border 差异化;或 `data-allow-no-focal` 显式平权). ~2 s overhead. Use `--no-visual` to skip (CI without Chromium); gracefully skips if playwright is not installed |
 
 When the user asks "what does [Rxx] mean", look up the rule in `validate.py`
 (grep for the code) — every audit function has a docstring + the error message

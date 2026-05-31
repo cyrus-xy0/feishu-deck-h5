@@ -46,20 +46,17 @@ FAMILIES = [
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
     ('视觉 (Playwright)',    ['R-OVERFLOW', 'R-OVERLAP', 'R-VIS-TIER', 'R-VIS-HIER',
                               'R-VIS-LABEL-FLOOR', 'R-VIS-BODY-FLOOR',
-                              'R-VIS-ALIGN', 'R-VIS-ABSPOS-DUAL-ANCHOR',
+                              'R-VIS-ABSPOS-DUAL-ANCHOR',
                               'R-VIS-CARD-OVERFLOW', 'R-VIS-OPT-OUT-ABUSE',
                               'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL',
                               'R-VIS-NO-IMAGERY', 'R-FOCAL-CHECK', 'R-VIS-BALANCE',
                               'R-VIS-CARD-MIN-HEIGHT-SPARSE', 'R-VIS-SLACK-FLEX',
                               'R-VIS-CROWD', 'R-VIS-TITLE-GAP', 'R-VIS-PEER-SIZE',
                               'R-VIS-GUTTER', 'R-VIS-HERO-FLOOR',
-                              'R-VIS-SHORT-LABEL-FLOOR']),
-    ('交付物附件',           ['R-FEEDBACK']),
+                              'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-CANVAS-CENTER']),
 ]
 
 CONTEXT_NOTES = {
-    'R-FEEDBACK': '别人交给你的 deck 通常没有 FEEDBACK.md (那是 new-run '
-                  '工作流的产物), 这条 warn 可忽略.',
     'T00':        '如果是 Replica-mode (每页 PDF 截图) 或外部来源 deck, '
                   '没有 data-text-id 是正常的.',
     'T03':        '只有同时附 texts.md 才会校验 sync; 纯 HTML 检查不必关注.',

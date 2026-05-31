@@ -67,7 +67,6 @@ from pathlib import Path
 #    audit_text_ids              T00-T03          data-text-id format + texts.md sync
 #    audit_visual_richness       R-VIS-NO-IMAGERY deck reads flat (advisory)
 #    audit_perf                  P50-P55          inline-size / asset budgets
-#    audit_feedback_md           R-FEEDBACK       FEEDBACK.md present at hand-off
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
@@ -116,9 +115,6 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
       R-VIS-HIER       · within each card / panel, meta-class fontSize ≤
                          body-class fontSize (renderer-confirmed, not just
                          static CSS — catches inheritance / overrides)
-      R-VIS-ALIGN      · grid containers (.overview-grid / .todo-grid / etc.)
-                         have all direct children at roughly the same
-                         bounding-box height (within 4 px tolerance)
       R-VIS-BODY-FLOOR · 2026-05-19 · text elements with ≥ 8 chars of direct
                          text rendered at < 24 px while NOT inside a mockup
                          container or chrome class. Catches the gap where
@@ -279,18 +275,6 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             f'(`{entry["card_sel"]}`). Visual hierarchy reads inverted — '
             'shrink meta to ≤ body, or rename to a column-pill class if '
             'this element is actually a column title (not meta).')
-
-    for entry in report.get('align', [])[:20]:
-        # Soft: 4 px tolerance is genuinely fuzzy (sub-pixel rounding on
-        # Chromium fractional scale can produce 5 px deltas on perfectly
-        # aligned grids). Editorial — flagged but never promoted to error.
-        iss.warn_soft('R-VIS-ALIGN',
-            f'slide {entry["slide_idx"]} · grid `{entry["grid_sel"]}` has '
-            f'{entry["count"]} direct children with heights '
-            f'{entry["heights"]} — max diff {entry["delta"]} px '
-            f'(> 4 px tolerance). For canonical-card / overview-card '
-            'grids the cards should be equal-height; check `flex: 1` is '
-            'applied or `align-items: stretch` is set on the container.')
 
     for entry in report.get('title_position', [])[:20]:
         iss.err('R-VIS-TITLE-POSITION',
@@ -504,6 +488,34 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 '窄条飘着 → 加宽或配伴随块。真有图但被判空说明图是 media→已计入不会误报;'
                 '故意留白 → `data-allow-imbalance`。')
 
+    # ---- R-VIS-CANVAS-CENTER · 内容整体在"画布"里垂直居中 (2026-05-31) ----
+    # R-VIS-BALANCE 只看"内容在 body 容器(.stage)内部"的上下留白是否均衡 —— 但
+    # 当 .stage 本身相对画布偏上时(如对称定位 top:200/bottom:200,中心 540,而画布
+    # 中心 ~597),内容在 .stage 内部均衡却整体偏上,balance 检测不出 → 漏报。这条补
+    # 这个洞:画布 = [主标题.header 底边 → 屏幕底 1080];内容并集(排除 .header)的垂直
+    # 中心 content_mid 应 ≈ 画布中心 canvas_mid = (hb + 1080)/2。offset = canvas_mid
+    # - content_mid(正=偏上,负=偏下)。满铺型(is_full:内容高/可用带高 > 0.72)豁免
+    # ——它顶对齐铺满是对的。几何 name-free。Warn 级(留白判断主观,可 opt-out)。
+    for entry in report.get('canvas_center', [])[:20]:
+        if entry.get('is_full'):
+            continue
+        offset = entry['offset']
+        if abs(offset) <= 40:
+            continue
+        _dir = '偏上' if offset > 0 else '偏下'
+        iss.warn('R-VIS-CANVAS-CENTER',
+            f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
+            f'内容整体未在[标题底→屏幕底]画布垂直居中:{_dir} {abs(offset)}px'
+            f'(内容中心 {entry["content_mid"]}px / 画布中心 {entry["canvas_mid"]}px)'
+            ' —— 内容在 .stage 内部看似均衡,但 .stage 相对画布整体偏移,所以全页'
+            '看着上空/下空。这跟 R-VIS-BALANCE 互补:balance 看内容在容器内部的上下'
+            '留白,这条看内容并集中心 vs 画布([主标题底边→1080])中心。'
+            'Fix: 内容并集应在 [标题底→屏幕底] 画布里垂直居中;根因常是 .stage 用对称'
+            '定位(top/bottom 相等)使中心固定 540,而画布中心因标题占顶被推到 ~597 → '
+            '整体偏上。正解在 framework:让 content 的 .grid `flex:1` 撑满 stage + '
+            '`align-content:center`(稀疏自动居中、满铺自动顶对齐铺满);或确属设计意图 '
+            '→ 在 .slide 加 `data-allow-imbalance` 跳过。')
+
     # ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
     # 框内文字离卡片可见底边过近且明显下偏 = "文字离下面太近"(qingdao 3up 等高卡
     # 实测离底 5px / 顶部 34px)。几何 name-free,不按版式名:松(下方大留白,如
@@ -652,9 +664,13 @@ _VISUAL_AUDIT_JS_CACHE = None
 def _visual_audit_js():
     global _VISUAL_AUDIT_JS_CACHE
     if _VISUAL_AUDIT_JS_CACHE is None:
+        # visual-audit.js holds CJK bytes; a bare .read_text() decodes with the
+        # locale default, which under C/POSIX (the default in minimal Linux
+        # containers / CI) is ASCII and raises UnicodeDecodeError — crashing the
+        # DEFAULT validate path. Pin UTF-8 so it's locale-independent.
         _VISUAL_AUDIT_JS_CACHE = (
             Path(__file__).resolve().parent / 'visual-audit.js'
-        ).read_text()
+        ).read_text(encoding='utf-8')
     return _VISUAL_AUDIT_JS_CACHE
 
 
@@ -728,7 +744,6 @@ STATIC_AUDITS = [
     (audit_autobalance_present, ('html', 'iss')),
     (audit_perf,               ('html', 'iss')),
     (audit_text_ids,           ('html', 'path', 'iss')),
-    (audit_feedback_md,        ('path', 'iss')),
 ]
 
 
@@ -751,7 +766,7 @@ def main():
                         '"column bleeds into legend" bug that static CSS '
                         'analysis cannot), R-VIS-TIER (computed fontSize on '
                         '4-tier ladder), R-VIS-HIER (meta ≤ body in each '
-                        'card), R-VIS-ALIGN (grid children equal height). '
+                        'card). '
                         'DEFAULT: on (~1-5s extra per deck). Use --no-visual '
                         'to skip (e.g. CI without Chromium). Gracefully '
                         'skips when playwright is not installed.')
@@ -806,8 +821,8 @@ def main():
         run_visual_audits(path, iss, want_screenshots=args.screenshots)
 
     if args.strict:
-        # Promote regular warnings to errors. SOFT warnings (R-FEEDBACK,
-        # R-VIS-ALIGN, etc.) stay as warnings — they are editorial
+        # Promote regular warnings to errors. SOFT warnings (R-VIS-NO-IMAGERY,
+        # R-SELF-CONTAINED, etc.) stay as warnings — they are editorial
         # advisories that should never fail CI.
         iss.errors.extend(iss.warnings)
         iss.warnings = []

@@ -2007,64 +2007,6 @@ def audit_layout_integrity(html: str, iss: Issues):
 
 
 
-def audit_feedback_md(html_path: Path, iss: Issues):
-    """R-FEEDBACK: every run output should ship a FEEDBACK.md sidecar.
-
-    Path A (render.py) emits FEEDBACK.md inline with each deck. Path B
-    (freehand LLM authoring) has no automation and the agent forgets
-    more often than not — 8 of 17 runs through 2026-05-15 shipped
-    without one. SKILL.md "RUN-FEEDBACK CAPTURE" makes it mandatory;
-    this is the soft enforcement that catches the omission.
-
-    Scope: only flags HTML living under a `runs/<ts>/output/` directory
-    (the per-run output convention from new-run.sh). Files in
-    `examples/`, `templates/`, or arbitrary one-off locations skip
-    this audit — they're not per-run outputs.
-
-    Warning, not error: the deck still works without FEEDBACK.md.
-    `finalize.sh` auto-stubs the file these days, so this rule is
-    mostly a safety net for legacy / one-off runs that bypass finalize.
-    """
-    # Only enforce inside the runs/<ts>/output/ convention
-    parent = html_path.parent
-    grandparent = parent.parent
-    in_run_output = (parent.name == 'output' and
-                     re.match(r'^\d{8}-\d{6}', grandparent.name))
-    if not in_run_output:
-        return
-
-    feedback = parent / 'FEEDBACK.md'
-    if not feedback.is_file():
-        iss.warn_soft('R-FEEDBACK',
-            f'no FEEDBACK.md in {parent}. Every run should '
-            'capture the agent\'s judgment calls + visual workarounds + '
-            'validator escapes for the maintainer to fold into the next '
-            'skill version. Run `bash assets/finalize.sh <output-dir>` '
-            'to auto-stub the file, then fill in agent decisions before '
-            'hand-off. (Path A render.py emits this automatically; '
-            'freehand decks need it written by hand.)')
-        return
-
-    # Detect the finalize.sh auto-stub. If found, the file exists but is
-    # empty of agent-authored content — finalize.sh just created a
-    # placeholder. Keep warning until the agent fills it in.
-    try:
-        content = feedback.read_text(encoding='utf-8', errors='replace')
-    except OSError:
-        return
-    if 'FEEDBACK.md.auto-stub' in content:
-        iss.warn_soft('R-FEEDBACK',
-            f'{feedback.name} exists but is an unfilled auto-stub from '
-            '`finalize.sh`. The agent must replace the placeholder '
-            'sections with real decisions from this run BEFORE hand-off. '
-            'Look for `## 关键决策(本 run 实际发生的判断)` — every entry '
-            'should describe one concrete choice the agent made (layout '
-            'pick, sizing tweak, validator workaround, copy shortening) '
-            'with `**为什么**:` + checkbox. Drop the auto-stub HTML '
-            'comment once you\'ve filled it in to silence this warning.')
-
-
-
 # ---------------------------------------------------------------------------
 #  Design-quality nudge (2026-05-29) — advisory, never blocks
 # ---------------------------------------------------------------------------

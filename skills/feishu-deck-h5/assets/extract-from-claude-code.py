@@ -206,7 +206,7 @@ def iter_user_prompts(path: Path):
       - system-prefixed entries (slash commands, caveats, reminders)
       - empty content
     """
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -345,7 +345,7 @@ def main():
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(output)
+        args.out.write_text(output, encoding="utf-8")
         print(f'wrote {len(entries)} prompts → {args.out}', file=sys.stderr)
     else:
         sys.stdout.write(output)
