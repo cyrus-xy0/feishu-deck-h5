@@ -440,7 +440,7 @@ def _run_all_audits(html: str, slides: list, path: Path,
 #  main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description='feishu-deck-h5 · 纯检查模式 (无 PREFLIGHT / new-run / asset-copy)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -458,13 +458,22 @@ def main() -> int:
     p.add_argument('html', help='待检查的 HTML 文件路径')
     p.add_argument('--strict', action='store_true',
                    help='把 warn 升级为 error (与 --gate 互斥)')
-    p.add_argument('--visual', action='store_true',
-                   help='加跑 Playwright 视觉审计; --gate ingest 自动开启')
+    p.add_argument('--visual', action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help='Playwright 视觉审计 (R-OVERFLOW / R-VIS-* / R-FOCAL …). '
+                        'DEFAULT: on, 与 validate.py 对齐; --no-visual 关闭 '
+                        '(CI 无 chromium 时); --gate ingest 强制开启. '
+                        '未装 playwright/chromium 时自动跳过, 不硬失败')
     p.add_argument('--gate', choices=['ingest'],
                    help='入库门禁模式. ingest = 21 条必修规则, '
                         '业务语言报告, 库 ingest-package.py 用')
     p.add_argument('--report', metavar='PATH',
                    help='把 markdown 报告写到指定路径; 不带则打到 stdout')
+    return p
+
+
+def main() -> int:
+    p = build_parser()
     args = p.parse_args()
 
     path = Path(args.html).resolve()

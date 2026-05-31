@@ -8,7 +8,7 @@ PR for review) and just wants to know what's non-compliant. The skill ships
 a dedicated entry point for this:
 
 ```bash
-bash skills/feishu-deck-h5/assets/check-only.sh <html-path> [--strict] [--visual] [--report PATH]
+bash skills/feishu-deck-h5/assets/check-only.sh <html-path> [--strict] [--no-visual] [--report PATH]
 ```
 
 What it does:
@@ -31,15 +31,17 @@ What it does:
 
 ### When to use what flags
 
-- **default** — `bash check-only.sh deck.html` — warn ≠ blocker. Use for
-  first-pass review of someone else's deck. Exit 0 if no errors.
+- **default** — `bash check-only.sh deck.html` — warn ≠ blocker, **视觉审计默认开**
+  (与 `validate.py` 对齐, 2026-05-31 起)。Use for first-pass review of someone
+  else's deck. Exit 0 if no errors.
 - **`--strict`** — `bash check-only.sh deck.html --strict` — warns promoted
   to errors. Use when the deck is going to a customer and you want zero
   warnings.
-- **`--visual`** — adds Playwright-based renderer audits (R-OVERFLOW /
-  R-VIS-TIER / R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-ALIGN). ~5s per 30-slide
-  deck. Requires `pip install playwright && python -m playwright install
-  chromium` once.
+- **`--no-visual`** — **关闭** Playwright 视觉审计 (R-OVERFLOW / R-VIS-TIER /
+  R-VIS-HIER / R-VIS-LABEL-FLOOR / R-VIS-BALANCE / R-FOCAL-CHECK …)。视觉审计
+  **默认开启**, ~2-5s per 30-slide deck, 需要 `pip install playwright &&
+  python -m playwright install chromium` 一次; 未装时自动跳过 (打 notice, 不硬
+  失败)。仅在 CI 无 chromium 或想跑得更快时用 `--no-visual` 关掉。
 - **`--report PATH`** — write the markdown report to a file (stderr prints
   "✓ 报告已写到 …"). Default: stdout. When writing to a file, you can
   forward it on Lark / email as a review note.

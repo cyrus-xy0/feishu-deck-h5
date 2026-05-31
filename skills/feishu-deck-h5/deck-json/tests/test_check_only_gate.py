@@ -134,6 +134,24 @@ def test_families_cover_newly_surfaced_codes():
         assert code in fam_codes, f"{code} not categorized in FAMILIES"
 
 
+def test_visual_defaults_on_parity_with_validate():
+    """2026-05-31: check-only's visual audits must default ON, matching
+    validate.py — else the canonical `check-only.sh deck.html` silently skips
+    the R-VIS-* / R-FOCAL renderer audits and reports a half-checked PASS.
+    Same drift class F-08 closed at the registry level, reopened via the
+    --visual default. Guard at the CLI layer (no chromium needed)."""
+    assert CO.build_parser().parse_args(["deck.html"]).visual is True, \
+        "check-only --visual must default to True"
+    # explicit --no-visual still works as the CI / no-chromium escape hatch
+    assert CO.build_parser().parse_args(
+        ["deck.html", "--no-visual"]).visual is False
+    # validate.py must agree (BooleanOptionalAction default-on) — source-level
+    # parity check, mirroring this file's other validate.py source scans.
+    vsrc = (ASSETS / "validate.py").read_text(encoding="utf-8")
+    assert re.search(r"--visual.*BooleanOptionalAction", vsrc, re.S), \
+        "validate.py --visual must stay BooleanOptionalAction default-on"
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
