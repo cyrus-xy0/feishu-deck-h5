@@ -245,7 +245,15 @@
     // content clipped invisibly. Slide-level R-OVERFLOW doesn't catch it
     // because the card itself fits in canvas. Common in dense 3-up narrative
     // cards. Skip .slide / .slide-frame themselves (intentional canvas clip).
-    const overflowCandidates = slide.querySelectorAll('.stage *');
+    // 2026-05-31 · raw coverage: a layout:"raw" slide has no .stage wrapper, so the
+    // .stage-scoped query would miss every clipped / spilling leaf. Fall back to all
+    // descendants ONLY for raw. Schema slides keep '.stage *' verbatim — including
+    // schema layouts that legitimately have NO .stage (section/cover/etc.), where a
+    // blanket '*' would surface decorative-numeral line-box clips as false positives
+    // (e.g. .chapter-num). So: zero schema regression, full raw coverage.
+    const overflowCandidates = slide.querySelector('.stage')
+      ? slide.querySelectorAll('.stage *')
+      : (layout === 'raw' ? slide.querySelectorAll('*') : slide.querySelectorAll('.stage *'));
     overflowCandidates.forEach(el => {
       if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return;
       const cs = window.getComputedStyle(el);
@@ -403,26 +411,57 @@
       // Content is in .stage, the title in .header (cross-container — R-OVERLAP,
       // same-container only, never compares them). < 24px (design px) or negative
       // (overlap) → flag (#5 sections grew into the title).
-      if (header) {
-        const stage = slide.querySelector(':scope > .stage');
-        if (stage) {
-          const hr = header.getBoundingClientRect();
-          let contentTop = Infinity;
-          for (const el of stage.querySelectorAll('*')) {
+      // Prefer framework chrome (:scope > .header + :scope > .stage). When absent
+      // (raw / hand-built / imported markup), fall back to NAME-FREE bands: title =
+      // topmost own-text element in a title tier (≥24px) within the top 40% of the
+      // slide; content = the topmost real block below it. Schema decks always have
+      // .header + .stage → the named path runs and the fallback never fires, so
+      // zero schema regression.
+      let tgTitleRect = null, tgTitleSel = null, tgContentTop = Infinity;
+      const tgStage = slide.querySelector(':scope > .stage');
+      if (header && tgStage) {
+        tgTitleRect = header.getBoundingClientRect();
+        tgTitleSel = shortSel(header);
+        for (const el of tgStage.querySelectorAll('*')) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          const r = el.getBoundingClientRect();
+          if (r.width > 40 && r.height > 16) tgContentTop = Math.min(tgContentTop, r.top);
+        }
+      } else if (!header) {
+        const sr = slide.getBoundingClientRect();
+        let tEl = null, tTop = Infinity;
+        for (const el of slide.querySelectorAll('*')) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          if (!hasOwnText(el)) continue;
+          const cs = getComputedStyle(el);
+          if (cs.position === 'absolute' || cs.position === 'fixed') continue;   // skip chrome / decor
+          if (Math.round(parseFloat(cs.fontSize)) < 24) continue;                // title tier only
+          const r = el.getBoundingClientRect();
+          if (r.width <= 40 || r.height <= 16) continue;
+          if ((r.top - sr.top) > sr.height * 0.4) continue;                      // must sit near the top
+          if (r.top < tTop) { tTop = r.top; tEl = el; }
+        }
+        if (tEl) {
+          tgTitleRect = tEl.getBoundingClientRect();
+          tgTitleSel = shortSel(tEl);
+          for (const el of slide.querySelectorAll('*')) {
+            if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
             if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+            const cs = getComputedStyle(el);
+            if (cs.position === 'absolute' || cs.position === 'fixed') continue;
             const r = el.getBoundingClientRect();
-            if (r.width > 40 && r.height > 16) contentTop = Math.min(contentTop, r.top);
+            if (r.width > 40 && r.height > 16 && r.top >= tgTitleRect.bottom - 2) tgContentTop = Math.min(tgContentTop, r.top);
           }
-          // contentTop must sit BELOW the header's own top (else it's a full-bleed
-          // bg / absolute decor spanning the slide — not "content below title").
-          if (contentTop !== Infinity && contentTop >= hr.top - 2) {
-            const gap = (contentTop - hr.bottom) / _scale;
-            if (gap < 24) {
-              out.title_gap.push({
-                slide_idx, layout, gap_px: Math.round(gap), title_sel: shortSel(header),
-              });
-            }
-          }
+        }
+      }
+      // contentTop must sit BELOW the title's own top (else it's a full-bleed bg /
+      // absolute decor spanning the slide — not "content below title").
+      if (tgTitleRect && tgContentTop !== Infinity && tgContentTop >= tgTitleRect.top - 2) {
+        const gap = (tgContentTop - tgTitleRect.bottom) / _scale;
+        if (gap < 24) {
+          out.title_gap.push({
+            slide_idx, layout, gap_px: Math.round(gap), title_sel: tgTitleSel,
+          });
         }
       }
     }
@@ -933,7 +972,14 @@
         || slide.querySelector(':scope > .nodes')
         || slide.querySelector(':scope > .toc')
         || slide.querySelector(':scope > .table-wrap')
-        || slide.querySelector(':scope > .stack');
+        || slide.querySelector(':scope > .stack')
+        // 2026-05-31 · raw coverage: no framework container (raw / hand-built /
+        // imported markup) → measure balance against the slide itself. Chrome
+        // (wordmark / pageno) is position:absolute and is filtered out of both
+        // `blocks` and `contentEls` below, so the geometry still reflects real
+        // content. Schema decks always resolve a named container first → the
+        // fallback never fires for them, so zero schema regression.
+        || slide;
       // 若 .stage 只包了一层 .grid / .flow / 等,钻进去——gap 要量在真正的
       // 内容容器上,不要把 stage→grid 的 padding 误算成内容空隙。
       while (bodyContainer && bodyContainer.children.length === 1) {
@@ -1289,6 +1335,13 @@
         const raw = el.className;
         return (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase();
       };
+      // roleOf is class-based ON PURPOSE: peer-size compares the SAME SEMANTIC role
+      // across parallel cards (body vs body, num vs num). A name-free tag fallback
+      // ('tag:div') conflates a title, its EN subtitle and a hero number — all <div> —
+      // into one "role" and floods real decks with false positives (title 28 vs sub 16
+      // vs num 48 flagged as "should be equal"). So raw markup with arbitrary class
+      // names is a DOCUMENTED limitation here, NOT a fixable gap. (Verified: a tag/
+      // flex-anchor fallback added 8 false findings across sample-deck + phase-1c.)
       const roleOf = (el) => { const c = _cls(el); for (const k of ROLE_KEYS) if (c.includes(k)) return k; return null; };
       const parallelAnchor = (el) => {
         for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
@@ -1460,7 +1513,47 @@
         }
       }
     };
-    if (HERO_FLOORS[layout]) _heroFloorCheck(HERO_FLOORS[layout]);
+    if (HERO_FLOORS[layout]) {
+      _heroFloorCheck(HERO_FLOORS[layout]);
+      // 2026-05-31 · raw coverage: an arbitrary-class hero (e.g. a raw slide that
+      // declares a hero role via _orig_layout → data-layout=cover/section/...) is
+      // missed by the class selectors above. If NONE of the layout's spec selectors
+      // matched a visible element, fall back to the slide's LARGEST visible own-text
+      // font vs the layout's SMALLEST floor — name-free element pick, still gated by
+      // the hero layout token. (Undeclared data-layout="raw" has no HERO_FLOORS entry
+      // → still skipped: a raw slide with no declared role is not a known hero, so
+      // its largest font must not be judged against a hero floor.)
+      const _specs = HERO_FLOORS[layout];
+      const _classHit = _specs.some(s => [...slide.querySelectorAll(s.sel)].some(el => {
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+        const r = el.getBoundingClientRect();
+        return r.width >= 2 && r.height >= 2;
+      }));
+      if (!_classHit) {
+        const _minFloor = Math.min(..._specs.map(s => s.floor));
+        let _best = null, _bestPx = -1;
+        slide.querySelectorAll('*').forEach(el => {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          if (!hasOwnText(el)) return;
+          for (let n = el; n && n !== slide; n = n.parentElement) if (hasAnyClass(n, TIER_MOCK)) return;
+          for (let n = el; n; n = n.parentElement) if (n.dataset && n.dataset.allowTypescale != null) return;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          const r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return;
+          const px = Math.round(parseFloat(cs.fontSize));
+          if (px > _bestPx) { _bestPx = px; _best = el; }
+        });
+        if (_best && _bestPx > 0 && _bestPx < _minFloor) {
+          out.hero_floor.push({
+            slide_idx, label, layout, role: 'hero 主元素 (name-free)', selector: shortSel(_best),
+            rendered_px: _bestPx, floor_px: _minFloor, spec_px: _minFloor,
+            lifted: !!_best.closest('[data-lifted]'),
+          });
+        }
+      }
+    }
     _heroFloorCheck([KPI_FLOOR]);
 
     // ---- R-VIS-SHORT-LABEL-FLOOR · 1–7 字短标签 / SVG 轴标 < 18px (2026-05-31) ----

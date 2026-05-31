@@ -12,30 +12,45 @@ Methodology mirrors the sibling per-rule tests (``test_vis_gutter`` etc.): read
 minimal, geometry-self-contained fixture (all sizes inline — no framework CSS), and
 inspect the report bucket.
 
-Empirically verified raw coverage (workflow wgry1zvgg, real render + Chromium):
+Empirically verified raw coverage (workflow wgry1zvgg, real render + Chromium). 4 of the
+5 gaps were FIXED 2026-05-31 with selector fallbacks that add raw coverage WITHOUT
+changing schema behavior (each fallback only fires when the framework class is absent /
+the slide is raw — verified zero new findings on sample-deck + phase-1c). The 5th
+(PEER-SIZE) was tried, REVERTED, and is now a documented limitation.
 
-  COVERED — name-free geometry, fires on raw:
-    R-VIS-GUTTER            (_isFramedBox geometry, any flex/grid container)
-    R-VIS-SHORT-LABEL-FLOOR (computed fontSize<18 over '*, text, tspan')
-    R-VIS-CROWD             (_isFramedBox + content-union geometry)
+  COVERED out of the box — name-free geometry:
+    R-VIS-GUTTER            _isFramedBox geometry, any flex/grid container
+    R-VIS-SHORT-LABEL-FLOOR computed fontSize<18 over '*, text, tspan'
+    R-VIS-CROWD             _isFramedBox + content-union geometry
 
-  RAW ESCAPES — schema-class / layout gated, marked xfail(strict) below:
-    R-VIS-HERO-FLOOR    HERO_FLOORS keyed by layout NAME (no 'raw') + KPI_FLOOR
-                        class-gated on .kpi-val/.kpi .v/.metric-value  (visual-audit.js:1428,1463-1464)
-    R-VIS-PEER-SIZE     roleOf() needs BODY_KEYS/META_KEYS substring AND
-                        parallelAnchor() needs PEER_PARALLEL/GRID_KEYS/CARD_KEYS/
-                        CARD_SUFFIX ancestor                            (visual-audit.js:1292-1300)
-    R-VIS-BALANCE       bodyContainer = :scope > .stage|.grid|.flow|.nodes|.toc|
-                        .table-wrap|.stack, no fallback to the slide   (visual-audit.js:930-936)
-    R-VIS-CARD-OVERFLOW candidate query slide.querySelectorAll('.stage *')   (visual-audit.js:248)
-    R-VIS-TITLE-GAP     requires :scope > .header AND :scope > .stage   (visual-audit.js:387,407)
+  FIXED to cover raw (were schema-class / layout gated):
+    R-VIS-CARD-OVERFLOW raw slide (no .stage) → candidate query falls back to '*'. Schema
+                        slides keep '.stage *' verbatim — including .stage-less schema
+                        layouts (section/cover), where a blanket '*' would false-positive on
+                        decorative-numeral line-box clips (.chapter-num). So raw-gated.
+    R-VIS-BALANCE       no framework container → bodyContainer falls back to the slide
+                        (chrome is position:absolute → filtered out of the geometry)
+    R-VIS-TITLE-GAP     no .header/.stage → name-free title band (topmost ≥24px text,
+                        top 40%) measured against the next block below
+    R-VIS-HERO-FLOOR    a hero layout with no class-selector hit → largest visible font
+                        vs the layout's smallest floor. Element pick is name-free, but the
+                        LAYOUT gate stays on purpose: an UNDECLARED data-layout="raw" slide
+                        has no HERO_FLOORS entry and is correctly NOT judged as a hero —
+                        a raw hero must declare its role via _orig_layout (→ data-layout=
+                        cover/section/…).
 
-Each escape rule has TWO tests: a ``*_schema_control`` (plain assert) proving the
-fixture geometry genuinely fires under the framework class — so a green xfail is not
-hiding a weak fixture — and a ``*_raw_fires`` marked ``xfail(strict=True)``.  The
-xfail asserts the CORRECT behavior (the rule SHOULD fire on raw); it xfails today and
-flips to a FAILURE the moment the selector is made name-free — that is the signal to
-delete the marker and keep the now-passing raw assertion.
+  DOCUMENTED LIMITATION — class-role-gated by design, not safely fixable:
+    R-VIS-PEER-SIZE     compares the SAME semantic role (body vs body, num vs num) across
+                        parallel cards. A name-free tag/flex fallback was tried and reverted:
+                        it conflated title / EN-subtitle / hero-number (all <div>) into one
+                        role and produced 8 false findings on sample-deck + phase-1c. Its
+                        raw test is xfail(strict) — it documents the gap and will flag (xpass)
+                        if a geometric peer-role inference is ever built.
+
+Each FIXED rule keeps a ``*_schema_control`` (proves the fixture geometry fires under the
+framework class, so a passing raw test is not hiding a weak fixture) plus a ``*_raw_fires``
+plain assert. R-VIS-HERO-FLOOR additionally asserts that an UNDECLARED raw slide is left
+alone — guarding against a false positive on ordinary raw content pages.
 
 See SKILL.md "raw = markup 不采用标准框架 class 骨架" and the LIFT/raw discussion.
 """
@@ -153,21 +168,28 @@ def test_hero_floor_schema_control():
     assert len(hits) >= 1, f"control: hero floor must fire on cover h1@70px (<88); got {hits}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "R-VIS-HERO-FLOOR raw escape: HERO_FLOORS keyed by layout name (no 'raw') and "
-    "KPI_FLOOR class-gated on .kpi-val/.kpi .v/.metric-value (visual-audit.js:1428,1463-1464). "
-    "Fix: pick the largest visible font on a non-hero-excluded slide vs a per-layout-OR-default "
-    "floor; then delete this marker."))
-def test_hero_floor_raw_fires():
+def test_hero_floor_declared_hero_raw_fires():
+    # FIXED 2026-05-31: a raw slide that DECLARES a hero role via _orig_layout renders
+    # data-layout=cover; the name-free element pick now catches an arbitrary-class headline.
     inner = '<div class="zzheadline" style="font-size:70px">封面主标题</div>'
+    hits = _bucket(_slide("cover", inner), "hero_floor")
+    assert len(hits) >= 1, f"R-VIS-HERO-FLOOR should fire on declared-hero raw 70px headline (<88); got {hits}"
+
+
+def test_hero_floor_undeclared_raw_skipped():
+    # CORRECT BEHAVIOR (not a gap): data-layout="raw" declares no hero role, so its largest
+    # font must NOT be judged against a hero floor — a 70px headline may be a content title.
+    inner = '<div class="zzheadline" style="font-size:70px">某内容标题</div>'
     hits = _bucket(_slide("raw", inner), "hero_floor")
-    assert len(hits) >= 1, f"R-VIS-HERO-FLOOR should fire on raw 70px hero (<88); got {hits}"
+    assert len(hits) == 0, f"undeclared raw must not be treated as a hero; got {hits}"
 
 
 # ---- R-VIS-PEER-SIZE ----
 def _peer_inner(wrap_cls, item_cls):
+    # flex wrapper so the raw path's name-free anchor (nearest flex/grid container) resolves;
+    # the schema control's verdict-grid is anchored by class, so display:flex is harmless there.
     return (
-        f'<div class="{wrap_cls}">'
+        f'<div class="{wrap_cls}" style="display:flex;gap:20px">'
         f'<div class="{item_cls}" style="font-size:30px">甲方</div>'
         f'<div class="{item_cls}" style="font-size:18px">乙方</div>'
         "</div>"
@@ -181,14 +203,14 @@ def test_peer_size_schema_control():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "R-VIS-PEER-SIZE raw escape: roleOf() needs a BODY_KEYS/META_KEYS substring AND "
-    "parallelAnchor() needs a PEER_PARALLEL/GRID_KEYS/CARD_KEYS / -card|-tile|-cell|-panel|-box "
-    "ancestor (visual-audit.js:1292-1300); arbitrary zz* classes drop out. "
-    "Fix: bucket by a name-free anchor (nearest flex/grid common parent) + geometric role; "
-    "then delete this marker."))
+    "R-VIS-PEER-SIZE is class-role-gated by design — it compares the SAME semantic role "
+    "across parallel cards. A name-free tag/flex fallback was tried and REVERTED (it conflated "
+    "title / EN-subtitle / hero-number, all <div>, and produced 8 false findings on sample-deck "
+    "+ phase-1c). Raw arbitrary-class markup is a documented limitation; if a geometric peer-role "
+    "inference is ever built, this xpasses → drop the marker."))
 def test_peer_size_raw_fires():
     hits = _bucket(_slide("raw", _peer_inner("zzgrid", "zztext")), "peer_size")
-    assert len(hits) >= 1, f"R-VIS-PEER-SIZE should fire on raw 30/18px peers; got {hits}"
+    assert len(hits) >= 1, f"R-VIS-PEER-SIZE does not fire on raw arbitrary-class peers (documented); got {hits}"
 
 
 # ---- R-VIS-BALANCE (side-empty) ----
@@ -205,12 +227,8 @@ def test_balance_side_empty_schema_control():
     assert len(hits) >= 1, f"control: side-empty must fire on .stage with 700px empty right; got {hits}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "R-VIS-BALANCE raw escape: bodyContainer = :scope > .stage|.grid|.flow|.nodes|.toc|"
-    ".table-wrap|.stack with NO fallback to the slide (visual-audit.js:930-936); arbitrary raw "
-    "children → bodyContainer=null → whole balance block skipped. "
-    "Fix: fall back to the slide itself / largest non-chrome direct child; then delete this marker."))
 def test_balance_side_empty_raw_fires():
+    # FIXED 2026-05-31: no framework container → bodyContainer falls back to the slide itself.
     hits = _bucket(_slide("raw", _balance_inner("zzstage")), "balance", kind="side-empty")
     assert len(hits) >= 1, f"R-VIS-BALANCE side-empty should fire on raw lopsided grid; got {hits}"
 
@@ -230,19 +248,18 @@ def test_card_overflow_schema_control():
     assert len(hits) >= 1, f"control: card-overflow must fire on clipped .stage card; got {hits}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "R-VIS-CARD-OVERFLOW raw escape: sole candidate query is slide.querySelectorAll('.stage *') "
-    "(visual-audit.js:248); a raw slide with no .stage ancestor enqueues zero candidates. "
-    "Fix: broaden to slide.querySelectorAll('*') (excluding .slide/.slide-frame); then delete marker."))
 def test_card_overflow_raw_fires():
+    # FIXED 2026-05-31: no .stage → candidate query falls back to slide.querySelectorAll('*').
     hits = _bucket(_slide("raw", _overflow_inner("zzwrap")), "card_overflow")
     assert len(hits) >= 1, f"R-VIS-CARD-OVERFLOW should fire on raw clipped box; got {hits}"
 
 
 # ---- R-VIS-TITLE-GAP ----
 def _title_gap_inner(header_cls, stage_cls):
+    # title element carries NO framework class — the raw path must find it by font tier,
+    # the schema path by the .header container. Both work without relying on .title-zh.
     return (
-        f'<div class="{header_cls}"><h2 class="title-zh" style="font-size:28px;margin:0">页面标题</h2></div>'
+        f'<div class="{header_cls}"><div style="font-size:28px;margin:0">页面标题</div></div>'
         f'<div class="{stage_cls}"><div style="width:300px;height:120px">正文区块顶到标题</div></div>'
     )
 
@@ -252,10 +269,7 @@ def test_title_gap_schema_control():
     assert len(hits) >= 1, f"control: title-gap must fire on .header/.stage with ~0px gap; got {hits}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "R-VIS-TITLE-GAP raw escape: hard-gated on :scope > .header AND :scope > .stage "
-    "(visual-audit.js:387,407); arbitrary raw markup has neither → block returns without measuring. "
-    "Fix: derive title band = topmost title-tier text, content band = next block below; then delete marker."))
 def test_title_gap_raw_fires():
+    # FIXED 2026-05-31: no .header/.stage → name-free title band (topmost ≥24px text) + next block.
     hits = _bucket(_slide("raw", _title_gap_inner("zzheader", "zzstage")), "title_gap")
     assert len(hits) >= 1, f"R-VIS-TITLE-GAP should fire on raw title/content crowd; got {hits}"
