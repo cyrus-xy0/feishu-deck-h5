@@ -136,13 +136,101 @@
     return false;
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [] };
+  // ---- box-distribution helpers (R-VIS-CROWD · 2026-05-30) ----
+  // Union bbox of visible TEXT-bearing leaves under root (decoration excluded).
+  const _contentUnion = (root) => {
+    let t = Infinity, b = -Infinity, any = false;
+    for (const el of root.querySelectorAll('*')) {
+      if (el.tagName === 'SVG' || el.tagName === 'svg' ||
+          el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+      if (!hasOwnText(el)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      any = true; t = Math.min(t, r.top); b = Math.max(b, r.bottom);
+    }
+    return any ? { top: t, bottom: b } : null;
+  };
+  // A visibly "framed" box (border / bg color / bg image) — text sits INSIDE a frame.
+  const _isFramedBox = (el) => {
+    const cs = getComputedStyle(el);
+    const hb = ['Top', 'Right', 'Bottom', 'Left'].some(s =>
+      parseFloat(cs['border' + s + 'Width'] || 0) > 0 &&
+      !/transparent|rgba\(0, 0, 0, 0\)/.test(cs['border' + s + 'Color']));
+    const bg = cs.backgroundColor, hbg = bg && !/transparent|rgba\(0, 0, 0, 0\)/.test(bg);
+    const hbi = cs.backgroundImage && cs.backgroundImage !== 'none';
+    return hb || hbg || hbi;
+  };
+  // Media tiles carry an intentionally edge-placed caption — excluded from crowd.
+  const _isMediaBox = (el) => {
+    const cs = getComputedStyle(el);
+    if (cs.backgroundImage && cs.backgroundImage !== 'none' && !/gradient/i.test(cs.backgroundImage)) return true;
+    if (el.querySelector('img,iframe,canvas,video,picture')) return true;
+    const raw = el.className;
+    const c = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString();
+    return /\b(photo|image|img|visual|mock|thumb|avatar|portrait|media|phone|screen)\b/i.test(c);
+  };
+  // grow-box verdict (改大自动拉高) for a sub-floor body element: if its font is
+  // bumped to FLOOR (24), how much taller does it get, and is there room — the
+  // box's own bottom slack PLUS canvas space below the box — to GROW THE BOX
+  // instead of shrinking the font? Pure measurement, no mutation. Lets the
+  // R-VIS-BODY-FLOOR finding say "提到 24 → 框可长高装得下" vs "无空间,需压内容".
+  const _growBox = (el, slide, scale) => {
+    const FLOOR = 24;
+    const px = parseFloat(getComputedStyle(el).fontSize) || FLOOR;
+    if (px >= FLOOR) return null;
+    const elH = el.getBoundingClientRect().height / scale;
+    const growNeeded = Math.round(elH * (FLOOR / px - 1)); // ∝ line-height bump
+    let node = el.parentElement, framed = null;
+    while (node && node !== slide) {
+      if (_isFramedBox(node) && !_isMediaBox(node)) { framed = node; break; }
+      node = node.parentElement;
+    }
+    const target = framed || slide;
+    const br = target.getBoundingClientRect();
+    const cu = _contentUnion(target);
+    const innerSlack = cu ? Math.max(0, (br.bottom - cu.bottom) / scale) : 0;
+    const sr = slide.getBoundingClientRect();
+    const canvasBelow = framed ? Math.max(0, (sr.bottom - br.bottom) / scale) : 0;
+    const room = Math.round(innerSlack + canvasBelow);
+    return { grow_needed_px: growNeeded, room_px: room,
+             can_grow: growNeeded <= room, in_box: !!framed };
+  };
+
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [], crowd: [], title_gap: [], peer_size: [], gutter: [], hero_floor: [], short_label_floor: [] };
   const slides = document.querySelectorAll('.slide');
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
     const label = slide.getAttribute('data-screen-label') || `slide-${slide_idx}`;
     const layout = slide.getAttribute('data-layout') || '';
     const isHeroLayout = HERO_LAYOUTS.has(layout);
+    const _scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+
+    // ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
+    // name-free 几何:framed 非媒体框,其文字内容离框"可见底边"很近(< 10px)
+    // 且明显比顶部更挤(下偏 ≥ 16px)= 文字被挤到框底(qingdao 3up 等高卡的
+    // "文字离下面太近"实测离底 3px / 顶部 38px)。与"松"(下方大留白,如 KPI 列
+    // 顶基线对齐,实测离底 16px+/262px)区分开 —— 松不触发,所以 stats 类天然
+    // 豁免,无需按版式名白名单。阈值 10px 给两侧各 ~6px 余量(校准:挤底 3/6px
+    // 触发、stats 16px 放行)。Hero 版式 / data-allow-imbalance 跳过。
+    if (!isHeroLayout && !slide.hasAttribute('data-allow-imbalance')) {
+      const _framed = [...slide.querySelectorAll('*')].filter(el =>
+        _isFramedBox(el) && !_isMediaBox(el) && el.getBoundingClientRect().height > 80 * _scale);
+      const _boxes = _framed.filter(el => !_framed.some(o => o !== el && o.contains(el)));
+      for (const box of _boxes) {
+        const cu = _contentUnion(box); if (!cu) continue;
+        const r = box.getBoundingClientRect();
+        const distTop = (cu.top - r.top) / _scale;       // text → box visible top edge
+        const distBottom = (r.bottom - cu.bottom) / _scale; // text → box visible bottom edge
+        if (distBottom < 10 && distTop > distBottom + 16) {
+          out.crowd.push({
+            idx: slide_idx, label, sel: shortSel(box),
+            top_px: Math.round(distTop), bottom_px: Math.round(distBottom),
+          });
+        }
+      }
+    }
 
     // ---- Overflow ----
     if (slide.scrollHeight > 1080 || slide.scrollWidth > 1920) {
@@ -157,7 +245,15 @@
     // content clipped invisibly. Slide-level R-OVERFLOW doesn't catch it
     // because the card itself fits in canvas. Common in dense 3-up narrative
     // cards. Skip .slide / .slide-frame themselves (intentional canvas clip).
-    const overflowCandidates = slide.querySelectorAll('.stage *');
+    // 2026-05-31 · raw coverage: a layout:"raw" slide has no .stage wrapper, so the
+    // .stage-scoped query would miss every clipped / spilling leaf. Fall back to all
+    // descendants ONLY for raw. Schema slides keep '.stage *' verbatim — including
+    // schema layouts that legitimately have NO .stage (section/cover/etc.), where a
+    // blanket '*' would surface decorative-numeral line-box clips as false positives
+    // (e.g. .chapter-num). So: zero schema regression, full raw coverage.
+    const overflowCandidates = slide.querySelector('.stage')
+      ? slide.querySelectorAll('.stage *')
+      : (layout === 'raw' ? slide.querySelectorAll('*') : slide.querySelectorAll('.stage *'));
     overflowCandidates.forEach(el => {
       if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return;
       const cs = window.getComputedStyle(el);
@@ -211,6 +307,54 @@
             });
           }
         }
+        // (a'') Visible TEXT-LEAF spill (R-VIS-CARD-OVERFLOW upgrade · 2026-05-31)
+        // (a') above only catches CONTAINERS (children>0; it compares child
+        // border-box bottoms). A pure TEXT LEAF — text but NO element children —
+        // has no child rect, so text that wraps an extra line and pokes past its
+        // cell slipped through unflagged (P2/P8 · #4 "自然语言搭建业务应用").
+        // Measure the leaf's own rendered line boxes via Range.getClientRects()
+        // vs the nearest framed ancestor's inner (border) box. Line boxes are the
+        // actual rendered rows, so a large-font leaf produces no false positive
+        // (the reason branch a' avoided scrollHeight in the first place).
+        else if (el.clientHeight > 0 && el.children.length === 0
+                 && hasOwnText(el) && !_isMediaBox(el)) {
+          // Nearest framed, non-media box that is the leaf ITSELF (a framed card
+          // whose own text overflows it) OR an ancestor (text spilling out of a
+          // separate framed cell, as in #4). Start at `el` so both cases catch.
+          let frame = null;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (_isFramedBox(n) && !_isMediaBox(n)) { frame = n; break; }
+          }
+          if (frame) {
+            const fr = frame.getBoundingClientRect();
+            const fcs = getComputedStyle(frame);
+            const innerBottom = fr.bottom - (parseFloat(fcs.borderBottomWidth) || 0);
+            const innerRight  = fr.right  - (parseFloat(fcs.borderRightWidth)  || 0);
+            const rng = document.createRange(); rng.selectNodeContents(el);
+            let lineBottom = -Infinity, lineRight = -Infinity, anyLine = false;
+            for (const lr of rng.getClientRects()) {
+              if (lr.width < 1 || lr.height < 1) continue;
+              anyLine = true;
+              lineBottom = Math.max(lineBottom, lr.bottom);
+              lineRight  = Math.max(lineRight,  lr.right);
+            }
+            if (anyLine) {
+              const spill = Math.max((lineBottom - innerBottom) / _scale,
+                                     (lineRight  - innerRight)  / _scale);
+              if (spill > 4) {
+                out.card_overflow.push({
+                  slide_idx,
+                  selector: shortSel(el),
+                  content_h: Math.round(lineBottom - fr.top),
+                  card_h: Math.round(innerBottom - fr.top),
+                  overflow_px: Math.round(spill),
+                  direction: 'leaf-text-spill',
+                  frame_sel: shortSel(frame),
+                });
+              }
+            }
+          }
+        }
       }
       // (b) Horizontal overflow on flex/grid container with nowrap children
       // (added 2026-05-22) — catches "flex row children too wide for parent,
@@ -257,6 +401,66 @@
         if (Math.abs(headerTop - expectedTop) > tolerance) {
           out.title_position.push({
             slide_idx, layout, actual_top: headerTop, expected_top: expectedTop,
+          });
+        }
+      }
+      // ---- R-VIS-TITLE-GAP · 正文顶到/重叠标题 (2026-05-31) ----
+      // R-VIS-TITLE-POSITION only checks the .header's ABSOLUTE top (≈61); it
+      // can't see content that grew/overflowed UP toward the title. Here measure
+      // the RELATIVE gap: header bottom → topmost real content block inside .stage.
+      // Content is in .stage, the title in .header (cross-container — R-OVERLAP,
+      // same-container only, never compares them). < 24px (design px) or negative
+      // (overlap) → flag (#5 sections grew into the title).
+      // Prefer framework chrome (:scope > .header + :scope > .stage). When absent
+      // (raw / hand-built / imported markup), fall back to NAME-FREE bands: title =
+      // topmost own-text element in a title tier (≥24px) within the top 40% of the
+      // slide; content = the topmost real block below it. Schema decks always have
+      // .header + .stage → the named path runs and the fallback never fires, so
+      // zero schema regression.
+      let tgTitleRect = null, tgTitleSel = null, tgContentTop = Infinity;
+      const tgStage = slide.querySelector(':scope > .stage');
+      if (header && tgStage) {
+        tgTitleRect = header.getBoundingClientRect();
+        tgTitleSel = shortSel(header);
+        for (const el of tgStage.querySelectorAll('*')) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          const r = el.getBoundingClientRect();
+          if (r.width > 40 && r.height > 16) tgContentTop = Math.min(tgContentTop, r.top);
+        }
+      } else if (!header) {
+        const sr = slide.getBoundingClientRect();
+        let tEl = null, tTop = Infinity;
+        for (const el of slide.querySelectorAll('*')) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          if (!hasOwnText(el)) continue;
+          const cs = getComputedStyle(el);
+          if (cs.position === 'absolute' || cs.position === 'fixed') continue;   // skip chrome / decor
+          if (Math.round(parseFloat(cs.fontSize)) < 24) continue;                // title tier only
+          const r = el.getBoundingClientRect();
+          if (r.width <= 40 || r.height <= 16) continue;
+          if ((r.top - sr.top) > sr.height * 0.4) continue;                      // must sit near the top
+          if (r.top < tTop) { tTop = r.top; tEl = el; }
+        }
+        if (tEl) {
+          tgTitleRect = tEl.getBoundingClientRect();
+          tgTitleSel = shortSel(tEl);
+          for (const el of slide.querySelectorAll('*')) {
+            if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
+            if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+            const cs = getComputedStyle(el);
+            if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+            const r = el.getBoundingClientRect();
+            if (r.width > 40 && r.height > 16 && r.top >= tgTitleRect.bottom - 2) tgContentTop = Math.min(tgContentTop, r.top);
+          }
+        }
+      }
+      // contentTop must sit BELOW the title's own top (else it's a full-bleed bg /
+      // absolute decor spanning the slide — not "content below title").
+      if (tgTitleRect && tgContentTop !== Infinity && tgContentTop >= tgTitleRect.top - 2) {
+        const gap = (tgContentTop - tgTitleRect.bottom) / _scale;
+        if (gap < 24) {
+          out.title_gap.push({
+            slide_idx, layout, gap_px: Math.round(gap), title_sel: tgTitleSel,
           });
         }
       }
@@ -523,6 +727,8 @@
         char_count: directText.length,
         preview: directText.length > 40 ? directText.slice(0, 40) + '…' : directText,
         lifted: !!el.closest('[data-lifted]'),
+        // grow-box verdict: can we 改大自动拉高 (enlarge font + grow box) here?
+        ...(_growBox(el, slide, _scale) || {}),
       });
     });
 
@@ -766,7 +972,14 @@
         || slide.querySelector(':scope > .nodes')
         || slide.querySelector(':scope > .toc')
         || slide.querySelector(':scope > .table-wrap')
-        || slide.querySelector(':scope > .stack');
+        || slide.querySelector(':scope > .stack')
+        // 2026-05-31 · raw coverage: no framework container (raw / hand-built /
+        // imported markup) → measure balance against the slide itself. Chrome
+        // (wordmark / pageno) is position:absolute and is filtered out of both
+        // `blocks` and `contentEls` below, so the geometry still reflects real
+        // content. Schema decks always resolve a named container first → the
+        // fallback never fires for them, so zero schema regression.
+        || slide;
       // 若 .stage 只包了一层 .grid / .flow / 等,钻进去——gap 要量在真正的
       // 内容容器上,不要把 stage→grid 的 padding 误算成内容空隙。
       while (bodyContainer && bodyContainer.children.length === 1) {
@@ -835,6 +1048,35 @@
                   gap_px: Math.round(gap),
                   between_a: shortSel(blocks[i - 1].el),
                   between_b: shortSel(blocks[i].el),
+                });
+              }
+            }
+            // 横向失衡 / 单侧空壳 (2026-05-31 · P10):真实内容(text+media 叶子,
+            // 空框不计)挤向一侧,另一侧 ≥22% 横向空。右侧若有图(media 计入)则
+            // 不报 → 只揪真空(#36「右半空壳面板」/ 内容偏左右侧空)。raw px,
+            // 与上面纵向阈值一致。横向 3-up 内容铺满 → 两侧 slack 都小,不报。
+            const contentEls = [...bodyContainer.querySelectorAll('*')].filter(el => {
+              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return false;
+              const cs = getComputedStyle(el);
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+              const r = el.getBoundingClientRect();
+              if (r.width < 8 || r.height < 8) return false;
+              const hasText = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+              const isMedia = el.matches('img,video,canvas,iframe,picture,svg')
+                || (cs.backgroundImage && cs.backgroundImage !== 'none' && !/gradient/i.test(cs.backgroundImage));
+              return hasText || isMedia;
+            });
+            if (contentEls.length) {
+              let cl = Infinity, cr = -Infinity;
+              for (const el of contentEls) { const r = el.getBoundingClientRect(); cl = Math.min(cl, r.left); cr = Math.max(cr, r.right); }
+              const leftSlack = cl - bodyRect.left, rightSlack = bodyRect.right - cr, bw = bodyRect.width;
+              if (leftSlack + rightSlack > 0.22 * bw
+                  && Math.abs(leftSlack - rightSlack) > 0.22 * bw
+                  && Math.abs(leftSlack - rightSlack) > 200) {
+                out.balance.push({
+                  slide_idx, container_sel: shortSel(bodyContainer), kind: 'side-empty',
+                  left_slack: Math.round(leftSlack), right_slack: Math.round(rightSlack),
+                  body_width: Math.round(bw),
                 });
               }
             }
@@ -1074,6 +1316,304 @@
           }
         }
       }
+    }
+
+    // ---- R-VIS-PEER-SIZE · 同角色并列 sibling 字号不一致 (2026-05-31) ----
+    // P5:#4 「18 与 22 混」—— 同一并列容器内、语义角色相同(body/desc/feat-body…)
+    // 的 sibling，computed font-size 应相等(容差 1px)。角色 token 必须字面相等
+    // 才互比 —— 标题/eyebrow/不同角色本就该不同,零跨角色误报。豁免:hero/SVG/
+    // mock/chrome/单元素组/data-allow-peer-size。
+    if (!isHeroLayout) {
+      const PEER_PARALLEL = new Set([
+        'overview-grid', 'north-star-map', 'scene-grid', 'logo-wall',
+        'verdict-grid', 'principle-band', 'kpi-strip', 'arch-stack',
+        'arch-hands', 'pipeline', 'steps', 'pills', 'toc',
+        'agenda-stack', 'todo-grid', 'dir-grid',
+      ]);
+      const ROLE_KEYS = [...BODY_KEYS, ...META_KEYS];
+      const _cls = (el) => {
+        const raw = el.className;
+        return (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase();
+      };
+      // roleOf — three tiers, fine→coarse, picking "same role" without ever conflating
+      // distinct roles:
+      //   1. a KNOWN semantic keyword (body / desc / num / …) — schema behaviour, UNCHANGED.
+      //   2. else the element's EXACT class signature (sorted class tokens). Two siblings
+      //      that share the SAME class (even an arbitrary raw one like `zztext`) are the
+      //      same role; a title vs its EN-subtitle vs a number — DIFFERENT classes — are
+      //      NOT compared. This is the distinction the earlier `tag:div` fallback lost
+      //      (it merged all <div> into one role → 8 false findings); exact class keeps
+      //      them apart. Raw decks that label their peers with ANY consistent class are
+      //      now covered; cross-class hierarchy is never flagged.
+      //   3. else (no class at all) null — too ambiguous to assign a role geometrically.
+      const roleOf = (el) => {
+        const c = _cls(el);
+        for (const k of ROLE_KEYS) if (c.includes(k)) return k;
+        const sig = c.trim().split(/\s+/).filter(Boolean).sort().join('.');
+        return sig || null;
+      };
+      // parallelAnchor: a known parallel / grid / card class first (schema, unchanged);
+      // else the nearest flex / grid container (same geometry GUTTER uses) so raw peers in
+      // an unnamed flex/grid row still anchor. Null only when no such container exists.
+      const parallelAnchor = (el) => {
+        for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
+          const toks = _cls(n).split(/\s+/).filter(Boolean);
+          if (toks.some(t => PEER_PARALLEL.has(t) || GRID_KEYS.includes(t) || CARD_KEYS.includes(t))) return n;
+          if (CARD_SUFFIXES.some(suf => toks.some(t => t.endsWith(suf)))) return n;
+        }
+        for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
+          const d = getComputedStyle(n).display;
+          if (d === 'flex' || d === 'inline-flex' || d === 'grid' || d === 'inline-grid') return n;
+        }
+        return null;
+      };
+      const peerOptOut = (el) => {
+        for (let n = el; n && n !== slide; n = n.parentElement)
+          if (n.hasAttribute && n.hasAttribute('data-allow-peer-size')) return true;
+        return false;
+      };
+      const groups = new Map();
+      const anchorIds = new WeakMap(); let aSeq = 0;
+      slide.querySelectorAll('*').forEach(el => {
+        if (!hasOwnText(el)) return;
+        if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+        if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+        const role = roleOf(el); if (!role) return;
+        let inMock = false;
+        for (let n = el; n && n !== slide; n = n.parentElement) { if (hasAnyClass(n, TIER_MOCK)) { inMock = true; break; } }
+        if (inMock || peerOptOut(el)) return;
+        const anchor = parallelAnchor(el); if (!anchor) return;
+        const cs = window.getComputedStyle(el);
+        if (cs.visibility === 'hidden' || cs.display === 'none') return;
+        const px = Math.round(parseFloat(cs.fontSize)); if (!px || px < 8) return;
+        if (!anchorIds.has(anchor)) anchorIds.set(anchor, ++aSeq);
+        const key = anchorIds.get(anchor) + ' ' + role;
+        if (!groups.has(key)) groups.set(key, { anchor, role, items: [] });
+        groups.get(key).items.push({ el, px });
+      });
+      for (const { anchor, role, items } of groups.values()) {
+        if (items.length < 2) continue;
+        const sizes = items.map(i => i.px);
+        const minPx = Math.min(...sizes), maxPx = Math.max(...sizes);
+        if (maxPx - minPx <= 1) continue;
+        const tally = {}; sizes.forEach(s => { tally[s] = (tally[s] || 0) + 1; });
+        const majorityPx = +Object.keys(tally).sort((a, b) => tally[b] - tally[a] || (+b) - (+a))[0];
+        const offenders = items.filter(i => Math.abs(i.px - majorityPx) > 1);
+        if (!offenders.length) continue;
+        out.peer_size.push({
+          slide_idx, container_sel: shortSel(anchor), role, majority_px: majorityPx,
+          sizes: [...new Set(sizes)].sort((a, b) => a - b), count: items.length,
+          offenders: offenders.slice(0, 4).map(o => ({ sel: shortSel(o.el), px: o.px })),
+          lifted: offenders.some(o => !!o.el.closest('[data-lifted]')),
+        });
+      }
+    }
+
+    // ---- R-VIS-GUTTER · 同组相邻框间距不等 / 框内 padding 不一致 (2026-05-31) ----
+    // P7:#3 卡片左右 28px 但到下面 strap 仅 8px;#4 同组 cell padding 不一致。
+    // name-free 几何,双闸(max>min*1.8 且差>10px)滤掉均匀网格合法差与亚像素。
+    // 豁免:hero / data-allow-imbalance / 媒体框 / <40px chrome / <3 同组框。
+    if (!isHeroLayout && !slide.hasAttribute('data-allow-imbalance')) {
+      const _vis = (el) => {
+        const cs = getComputedStyle(el);
+        return cs.display !== 'none' && cs.visibility !== 'hidden'
+            && cs.position !== 'absolute' && cs.position !== 'fixed';
+      };
+      const _gutterSeen = new Set();
+      slide.querySelectorAll('*').forEach(container => {
+        const ccs = getComputedStyle(container);
+        if (!['flex', 'inline-flex', 'grid', 'inline-grid'].includes(ccs.display)) return;
+        const kids = [...container.children].filter(el => {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return false;
+          if (!_vis(el) || !_isFramedBox(el) || _isMediaBox(el)) return false;
+          const r = el.getBoundingClientRect();
+          return r.height > 40 * _scale && r.width > 40 * _scale;
+        });
+        if (kids.length < 3) return;
+        const rects = kids.map(el => ({ el, r: el.getBoundingClientRect() }));
+        const xs = rects.map(o => o.r.left + o.r.width / 2);
+        const ys = rects.map(o => o.r.top + o.r.height / 2);
+        const horizontal = (Math.max(...xs) - Math.min(...xs)) >= (Math.max(...ys) - Math.min(...ys));
+        rects.sort((a, b) => horizontal ? (a.r.left - b.r.left) : (a.r.top - b.r.top));
+        const gutters = [];
+        for (let i = 1; i < rects.length; i++) {
+          const a = rects[i - 1].r, b = rects[i].r;
+          if (horizontal) {
+            if (Math.abs((a.top + a.height / 2) - (b.top + b.height / 2)) > a.height / 2) continue;
+            gutters.push(Math.max(0, (b.left - a.right) / _scale));
+          } else {
+            if (Math.abs((a.left + a.width / 2) - (b.left + b.width / 2)) > a.width / 2) continue;
+            gutters.push(Math.max(0, (b.top - a.bottom) / _scale));
+          }
+        }
+        if (gutters.length >= 2) {
+          const gmin = Math.min(...gutters), gmax = Math.max(...gutters);
+          if (gmax > (gmin < 1 ? 1 : gmin) * 1.8 && (gmax - gmin) > 10) {
+            const key = 'g::' + shortSel(container);
+            if (!_gutterSeen.has(key)) {
+              _gutterSeen.add(key);
+              out.gutter.push({
+                slide_idx, label, kind: 'gutter', container_sel: shortSel(container),
+                axis: horizontal ? 'row' : 'column', gutters: gutters.map(g => Math.round(g)),
+                min_px: Math.round(gmin), max_px: Math.round(gmax), count: kids.length,
+              });
+            }
+          }
+        }
+        const byTag = {};
+        for (const { el } of rects) (byTag[el.tagName] = byTag[el.tagName] || []).push(el);
+        for (const tag of Object.keys(byTag)) {
+          const group = byTag[tag];
+          if (group.length < 3) continue;
+          const pads = [];
+          for (const el of group) {
+            const cu = _contentUnion(el); if (!cu) { pads.length = 0; break; }
+            const r = el.getBoundingClientRect();
+            const pd = Math.min((cu.top - r.top), (r.bottom - cu.bottom)) / _scale;
+            if (pd < -2) { pads.length = 0; break; }
+            pads.push(Math.max(0, pd));
+          }
+          if (pads.length < 3) continue;
+          const pmin = Math.min(...pads), pmax = Math.max(...pads);
+          if (pmax > (pmin < 1 ? 1 : pmin) * 1.8 && (pmax - pmin) > 10) {
+            const key = 'p::' + shortSel(container) + '::' + tag;
+            if (!_gutterSeen.has(key)) {
+              _gutterSeen.add(key);
+              out.gutter.push({
+                slide_idx, label, kind: 'padding', container_sel: shortSel(container),
+                cell_tag: tag.toLowerCase(), pads: pads.map(p => Math.round(p)),
+                min_px: Math.round(pmin), max_px: Math.round(pmax), count: group.length,
+              });
+            }
+          }
+        }
+      });
+    }
+
+    // ---- R-VIS-HERO-FLOOR · hero 主元素字号下限 (2026-05-31) ----
+    // 方向 = 尺寸下限,不是白名单(对比 R-VIS-TIER 只判 px 在不在 HERO_SIZES)。
+    // P11:封面 82px < 100 master → "偏小、不够大气"。下限取 master-spec 的保守
+    // 分数,只有真偏小才触发。font-size 不受 --fs-scale 影响,直接读 px。
+    const HERO_FLOORS = {
+      'cover':    [{ sel: 'h1.title, .title-zh, .cover-title, .cover-h1', floor: 88, role: '封面主标题', spec: 100 }],
+      'section':  [{ sel: 'h2.title, .title-zh', floor: 72, role: '章节标题', spec: 88 },
+                   { sel: '.chapter-num', floor: 112, role: '章节序号', spec: 160 }],
+      'big-stat': [{ sel: '.num', floor: 168, role: '大数字', spec: 240 }],
+      'stats':    [{ sel: '.col .num', floor: 92, role: '指标数字', spec: 132 }],
+      'quote':    [{ sel: 'blockquote, .quote-body, .bq', floor: 56, role: '引言主体', spec: 88 }],
+    };
+    const KPI_FLOOR = { sel: '.kpi-val, .kpi .v, .metric-value', floor: 40, role: 'KPI 值', spec: 56 };
+    const _heroFloorCheck = (specs) => {
+      for (const { sel, floor, role, spec } of specs) {
+        const cands = [...slide.querySelectorAll(sel)].filter(el => {
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+          const r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return false;
+          for (let n = el; n && n !== slide; n = n.parentElement) if (hasAnyClass(n, TIER_MOCK)) return false;
+          for (let n = el; n; n = n.parentElement) if (n.dataset && n.dataset.allowTypescale != null) return false;
+          return true;
+        });
+        if (!cands.length) continue;
+        let best = null, bestPx = -1;
+        for (const el of cands) {
+          const px = Math.round(parseFloat(getComputedStyle(el).fontSize));
+          if (px > bestPx) { bestPx = px; best = el; }
+        }
+        if (best && bestPx > 0 && bestPx < floor) {
+          out.hero_floor.push({
+            slide_idx, label, layout, role, selector: shortSel(best),
+            rendered_px: bestPx, floor_px: floor, spec_px: spec,
+            lifted: !!best.closest('[data-lifted]'),
+          });
+        }
+      }
+    };
+    if (HERO_FLOORS[layout]) {
+      _heroFloorCheck(HERO_FLOORS[layout]);
+      // 2026-05-31 · raw coverage: an arbitrary-class hero (e.g. a raw slide that
+      // declares a hero role via _orig_layout → data-layout=cover/section/...) is
+      // missed by the class selectors above. If NONE of the layout's spec selectors
+      // matched a visible element, fall back to the slide's LARGEST visible own-text
+      // font vs the layout's SMALLEST floor — name-free element pick, still gated by
+      // the hero layout token. (Undeclared data-layout="raw" has no HERO_FLOORS entry
+      // → still skipped: a raw slide with no declared role is not a known hero, so
+      // its largest font must not be judged against a hero floor.)
+      const _specs = HERO_FLOORS[layout];
+      const _classHit = _specs.some(s => [...slide.querySelectorAll(s.sel)].some(el => {
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+        const r = el.getBoundingClientRect();
+        return r.width >= 2 && r.height >= 2;
+      }));
+      if (!_classHit) {
+        const _minFloor = Math.min(..._specs.map(s => s.floor));
+        let _best = null, _bestPx = -1;
+        slide.querySelectorAll('*').forEach(el => {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          if (!hasOwnText(el)) return;
+          for (let n = el; n && n !== slide; n = n.parentElement) if (hasAnyClass(n, TIER_MOCK)) return;
+          for (let n = el; n; n = n.parentElement) if (n.dataset && n.dataset.allowTypescale != null) return;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          const r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return;
+          const px = Math.round(parseFloat(cs.fontSize));
+          if (px > _bestPx) { _bestPx = px; _best = el; }
+        });
+        if (_best && _bestPx > 0 && _bestPx < _minFloor) {
+          out.hero_floor.push({
+            slide_idx, label, layout, role: 'hero 主元素 (name-free)', selector: shortSel(_best),
+            rendered_px: _bestPx, floor_px: _minFloor, spec_px: _minFloor,
+            lifted: !!_best.closest('[data-lifted]'),
+          });
+        }
+      }
+    }
+    _heroFloorCheck([KPI_FLOOR]);
+
+    // ---- R-VIS-SHORT-LABEL-FLOOR · 1–7 字短标签 / SVG 轴标 < 18px (2026-05-31) ----
+    // R-VIS-BODY-FLOOR 有 directText.length<8 → return 门槛(豁免图标/单位/短数字),
+    // 不能删;但它放过了图表轴标 / 短分类标签(1–7 字,投影看不清)。这条补缝,
+    // 并专门下钻 SVG <text>/<tspan>(其他所有渲染检查都跳过 SVG 轴标)。
+    // computed < 18px → WARN。自带 chrome/mock 正则(避免依赖块内常量)。
+    const SHORT_FLOOR = 18;
+    const _SL_CHROME = /(^|[\s-])(eyebrow|kicker|pill|tag|chip|badge|source|pageno|footnote|attrib|copyright|wordmark|unit|legend)([\s-]|$)/i;
+    const _SL_MOCK = /(mock|phone|screen|device|chat|im-|app-ui|pd-card|doc-frame)/i;
+    const _slClass = (el) => { const r = el.className; return (r && r.baseVal !== undefined ? r.baseVal : (r || '')).toString(); };
+    const seenShortLabel = new Set();
+    if (!isHeroLayout) {
+      slide.querySelectorAll('*, text, tspan').forEach(el => {
+        if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+        if (!hasOwnText(el)) return;
+        const isSvgText = !!el.ownerSVGElement || el.tagName === 'text' || el.tagName === 'TEXT' || el.tagName === 'tspan';
+        const px = Math.round(parseFloat(getComputedStyle(el).fontSize) || 0);
+        if (!px || px >= SHORT_FLOOR) return;
+        let directText = '';
+        for (const n of el.childNodes) if (n.nodeType === 3) directText += n.textContent;
+        directText = directText.trim();
+        if (!directText) return;
+        const cjk = (directText.match(/[一-鿿]/g) || []).length;
+        const latin = (directText.match(/[A-Za-z0-9%]/g) || []).length;
+        const len = Math.max(cjk, latin) || directText.length;
+        if (len < 1 || len > 7) return;                 // 8+ 归 R-VIS-BODY-FLOOR
+        if (_SL_CHROME.test(_slClass(el))) return;
+        let skip = false;
+        for (let n = el; n && n !== slide; n = n.parentElement) {
+          if (n !== el && (_SL_MOCK.test(_slClass(n)) || _isMediaBox(n))) { skip = true; break; }
+          if (n.dataset && n.dataset.allowBodyFloor != null) { skip = true; break; }
+        }
+        if (skip) return;
+        const sel = shortSel(el);
+        const key = slide_idx + '::' + sel + '::' + px;
+        if (seenShortLabel.has(key)) return;
+        seenShortLabel.add(key);
+        out.short_label_floor.push({
+          slide_idx, selector: sel, rendered_px: px, char_count: len, is_svg: isSvgText,
+          text: directText.length > 16 ? directText.slice(0, 16) + '…' : directText,
+          lifted: !!(el.closest && el.closest('[data-lifted]')),
+        });
+      });
     }
   });
 

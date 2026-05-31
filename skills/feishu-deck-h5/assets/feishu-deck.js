@@ -23,6 +23,156 @@
 
   let activeController = null;       // tracks the current init's AbortController
 
+  // ============================================================
+  // Runtime auto-balance (2026-05-30): after scale-to-fit, geometrically fix
+  // mis-distributed boxes so RAW / legacy decks (which bypass the schema
+  // correct-by-construction defaults) come out balanced ON LOAD — not
+  // detected-then-fixed. name-free / geometric (no layout-name whitelist).
+  //  · measurement-gated: only touches slides that actually measure crowded.
+  //  · apply-measure-keep-or-revert: a correction is kept ONLY if it reduces
+  //    crowding without introducing new canvas overflow → never makes a slide
+  //    worse (genuinely over-full boxes, e.g. content 161px too tall, revert).
+  //  · skips hero layouts, [data-allow-imbalance], [data-no-autobalance] decks.
+  //  · content-visibility hides non-current slides in present mode, so each
+  //    slide is balanced the first time it is actually laid out (initial pass
+  //    for current/scroll slides, the is-current observer for the rest).
+  //  · NO new ResizeObserver / addEventListener — stays within P52/P53 budget.
+  // ============================================================
+  const HERO_AB = new Set(['cover', 'section', 'big-stat', 'quote', 'image-text', 'end']);
+  const _abHasText = (el) => {
+    for (const n of el.childNodes) if (n.nodeType === 3 && n.textContent.trim()) return true;
+    return false;
+  };
+  const _abTextUnion = (root) => {
+    let t = Infinity, b = -Infinity, any = false;
+    root.querySelectorAll('*').forEach((el) => {
+      if (/^(SVG|svg|SCRIPT|STYLE)$/.test(el.tagName) || !_abHasText(el)) return;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      any = true; t = Math.min(t, r.top); b = Math.max(b, r.bottom);
+    });
+    return any ? { top: t, bottom: b } : null;
+  };
+  const _abFramed = (el) => {
+    const cs = getComputedStyle(el);
+    const border = ['Top', 'Right', 'Bottom', 'Left'].some((s) =>
+      parseFloat(cs['border' + s + 'Width'] || 0) > 0 &&
+      !/transparent|rgba\(0, 0, 0, 0\)/.test(cs['border' + s + 'Color']));
+    const bg = cs.backgroundColor && !/transparent|rgba\(0, 0, 0, 0\)/.test(cs.backgroundColor);
+    const bgi = cs.backgroundImage && cs.backgroundImage !== 'none';
+    return border || bg || bgi;
+  };
+  const _abMedia = (el) => {
+    const cs = getComputedStyle(el);
+    if (cs.backgroundImage && cs.backgroundImage !== 'none' && !/gradient/i.test(cs.backgroundImage)) return true;
+    if (el.querySelector('img,iframe,canvas,video,picture')) return true;
+    const raw = el.className, c = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString();
+    return /\b(photo|image|img|visual|mock|thumb|avatar|portrait|media|phone|screen)\b/i.test(c);
+  };
+  // Per-slide measurement: crowd severity (framed box text jammed against its
+  // bottom edge) + spill (how far any framed box bottom passes the slide edge).
+  function _abMeasure(slide) {
+    const scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+    const sb = slide.getBoundingClientRect().bottom;
+    const all = [...slide.querySelectorAll('*')].filter((el) =>
+      _abFramed(el) && !_abMedia(el) && el.getBoundingClientRect().height > 80 * scale);
+    const boxes = all.filter((el) => !all.some((o) => o !== el && o.contains(el)));
+    let severity = 0, spill = 0, overflow = 0; const crowded = [], overflowed = [];
+    for (const box of boxes) {
+      const r = box.getBoundingClientRect();
+      spill = Math.max(spill, (r.bottom - sb) / scale);
+      const cu = _abTextUnion(box); if (!cu) continue;
+      const distTop = (cu.top - r.top) / scale, distBottom = (r.bottom - cu.bottom) / scale;
+      // 文字溢出框底(distBottom<0)= grow-box 的对象:框被写死/挤扁,内容掉出去。
+      if (distBottom < -1) { overflow += (-distBottom); overflowed.push([box, -distBottom]); }
+      if (distBottom < 10 && distTop > distBottom + 16) { crowded.push(box); severity += (16 - distBottom); }
+    }
+    return { severity, spill, overflow, crowded, overflowed };
+  }
+  // HARD RULE (death rule): auto-balance must NEVER move a content-page title
+  // or subtitle. These positions are snapshotted before any correction and
+  // re-checked after — if a correction shifts ANY of them, the whole slide is
+  // reverted. Belt: corrections only un-stretch the crowded box's FRAMED peers,
+  // never title/non-box siblings.
+  const _abTitleEls = (slide) => [...slide.querySelectorAll(
+    '.header, .title-zh, .title-en, .subtitle, .eyebrow, .kicker, ' +
+    '.header h1, .header h2, .header h3')];
+
+  function balanceSlide(slide) {
+    const layout = slide.getAttribute('data-layout') || '';
+    if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return;
+    const before = _abMeasure(slide);
+    if (before.severity === 0 && before.overflow === 0) return;  // balanced → no-op (schema decks)
+    // Snapshot title/subtitle positions — they may not move (hard rule).
+    const titleSnap = _abTitleEls(slide).map((el) => {
+      const r = el.getBoundingClientRect(); return [el, r.top, r.left];
+    });
+    // Correction: un-stretch the crowded box's FRAMED peers only (content-sized
+    // + shared centerline; never a title/other sibling) + center content
+    // vertically inside flex-column boxes — the content-3up fix on raw geometry.
+    const touched = [];
+    const rows = new Set();
+    before.crowded.forEach((box) => { if (box.parentElement) rows.add(box.parentElement); });
+    rows.forEach((p) => {
+      for (const ch of p.children) {
+        if (ch.nodeType !== 1 || !_abFramed(ch) || _abMedia(ch)) continue;  // peers only
+        touched.push([ch, 'alignSelf', ch.style.alignSelf]);
+        ch.style.alignSelf = 'center';
+      }
+    });
+    before.crowded.forEach((box) => {
+      const cs = getComputedStyle(box);
+      if (cs.display.indexOf('flex') >= 0 && cs.flexDirection.indexOf('column') === 0) {
+        touched.push([box, 'justifyContent', box.style.justifyContent]);
+        box.style.justifyContent = 'center';
+      }
+    });
+    // GROW-BOX (2026-05-31): a box whose text overflows its bottom (written-in /
+    // squeezed-flat height) → raise its min-height to contain the content (the
+    // runtime version of grow-box-fit's 拉高框). We grow OPTIMISTICALLY here;
+    // the measure-or-revert guard below is the safety net — if growing pushes
+    // the slide past its edge (no canvas room) or moves the title, the whole
+    // thing reverts (incl. these min-heights). Never shrinks; never touches fonts.
+    const scaleAB = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+    before.overflowed.forEach(([box, over]) => {
+      const r = box.getBoundingClientRect();
+      touched.push([box, 'minHeight', box.style.minHeight]);
+      box.style.minHeight = Math.ceil(r.height / scaleAB + over + 6) + 'px';
+    });
+    const after = _abMeasure(slide);
+    const titleMoved = titleSnap.some(([el, t, l]) => {
+      const r = el.getBoundingClientRect();
+      return Math.abs(r.top - t) > 1 || Math.abs(r.left - l) > 1;
+    });
+    // Keep if EITHER crowd OR overflow got meaningfully better, AND neither got
+    // worse, AND no new canvas spill, AND the title didn't move (death rule).
+    const crowdBetter = after.severity < before.severity - 0.5;
+    const overflowBetter = after.overflow < before.overflow - 2;
+    const improved = (crowdBetter || overflowBetter) &&
+                     after.severity <= before.severity + 0.5 &&
+                     after.overflow <= before.overflow + 2 &&
+                     after.spill <= Math.max(before.spill, 2) && !titleMoved;
+    if (improved) {
+      slide.setAttribute('data-fs-autobalanced', '');
+    } else {
+      for (const [el, prop, val] of touched) el.style[prop] = val || '';  // incl. title-moved revert
+    }
+  }
+  function maybeBalance(slide) {
+    if (!slide || slide.hasAttribute('data-fs-balanced')) return;
+    const deck = slide.closest('.deck');
+    if (deck && deck.hasAttribute('data-no-autobalance')) return;
+    // content-visibility:auto skips off-screen slides → their content has 0
+    // size. Only tag+balance once a content container is actually laid out;
+    // otherwise leave untagged so the is-current observer retries when visible.
+    const probe = slide.querySelector('.stage, .grid, .flow, .nodes, .toc, .stack, .header, [class*="card"]');
+    if (!probe || probe.getBoundingClientRect().height < 30) return;
+    slide.setAttribute('data-fs-balanced', '');
+    try { balanceSlide(slide); } catch (e) { /* never break the deck over layout */ }
+  }
+
   function init() {
     const deck = document.querySelector('.deck');
     if (!deck) return null;
@@ -188,6 +338,10 @@
     // starts the current slide's video.
     const mediaState = frames.map((f) => f.classList.contains('is-current'));
     frames.forEach((f, i) => syncFrameMedia(f, mediaState[i]));
+    // Initial auto-balance pass: balances the current slide (present mode) and
+    // every laid-out slide (scroll mode). Non-current present-mode slides are
+    // content-visibility-hidden here and get balanced on first enter (below).
+    requestAnimationFrame(() => frames.forEach((f) => maybeBalance(f.querySelector('.slide'))));
     const mediaObserver = new MutationObserver((muts) => {
       for (const m of muts) {
         const i = frames.indexOf(m.target);
@@ -196,6 +350,9 @@
         if (now === mediaState[i]) continue;   // class changed but is-current didn't
         mediaState[i] = now;
         syncFrameMedia(m.target, now);
+        // Balance a present-mode slide the first time it becomes visible
+        // (content-visibility makes it measurable only now).
+        if (now) requestAnimationFrame(() => maybeBalance(m.target.querySelector('.slide')));
       }
     });
     frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));

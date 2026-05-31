@@ -629,6 +629,30 @@ North star: **the deck must not silently invent material the user couldn't defen
 
 > 📎 详见 `references/run-artifacts.md`
 
+## MAKING-OF LOG (default-on) — `log/` per run · 制作全过程纪录片
+
+记录一份 deck 是怎么一步步做出来的(给同学还原过程 + 给自己诊断 skill bug),
+平行存放在 `runs/<deck>/log/`,**绝不进 `out/`**。工具:`log-tool/deck-log.py`
+(schema/细节见 `log-tool/README.md`)。**默认开**;`deck-log off` 全局停录。
+
+固定动作(做 GENERATION 类 deck 时按部就班执行,无需用户提醒):
+
+1. **开工**(建好 WORKSPACE 后):`deck-log init <run-dir> --title "<deck 名>"`
+   → 搭 `log/` 骨架、记下当前会话 transcript 路径、设为活跃 deck。**每个回合的输入+我的
+   原始回复无需手动记**:它们本就在会话 transcript 里,`render` 时自动捞 `start_ts` 之后
+   那段(0 token,纯文件读;**不挂任何常驻 hook**)。自动找错了用 `init --transcript <path>`。
+2. **每出一版**:`deck-log snapshot <run-dir> --label "<这版做了啥>"`
+   → 冻结副本 + Playwright 截全套图(每页 1920×1080)+ 跑 check-distribution 校验。
+3. **用户吐槽某页 / 我发现问题**:`deck-log event <run-dir> --type problem --slide N
+   --msg "<问题>" --said "<用户原话>"`;修好后 `--type fix --resolves "<那个问题>"`。
+   (这条 problem→fix 因果链是后面 `diagnose` 判断"哪些是框架 bug"的关键。)
+4. **可选**给关键回合补一行摘要:`deck-log event <run-dir> --type summary
+   --json '{"n":<回合号>,"msg":"<一句话>"}'`。
+5. **收尾**:`deck-log render <run-dir>` → 生成 `log/making-of.html`(双击即看;
+   `--inline` 出可分享单文件)。告诉用户路径。
+6. **诊断**(用户问"哪些是 skill 该修的 bug"时):`deck-log diagnose <run-dir>` 出
+   digest,**丢给 subagent 分析**,按 `AUDIT-*.md` 的 F-NN 工单格式产出候选工单。
+
 Generate a dark, cinematic Lark / 飞书 brand-aligned **HTML deck** at 1920×1080 in a single
 self-contained file that:
 
@@ -844,6 +868,28 @@ The `examples/sample-deck.html` file is built this way and is the reference outp
 Enforced by `validate.py` rule **R48** (`audit_default_centering`) — blocks delivery if a fixed-shape layout's container lacks centering.
 
 > 📎 细节见 `references/layout-recipes.md`
+
+## 布局正确性 = 一次做对(correct-by-construction)优先,校验是安全网
+
+**目标:deck 生成出来本身布局就对,而不是每次靠校验抓出来再改。** 优先级:
+
+1. **生成即对(主力)** —— 居中、内容尺寸、卡片分布等布局正确性由**框架 CSS / schema 默认**保证(`.stage` 居中;版式 scoped 默认,如 content-3up / process / matrix / before-after / logo-wall 的"内容尺寸 + 共享中线 + 卡内垂直居中")。schema 路径理想是"零 finding":你描述 *what*,框架负责 *layout*,不手调字号/位置去凑。
+2. **校验(R48 / R-VIS-BALANCE / R-VIS-CROWD / L1–L4 …)= 安全网,不是主力** —— 只兜 construction 保证不了的(`layout: raw` 手写页、极端内容、外来 deck)。理想状态它越来越安静;**靠校验反复抓同一类布局问题 = 信号:该把它修进框架默认**。
+3. **反复出现的版式缺陷 → 修框架,别只加检测、更别每个 deck 局部 workaround。** 维护者标准打法:对该版式写 **scoped CSS 默认**(覆盖该 `data-layout`,不动全局 legacy 规则)→ 用 `assets/check-distribution.py`(三层 name-free 几何分布审计:画布/组/框;`--css` 注入测、`--fix` gated 修正)在**不均内容**上验证 findings 下降 **且其它版式零回归** → 再合;能升 schema 默认就别留给人手调。豁免要几何/结构判定(如 stats KPI 列顶基线对齐),**不要按版式名开白名单**。
+
+> 📎 细节见 `references/layout-recipes.md`
+
+## 导入外来 raw HTML deck:字号问题照报,修法二选一,绝不盲 snap
+
+拿到 / 导入一份**外来手搓 HTML deck**(不是本技能 schema 生成的)时:
+
+1. **字号问题照报,imported 不豁免**(2026-05-30 修正,曾错把 imported 的字号降 advisory,等于把问题藏了 —— 已撤回)。小正文(<24)投影看不清、hero 尺寸不对,**谁设计的都是问题,validator 照报 R06/R20/R-VIS-TIER/下限**。`<meta name="fs-deck-origin" content="imported">` 现在只是**来源标记**(不改字号严重度)。
+2. **错在「修法」,不在「报」。snap = 把字号 px 拍到 4 档却不管框** → 撑爆适配 / 把 hero 压小、丢重点(见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`)。正确修法二选一:
+   - **(A) 保留原设计 + 把字号修对** —— ① 换当前框架 JS:`python3 assets/rebundle-import.py <deck.html>`(auto-balance 加载修 box-crowd〔文字贴底〕,零字号/chrome 触碰);② **字号一键修对**:`python3 assets/grow-box-fit.py <deck.html>`(先 dry-run 看计划,`--apply` 落盘+备份+前后截图)—— 浏览器实测几何,**小正文<24 且画布有空间 → 提到 24 并让框自动长高(改大自动拉高),没空间的只标出来让你压内容/删条目;hero/封面 off-ladder 大字 → 向上吸附到最近 hero 档(82→88…);永不缩任何字号,chrome 硬排除**;③ 仍有真伤阅读的溢出再对症(标题换行 / 压字 / 删条目)。
+   - **(B) 重生成走 schema** —— 按 `deck.json`(Path A)重做,字号**按角色**给(重点→hero、正文→24、chrome→框架),内容与字号一起设计、天生适配 = correct-by-construction。
+3. **绝不**「snap 字号 px 完事不管框」—— 这是拍平设计、级联溢出的**类别错误**。修小字靠 **enlarge + grow-box**;修 hero 靠 **layout 尺寸**;chrome(翻页器/全屏提示/wordmark/pageno)永远不是内容,任何变换/检查都排除它。
+
+> 📎 复盘见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`(L1 已撤回,见文内修正记)
 
 ## Variant override discipline
 

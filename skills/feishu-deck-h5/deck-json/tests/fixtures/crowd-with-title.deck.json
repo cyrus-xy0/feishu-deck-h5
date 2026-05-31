@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "deck": {
+    "title": "auto-balance title-guard fixture (死规矩)",
+    "author": "validator-fixture",
+    "date": "2026-05"
+  },
+  "slides": [
+    {
+      "key": "crowd-with-title",
+      "layout": "raw",
+      "screen_label": "crowd-with-title",
+      "data": {
+        "title": "标题不可移动 fixture",
+        "html": "<div class=\"stage\" style=\"position:absolute;inset:96px;display:flex;flex-direction:column;gap:32px;\"><div class=\"header\"><h2 class=\"title-zh\" style=\"font-size:48px;color:#fff;margin:0;\">内容页标题</h2><p class=\"subtitle\" style=\"font-size:24px;color:rgba(255,255,255,0.72);margin:8px 0 0;\">这是副标题</p></div><div class=\"cards-row\" style=\"flex:1;display:grid;grid-template-columns:repeat(2,1fr);gap:36px;align-items:stretch;\"><div class=\"card\" style=\"border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);border-radius:16px;padding:60px 32px 4px;display:flex;flex-direction:column;justify-content:flex-end;color:#fff;\"><p style=\"margin:0;font-size:22px;line-height:1.5;\">被挤到卡片底边的正文文字,离底只剩几像素。</p></div><div class=\"card\" style=\"border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);border-radius:16px;padding:32px;display:flex;flex-direction:column;color:#fff;\"><p style=\"margin:0;font-size:22px;line-height:1.5;\">短内容。</p></div></div></div>"
+      }
+    }
+  ]
+}

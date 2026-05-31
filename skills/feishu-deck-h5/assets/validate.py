@@ -96,7 +96,7 @@ from _validate_common import (
 # imported BEFORE that registry is built.
 from _validate_audits import *
 from _validate_audits import (
-    _lifted_slide_keys, _parse_texts_md_ids, _SPARSE_BY_DESIGN,
+    _lifted_slide_keys, _parse_texts_md_ids, _SPARSE_BY_DESIGN, _deck_imported,
 )
 
 # ---------------------------------------------------------------------------
@@ -235,16 +235,30 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
         return
 
     # ----- Format findings from the JS report -----
+    # NOTE (2026-05-30, L1 reverted): font-size violations are NOT exempted for
+    # imported/foreign decks. Small body text is unreadable regardless of who
+    # designed it, and an off-size hero is still wrong — the validator flags
+    # both; the RIGHT fix is enlarge-to-floor + grow-box (small body) / hero at
+    # the layout's defined size, never snap-and-overflow nor advisory-and-ignore.
     for entry in report.get('overflow', [])[:20]:
         bits = []
         delta_h = entry['h'] - 1080
         delta_w = entry['w'] - 1920
         if delta_h > 0: bits.append(f'height +{delta_h} px')
         if delta_w > 0: bits.append(f'width +{delta_w} px')
-        iss.err('R-OVERFLOW',
+        # Severity tiering (2026-05-30): not all canvas overflow hurts reading.
+        # <24px (≈half a line, space is fine) = benign advisory; 24-60px = warn;
+        # >60px = content genuinely clipped/lost → error. Only the harmful tier
+        # blocks delivery.
+        _ov = max(delta_h, delta_w)
+        _lev = iss.err if _ov > 60 else iss.warn if _ov >= 24 else iss.warn_soft
+        _sev = ('严重 · 内容被切，必修' if _ov > 60
+                else '临界 · 约 1-2 行' if _ov >= 24
+                else '可忽略 · 半行内，空间够，不阻断')
+        _lev('R-OVERFLOW',
             f'slide {entry["idx"]} ({entry["label"]}): content overflows '
-            f'canvas — {", ".join(bits)}. Reduce content density, drop '
-            'cards/rows, increase column count, or shorten body copy.')
+            f'canvas — {", ".join(bits)}（{_sev}）. 对症修：标题溢出→换行/加宽容器，'
+            '正文→压字数，条目过多→删条目/减列。')
 
     for entry in report.get('tier', [])[:20]:
         _lev = iss.warn if entry.get('lifted') else iss.err
@@ -290,6 +304,18 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'left:73px; right:320px`) so title aligns with the master '
             'spec across all layouts.')
 
+    for entry in report.get('title_gap', [])[:20]:
+        # < 12px (or negative) = colliding/crowding the title → err;
+        # 12-24px = tight breathing room → warn (advisory).
+        _lev = iss.err if entry["gap_px"] < 12 else iss.warn
+        _lev('R-VIS-TITLE-GAP',
+            f'slide {entry["slide_idx"]} (layout `{entry["layout"]}`) · content '
+            f'sits only {entry["gap_px"]}px below the title (< 24px / overlapping). '
+            'The body grew or overflowed UP toward `.header` — it is crowding / '
+            'colliding with the title. Fix: shorten or shrink the content so it '
+            'fits, OR move the content block DOWN (adjust the stage top / vertical '
+            'centering). 死规矩:标题/副标题位置不动,压内容或下移正文,绝不动标题。')
+
     for entry in report.get('opt_out_abuse', [])[:20]:
         ex_str = (f' (e.g. {", ".join(entry["examples"])})'
                   if entry.get('examples') else '')
@@ -307,8 +333,17 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 
     for entry in report.get('card_overflow', [])[:20]:
         direction = entry.get('direction', 'vertical')
+        # Severity tiering: visible spill <24px is benign; clipped content (lost)
+        # escalates sooner. >60px (or >24px clipped) = error; else warn / advisory.
+        _px = entry.get('overflow_px', 0)
+        # Content spilling OUT of / clipped BY a styled box is a VISIBLE defect
+        # (text sitting outside its card) — harmful even at small px, unlike
+        # benign canvas-EDGE slack (R-OVERFLOW). The earlier 24-60px=warn tiering
+        # wrongly hid real card spills (e.g. a 42px hero-card spill). Only a tiny
+        # <16px (descender / rounding) is advisory here.
+        _lev = iss.err if _px > 16 else iss.warn
         if direction == 'horizontal':
-            iss.err('R-VIS-CARD-OVERFLOW',
+            _lev('R-VIS-CARD-OVERFLOW',
                 f'slide {entry["slide_idx"]} · `{entry["selector"]}` is a '
                 f'flex/grid container with nowrap children — total children '
                 f'width ({entry["content_h"]} px) exceeds container width '
@@ -318,7 +353,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'child to a separate line (display:block sibling), set '
                 '`flex-wrap: wrap`, or widen the container.')
         elif direction == 'vertical-visible':
-            iss.err('R-VIS-CARD-OVERFLOW',
+            _lev('R-VIS-CARD-OVERFLOW',
                 f'slide {entry["slide_idx"]} · `{entry["selector"]}` content '
                 f'({entry["content_h"]} px) is {entry["overflow_px"]} px taller '
                 f'than its box ({entry["card_h"]} px) and overflow is NOT hidden '
@@ -329,7 +364,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'tighten padding / gap, or give the box more height. (Geometry — '
                 'stays ERROR even on lifted slides; a visible spill is a real defect.)')
         else:
-            iss.err('R-VIS-CARD-OVERFLOW',
+            _lev('R-VIS-CARD-OVERFLOW',
                 f'slide {entry["slide_idx"]} · `{entry["selector"]}` has '
                 f'`overflow:hidden` but content ({entry["content_h"]} px) is '
                 f'{entry["overflow_px"]} px taller than the container '
@@ -367,6 +402,18 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 
     for entry in report.get('body_floor', [])[:20]:
         _lev = iss.warn if entry.get('lifted') else iss.err
+        # grow-box verdict (改大自动拉高): if the box has room, enlarging to the
+        # floor + growing the box is the fix; if not, content must be cut.
+        _cg = entry.get('can_grow')
+        if _cg is True:
+            _fix = (f' 修法→ 提到 24 + 框自动长高(改大自动拉高):需约 '
+                    f'{entry.get("grow_needed_px","?")}px,框/画布余 '
+                    f'{entry.get("room_px","?")}px,装得下。永不缩字号。')
+        elif _cg is False:
+            _fix = (f' 修法→ 提到 24 后空间不够(需 {entry.get("grow_needed_px","?")}px,'
+                    f'仅余 {entry.get("room_px","?")}px):压字数/删条目,而非缩字号。')
+        else:
+            _fix = ' 修法→ 提到 24(优先),内容超框则拉高框 / 压字数,永不缩字号。'
         _lev('R-VIS-BODY-FLOOR',
             (('LIFTED slide (verbatim from another deck) — downgraded to '
               'WARNING, you choose whether to bump. ') if entry.get('lifted') else '') +
@@ -374,12 +421,11 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             f'{entry["rendered_px"]}px but its direct text is '
             f'{entry["char_count"]} chars ("{entry["preview"]}"). '
             'Body content (≥ 8 chars of sentence-like text outside mockup '
-            'containers and chrome classes) must be ≥ 24 px on projector. '
-            'Bump to 24 (preferred), OR rename to a chrome class '
-            '(.eyebrow / .footnote / .source / .pill / .tag / .chip / '
-            '.badge / .pageno / .demo-tag) if it really is chrome, OR set '
-            '`data-allow-body-floor` on the element for a documented '
-            'exception (e.g. legend annotation by design).')
+            'containers and chrome classes) must be ≥ 24 px on projector.' +
+            _fix +
+            ' (Or rename to a chrome class .eyebrow/.footnote/.source/.pill/'
+            '.tag/.chip/.badge/.pageno/.demo-tag if it really is chrome, OR set '
+            '`data-allow-body-floor` for a documented exception.)')
 
     for entry in report.get('abspos_dual_anchor', [])[:20]:
         iss.err('R-VIS-ABSPOS-DUAL-ANCHOR',
@@ -437,7 +483,7 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 '— 内容沉底,上半页大块空白。Fix: 容器 `justify-content: center` '
                 '或 `align-content: center`;或检查是否有 `margin-top: auto` 把'
                 '内容硬推到底部(BF9 反模式)。')
-        else:  # dead-band
+        elif kind == 'dead-band':
             iss.warn('R-VIS-BALANCE',
                 f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
                 f'中间留白 {entry["gap_px"]}px(dead-band)— `{entry["between_a"]}` '
@@ -446,6 +492,29 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'space-between`(BF9 反模式经常制造这种空白);(2) 缩小 gap;(3) '
                 '在中间加一行 supporting 元素(pullquote / KPI / divider);(4) '
                 '确实是设计意图(留白让 hero 呼吸)→ 加 `data-allow-imbalance`。')
+        elif kind == 'side-empty':
+            _side = '右侧' if entry['right_slack'] > entry['left_slack'] else '左侧'
+            iss.warn('R-VIS-BALANCE',
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
+                f'横向失衡 / 单侧空壳(side-empty): 左空 {entry["left_slack"]}px / '
+                f'右空 {entry["right_slack"]}px(容器宽 {entry["body_width"]}px)— '
+                f'真实内容(文字/图)挤向一边,{_side}一大块空(空框不算内容)。'
+                '常见 #36「右半是个空壳面板」/ 内容偏左。Fix: (1) 给空的一侧填真内容 '
+                '(图示 / 截图重建 / 要点);(2) 缩窄空面板、让内容两栏铺满;(3) 单列'
+                '窄条飘着 → 加宽或配伴随块。真有图但被判空说明图是 media→已计入不会误报;'
+                '故意留白 → `data-allow-imbalance`。')
+
+    # ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
+    # 框内文字离卡片可见底边过近且明显下偏 = "文字离下面太近"(qingdao 3up 等高卡
+    # 实测离底 5px / 顶部 34px)。几何 name-free,不按版式名:松(下方大留白,如
+    # KPI 列顶基线对齐)下内距大、不触发,stats 类天然豁免。warn 级(--strict 升 err)。
+    for entry in report.get('crowd', [])[:20]:
+        iss.warn('R-VIS-CROWD',
+            f'slide {entry["idx"]} · `{entry["sel"]}` 框内文字贴底 —— 内容离框可见底边'
+            f'只剩 {entry["bottom_px"]}px,顶部却留 {entry["top_px"]}px,文字被挤到框底。'
+            'Fix: 让卡片按内容尺寸 + 垂直居中(参考 content-3up `align-self: center; '
+            'justify-content: center`),或给框一个最小下内距 / 减少该框内容;'
+            '若等高框内文字贴底是刻意设计 → 在 `.slide` 加 `data-allow-imbalance`。')
 
     # ---- R-VIS-SLACK-FLEX · flex:1 子容器撑出内部空白 ----
     # R-VIS-BALANCE 看的是 body container 顶级 children 之间的 sibling gap;
@@ -511,6 +580,54 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'border / 不同 padding 把 hero 元素从平行结构里抽出来;(4) 这页确实'
             '是 overview / 平权矩阵(N 项等大就是设计本身)→ 在 .slide 加 '
             '`data-allow-no-focal` 跳过审计。')
+
+    for entry in report.get('peer_size', [])[:20]:
+        _off = ", ".join(f'`{o["sel"]}`={o["px"]}px' for o in entry.get('offenders', [])[:3])
+        iss.warn('R-VIS-PEER-SIZE',
+            f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` 内同角色 '
+            f'`{entry["role"]}` 字号不一致:多数 {entry["majority_px"]}px,'
+            f'但 {_off} 偏离(本组出现 {sorted(entry["sizes"])} 多种尺寸)。'
+            '同一并列容器里同角色的 sibling 应等大 —— "有大有小"靠这条抓。'
+            'Fix:把偏离者统一到多数派字号(按角色给一档);若确为有意不同 → '
+            '元素或祖先加 `data-allow-peer-size`。')
+
+    for entry in report.get('gutter', [])[:20]:
+        # 间距判断有主观成分 → warn;lifted 页(逐字搬运)降 warn_soft。
+        _lev = iss.warn_soft if entry.get('lifted') else iss.warn
+        _pre = ('LIFTED slide(逐字搬运)— 降为软提示。 ' if entry.get('lifted') else '')
+        if entry['kind'] == 'gutter':
+            _lev('R-VIS-GUTTER', _pre +
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` 同组相邻框'
+                f'({entry["axis"]})间距不等:{entry["gutters"]}px(min {entry["min_px"]} / '
+                f'max {entry["max_px"]})。同组框 gutter 应相等才齐整(P7 #3:卡片左右 '
+                '28px 但到下面只 8px)。Fix:把 gap 统一;故意不均 → .slide 加 '
+                '`data-allow-imbalance`。')
+        else:
+            _lev('R-VIS-GUTTER', _pre +
+                f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` 同 tag '
+                f'`{entry["cell_tag"]}` 组框的内 padding 不一致:{entry["pads"]}px'
+                f'(min {entry["min_px"]} / max {entry["max_px"]})。同类 cell 内容到'
+                '边框的距离应一致才好看(P7 #4)。Fix:统一 padding / 让内容等距居中。')
+
+    for entry in report.get('hero_floor', [])[:20]:
+        _lev = iss.warn_soft if entry.get('lifted') else iss.warn
+        _lev('R-VIS-HERO-FLOOR',
+            f'slide {entry["slide_idx"]} (layout `{entry["layout"]}`) · '
+            f'{entry["role"]} `{entry["selector"]}` 渲染 {entry["rendered_px"]}px,'
+            f'低于该版式 hero 下限 {entry["floor_px"]}px(master 规格约 '
+            f'{entry["spec_px"]}px)→ 偏小、不够大气(P11 封面 82<100)。方向是'
+            '"够不够大"不是"在不在白名单":hero 主元素该走 layout 规定尺寸。'
+            'Fix:放大到 master 规格;若刻意做小变体 → 加 `data-allow-typescale`。')
+
+    for entry in report.get('short_label_floor', [])[:20]:
+        _lev = iss.warn_soft if entry.get('lifted') else iss.warn
+        _svg = ' (SVG 轴标)' if entry.get('is_svg') else ''
+        _lev('R-VIS-SHORT-LABEL-FLOOR',
+            f'slide {entry["slide_idx"]} · `{entry["selector"]}`{_svg} 短标签 '
+            f'"{entry["text"]}"({entry["char_count"]} 字)渲染 {entry["rendered_px"]}px '
+            '< 18px,投影看不清。R-VIS-BODY-FLOOR 的「≥8 字」门槛放过了这种短轴标/'
+            '分类标签,这条专补(含 SVG 轴标)。Fix:放大到 ≥18(图表轴标)/24(正文);'
+            '若确为单位/装饰 → 元素加 `data-allow-body-floor`。')
 
     # (screenshot archival happens inside the Playwright block above; no
     # post-step needed. The previous `if 'shots_dir' in dir(): pass` was
@@ -600,7 +717,7 @@ STATIC_AUDITS = [
     (audit_empty_header_zone,  ('html', 'iss')),
     (audit_hierarchy,          ('html', 'iss')),
     (audit_variant_discipline, ('html', 'iss')),
-    (audit_ui_mocks_are_html,  ('slides', 'iss')),
+    (audit_ui_mocks_are_html,  ('html', 'iss')),
     (audit_no_cyan_accent,     ('slides', 'iss')),
     (audit_header_minimal,     ('slides', 'iss')),
     (audit_slide_keys,         ('slides', 'iss')),
@@ -608,6 +725,7 @@ STATIC_AUDITS = [
     (audit_list_echo,          ('slides', 'iss')),
     (audit_visual_richness,    ('slides', 'iss')),
     (audit_self_contained,     ('html', 'iss')),
+    (audit_autobalance_present, ('html', 'iss')),
     (audit_perf,               ('html', 'iss')),
     (audit_text_ids,           ('html', 'path', 'iss')),
     (audit_feedback_md,        ('path', 'iss')),
