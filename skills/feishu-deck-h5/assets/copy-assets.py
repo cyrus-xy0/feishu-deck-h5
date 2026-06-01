@@ -233,6 +233,9 @@ def main():
                     return f'{prefix}assets/{rest}'
 
             target = local_assets / rest if sub == "assets" else local_assets / sub / rest
+            if not target.resolve().is_relative_to(out_dir.resolve()):
+                print(f"  [WARN] skipping out-of-output asset ref (path traversal?): {m.group(0)}")
+                return m.group(0)
             referenced.add(str(target.relative_to(out_dir)))
             if origin.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -256,6 +259,9 @@ def main():
             nonlocal bytes_copied
             rest = m.group(2)
             target = local_input / rest
+            if not target.resolve().is_relative_to(out_dir.resolve()):
+                print(f"  [WARN] skipping out-of-output input ref (path traversal?): {m.group(0)}")
+                return m.group(0)
             referenced.add(str(target.relative_to(out_dir)))
             # Try canonical runs/<ts>/input/ first, then fall back to other
             # likely locations (covers legacy decks that put input/ inside
@@ -328,7 +334,13 @@ def main():
             both fail) but the rewrite proceeds. Net effect: file moved once,
             every HTML correctly rewritten."""
             nonlocal bytes_copied
-            prefix = m.group(1)
+            # Use the per-file depth-derived `prefix` (loop scope), NOT the
+            # source ref's `m.group(1)`: an inside-skill run (output under
+            # skills/feishu-deck-h5/runs/) emits `../../../assets/foo` whose
+            # prefix ESCAPES output/. Preserving it left the localized copy
+            # orphaned and the ref pointing out of the deck → 404 after
+            # move/zip/publish. The loop `prefix` is the correct climb from this
+            # HTML file's dir to output/assets/ regardless of the source form.
             rest = m.group(2)
 
             # Compute canonical rest via legacy redirects (mirrors
