@@ -800,16 +800,24 @@ def inline_linked(html_text, base_dir):
     files are left untouched. Shared by main() here and check-only.py — was
     copy-pasted in both, unified per F-14."""
     def repl_link(m):
-        href = m.group(1)
-        if href.startswith(('http:', 'https:', 'data:')): return m.group(0)
+        tag = m.group(0)
+        # Order-independent: match ANY <link> tag, inline only if it's a local
+        # stylesheet. The old `rel="stylesheet" … href=` regex missed
+        # `<link href="…" rel="stylesheet">`, so that framework CSS was
+        # invisible to the audits (they then under-reported).
+        if 'rel="stylesheet"' not in tag:
+            return tag
+        hm = re.search(r'href="([^"]+)"', tag)
+        if not hm:
+            return tag
+        href = hm.group(1)
+        if href.startswith(('http:', 'https:', 'data:')): return tag
         target = (base_dir / href).resolve()
-        if not target.is_file(): return m.group(0)
+        if not target.is_file(): return tag
         return ('<style data-source="framework">'
                 + target.read_text(encoding='utf-8')
                 + '</style>')
-    html_text = re.sub(
-        r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>',
-        repl_link, html_text)
+    html_text = re.sub(r'<link\b[^>]*>', repl_link, html_text)
     def repl_script(m):
         src = m.group(1)
         if src.startswith(('http:', 'https:', 'data:')): return m.group(0)

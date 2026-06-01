@@ -182,9 +182,11 @@ def audit_font_sizes(html: str, iss: Issues):
                or '.fullscreen' in selector or '@' in selector:
                 continue
             # Only check rules that target slide content
+            # `.col` / `.cell` matched via token boundary so `.color-box` /
+            # `.cellophane` aren't mistaken for grid / table-cell content.
             if '.slide' not in selector and '.card' not in selector \
-               and '.col' not in selector and '.toc' not in selector \
-               and '.cell' not in selector and 'thead' not in selector \
+               and not re.search(r'\.col(?![\w-])', selector) and '.toc' not in selector \
+               and not re.search(r'\.cell(?![\w-])', selector) and 'thead' not in selector \
                and 'tbody' not in selector:
                 continue
             # Per-rule opt-outs (preserve marker check on raw block before
@@ -1619,7 +1621,7 @@ def audit_ui_mocks_are_html(html, iss: Issues):
                     '用 HTML 重建,别用栅格背景塞 UI。')
         # (c) content <iframe> (exempt the legit iframe-embed layout) → warn
         if not is_iframe_layout and re.search(r'<iframe\b', fr):
-            iss.warn('UI1',
+            _lev('UI1',
                 f'slide {i}: <iframe> 正文嵌入 — 内嵌文字字号检查够不到、不可控。'
                 '把要呈现的内容用 HTML/.ui-* 重建,或只作示意缩略图(非 iframe-embed 版式)。')
 
