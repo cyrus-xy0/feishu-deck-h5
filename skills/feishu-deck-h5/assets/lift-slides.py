@@ -792,7 +792,13 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="bypass concurrent-modification (optimistic-lock) check — write "
                          "DEST_DECK_JSON even if it changed on disk since it was read (F-53)")
-    args = ap.parse_args()
+    # `--key K DEST.json --shake` is the documented/native-lift form. Plain
+    # argparse stops collecting the `rest` positional after an optional when
+    # `nargs="*"` is involved, so DEST.json can be reported as "unrecognized".
+    # Intermixed parsing keeps the legacy positional contract while allowing
+    # options before or after DEST.json.
+    parse_args = getattr(ap, "parse_intermixed_args", ap.parse_args)
+    args = parse_args()
 
     if args.index:
         print_manifest(args.src_html)
