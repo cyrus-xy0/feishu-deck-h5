@@ -352,13 +352,24 @@ def cmd_set_variant(deck: dict, args) -> tuple[int, dict | None]:
     # Drop incompatible fields
     for f in dropped:
         del data[f]
+    # Scaffold the new variant's required fields that are now MISSING (TODO
+    # placeholders) so the switch yields a SCHEMA-VALID deck the user fills in —
+    # instead of write_deck_with_validation rejecting + rolling back the whole
+    # switch because the new variant's required fields aren't present. (#309)
+    scaffolded = []
+    sc = build_scaffold(layout, new_variant, args.key)
+    if sc and isinstance(sc.get("data"), dict):
+        for f, v in sc["data"].items():
+            if f not in data:
+                data[f] = copy.deepcopy(v)   # deepcopy: don't share the SCAFFOLDS literal
+                scaffolded.append(f)
     slide["data"] = data
     slide["variant"] = new_variant
     print(f"  slides[{idx}] (key={args.key}) variant: {old_variant!r} → {new_variant!r}")
     if dropped:
         print(f"    dropped fields: {dropped}")
-    print(f"    NOTE: required fields for {layout}/{new_variant} may now be missing — "
-          f"fill via set commands before render.")
+    if scaffolded:
+        print(f"    scaffolded TODO fields for {layout}/{new_variant}: {scaffolded} (fill before render)")
     return 0, deck
 
 
