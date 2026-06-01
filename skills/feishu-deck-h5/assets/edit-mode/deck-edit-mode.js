@@ -288,6 +288,10 @@
     const before = e.clientY < rect.top + rect.height / 2;
     target.parentNode.insertBefore(dragSrc, before ? target : target.nextSibling);
     clearDropMarkers();
+    // (#246) sync the sidebar order + numbering to the new frame order (and
+    // re-bind the IntersectionObserver to the live frames). A canvas drag used
+    // to leave the sidebar stale relative to the canvas.
+    rebuildSidebar();
   }
 
   // ── undo stack ─────────────────────────────────────────────────────────
@@ -334,7 +338,9 @@
     if (cloneBody) cloneBody.classList.remove('deck-edit-mode');
     // Restore deck mode attribute to its pre-edit value
     const deckEl = clone.querySelector('.deck');
-    if (deckEl && prevDeckMode) deckEl.setAttribute('data-mode', prevDeckMode);
+    // Default to 'present' when prevDeckMode is null (save() invoked outside edit
+    // mode) so the saved file never bakes in the edit-mode 'scroll' state. (#305)
+    if (deckEl) deckEl.setAttribute('data-mode', prevDeckMode || 'present');
     // Restore iframe pointer-events to original (we stored on the live DOM,
     // but the clone reflects the modified value; resetting in clone)
     clone.querySelectorAll('iframe').forEach((f) => {
