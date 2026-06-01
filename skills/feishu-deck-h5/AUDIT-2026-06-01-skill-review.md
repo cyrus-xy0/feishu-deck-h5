@@ -230,6 +230,38 @@
 | F-247 | `log-tool/deck-log.py:443-448` | `snapshot --slide N` for a non-existent page returns an empty (not None) shots list, so the user sees "0 张" with no explanation and the page-missing warning is easy to miss | ☐ |
 | F-248 | `log-tool/deck-log.py:473` | Off-by-one in severity extraction: `sev = f[1] if len(f) > 2 else ""` should be `len(f) > 1`; a 2-element finding silently loses its severity | ☐ |
 | F-249 | `log-tool/deck-log.py:559-562` | Turns are globally re-numbered every render based on the current set of discovered transcripts, so a `summary` event's `n` (and the displayed 回合 number) can attach to the wrong turn onc | ☐ |
+| F-250 | `assets/lift-slides.py:493-514 (transform)` | `--shake` inlines framework background rules using `var(--fs-asset-content-bg)` into the slide's data.html. A `url()` carried in a custom property resolves relative to the **document**, not the feishu-deck.css that defines it → `output/lark-content-bg.jpg` 404 → background silently goes black. Schema decks are unaffected (rule stays in the external CSS). Hit live: qingdao #38 lift lost its blue-glow ambient bg; validator PASSes, only caught by eye. **Fix:** `_deref_asset_vars()` rewrites inlined `var(--fs-asset-X)` → `url("assets/<file>")` (the path copy-assets lands brand assets at for linked-local delivery). Covers content/cover/section-bg + logo + slogan. | ✅ |
+| F-251 | `assets/lift-slides.py:591-593 (lift)` | Lifting into a NON-existent target deck.json scaffolds `deck:{}` with no `deck.title`, so the FIRST render of a freshly-lifted new deck always fails schema validation (`deck.title required`). The "lift a page into a brand-new deck" flow always stumbles. **Fix:** seed `deck.title` from the source deck `<title>` (fallback = source folder name → "未命名 deck"). | ✅ |
+| F-252 | `assets/lift-slides.py:transform/lift loop` | Lifting a foreign page that uses `<img>` for content photos/avatars fails UI1 on every `<img>` at render time (source bypassed the gate; through it = a wall). **Fix (partial):** lift-time **warning** lists the content `<img>` count + the bg-div fix, surfacing it at lift not render. Auto-conversion left as future opt-in (`--photos-as-bg`) — naive img→bg-div collapses imgs whose parent relies on intrinsic size, so it's not safe to apply unconditionally. | ◑ |
+
+---
+> **F-250..F-252(2026-06-02)** — 单页 lift→新 deck 实操中发现,见 [[#lift-new-deck-fidelity]] 下方进度节。分支 `fix-lift-new-deck-fidelity`(未合并 main)。与 `8eb0782` 的 `--shake` 三类修复正交。
 
 ---
 > 修复在 `main` 上分批改 + 分批 commit(不 push),每批改前重读文件(并发 session 安全)、改后跑测试。WONTFIX/by-design 项在对应 commit message 注明理由。
+
+---
+
+## <a name="lift-new-deck-fidelity"></a>F-250..F-252 修复进度(2026-06-02 · 分支 `fix-lift-new-deck-fidelity`,未合并/未 push)
+
+**触发**:用户「把外来青啤 deck `index-fix.html#38`(`ice-tea-5scripts`)lift 成一份**新** deck 的首页」。实操踩出 3 个"lift 到**新建**目标"路径专属缺口 —— 既有 lift 工单(F-40/F-44/F-45/F-75/F-76)都假设粘进**已有** deck,这条全新路径没人走过。三处全在 `assets/lift-slides.py`,与并行大审计(F-77..F-249)及 `8eb0782` 的 `--shake` 三类修复**正交**。
+
+**根因(已逐层坐实于最新 main)**
+- **F-250(🔴 静默背景丢失)** — `--shake` 把框架 `.slide{background:#000 var(--fs-asset-content-bg) …}` 内联进该页的 `data.html`。CSS 自定义属性里的 `url()` 由浏览器按**使用它的文档**解析,而非**定义它的 feishu-deck.css**(后者在 `assets/`)→ 解析成 `output/lark-content-bg.jpg`(缺 `assets/`)→ 404 → 背景静默变黑。**纯 schema deck 不受影响**(该规则留在外部 CSS,相对 CSS 解析正确)。实测:青啤 #38 丢了 blue-glow 氛围底;`validate.py` PASS,只能靠眼睛抓(像素对比 top 边 src=(12,17,47) vs lift=(0,0,0))。
+- **F-251** — lift 进不存在的目标 → 脚手架 `deck:{}` 无 `title` → 首次 `render-deck.py` 必报 `$.deck required property 'title' missing`。
+- **F-252(◑ 部分)** — 外来页用 `<img>` 当头像/照片 → render 时每张挂 UI1(源 deck 当年绕过了闸门)。
+
+**修复(`assets/lift-slides.py` 单文件)**
+- F-250:新增 `_deref_asset_vars()` + `_asset_var_filemap()`(从 feishu-deck.css `:root` 解析 `--fs-asset-* → 文件名`),在 `transform()` 末尾把内联的 `var(--fs-asset-X)` 解引用成 `url("assets/<file>")` —— copy-assets 为 linked-local 交付把品牌资产整套落在 `output/assets/`,故该路径正确。覆盖 content/cover/section-bg + logo + slogan。**caveat**:只对 linked-local 交付(默认+交付形态)正确;纯 skill-relative 渲染(无 copy-assets)下原 `var` 本来也 404,故是严格改进非退化。
+- F-251:`_source_title()` 用源 deck `<title>` 播种 `deck.title`(回退 = 源文件夹名 → "未命名 deck")。仅新建目标时,既有 deck 不动。
+- F-252:lift 时打印警告列出会触发 UI1 的内容 `<img>` 数量 + bg-div 修法,把发现点从 render 提前到 lift。**未做自动转换**:naive `<img>`→bg-div 会让"靠 img 内在尺寸撑开父容器"的页塌掉,不能无条件套;留 `--photos-as-bg` opt-in 为后续。
+
+**验证**
+- 改后全新 lift:F-251 title 自动播种 ✓;F-250 `var` 残留 0 / `url("assets/lark-content-bg.jpg")` ×2 ✓;F-252 lift 时即警告 ✓。
+- 端到端(lift → render → copy-assets,linked-local 交付形态):content-bg **不再 404**,errors 0。
+- 回归:`deck-json/tests/` 非 Playwright 全套 **177 passed**、`tests/run-regression.py`(视觉 fixtures)**7 pass·0 fail**、`test_self_contained` **5 passed**、lift 单测 **4 passed**。(全套 `pytest -q` 在本机挂在特定 `test_vis_*` Playwright 测试 + `dist/` 重复收集上 —— 环境问题,与本改动无关。)
+
+**未决 / 交给用户**
+- F-252 的 `--photos-as-bg` 安全自动转换(检测"父容器有显式尺寸 + img object-fit:cover"才转)。
+- 是否把 F-250 推广成更稳的 render 期修法(render-deck 在 `<head>` 注入文档相对正确的 `:root{--fs-asset-*}` 覆盖,可同时救 skill-relative 模式 + 任何 inline 用 var 的 custom_css)—— 改共享 render 路径,回归面更大,留作选项。
+- 是否合并本分支到 main / 是否推送。

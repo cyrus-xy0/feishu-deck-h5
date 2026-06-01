@@ -151,6 +151,40 @@ def get_framework_css():
     return _FRAMEWORK_CSS
 
 
+# --- lift-fidelity helpers (F-250 asset-var deref · F-251 title seed) ------
+_ASSET_VAR_DEF_RE = re.compile(
+    r'--fs-asset-([a-z0-9-]+)\s*:\s*url\(\s*["\']?([^"\')]+)["\']?\s*\)', re.I)
+_ASSET_VAR_USE_RE = re.compile(r'var\(\s*--fs-asset-([a-z0-9-]+)\s*\)', re.I)
+
+
+def _asset_var_filemap():
+    """`--fs-asset-NAME` → filename, parsed from feishu-deck.css :root."""
+    m = {}
+    for name, url in _ASSET_VAR_DEF_RE.findall(get_framework_css()):
+        m[name.lower()] = url.rsplit('/', 1)[-1]
+    return m
+
+
+def _deref_asset_vars(css):
+    """F-250: a `var(--fs-asset-X)` that ends up INLINED in the lifted slide's
+    data.html resolves its url() relative to the HTML *document* (not the
+    feishu-deck.css that defines the var) → 404 → black/blank background. Replace
+    known asset vars with an explicit `url("assets/<file>")` — the path
+    copy-assets lands framework brand assets at for linked-local delivery (the
+    default + delivered form). Unknown vars are left untouched."""
+    fm = _asset_var_filemap()
+    def repl(mt):
+        fn = fm.get(mt.group(1).lower())
+        return f'url("assets/{fn}")' if fn else mt.group(0)
+    return _ASSET_VAR_USE_RE.sub(repl, css)
+
+
+def _source_title(html):
+    """F-251: source deck <title> text, for seeding a new target deck.title."""
+    m = re.search(r'<title[^>]*>(.*?)</title>', html, re.I | re.S)
+    return re.sub(r'\s+', ' ', m.group(1)).strip() if m else ""
+
+
 # --- Keyframe closure (L6) ------------------------------------------------
 # Animation shorthand keywords that are NOT keyframe names (so we don't try to
 # pull a @keyframes called "infinite").
@@ -559,6 +593,18 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
         else:
             report.setdefault("proto_missing", []).append(slug)
 
+    # F-250: deref inlined `var(--fs-asset-X)` → `url("assets/<file>")` so the
+    # background image actually loads in the lifted (data.html-inline) slide.
+    inner = _deref_asset_vars(inner)
+
+    # F-252: a lifted page using `<img>` for content photos/avatars FAILS UI1 on
+    # render (every <img> in body is flagged). Surface it at LIFT time with the
+    # fix, not as a render-time wall. Skip imgs already vouched by UI1 escapes.
+    content_imgs = [m for m in re.findall(r'<img\b[^>]*>', inner)
+                    if 'data-ui-screenshot' not in m and 'data-decor' not in m]
+    if content_imgs:
+        report["content_imgs"] = len(content_imgs)
+
     return inner
 
 
@@ -590,7 +636,12 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         deck = json.loads(dst_deck_json.read_text(encoding="utf-8"))
     else:
         dst_mtime = None  # new file — nothing to clobber
-        deck = {"version": "1.0", "deck": {}, "slides": []}
+        # F-251: seed deck.title so the FIRST render of a freshly-lifted NEW deck
+        # doesn't fail schema validation (deck.title is required). Prefer the
+        # source deck's <title>; fall back to the source folder name. The human
+        # renames it later — an un-renderable deck.json is the worse default.
+        seed_title = _source_title(full_src_html) or src_stem or "未命名 deck"
+        deck = {"version": "1.0", "deck": {"title": seed_title}, "slides": []}
 
     print(f"source : {src_html_path}")
     print(f"frames : {len(starts)} total in source; lifting {frame_indices}")
@@ -684,6 +735,12 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if hint:
             print(f"    ⓘ layout {hint} has framework CSS that won't survive "
                   f"lift-to-raw — re-run with --shake to inline it")
+        nimg = report.get("content_imgs")
+        if nimg:
+            print(f"    ⚠ {nimg} content <img> → will FAIL UI1 on render. Convert to "
+                  f"`<div style=\"background-image:url(...);background-size:cover\">` "
+                  f"(photos/avatars, per brand rule), or add data-ui-screenshot if "
+                  f"intentionally a screenshot.")
         # F-45: informational asset-reference report. Surface what this page
         # references so a human can decide to swap/remove — never silent.
         if asset_refs:
