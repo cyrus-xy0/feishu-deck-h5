@@ -1978,6 +1978,76 @@ def audit_visual_richness(slides: list[str], iss: Issues):
             f'[advisory · richness is a design-phase call · never blocks]')
 
 
+def audit_raw_looks_schema(slides: list, iss: 'Issues', path):
+    """R-RAW-LOOKS-SCHEMA (warn_soft · ADVISORY): the raw-first backstop.
+
+    Under the raw-first stance (DECK GENERATION POLICY) `layout:"raw"` is the
+    default home base; schema layouts are the fall-back for a SHORT whitelist
+    of pure-standard shapes. This nudge catches the INVERSE failure mode —
+    OVER-PROCESSING: a raw slide whose DOM is just a plain N-card parallel
+    list (icon + title + body), with NO diagram-SVG, NO @keyframes animation
+    and NO relationship/flow signal. That shape is `content/3up` /
+    `content/blocks` — schema renders it with strictly less bug surface,
+    faster, and more consistent, so raw there is wasted handcraft.
+
+    SOURCE-OF-TRUTH = sibling deck.json, NOT the rendered data-layout. A
+    `layout:"raw"` slide commonly masks itself with a schema-ish data-layout
+    (e.g. content-3up) in its hand-authored data.html to borrow framework CSS,
+    so the rendered DOM can't tell raw from real schema. We read deck.json next
+    to index.html for the keys whose layout is "raw"; no deck.json (foreign /
+    Path B / lifted standalone) → skip silently (advisory, never false-positive
+    on a genuine schema card grid).
+
+    HIGH-PRECISION by design: skips anything with animation (@keyframes), a
+    non-icon diagram <svg>, or an arrow/connector (flow/relationship). So
+    metaphor pages (iceberg), animated heroes, and comparison/flow pages stay
+    untouched — only the genuinely-flat card list trips it.
+
+    ADVISORY ONLY — never an error, even under --strict (warn_soft). If the
+    page has bespoke / relational / narrative substance the author keeps raw
+    and ignores it; this never blocks delivery. (Replaces the rejected
+    deck-level ratio cap R-TOO-MUCH-RAW — over-raw is a per-page question,
+    not a global ratio: a 90%-raw deck where every page earns it is fine.)"""
+    import json
+    raw_keys = set()
+    try:
+        dj = Path(path).resolve().parent / 'deck.json'
+        if dj.exists():
+            data = json.loads(dj.read_text(encoding='utf-8'))
+            for s in data.get('slides', []):
+                if (s.get('layout') or '').strip() == 'raw' and s.get('key'):
+                    raw_keys.add(s['key'])
+    except Exception:
+        return                                        # can't identify raw → skip
+    if not raw_keys:
+        return
+    _ICON_VB = ('0 0 24 24', '0 0 20 20', '0 0 16 16')
+    _FLOW_SIGNALS = ('→', '➜', '➡', '⟶', 'connector', 'data-arrow', 'class="arrow')
+    for i, fr in enumerate(slides, 1):
+        key = slide_attr(fr, 'slide-key')
+        if key not in raw_keys:
+            continue
+        if '@keyframes' in fr:                        # animated → genuinely bespoke
+            continue
+        all_svg = len(re.findall(r'<svg\b', fr))
+        icon_svg = sum(1 for vb in re.findall(r'<svg\b[^>]*viewBox="([^"]*)"', fr)
+                       if vb.strip() in _ICON_VB)
+        if all_svg > icon_svg:                        # a non-icon diagram svg → bespoke
+            continue
+        if any(sig in fr for sig in _FLOW_SIGNALS):   # arrow/connector → flow/relationship
+            continue
+        cards = len(re.findall(r'class="[^"]*\bcard\b', fr))
+        if 3 <= cards <= 6:
+            iss.warn_soft(
+                'R-RAW-LOOKS-SCHEMA',
+                f'raw slide "{key}" looks like a plain {cards}-card parallel '
+                f'list (icon+title+body · no diagram-svg · no animation · no '
+                f'arrow/connector) — that is a standard shape. Consider falling '
+                f'back to content/3up or content/blocks (less bug surface, '
+                f'faster, consistent). [advisory · if the page has bespoke / '
+                f'relational / narrative substance, keep raw & ignore · never blocks]')
+
+
 # R-SELF-CONTAINED — per-slide CSS must live INSIDE the slide it styles.
 _DIV_TOKEN_RE = re.compile(r'<div\b[^>]*>|</div>')
 # A per-slide selector that, in a head/deck-level <style>, signals the page-anim

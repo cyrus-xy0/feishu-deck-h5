@@ -364,6 +364,34 @@ R-VIS-CARD-OVERFLOW:
   fix:
     - "精简卡片内容 / 放大卡片 / 减少卡片数"
 
+R-VIS-BAND-COLLIDE:
+  concern:     "A · 客户看不见"
+  symptom:     "页面底部/顶部那条带颜色的文字带, 压在正文上了"
+  consequence: "色带和正文重叠, 投影上糊成一团, 客户读不清"
+  fix:
+    - "把这条带子放进正文的居中流里(别用绝对定位浮在上面), 或把容器调高让两者错开"
+
+R-VIS-DEAD-ANIM:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有动画没生效, 该进场的元素停在了隐身状态"
+  consequence: "靠动画进场的内容永远不显示, 客户看到的是空白 / 缺块"
+  fix:
+    - "修正动画的选择器让它真能命中(常见是 lift / 换皮时被啃坏), 或删掉这条失效动画"
+
+R-VIS-DEAD-RULE:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有条样式没生效, 元素悄悄退回了浏览器默认(大字缩小 / 网格排版塌掉)"
+  consequence: "本该的大号字 / 网格排版失效, 字号闸还全绿不报警, 客户看到塌掉的版面"
+  fix:
+    - "修正这条样式的选择器让它真能命中(常见是 lift / 换皮被啃坏), 或删掉这条死规则"
+
+R-VIS-PANEL-TOP:
+  concern:     "A · 客户看不见"
+  symptom:     "框里的内容贴着顶, 下面空出一大片"
+  consequence: "内容没在框里居中, 看着头重脚轻不平衡"
+  fix:
+    - "给这个面板容器加垂直居中(flex 居中); 若刻意顶对齐, 标记 data-allow-imbalance 豁免"
+
 R-VIS-CARD-MIN-HEIGHT-SPARSE:
   concern:     "A · 客户看不见"
   symptom:     "这一页卡片内容太少, 卡片显得空"
@@ -477,6 +505,14 @@ R-SELF-CONTAINED:
   consequence: "重渲 / 复用时这页样式可能丢失 (建议性)"
   fix:
     - "把每页定制样式放进该页的 custom_css"
+
+R-RAW-LOOKS-SCHEMA:
+  concern:     "C · 复用时会打架"
+  symptom:     "这页是手搓的 (raw), 但内容其实就是一排标准卡片 (图标+标题+正文)"
+  consequence: "手搓标准形状 = 多花功夫 / 更容易出格 / 更难改, 没有设计增益 (建议性)"
+  fix:
+    - "改用标准卡片版式 (content/3up 或 content/blocks), 更省更稳更一致"
+    - "若这页确有定制 / 关系 / 叙事的设计实质, 保持 raw 忽略本条即可"
 
 # ---- D · 放映功能不全 (不影响内容, 影响演示体验) ----
 

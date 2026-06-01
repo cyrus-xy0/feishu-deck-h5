@@ -855,6 +855,7 @@ STATIC_AUDITS = [
     (audit_language_policy,    ('html', 'slides', 'iss')),
     (audit_list_echo,          ('slides', 'iss')),
     (audit_visual_richness,    ('slides', 'iss')),
+    (audit_raw_looks_schema,   ('slides', 'iss', 'path')),
     (audit_self_contained,     ('html', 'iss')),
     (audit_autobalance_present, ('html', 'iss')),
     (audit_perf,               ('html', 'iss')),

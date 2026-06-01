@@ -45,7 +45,8 @@ FAMILIES = [
     ('品牌 / 调色板',        ['L1', 'R10', 'R12', 'R38', 'R49', 'R-LANG']),
     ('布局完整性',           ['L2', 'L4', 'R36', 'R47', 'R48', 'R-CSSVAR',
                               'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST',
-                              'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT']),
+                              'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT',
+                              'R-RAW-LOOKS-SCHEMA']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
@@ -72,6 +73,10 @@ CONTEXT_NOTES = {
     'R-SELF-CONTAINED': '老 deck 把每页 CSS 放在 head <style> 里很常见; 这条只是 '
                         '提醒「该页 CSS 没跟着 slide 走, lift/republish 会丢」. '
                         '非阻塞 (warn_soft); 迁到 deck.json 的 custom_css 即可消除.',
+    'R-RAW-LOOKS-SCHEMA': 'raw-first 立场下的过度处理兜底: 一张手搓 raw 页若其实只是 '
+                        '一排标准卡片 (图标+标题+正文, 无示意图/动画/箭头连接), 提醒 '
+                        '改用 content/3up·blocks 更省更稳. 非阻塞 (warn_soft); 这页若有 '
+                        '定制/关系/叙事实质, 保持 raw 忽略即可.',
 }
 
 

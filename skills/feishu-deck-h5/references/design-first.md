@@ -5,8 +5,9 @@
 
 > **本节是 `DESIGN PHASE` Step 2 的细节**(per-page 设计预检 + Q0–Q4 + 六维 +
 > Decision rule)。编排、默认值、确认门规则在 `DESIGN PHASE` 那一节;这里讲
-> "每页具体怎么想"。确认门**按风险触发**(全 schema 宣告即走;有 `layout: raw`
-> / bespoke / 重度补全的页才停下确认),不再是无条件"必须等确认"。
+> "每页具体怎么想"。**raw-first 立场(见 `DECK GENERATION POLICY`):默认每页
+> `layout: "raw"`,只有命中「纯标准形状白名单」才回退 schema。** 确认门:raw 页
+> 过确认(批量一次性过),回退 schema 的白名单页宣告即走。
 
 When the user hands you **a text brief** (一串提示词 / 文案 / Q&A 大纲 /
 sections 描述 / 主题列表),**do NOT immediately create files**. First
@@ -373,30 +374,35 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
 
 ### Design pass output — markdown table in chat
 
-| # | 页 / 主题 | 角色 | Layout / path | hero? | 为什么 |
-|---|---|---|---|---|---|
-| P0 | 封面 | 结论 | `cover`(Path A) | — | 主标题 + 发起人 + 日期,master 封面 |
-| P1 | 客户三个核心痛点 | 现象 | `content/3up`(Path A) | — | 3 个并列点,schema 正合适 |
-| P2 | 客户原话 | 证据 | `quote`(Path A) | — | 单句引语 |
-| P3 | 那一个大论点 | 结论 | `layout: raw` · 双手架构 pattern | ★ | 全 deck 高光,schema 表达不了;翻词汇库选了 two-hand-arch |
-| P4 | Q&A 大问题 + 原声列表 | 现象 | `layout: raw` · `.qa-page` | — | 主问题需多行,schema 无匹配 |
+| # | 页 / 主题 | 角色 | path(默认 raw,回退才标) | 为什么 |
+|---|---|---|---|---|
+| P0 | 封面 | 结论 | 回退 `cover` | 纯标准形状:标题 + 发起人 + 日期 |
+| P1 | 客户三个核心痛点 | 现象 | 回退 `content/3up` | 纯并列 3 卡,无关系 / 动画 → 标准形状 |
+| P2 | 客户原话 | 证据 | 回退 `quote` | 单句引语,纯标准形状 |
+| P3 | 那一个大论点 | 结论 | **`raw`** · 双手架构 | 全 deck 高光,有空间结构 → 主场 raw;词汇库选 two-hand-arch |
+| P4 | 数据→信息→知识 | 方法论 | **`raw`** · 三层叙事 | 有递进 / 叙事实质,非纯并列 → raw |
 
 每行必须给:
 - **角色**: Q0 五选一(现象 / 方法论 / 结论 / 对比 / 证据)
-- **Layout / path**: Path A 写具体 schema 名;hero/bespoke 写 `layout: raw` +
-  **从词汇库选定的 pattern 名**(scan `narrative patterns A–N` +
-  `component utility classes`,优先复用现成 pattern,别从零硬写)
-- **hero?**: 标 ★ 的页才全开 bespoke + 必填 Q0–Q4 六维;通常 2–3 张
-- **为什么**: 1 句话依据(为什么这个 layout fit / 为什么必须 bespoke)
+- **path**: 默认 **`raw`** + **从词汇库选定的 pattern 名**(scan `narrative patterns A–N` +
+  `component utility classes`,优先复用现成 pattern,别从零硬写);命中白名单才写「回退 <schema>」
+- **为什么**: 1 句话依据 —— raw 页说"有什么 bespoke 实质 / 选了哪个 pattern";回退页说"它是哪个纯标准形状"
 
-> hero 页(★)在表下方各补一句话 design intent statement(见"通过 5 问的标志"),
-> 并把 Q0–Q4 + 六维写进 DESIGN-PLAN.md。
+> **raw 页(= 大多数)在表下方各补一句话 design intent statement**(见"通过 5 问的标志"),
+> 并把 Q0–Q4 + 六维写进 DESIGN-PLAN.md;回退 schema 的白名单页不需要。
 
-### Decision rule — "标准 layout 优先" 判断逻辑
+### Decision rule — 白名单回退判定(raw-first)
 
-按下表逐页判定。**第一个匹配的就是该页 layout**,不要往下找。
+**默认 = `layout: "raw"`。** 下表是「能回退 schema 的标准形状」清单 —— 逐页判:这页内容
+**是不是一个纯标准形状**(命中下表某行 **且** 无对位 / 关系 / 叙事 / 隐喻 / 空间 / 动画实质)?
+- **是 → 回退该 schema**(raw 装它纯属过度处理,会被 `R-RAW-LOOKS-SCHEMA` 标);
+- **否 → `layout: "raw"`**(主场)。
 
-| 内容形态 | 用 | 标准 fit 的理由 |
+例外:`chart` / `table` / `logo-wall` / `flow` / `arch-stack` 这类**确定性几何 schema**,
+当页"只是结构 / 数据、无 bespoke 故事"时可主动选 schema(renderer 出确定性图更省更稳)——
+这是你的判断,两边都不算错、不被标。
+
+| 内容形态 | 命中则回退 | 它为何是"纯标准形状" |
 |---|---|---|
 | 单标题 + 发起人 + 日期 | `cover` | Master 封面 |
 | 3-8 章节项的目录 | `agenda` | Pill stack |
@@ -415,11 +421,12 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
 | 2-5 层架构(应用 / 平台 / AI / 数据) | `arch-stack` | Tech stack |
 | 结尾 slogan / 联系方式 | `end` | Master 封底 |
 | Designer-polished PDF 页保真 | `replica` | 整页贴图 |
-| **以上都不匹配** | 想想 → 还是不匹配 → **自定义** | 见下 |
+| **以上都不匹配,或有 bespoke 实质** | → `layout: "raw"`(默认主场) | 见下 |
 
-### 什么时候自定义 IS the right call
+### raw 的典型实质(它是默认,不再"仅限")
 
-自定义(Path B / `layout: raw`)**仅限**以下场景,设计 pass 中必须 explicit 标出:
+> ⚠️ raw-first 翻向后,`layout: raw` 是**默认主场**,不再"仅限"特定场景。下面几类是
+> raw 最典型的实质理由(写进"为什么"列很顺手),但凡命中一类 = 留 raw:
 
 1. **schema-shape 结构性不匹配** — e.g. Q&A 页(大问题多行 + 原声列表);标准
    `content-2col` 强制主问题进 `.header .title-zh` 被单行截断
@@ -429,24 +436,23 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
 3. **用户明确给了 schema 无法表达的结构** — "6-beat case" / 竖版手机端 /
    "case 没有冲突,只有 3 个发现"
 
-### Anti-patterns — DO NOT 自定义 for these
+### Anti-patterns — 这些该回退 schema / 不是 layout 问题,别拿 raw 硬扛
 
-- ❌ "想标题 18 px 不要 24" — R20 drift,不是 schema 不够;snap 回 ladder
-- ❌ "schema 有 3up 但我想 4 个 card" — `content/blocks` 自由 grid 也是标准
-- ❌ "看着 schema 我没把握选哪个" — 看 deck-json/MIGRATION-REPORT.md
-   Phase 0.2 的 4-proposal 评估流程,不要直接 raw
+- ❌ "想标题 18 px 不要 24" — R20 drift,不是设计实质;raw 页也得用 `var(--fs-*)` 四档
+- ❌ "纯并列 4 卡(图标+标题+正文),想用 raw" — 这是纯标准形状,**回退 `content/blocks`**;raw 它 = 过度处理,`R-RAW-LOOKS-SCHEMA` 会标
+- ❌ "拿不准这页算不算纯标准形状" — raw-first 下**默认 raw 就对**(回退 schema 才要确证);别为了"省"硬塞进不贴合的 schema
 - ❌ "想给每页换不同 accent 颜色" — `data-accent` 属性,不是 layout 改
 
-### Design pass 收尾 — 确认门按风险触发
+### Design pass 收尾 — 确认门(raw-first)
 
-设计方案 table 输出后,看方案里有没有 **beyond-default 页**(`layout: raw` /
-bespoke hero / 超出用户给定材料的重度补全):
+设计方案 table 输出后:**raw 页 = beyond-default,需确认设计意图;回退 schema 的白名单页宣告即走**。
 
-- **有 → 停下等确认**。把那几页的 spec(Q0–Q4 + 六维 + 选定 pattern)逐项摆出,
-  end with:
-  > 这几张高光页(P_x / P_y)我按上面的设计来,确认?其余 schema 页我直接出。
-- **没有(全 schema)→ 宣告即走**,不强制停:
-  > 方案如上(全用标准 layout),我开工了;有要改的随时说。
+- **批量 deck**:把 raw 页的 spec(Q0–Q4 + 六维 + 选定 pattern)摆出,**一次性过整张方案**
+  (逐页停会烦死人),end with:
+  > 这几张 raw 页我按上面的设计来,确认?命中白名单回退 schema 的页(P_x / P_y)我直接出。
+- **全是回退 schema 的纯标准 deck**(罕见,如纯内部 OKR 复盘)→ 宣告即走:
+  > 方案如上(全是标准形状,回退 schema),我开工了;有要改的随时说。
+- 逐页增量喂时,每张 raw 页设计完单独过一下确认再落。
 
 无论哪种,**真正开始写文件前不要 pre-emptively 跑 PREFLIGHT**;按
 `DESIGN PHASE` 的顺序:确认/宣告 → PREFLIGHT → new-run → **落 `DESIGN-PLAN.md`**
