@@ -69,7 +69,7 @@ def extract_slide_inner(html: str, slide_key: str) -> str | None:
 
     Returns None if the slide isn't found in html.
     """
-    pat = rf'<div class="slide"[^>]*data-slide-key="{re.escape(slide_key)}"[^>]*>'
+    pat = rf'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="{re.escape(slide_key)}"[^>]*>'
     m = re.search(pat, html)
     if not m:
         return None

@@ -113,7 +113,7 @@ def _lifted_slide_keys(html: str) -> set:
     the slide is verbatim from another deck, so the human CHOOSES whether to
     bump fonts; it's surfaced, not blocking. Geometry/overflow stays error."""
     keys = set()
-    for m in re.finditer(r'<div class="slide"[^>]*>', html):
+    for m in re.finditer(r'<div class="slide(?:\s[^"]*)?"[^>]*>', html):
         tag = m.group(0)
         if 'data-lifted' in tag:
             km = re.search(r'data-slide-key="([^"]+)"', tag)
@@ -1634,7 +1634,7 @@ def audit_lift_style_lost(html: str, iss: Issues):
     frames = re.findall(r'<div class="slide-frame"[^>]*>(.*?)</div>\s*(?=<div class="slide-frame"|<div class="deck-ui"|$)',
                         body, re.DOTALL)
     for frame in frames:
-        m = re.search(r'<div class="slide"([^>]+)>(.*)', frame, re.DOTALL)
+        m = re.search(r'<div class="slide(?:\s[^"]*)?"([^>]+)>(.*)', frame, re.DOTALL)
         if not m: continue
         attrs, inner = m.group(1), m.group(2)
         if 'data-lifted' not in attrs: continue

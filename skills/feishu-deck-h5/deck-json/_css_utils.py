@@ -129,8 +129,19 @@ def _scope_one_selector(part: str, scope: str) -> str:
         return p
     if "[data-slide-key=" in p:
         return p
-    if "[data-page=" in p:
-        return re.sub(r'\[data-page=[^\]]*\]', scope, p)
+    if "[data-page" in p:
+        # `[data-page=N]` is usually the FRAME-level ancestor of `.slide` (the
+        # page-anim head pattern `[data-page="03"] .slide .card`). A plain token
+        # swap yields `scope .slide .card` — a PHANTOM nested `.slide` that
+        # matches 0 elements (scope already IS the keyed `.slide`), so a migrated
+        # rule silently dies. Mirror lift-slides.extract_head_slide_rules: strip
+        # selector-position comments, FUSE `[data-page=N](>) .slide` onto the
+        # keyed scope, then re-anchor any remaining bare `[data-page]` token.
+        # (Also handles bare `[data-page]` with no `=`.)
+        p = re.sub(r'/\*[\s\S]*?\*/', ' ', p)
+        p = re.sub(r'\[data-page(?:=[^\]]*)?\]\s*(?:>\s*)?\.slide(?![\w-])',
+                   lambda m: scope, p)
+        return re.sub(r'\[data-page(?:=[^\]]*)?\]', lambda m: scope, p)
     # `.slide` as the leading token (but NOT `.slide-frame` / `.slideshow`)
     if re.match(r'\.slide(?![\w-])', p):
         return re.sub(r'^\.slide', scope, p, count=1)

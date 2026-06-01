@@ -188,15 +188,22 @@ def render_template(template: str, data: dict) -> str:
       {{{ field }}}  raw   — value substituted as-is (use for known HTML)
       {{ field }}    safe  — value HTML-escaped (default)
 
-    Raw substitutions run first so they're not double-processed.
-    Supports dotted paths: {{ scene.caption }}.
+    Raw substitutions are resolved FIRST and parked behind NUL sentinels so the
+    subsequent safe `{{ }}` pass never re-scans raw-injected author HTML — a raw
+    slide's data.html or an enricher-built `*_html` slot may legitimately contain
+    a literal `{{ word }}` (e.g. a templating-syntax demo or copy with double
+    braces), which must NOT be re-interpreted as a missing-field placeholder
+    (that would SystemExit the whole render). Supports dotted paths: {{ a.b }}.
     """
+    raw_chunks: list[str] = []
+
     def sub_raw(m):
         path = m.group(1).strip()
         try:
-            return str(get_path(data, path))
+            raw_chunks.append(str(get_path(data, path)))
         except KeyError:
             raise SystemExit(f"render-deck: template references missing field {{{{{{ {path} }}}}}}")
+        return f"\x00RAW{len(raw_chunks) - 1}\x00"
     template = re.sub(r"\{\{\{\s*([\w.]+)\s*\}\}\}", sub_raw, template)
 
     def sub_safe(m):
@@ -206,7 +213,10 @@ def render_template(template: str, data: dict) -> str:
         except KeyError:
             raise SystemExit(f"render-deck: template references missing field {{{{ {path} }}}}")
         return _esc_br(str(value))
-    return re.sub(r"\{\{\s*([\w.]+)\s*\}\}", sub_safe, template)
+    template = re.sub(r"\{\{\s*([\w.]+)\s*\}\}", sub_safe, template)
+
+    # Restore parked raw chunks AFTER the safe pass, verbatim (never re-scanned).
+    return re.sub(r"\x00RAW(\d+)\x00", lambda m: raw_chunks[int(m.group(1))], template)
 
 
 # ---------------------------------------------------------------------------
@@ -1616,10 +1626,13 @@ def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
     block = (f'<style data-slide-key="{slide_key}" data-fs-custom-css>\n'
              f'{scoped}\n'
              f'        </style>')
-    # `class="slide"` (closing quote pins the class to exactly "slide", so this
-    # never matches `class="slide-frame"`). First match is the real .slide open.
+    # Match the `.slide` open div ALLOWING extra classes (`slide story-case`,
+    # `slide page-replica`, …). `(?:\s[^"]*)?` keeps `class="slide-frame"` OUT
+    # (after `slide` must come `"` or whitespace, never `-`), so the first match
+    # is still the real `.slide` open. Anchoring on exact `class="slide"` used to
+    # silently drop custom_css on story-case / replica slides (n=0 → no-op).
     new_html, n = re.subn(
-        r'(<div class="slide"[^>]*>)',
+        r'(<div class="slide(?:\s[^"]*)?"[^>]*>)',
         lambda m: m.group(0) + "\n        " + block,
         slide_html, count=1,
     )
