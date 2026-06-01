@@ -233,6 +233,6 @@ input copy:   $INPUT_IN_RUN
 
 Next:
   - open $OUT_DIR/index.html in a browser
-  - edit deck.json (or texts.md if you want) and re-run render-deck.py
+  - edit deck.json and re-run render-deck.py
   - for single-file delivery, run: bash $SKILL_ROOT/build.sh  (or inline via render-deck.py --inline)
 EOF

@@ -14,10 +14,9 @@ A slide can carry up to three numeric identifiers, at different DOM levels:
 | Identifier | Lives on | Status | Used for |
 |---|---|---|---|
 | `data-screen-label="NN Title"` | `.slide` element | **mandatory** | present-mode pager UI label; validator R02 requires it |
-| `data-text-id="slide-NN.field"` | every text leaf | **mandatory if texts.md sidecar exists** | links HTML → texts.md (T01–T03) |
 | `data-page="NN"` | `.slide-frame` wrapper | **conditional — only when the slide has per-page scoped CSS** | per-page `[data-page="07"] .card { ... }` overrides authored in the deck's inline `<style>` |
 
-The first two are always required (validator enforces). `data-page`
+`data-screen-label` is always required (validator enforces). `data-page`
 is **purely a CSS-scoping handle** the author opts into when they need
 per-page overrides — most Path A (template-rendered) slides don't have
 it at all (Opple deck: 0/51 frames carry `data-page`; CTG deck: 36/53
@@ -30,11 +29,7 @@ identifiers that EXIST on the affected slides:
    positions ≥ 7 shift +1).
 2. **Always** — update `data-screen-label="NN Title"` on every affected
    `.slide`.
-3. **Always (if texts.md exists)** — update `data-text-id="slide-NN.field"`
-   on every affected text leaf, and the matching `## slide-NN` headers
-   in `texts.md`. Use Edit's `replace_all` carefully — scope to the
-   affected slide's markup, not the whole file.
-4. **Only if `data-page="NN"` is on the affected `.slide-frame`** —
+3. **Only if `data-page="NN"` is on the affected `.slide-frame`** —
    renumber it too, AND grep for `[data-page="OLDNN"]` selectors in the
    deck's `<style>` blocks and renumber those to match. Skipping this
    leaves per-page CSS attached to the wrong frame (this is the bug
@@ -42,9 +37,9 @@ identifiers that EXIST on the affected slides:
    `data-page="03"` plus a `[data-page="03"] .card { … }` rule, and the
    renumber missed the frame attribute, so the rule fired on the wrong
    page after the delete).
-5. Run `python3 assets/validate.py runs/<ts>/output/index.html` —
-   R-DOM catches missing `</div>`, T03 catches texts.md drift, R20
-   catches per-page CSS that's off the type-scale ladder.
+4. Run `python3 assets/validate.py runs/<ts>/output/index.html` —
+   R-DOM catches missing `</div>`, R20 catches per-page CSS that's off
+   the type-scale ladder.
 
 **The deck on disk is your source of truth** for which identifiers
 each slide carries — there is no "every slide MUST have data-page"
@@ -74,10 +69,12 @@ HTML for slide insertion / deletion / column-content rotation:
   that lived inside the matched span.
 
 **Rule**: do not use regex / sed / plain text replacement to manipulate
-slide DOM structure. For editorial text changes use `apply-texts.py`
-(parses by `data-text-id`, position-safe). For structural changes
+slide DOM structure. For editorial text changes edit `deck.json` (schema
+field or a `layout: raw` slide's `data.html`) and re-render — or use
+`deck-cli set slides.N.data.<field> "…"`. For structural changes
 (insert / delete / move slide), do it by reading the file, identifying
-the slide blocks manually, and writing back the full sequence.
+the slide blocks manually, and writing back the full sequence (or, for
+Path A decks, mutate `deck.json` and re-render).
 
 **Safety net**: after every structural change, run validator R-DOM
 (`audit_dom_integrity` in `validate.py`). It catches the catastrophic

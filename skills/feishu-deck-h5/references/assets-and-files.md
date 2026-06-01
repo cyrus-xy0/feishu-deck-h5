@@ -14,8 +14,6 @@ feishu-deck-h5/
 │   │   ├── deck-edit-mode.css  ← edit-mode chrome (toolbar, drag affordances)
 │   │   └── deck-edit-mode.js   ← contenteditable text leaves + drag-reorder + Cmd/Ctrl+S save
 │   ├── validate.py             ← programmatic self-check (HARD GATE before delivery)
-│   ├── apply-texts.py          ← patch HTML from edited texts.md (text-edit sidecar)
-│   ├── extract-texts.py        ← bootstrap texts.md from a deck (annotate or dump)
 │   ├── copy-assets.py          ← per-run portability + emits assets-manifest.yaml
 │   ├── new-run.sh              ← create runs/<timestamp>/{input,output}/ workspace
 │   ├── preflight.sh            ← mandatory local-mount check

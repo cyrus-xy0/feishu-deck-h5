@@ -61,7 +61,7 @@ LLM 多做创造性工作(补文案、补内容、为高光页写 bespoke layout
 **Step 4 · 闸门 + 落盘**
 - 有 beyond-default 页 → 等用户确认;全 schema → 宣告即走。
 - 确认/宣告后:PREFLIGHT → new-run → **把锁定的方案写一份
-  `runs/<ts>/output/DESIGN-PLAN.md`**(与 PROMPTS.md / texts.md
+  `runs/<ts>/output/DESIGN-PLAN.md`**(与 PROMPTS.md
   同级),生成严格照它走;中途想偏离先回来改 plan,不静默漂移。
 
 **Step 5 · 密度闸门(每次 render 后过一遍,直到通过再交付)**

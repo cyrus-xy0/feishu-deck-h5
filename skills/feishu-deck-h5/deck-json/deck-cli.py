@@ -132,8 +132,25 @@ def backup_path(deck_path: Path, command: str) -> Path:
 
 
 def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
-                                no_backup: bool = False) -> bool:
-    """Write deck back to disk, re-validate. On schema fail: rollback, return False."""
+                                no_backup: bool = False,
+                                expected_mtime: float | None = None,
+                                force: bool = False) -> bool:
+    """Write deck back to disk, re-validate. On schema fail: rollback, return False.
+
+    Optimistic lock (F-48): if `expected_mtime` is given and the file's current
+    mtime differs (another process wrote deck.json since we read it), refuse the
+    write so we don't silently clobber that change. `--force` bypasses the check.
+    """
+    # 0. Optimistic-lock check — another session may have written since we read.
+    if expected_mtime is not None and not force and deck_path.exists():
+        cur_mtime = deck_path.stat().st_mtime
+        if abs(cur_mtime - expected_mtime) > 1e-6:
+            print(f"deck-cli: REFUSING write — {deck_path.name} changed on disk "
+                  f"since it was read (concurrent edit by another process). "
+                  f"Re-read the deck and retry, or pass --force to overwrite.",
+                  file=sys.stderr)
+            return False
+
     # 1. Backup current state
     bak = None
     if not no_backup and deck_path.exists():
@@ -420,10 +437,11 @@ def cmd_clone(deck: dict, args) -> tuple[int, dict | None]:
 
 
 def _strip_text_ids(obj):
-    """Recursively strip `data-text-id="..."` from every string in a slide. These
-    ids are position-bound (`slide-NN.field`) to the SOURCE deck, so they'd
-    collide / mismatch in the target's texts.md (T03). Same call lift-slides.py
-    makes. Returns the cleaned object + the count removed."""
+    """Recursively strip `data-text-id="..."` from every string in a slide.
+    These ids are position-bound (`slide-NN.field`) to the SOURCE deck; they
+    are inert in the target but carrying stale source-bound ids is messy, so
+    we drop them on paste. Same call lift-slides.py makes. Returns the cleaned
+    object + the count removed."""
     count = 0
 
     def walk(v):
@@ -672,7 +690,6 @@ def cmd_render(deck_path: Path, args) -> int:
     cmd = [sys.executable, str(RENDER_DECK), str(deck_path), str(args.output_dir)]
     if args.inline:           cmd.append("--inline")
     if args.skip_copy_assets: cmd.append("--skip-copy-assets")
-    if args.skip_texts:       cmd.append("--skip-texts")
     rc = subprocess.run(cmd)
     return 5 if rc.returncode != 0 else 0
 
@@ -686,6 +703,9 @@ def main(argv=None) -> int:
     ap.add_argument("deck", type=Path, help="path to deck.json")
     ap.add_argument("--yes", action="store_true", help="skip interactive confirms")
     ap.add_argument("--no-backup", action="store_true", help="skip .bak-pre-* backup")
+    ap.add_argument("--force", action="store_true",
+                    help="bypass concurrent-modification (optimistic-lock) check — "
+                         "write even if deck.json changed on disk since it was read")
 
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="list slides")
@@ -737,12 +757,12 @@ def main(argv=None) -> int:
     sp.add_argument("output_dir", type=Path)
     sp.add_argument("--inline", action="store_true")
     sp.add_argument("--skip-copy-assets", action="store_true")
-    sp.add_argument("--skip-texts", action="store_true")
 
     args = ap.parse_args(argv)
 
-    # Load deck
+    # Load deck (capture mtime for the optimistic-lock check on write-back)
     try:
+        deck_mtime = args.deck.stat().st_mtime
         deck = json.loads(args.deck.read_text(encoding="utf-8"))
     except FileNotFoundError:
         print(f"deck-cli: deck not found: {args.deck}", file=sys.stderr); return 2
@@ -778,7 +798,9 @@ def main(argv=None) -> int:
     if rc != 0 or updated is None:
         return rc
 
-    ok = write_deck_with_validation(args.deck, updated, args.cmd, args.no_backup)
+    ok = write_deck_with_validation(args.deck, updated, args.cmd, args.no_backup,
+                                    expected_mtime=deck_mtime,
+                                    force=getattr(args, "force", False))
     return 0 if ok else 3
 
 

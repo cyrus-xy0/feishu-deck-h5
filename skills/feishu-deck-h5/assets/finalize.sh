@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # feishu-deck-h5  ·  finalize a per-run output in one shot.
 #
-# Replaces the manual "remember to call copy-assets, then extract-texts,
-# then validate, then maybe package-deliverable" sequence with a single
-# orchestrated command. Idempotent — safe to re-run after edits.
+# Replaces the manual "remember to call copy-assets, then validate, then
+# maybe package-deliverable" sequence with a single orchestrated command.
+# Idempotent — safe to re-run after edits.
 #
 # Usage:
 #     bash assets/finalize.sh <output-dir> [mode] [--strict] [--name <slug>]
@@ -13,7 +13,7 @@
 #                         convention: lark-<customer>-<presentation-date>
 #                         e.g. --name lark-boyu-starbucks-2026-05-08
 #
-#     local   = copy-assets + extract-texts + validate (+ named copy if --name)
+#     local   = copy-assets + validate (+ named copy if --name)
 #     remote  = local steps + package-deliverable.sh (zip kit, zip name from --name)
 #
 # For single-file inline delivery (base64-inlined CSS/JS/images into one
@@ -24,7 +24,6 @@
 #     0  all green
 #     1  bad arguments
 #     2  copy-assets failed
-#     3  extract-texts failed
 #     4  validate failed (errors — fix the deck and re-run)
 #     5  packaging failed
 
@@ -100,18 +99,7 @@ if ! run_step "copy-assets" python3 "$SCRIPT_DIR/copy-assets.py" "$OUT_DIR"; the
     exit 2
 fi
 
-# ---------- 2 · extract-texts (sidecar) ----------
-TEXTS="$OUT_DIR/texts.md"
-if [ ! -f "$TEXTS" ]; then
-    echo "  · extract-texts (no sidecar found, generating) …"
-    if ! run_step "extract-texts" python3 "$SCRIPT_DIR/extract-texts.py" "$HTML" --out "$TEXTS"; then
-        echo "  ! extract-texts skipped (deck has no data-text-id leaves — fine for Replica decks)"
-    fi
-else
-    echo "  · texts.md sidecar already exists, skip"
-fi
-
-# ---------- 3 · validate ----------
+# ---------- 2 · validate ----------
 if [ -n "$STRICT" ]; then
     echo "  · validate --strict …"
 else
@@ -126,7 +114,7 @@ if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $STRICT; then
     exit 4
 fi
 
-# ---------- 4 · delivery-named copy (if --name provided) ----------
+# ---------- 3 · delivery-named copy (if --name provided) ----------
 NAMED_HTML=""
 if [ -n "$NAME" ]; then
     NAMED_HTML="$OUT_DIR/$NAME.html"
@@ -134,7 +122,7 @@ if [ -n "$NAME" ]; then
     echo "  · copied → $NAME.html"
 fi
 
-# ---------- 5 · mode-specific packaging ----------
+# ---------- 4 · mode-specific packaging ----------
 case "$MODE" in
     local)
         echo ""

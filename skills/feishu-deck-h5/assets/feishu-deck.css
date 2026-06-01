@@ -776,7 +776,18 @@ body {
    不动 1712 行的全局 legacy stretch(其它版式仍依赖它)。
    验证:assets/check-distribution.py 在青啤 slide 3 上 3 findings → 0,全 deck 零回归。 */
 .slide[data-layout="content-3up"] .grid .card {
-  align-self: center;
+  /* 2026-06-01: align-self center → stretch. The 2026-05-30 L3 fix used
+     `center` to stop the fullest card overflowing under the THEN-current
+     fixed-height band. The next day (2026-05-31, ~line 1685) the grid was
+     reworked to `flex:1 + align-content:center`, so the single grid row is
+     now `auto` = tallest card's content height and centered in the band.
+     Under THAT geometry `center` left shorter cards at their own (smaller)
+     content height → visibly ragged card heights (user-reported: "第三个框
+     变大了"). `stretch` makes every card match the row track (= tallest
+     content), giving an even grid WITHOUT overflow — the track is auto-sized
+     to content, so the tallest card's content exactly fits by construction.
+     `justify-content: center` keeps content vertically centered inside. */
+  align-self: stretch;
   justify-content: center;
 }
 
@@ -880,6 +891,24 @@ body {
   border: 1px solid var(--fs-hairline); border-radius: 16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
   position: relative; overflow: hidden;
+}
+/* 规范 L3 (2026-06-01) — SINGLE-child visual panel centers its content vertically.
+   Root cause (pg29 feishu-ai-scene-tools 实战): a panel container (.col-visual /
+   lifted *-pane) holding ONE shorter-than-column block (product shot / single
+   card / mock) left it top-stacked — the panel had no internal vertical
+   centering, only .stage/.grid did. This is the panel-level twin of the
+   content-3up card-centering fix.
+   Guards (do NOT break existing defenses):
+   · BF12 multi-card columns → excluded via :not(:has(card+card)) so equal-height
+     fill still wins;
+   · BF2 self-decorated children (.data-panel etc.) → the BF2 frame-strip rule
+     still applies; centering a single self-decorated panel is harmless;
+   · BF7 hero image (inline min-height directive) → that rule sets its own
+     align; an inline-min-height child fills the column so justify-content has
+     no slack to act on — no conflict.
+   Single-child only: a column with 2+ stacked cards is handled by BF12 above. */
+.slide[data-layout="content-2col"] .col-visual:not(:has(> .canonical-card + .canonical-card)):not(:has(> .news-card + .news-card)):not(:has(> .data-panel + .data-panel)) {
+  display: flex; flex-direction: column; justify-content: center;
 }
 
 /* ============================================================================

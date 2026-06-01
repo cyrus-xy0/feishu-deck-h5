@@ -63,7 +63,18 @@ WHAT IT DOES:
       prototypes/<slug>/…       → prototypes/<slug>/…  (whole dir copied)
   · Appends slide entries to deck.json with `lifted: "<src-stem>#<key>"` and
     `decor: [...]`, `accent`, etc. preserved.
-  · Reports per-slide: key, label, decor/accent, bytes, asset copies.
+  · Writes a structured `lift_origin` provenance block on each lifted slide
+    (src_deck / src_path / src_key / src_index / lifted_at:null) so heal/re-lift
+    can return to the EXACT source slide deterministically — no class-signature
+    reverse-guessing, no data-page≠visual-order mis-targeting (F-70). `lifted_at`
+    is null on purpose: we never call datetime.now() (it would break workflow
+    determinism); the caller stamps it if wanted.
+  · Reports per-slide: key, label, decor/accent, bytes, asset copies, AND a
+    full asset-reference scan (F-45) — every LOCAL ref (<iframe>/<img>/<source>/
+    <video>/url()/background-image) bucketed as present / source-file-MISSING /
+    framework-shared / BRAND-specific-clientlogo, so a human can swap or remove
+    instead of the lift silently carrying or dropping. base64/http refs are not
+    reported (self-contained / external). Informational only — never blocks.
 
 WHY layout: "raw" + slide-key-scoped CSS + framework defaults
   · Framework's `.header { top:61 left:73 right:320 }` and `.stage { top:200
@@ -213,6 +224,99 @@ def _page_to_key(full_html):
     return out
 
 
+# --- Asset-reference scan (F-45) ------------------------------------------
+# A lifted slide's HTML can reference assets in several ways. base64 (`data:`)
+# refs are self-contained (travel with the HTML) so we ignore them; http(s) refs
+# are external (not ours to carry). Everything else is a LOCAL path that must be
+# resolved against the SOURCE deck dir and (often) copied to the target — and if
+# the source file is missing, the lifted page renders blank/broken. clientlogo
+# refs are extra-special: they're BRAND-specific (the source customer's logo), so
+# even when the file exists, a new customer almost certainly wants it swapped.
+#
+# This scanner is INFORMATIONAL only — it never blocks a lift, it just surfaces
+# {present / missing / brand-specific} so a human can decide to swap or remove,
+# instead of the old silent carry-or-drop behaviour.
+
+# Local asset references in the inner HTML, by every syntax a slide can use:
+#   <iframe src=...>, <img src=...>, <... src=...>, url(...), background-image
+# We capture the raw URL token then filter to LOCAL paths below.
+_ASSET_REF_PATTERNS = (
+    re.compile(r'''<iframe\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''<img\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''<source\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''<video\b[^>]*?\b(?:src|poster)\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''url\(\s*['"]?([^'")]+?)['"]?\s*\)''', re.I),
+)
+
+
+def _is_local_asset_ref(url):
+    """True for refs we must resolve against the source deck dir. False for
+    self-contained (`data:`/base64) and external (`http(s):`//`mailto:` etc.)
+    refs, and for in-page anchors / blank refs."""
+    u = (url or "").strip()
+    if not u:
+        return False
+    low = u.lower()
+    if low.startswith(("data:", "http://", "https://", "//", "mailto:",
+                       "tel:", "javascript:", "blob:", "#", "about:")):
+        return False
+    return True
+
+
+def _classify_asset_ref(url):
+    """Bucket a LOCAL asset ref for the report:
+      'framework' — assets/shared/* or assets/lark-* (resolve in the SKILL, not
+                    the per-deck dir; carried by path-rewrite, always present)
+      'clientlogo'— assets/shared/clientlogo/* (BRAND-specific → flag for swap)
+      'input'     — input/* per-run screenshots/source files (copied by transform)
+      'prototype' — prototypes/<slug>/* iframe bodies (copied by transform)
+      'other'     — any other local path (e.g. a sibling .html iframe body, a
+                    relative ../foo.png) — these are the silent-break risk.
+    """
+    u = url.strip().lstrip("./")
+    low = u.lower()
+    if "shared/clientlogo/" in low or low.startswith("clientlogo/"):
+        return "clientlogo"
+    if low.startswith("assets/shared/") or re.match(r'assets/lark-', low):
+        return "framework"
+    if low.startswith("input/"):
+        return "input"
+    if low.startswith("prototypes/"):
+        return "prototype"
+    return "other"
+
+
+def scan_asset_refs(inner, src_dir):
+    """Scan a lifted slide's inner HTML for every LOCAL asset reference and
+    resolve it against the SOURCE deck dir to learn if the file is present.
+    Returns a list of dicts:
+        {"url": <as-written>, "kind": <bucket>, "exists": <bool|None>}
+    `exists` is None for kinds we don't resolve here (framework refs resolve in
+    the skill tree after path-rewrite; we don't second-guess them). De-duplicated
+    by url, document order preserved. base64/http refs are skipped entirely."""
+    seen = set()
+    refs = []
+    for pat in _ASSET_REF_PATTERNS:
+        for m in pat.finditer(inner):
+            url = m.group(1).strip()
+            if not _is_local_asset_ref(url) or url in seen:
+                continue
+            seen.add(url)
+            kind = _classify_asset_ref(url)
+            if kind == "framework":
+                exists = None  # resolved in skill tree post path-rewrite
+            elif kind == "prototype":
+                # prototypes/<slug>/... → check the <slug> dir exists in source
+                mm = re.match(r'(?:\./)?prototypes/([^/]+)/', url)
+                exists = (src_dir / "prototypes" / mm.group(1)).is_dir() if mm else None
+            else:
+                # input/clientlogo/other → resolve the path against source dir
+                rel = url.split("?", 1)[0].split("#", 1)[0].lstrip("./")
+                exists = (src_dir / rel).is_file()
+            refs.append({"url": url, "kind": kind, "exists": exists})
+    return refs
+
+
 def extract_head_slide_rules(src_head_css, slide_key, page_map):
     """Pull source HEAD/deck-level rules that target THIS slide — via
     `[data-slide-key="K"]` or `[data-page="N"]` (N→K through page_map) — and
@@ -310,7 +414,7 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
     inner = re.sub(r'\s*<div class="wordmark">飞书</div>\s*\n', '\n', inner, count=1)
     inner = re.sub(r'\s*<div class="wordmark"></div>\s*\n', '\n', inner, count=1)
 
-    # 2) Strip data-text-id attrs (would collide with target deck's texts.md)
+    # 2) Strip data-text-id attrs (inert source-bound ids; drop on lift)
     inner = re.sub(r'\s+data-text-id="[^"]*"', '', inner)
 
     # 3) Rescope CSS: drop [data-layout="..."] filter from slide-key-scoped rules
@@ -415,7 +519,8 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
     return inner
 
 
-def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=False):
+def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=False,
+         force=False):
     src_html_path = Path(src_html_path).resolve()
     dst_deck_json = Path(dst_deck_json).resolve()
     output_dir = Path(output_dir).resolve() if output_dir else dst_deck_json.parent
@@ -435,9 +540,13 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
     page_map = _page_to_key(full_src_html) if shake else {}
     src_stem = src_html_path.parent.name.replace(" ", "")  # e.g. "merged-49pages 2" → "merged-49pages2"
 
+    # Optimistic lock (F-53): record dst mtime at read time so we can refuse to
+    # silently clobber a concurrent edit on write-back (mirrors deck-cli.py F-48).
     if dst_deck_json.exists():
+        dst_mtime = dst_deck_json.stat().st_mtime
         deck = json.loads(dst_deck_json.read_text(encoding="utf-8"))
     else:
+        dst_mtime = None  # new file — nothing to clobber
         deck = {"version": "1.0", "deck": {}, "slides": []}
 
     print(f"source : {src_html_path}")
@@ -459,6 +568,10 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             print(f"✗ frame {one_indexed}: {e}")
             continue
         report = {}
+        # F-45: scan asset refs on the PRE-transform inner (raw source paths, so
+        # `assets/shared/` is still classifiable as framework before the rewrite
+        # turns it into a skill-relative `../../../` path). Informational only.
+        asset_refs = scan_asset_refs(inner, src_dir)
         inner = transform(inner, src_input_dir, src_proto_dir,
                           dst_input_dir, dst_proto_dir, report,
                           orig_layout=info.get("orig_layout"),
@@ -474,6 +587,20 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             "layout": "raw",
             "screen_label": info["label"],
             "lifted": f"{src_stem}#{info['key']}",
+            # F-70: structured provenance so heal/re-lift can return to the exact
+            # source slide DETERMINISTICALLY (no class-signature reverse-guessing
+            # / hash-screenshot mis-targeting). The free-text `lifted` ref above
+            # stays for the validator's downgrade contract; `lift_origin` is the
+            # machine-readable counterpart. `lifted_at` is intentionally null —
+            # we do NOT call datetime.now() (it would break workflow determinism);
+            # the caller fills it in if/when a timestamp is wanted.
+            "lift_origin": {
+                "src_deck": src_stem,
+                "src_path": str(src_html_path),
+                "src_key": info["key"],
+                "src_index": one_indexed,
+                "lifted_at": None,
+            },
             "data": {"html": inner},
         }
         if info["accent"]:
@@ -499,6 +626,42 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if hint:
             print(f"    ⓘ layout {hint} has framework CSS that won't survive "
                   f"lift-to-raw — re-run with --shake to inline it")
+        # F-45: informational asset-reference report. Surface what this page
+        # references so a human can decide to swap/remove — never silent.
+        if asset_refs:
+            present = [r for r in asset_refs
+                       if r["exists"] is True and r["kind"] != "clientlogo"]
+            # clientlogo refs get their own line (with present/missing state), so
+            # exclude them from the generic missing bucket to avoid double-listing.
+            missing = [r for r in asset_refs
+                       if r["exists"] is False and r["kind"] != "clientlogo"]
+            logos = [r for r in asset_refs if r["kind"] == "clientlogo"]
+            fw = [r for r in asset_refs if r["kind"] == "framework"]
+            print(f"    ── asset refs ({len(asset_refs)}) ──")
+            if present:
+                print(f"    ✓ present (carried): "
+                      f"{[r['url'] for r in present]}")
+            if fw:
+                print(f"    ✓ framework/shared (resolve in skill): "
+                      f"{[r['url'] for r in fw]}")
+            if missing:
+                print(f"    ✗ SOURCE FILE MISSING (page may render blank/broken): "
+                      f"{[r['url'] for r in missing]}")
+            if logos:
+                state = ["(file present)" if r["exists"] else "(file MISSING)"
+                         for r in logos]
+                pairs = [f"{r['url']} {s}" for r, s in zip(logos, state)]
+                print(f"    ⚠ BRAND-specific clientlogo — new customer likely "
+                      f"needs to swap/remove: {pairs}")
+
+    # Optimistic-lock check (F-53): if dst changed on disk since we read it,
+    # another process wrote it — refuse so we don't silently clobber that edit.
+    if (dst_mtime is not None and not force and dst_deck_json.exists()
+            and abs(dst_deck_json.stat().st_mtime - dst_mtime) > 1e-6):
+        print(f"\n✗ {dst_deck_json.name} changed on disk since read "
+              f"(concurrent edit by another process); re-read & retry, or --force",
+              file=sys.stderr)
+        sys.exit(4)
 
     dst_deck_json.write_text(
         json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -577,6 +740,9 @@ def main():
                          "([data-slide-key]/[data-page] page-anim pattern) + pull referenced "
                          "@keyframes. Lets OLD/foreign decks lift CLEAN with no pre-fix codemod. "
                          "Over-inclusive by design.")
+    ap.add_argument("--force", action="store_true",
+                    help="bypass concurrent-modification (optimistic-lock) check — write "
+                         "DEST_DECK_JSON even if it changed on disk since it was read (F-53)")
     args = ap.parse_args()
 
     if args.index:
@@ -607,7 +773,7 @@ def main():
         dst = rest[1]
         out = rest[2] if len(rest) > 2 else None
 
-    lift(args.src_html, frames, dst, out, shake=args.shake)
+    lift(args.src_html, frames, dst, out, shake=args.shake, force=args.force)
     return 0
 
 

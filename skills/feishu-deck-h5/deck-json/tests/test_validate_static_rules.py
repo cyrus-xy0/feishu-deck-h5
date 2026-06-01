@@ -18,8 +18,10 @@ inline (no dependency on examples/ / runs/ / absolute paths). Thresholds and
 HTML/CSS shapes below were read directly from validate.py, NOT assumed:
   * R06   reads FLOOR_BODY_PX=24, FLOOR_CHROME_PX=16; only audits selectors
           containing .slide/.card/.col/.toc/.cell/thead/tbody inside <style>.
-  * R20   ONLY audits rules whose selector contains `[data-page=`; ladder
-          = {16,24,28,48}; honours /* allow:typescale */.
+  * R20   audits rules whose selector contains `[data-page=` OR
+          `[data-slide-key=` (F-52: lifted/co-located per-page CSS keys off
+          data-slide-key); ladder = {16,24,28,48}; honours /* allow:typescale */;
+          lifted slides (data-lifted on the .slide) downgrade err->warn.
   * R12   ONLY audits rules whose selector STARTS with `.slide`; glow-ring
           `0 0 0 Npx`, `inset`, and /* allow:drop-shadow */ are exempt.
   * R10   strips <script>/<style>/<svg>/data: from <body> before hex scan;
@@ -131,9 +133,36 @@ def test_r20_on_ladder_no_fire():
     assert "R20" not in _err_codes(V.audit_type_ladder, html)
 
 
+def test_r20_slide_key_off_ladder_fires():
+    # F-52: a per-page rule keyed off [data-slide-key=...] (lifted / co-located
+    # CSS scheme) with an off-ladder size MUST report R20. Previously the gate
+    # only recognised [data-page=...], so slide-key pages slipped through as a
+    # dead gate. The .slide is NOT marked data-lifted -> stays a hard error.
+    html = _doc('[data-slide-key="abc"] .cbody { font-size: 30px; }')
+    assert "R20" in _err_codes(V.audit_type_ladder, html)
+
+
+def test_r20_lifted_slide_key_off_ladder_downgrades_to_warn():
+    # F-52: when the slide IS lifted (a `<div class="slide" data-lifted
+    # data-slide-key="abc">` exists), the off-ladder R20 downgrades err->warn so
+    # a 36-page lift doesn't drown the gate. It must still SURFACE (in warnings),
+    # just not block as an error.
+    html = (
+        '<html><head><style>'
+        '[data-slide-key="abc"] .cbody { font-size: 30px; }'
+        '</style></head><body>'
+        '<div class="slide-frame">'
+        '<div class="slide" data-lifted data-slide-key="abc">x</div>'
+        '</div></body></html>'
+    )
+    assert "R20" not in _err_codes(V.audit_type_ladder, html)
+    assert "R20" in _all_codes(V.audit_type_ladder, html)
+
+
 def test_r20_non_per_page_rule_ignored():
-    # Off-ladder size but NO [data-page=...] in selector -> R20 ignores it
-    # (the global framework stylesheet owns hero values).
+    # Off-ladder size but NEITHER [data-page=...] NOR [data-slide-key=...] in the
+    # selector -> R20 ignores it (the global framework stylesheet owns hero
+    # values).
     html = _doc(".slide .cbody { font-size: 30px; }")
     assert "R20" not in _err_codes(V.audit_type_ladder, html)
 

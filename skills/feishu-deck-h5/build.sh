@@ -55,10 +55,6 @@ HEAD
   echo '<script src="../assets/feishu-deck.js"></script></body></html>'
 } > "$OUT_LINK"
 
-python3 "$ROOT/assets/extract-texts.py" "$OUT_LINK" \
-  --annotate "$OUT_LINK" \
-  --out "${OUT_LINK%.html}.texts.md"
-
 # Patch the linked CSS so --fs-asset-* point to ../assets relative to examples/
 # (the CSS already has the right relative paths from assets/ — examples/ → ../assets/ works)
 
@@ -114,8 +110,6 @@ PY
     cat "$ROOT/assets/feishu-deck.js"
     echo '</script></body></html>'
   } > "$OUT_INLINE"
-
-  cp "${OUT_LINK%.html}.texts.md" "${OUT_INLINE%.html}.texts.md"
 fi
 
 # ---- Build slide-recipes.html (also linked) ----

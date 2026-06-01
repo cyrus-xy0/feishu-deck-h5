@@ -297,9 +297,8 @@ def validate_slide_fragment(frag: str, strict: bool = False) -> tuple[bool, list
         proc = subprocess.run(argv, capture_output=True, text=True)
         issues = []
         # Rules that don't apply to a single-slide fragment validation:
-        #   T03 — texts.md sidecar (deck-level, generated only for full decks)
         #   P50-P55 — perf budget (whole-deck level)
-        FRAGMENT_IRRELEVANT = re.compile(r'\[(T03|P5\d)\]')
+        FRAGMENT_IRRELEVANT = re.compile(r'\[(P5\d)\]')
         for line in (proc.stdout + proc.stderr).splitlines():
             line = line.rstrip()
             if FRAGMENT_IRRELEVANT.search(line):

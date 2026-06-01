@@ -13,7 +13,6 @@
       log/                     ← 本工具的地盘
         journal.jsonl          唯一真相源:每行一个事件
         inputs/                你给的原始附件(brief / 参考图 / .thmx …)
-        versions/vNNN/snapshot.html
         screenshots/vNNN/sNN.png   每版整套(每页一张 1920×1080)
         audits/vNNN.json       该版本的几何/校验机读结果
         making-of.html         渲染出的纪录片(可分享)
@@ -24,7 +23,7 @@
 
 子命令
     init      <deck-dir> [--transcript]  搭 log/ 骨架,记下会话 transcript+起点,设为活跃 deck
-    snapshot  <deck-dir> [--label ...]   冻结当前 deck + Playwright 截全套图 + 跑校验 → 一个 version 事件
+    snapshot  <deck-dir> [--label …] [--slide N]  Playwright 截图 + 跑校验 → version 事件 + 自动刷新 making-of;--slide N 只刷某页
     event     <deck-dir> --type T ...    追加一条任意事件(problem / fix / note / summary …)
     turns     <deck-dir> [--all]         预览从 transcript 捞到的回合(调试)
     render    <deck-dir> [--inline]      journal + transcript 回合 → making-of.html
@@ -36,11 +35,9 @@
 from __future__ import annotations
 import argparse
 import datetime as _dt
-import html
 import json
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -54,6 +51,21 @@ DESIGN_W, DESIGN_H = 1920, 1080
 # ----------------------------------------------------------------------------- helpers
 def _now_iso() -> str:
     return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _ts_epoch(s) -> float:
+    """ISO 时间戳 → epoch 秒,用于*跨时区*正确比较/排序。
+
+    坑:journal 的 start_ts/ts 是本地格式(`...+08:00`),transcript 的 timestamp 是
+    UTC(`...Z`)。直接按字符串比大小会把 `16:xxZ`(=北京 00:xx,实际在 start 之后)
+    误判成"开工前"丢弃 —— 这是 making-of 流水为空的根因。统一解析成绝对时间点再比。
+    解析失败返回 -inf(排最前、不参与过滤)。"""
+    if not s:
+        return float("-inf")
+    try:
+        return _dt.datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError, OSError, OverflowError):
+        return float("-inf")
 
 
 def _log_dir(deck_dir: Path) -> Path:
@@ -94,15 +106,26 @@ def read_events(log_dir: Path) -> list[dict]:
     return out
 
 
-def _next_version(log_dir: Path) -> str:
-    vers = log_dir / "versions"
-    n = 0
-    if vers.exists():
-        for d in vers.iterdir():
+def _version_nums(log_dir: Path) -> list[int]:
+    """已有的版本号列表(从 screenshots/vNNN 推导;不再依赖已废弃的 versions/ 冻结目录)。"""
+    shots = log_dir / "screenshots"
+    nums = []
+    if shots.exists():
+        for d in shots.iterdir():
             m = re.fullmatch(r"v(\d{3})", d.name)
             if m:
-                n = max(n, int(m.group(1)))
-    return f"v{n + 1:03d}"
+                nums.append(int(m.group(1)))
+    return sorted(nums)
+
+
+def _next_version(log_dir: Path) -> str:
+    nums = _version_nums(log_dir)
+    return f"v{(nums[-1] + 1) if nums else 1:03d}"
+
+
+def _latest_version(log_dir: Path) -> str | None:
+    nums = _version_nums(log_dir)
+    return f"v{nums[-1]:03d}" if nums else None
 
 
 # ------------------------------------------------------ transcript ingest (无 hook 方案)
@@ -130,6 +153,20 @@ def _is_real_prompt(text: str) -> bool:
     return bool(t) and not t.startswith(_CMD_PREFIXES)
 
 
+def _text_from_content(content) -> str:
+    """transcript 的 message.content 可能是 str,也可能是 block 列表。
+    新版会话格式里真·用户输入多为 [{"type":"text","text":...}],旧版才是裸 str。
+    只抽 text block,忽略 tool_result / image / thinking 等。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    return ""
+
+
 def extract_turns(transcript: str, since_ts: str | None) -> list[dict]:
     """从 transcript 抽成 turn 列表:把每条真·人类输入配上紧随其后的 assistant 文本。
 
@@ -148,16 +185,20 @@ def extract_turns(transcript: str, since_ts: str | None) -> list[dict]:
         except json.JSONDecodeError:
             continue
         ts = o.get("timestamp")
-        if since_ts and ts and ts < since_ts:
-            continue
+        if since_ts and ts:
+            te, se = _ts_epoch(ts), _ts_epoch(since_ts)
+            # 只在两边都能解析时才过滤,且按绝对时间点(跨时区安全)比较
+            if te != float("-inf") and se != float("-inf") and te < se:
+                continue
         typ = o.get("type")
         msg = o.get("message") or {}
         content = msg.get("content")
-        if typ == "user" and isinstance(content, str) and not o.get("isMeta") and _is_real_prompt(content):
-            rows.append(("in", ts, content))
-        elif typ == "assistant" and isinstance(content, list):
-            txt = "\n".join(b.get("text", "") for b in content
-                            if isinstance(b, dict) and b.get("type") == "text").strip()
+        if typ == "user" and not o.get("isMeta"):
+            txt = _text_from_content(content)
+            if txt and _is_real_prompt(txt):
+                rows.append(("in", ts, txt))
+        elif typ == "assistant":
+            txt = _text_from_content(content)
             if txt:
                 rows.append(("out", ts, txt))
 
@@ -179,7 +220,7 @@ def extract_turns(transcript: str, since_ts: str | None) -> list[dict]:
 # ----------------------------------------------------------------------------- init
 def cmd_init(args) -> int:
     log_dir = _log_dir(Path(args.deck_dir))
-    for sub in ("inputs", "versions", "screenshots", "audits"):
+    for sub in ("inputs", "screenshots", "audits"):
         (log_dir / sub).mkdir(parents=True, exist_ok=True)
     # 记下"当前活跃 deck"(供 status 查看;render 用 session 事件里的 transcript)
     ACTIVE_PTR.parent.mkdir(parents=True, exist_ok=True)
@@ -229,8 +270,11 @@ _SHOW_SLIDE_JS = r"""
 """
 
 
-def _shoot(html_path: Path, out_png_dir: Path):
-    """用 Playwright 把每页截成 1920×1080 的 png。返回每页 meta 列表,失败返回 None。"""
+def _shoot(html_path: Path, out_png_dir: Path, only_slide: int | None = None):
+    """用 Playwright 把每页截成 1920×1080 的 png。返回本次截到的页 meta 列表,失败返回 None。
+
+    only_slide:仅截第 N 页(1-based)。用于"每页做完只刷那一页"的增量截图,避免
+    每次都全量重开浏览器逐页跑(deck 越大越慢)。其余页沿用上一版已有的 png。"""
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -249,6 +293,10 @@ def _shoot(html_path: Path, out_png_dir: Path):
         page.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
         page.wait_for_timeout(300)
         meta = page.evaluate(_SLIDE_META_JS)
+        if only_slide is not None:
+            meta = [m for m in meta if m["idx"] == only_slide]
+            if not meta:
+                print(f"  ⚠️ 第 {only_slide} 页不存在,未截图。", file=sys.stderr)
         for m in meta:
             page.evaluate(_SHOW_SLIDE_JS, m["idx"] - 1)
             page.wait_for_timeout(350)
@@ -258,23 +306,6 @@ def _shoot(html_path: Path, out_png_dir: Path):
             shots.append(m)
         browser.close()
     return shots
-
-
-def _freeze(html_path: Path, dest: Path):
-    """冻结一份能独立打开的副本:注入 <base href> 指回 out/,让相对资源仍可解析。"""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        src = html_path.read_text(encoding="utf-8")
-    except Exception as e:
-        print(f"  ⚠️ 冻结失败,跳过:{e}", file=sys.stderr)
-        return
-    base = html.escape(html_path.resolve().parent.as_uri() + "/", quote=True)
-    tag = f'<base href="{base}">'
-    if "<head>" in src:
-        src = src.replace("<head>", "<head>\n  " + tag, 1)
-    else:
-        src = tag + "\n" + src
-    dest.write_text(src, encoding="utf-8")
 
 
 def _run_distribution_audit(html_path: Path) -> dict | None:
@@ -303,16 +334,30 @@ def cmd_snapshot(args) -> int:
         print(f"✗ 找不到 deck html:{html_path}", file=sys.stderr)
         return 2
 
+    only = getattr(args, "slide", None)
+
+    # ---- 增量模式:只刷某一页 ----
+    # 覆盖最新版本里那一页的 png(秒级、只开一次浏览器截一张),不新建版本、不动 journal。
+    # making-of 的 version 事件仍指向同一 png 路径,改了字节下次 render 自动反映。
+    if only is not None:
+        latest = _latest_version(log_dir)
+        if latest:
+            shots = _shoot(html_path, log_dir / "screenshots" / latest, only_slide=only)
+            n = len(shots) if shots else 0
+            print(f"📸 {latest} · 仅刷新第 {only} 页:{n} 张"
+                  + (" · ⚠️ 无截图(playwright?)" if shots is None else ""))
+            _auto_render(log_dir, deck_dir)
+            return 0
+        print("  (还没有基线版本,先做一次完整 snapshot 再用 --slide 增量)", file=sys.stderr)
+        # 落空 → 继续走全量,建立基线
+
     v = _next_version(log_dir)
     print(f"📸 {v}  ←  {html_path}")
 
-    # 1. 冻结副本
-    _freeze(html_path, log_dir / "versions" / v / "snapshot.html")
-
-    # 2. 截图
+    # 截图(全套)
     shots = _shoot(html_path, log_dir / "screenshots" / v)
 
-    # 3. 几何校验
+    # 几何校验
     audit = _run_distribution_audit(html_path)
     findings = []
     if audit:
@@ -334,11 +379,10 @@ def cmd_snapshot(args) -> int:
                     code, sev, msg = "", "", str(f)
                 findings.append({"slide": s.get("idx"), "code": code, "sev": sev, "msg": msg})
 
-    # 4. 落 version + audit 事件
+    # 落 version + audit 事件(不再保存 deck 当时的 html,只留截图)
     append_event(log_dir, {
         "t": "version", "v": v, "label": args.label or "",
         "html": str(html_path),
-        "snapshot": f"versions/{v}/snapshot.html",
         "slides": [{"idx": s["idx"], "key": s.get("key"), "layout": s.get("layout"),
                     "png": f"screenshots/{v}/{s['png']}"} for s in (shots or [])],
         "n_slides": len(shots or []),
@@ -349,8 +393,20 @@ def cmd_snapshot(args) -> int:
     n = len(shots) if shots else 0
     print(f"   {n} 页截图" + (" · ⚠️ 无截图(playwright?)" if not shots else "")
           + (f" · {len(findings)} 条校验发现" if findings else " · 校验通过/未跑"))
-    print(f"   下一步:做完所有版本后 `deck-log render {deck_dir}`")
+    _auto_render(log_dir, deck_dir)
     return 0
+
+
+def _auto_render(log_dir: Path, deck_dir: Path) -> None:
+    """snapshot 后顺手刷新 making-of.html(快、0 token),省得手动再跑 render。"""
+    try:
+        from _render_makingof import render_html
+        merged = _merge_events_and_turns(log_dir)
+        if merged:
+            render_html(log_dir, merged, log_dir / "making-of.html", inline=False)
+            print(f"   ↻ 已刷新流水:{log_dir / 'making-of.html'}")
+    except Exception as e:
+        print(f"   ⚠️ 流水刷新跳过(可手动 `deck-log render {deck_dir}`):{e}", file=sys.stderr)
 
 
 # ----------------------------------------------------------------------------- event
@@ -397,7 +453,8 @@ def _merge_events_and_turns(log_dir: Path, allow_transcript: bool = True) -> lis
         if tp:
             turns = extract_turns(tp, sess.get("start_ts"))
     merged = events + turns
-    merged.sort(key=lambda e: (e.get("ts") or e.get("start_ts") or ""))
+    # 按绝对时间点排序(journal 本地 +08:00 与 transcript UTC Z 混排也不会错位)
+    merged.sort(key=lambda e: _ts_epoch(e.get("ts") or e.get("start_ts")))
     return merged
 
 
@@ -505,9 +562,11 @@ def main(argv=None) -> int:
     p.add_argument("--transcript", default=None, help="显式指定会话 transcript(默认自动找最近的)")
     p.set_defaults(func=cmd_init)
 
-    p = sub.add_parser("snapshot", help="冻结+截图+校验,落一个 version 事件")
+    p = sub.add_parser("snapshot", help="截图+校验,落一个 version 事件;--slide N 只刷某页")
     p.add_argument("deck_dir"); p.add_argument("--html", default=None)
     p.add_argument("--label", default=None, help="这一版的简短说明")
+    p.add_argument("--slide", type=int, default=None,
+                   help="只重截第 N 页(1-based,覆盖最新版本那一页,秒级);省略=全量截一版")
     p.set_defaults(func=cmd_snapshot)
 
     p = sub.add_parser("event", help="追加一条任意事件")
