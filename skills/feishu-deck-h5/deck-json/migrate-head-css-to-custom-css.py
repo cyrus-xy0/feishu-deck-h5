@@ -254,6 +254,12 @@ def main(argv=None) -> int:
         if slide is None:
             missing.append(key)
             continue
+        # Idempotency: if this slide's custom_css already carries a migration
+        # marker, the head blocks were migrated on a PRIOR run but index.html
+        # wasn't re-rendered (so they still appear in head) — re-appending would
+        # DUPLICATE the rules. Skip; re-render first to clear the head blocks.
+        if "migrated from head <style> by L7 codemod" in (slide.get("custom_css") or ""):
+            continue
         n_rules = sum(1 for _ in _walk_top(css))   # top-level rules + keyframes
         applied.append((key, n_rules, len(css)))
         if not args.dry_run:
