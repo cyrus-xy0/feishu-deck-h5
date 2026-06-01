@@ -458,6 +458,9 @@ def _renumber_text_ids(html: str, new_slide_no: int) -> str:
 
 def insert_into_json(deck_path: Path, fragments: list[str], position: int) -> None:
     deck = json.loads(deck_path.read_text(encoding="utf-8"))
+    if not isinstance(deck.get("slides"), list):
+        raise SystemExit(f"{deck_path.name}: malformed deck.json — missing/invalid "
+                         f"'slides' array")
     existing_keys = {s.get("key") for s in deck["slides"]}
     new_slides = []
     for offset, frag in enumerate(fragments):
@@ -632,6 +635,9 @@ def main(argv=None) -> int:
     # Pick position
     if mode == "A":
         deck = json.loads(target.read_text(encoding="utf-8"))
+        if not isinstance(deck.get("slides"), list):
+            _err(f"{target.name}: malformed deck.json — missing/invalid 'slides' array")
+            return 2
         slides_view = deck["slides"]
     else:
         text = target.read_text(encoding="utf-8")
