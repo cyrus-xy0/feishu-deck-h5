@@ -113,14 +113,6 @@
     const cls = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase();
     return keys.some(k => cls.includes(k));
   };
-  const firstAncestor = (el, keys) => {
-    let n = el.parentElement;
-    while (n) {
-      if (hasAnyClass(n, keys)) return n;
-      n = n.parentElement;
-    }
-    return null;
-  };
   const shortSel = el => {
     const tag = el.tagName.toLowerCase();
     const raw = el.className;
@@ -582,7 +574,11 @@
       // there is no visible title to position-check, so skip it.
       const headerRendered = !!header && header.getClientRects().length > 0;
       if (header && titleEl && headerRendered) {
-        const headerTop = Math.round(header.getBoundingClientRect().top - slide.getBoundingClientRect().top);
+        // Divide the (scaled) bbox delta back to DESIGN px before comparing to
+        // the design-px constant 61 — at a non-1 scale (small viewport) the raw
+        // scaled delta would false-trigger.
+        const scale = (slide.getBoundingClientRect().height / 1080) || 1;
+        const headerTop = Math.round((header.getBoundingClientRect().top - slide.getBoundingClientRect().top) / scale);
         const expectedTop = 61;
         const tolerance = 8;
         if (Math.abs(headerTop - expectedTop) > tolerance) {
