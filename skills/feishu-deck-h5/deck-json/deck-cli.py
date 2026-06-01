@@ -489,7 +489,7 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     refs resolve identically in both decks, so they need no copy. Returns a
     report dict {input, prototypes, missing}."""
     text = _slide_asset_text(slide)
-    copied = {"input": [], "prototypes": [], "missing": []}
+    copied = {"input": [], "prototypes": [], "local": [], "missing": []}
     for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "input" / fname
         d = dst_dir / "input" / fname
@@ -509,6 +509,35 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
             copied["prototypes"].append(slug)
         else:
             copied["missing"].append(f"prototypes/{slug}/")
+    # Bare/relative deck-local media refs (scene.png, ./img.jpg, deck-local
+    # assets/foo.png, replica page_image, image.src, …): NOT under input/ or
+    # prototypes/, NOT framework (assets/shared·lark-)/http/data, NOT escaping
+    # the deck dir via ../ or /. These were previously neither copied nor
+    # reported → silent broken image after paste. Copy preserving the deck-
+    # relative path, else flag missing.
+    _MEDIA = r'(?:png|jpe?g|gif|webp|svg|avif|mp4|webm|mov|m4v)'
+    already = set(copied["input"]) | {f"prototypes/{s}" for s in copied["prototypes"]}
+    _ref_re = r'''([^\s"'<>()\\?#]+\.''' + _MEDIA + r''')(?=[\s"'<>()?#]|$)'''
+    for m in re.finditer(_ref_re, text, re.I):
+        ref = m.group(1)
+        low = ref.lower()
+        norm = low.lstrip("./")
+        if (norm.startswith(("input/", "prototypes/", "assets/shared/", "assets/lark-"))
+                or low.startswith(("http://", "https://", "data:", "//", "/"))
+                or ref.startswith("../") or "/../" in ref):
+            continue  # handled above / framework / external / escapes deck dir
+        rel = ref.lstrip("./")
+        if rel in already or rel in copied["local"]:
+            continue
+        s = src_dir / rel
+        if s.is_file():
+            d = dst_dir / rel
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
+                shutil.copy2(s, d)
+            copied["local"].append(rel)
+        else:
+            copied["missing"].append(rel)
     return copied
 
 
@@ -584,6 +613,8 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
         print(f"    input/ copied: {report['input']}")
     if report["prototypes"]:
         print(f"    prototypes/ copied: {report['prototypes']}")
+    if report.get("local"):
+        print(f"    deck-local assets copied: {report['local']}")
     if report["missing"]:
         print(f"    ⚠ assets MISSING in source (broken refs after paste): {report['missing']}")
     return 0, deck

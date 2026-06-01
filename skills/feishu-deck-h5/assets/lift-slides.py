@@ -453,15 +453,17 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
         inner
     )
 
-    # 4) Rewrite shared/framework asset paths to skill-relative
-    for q in ("'", '"'):
-        inner = inner.replace(
-            f"url({q}assets/shared/", f"url({q}{SKILL_PREFIX}assets/shared/")
-        for f in ("lark-logo.png", "lark-logo-mono-white.png",
-                  "lark-cover-bg.jpg", "lark-content-bg.jpg",
-                  "lark-section-bg.jpg", "lark-slogan.png"):
-            inner = inner.replace(
-                f"url({q}assets/{f}{q}", f"url({q}{SKILL_PREFIX}assets/{f}{q}")
+    # 4) Rewrite shared/framework asset paths (assets/shared/* + assets/lark-*,
+    #    matching _classify_asset_ref) to skill-relative — in url(), <img src>,
+    #    href=, poster= alike (NOT just url()), and for ANY framework file (no
+    #    hardcoded filename list). The leading quote/paren guard leaves already-
+    #    prefixed refs (preceded by `/`) untouched, so this is idempotent. The
+    #    old url()-only + 6-file-list version left `<img src="assets/lark-*">` and
+    #    any 7th framework file un-rewritten → 404 in the target (F-76 class).
+    inner = re.sub(
+        r'''(['"(]\s*)((?:assets/shared/|assets/lark-)[^'")\s]*)''',
+        lambda m: f"{m.group(1)}{SKILL_PREFIX}{m.group(2)}",
+        inner)
 
     # 5) Auto-copy input/<file> references + leave path local. Scan EVERY asset
     #    syntax (<img>/<source>/<video>/<iframe>/url()) via the SAME patterns the
@@ -597,6 +599,7 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
     print()
 
     appended = 0
+    existing_keys = {s.get("key") for s in deck["slides"] if s.get("key")}
     for one_indexed in frame_indices:
         if one_indexed < 1 or one_indexed > len(starts):
             print(f"✗ frame {one_indexed} out of range (source has {len(starts)})")
@@ -623,8 +626,22 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if '<div class="slide"' in inner:
             print(f"  ⚠ frame {one_indexed} ({info['key']}): nested .slide remains in inner — "
                   f"check frame boundary")
+        # De-collide the lifted key against the destination deck AND other frames
+        # lifted in this same run. The source key was previously used verbatim →
+        # a collision produced a deck.json that render --strict rejects (R-KEY)
+        # with no rollback. render-deck sets data-slide-key from this entry key on
+        # the wrapper and `inner` carries no .slide of its own (checked above), so
+        # renaming the entry key suffices. Provenance below keeps the SOURCE key.
+        key = info["key"]
+        if key in existing_keys:
+            base, j = key, 2
+            while f"{base}-{j}" in existing_keys:
+                j += 1
+            key = f"{base}-{j}"
+            print(f"    key collision: '{info['key']}' already in target → renamed '{key}'")
+        existing_keys.add(key)
         entry = {
-            "key": info["key"],
+            "key": key,
             "layout": "raw",
             "screen_label": info["label"],
             "lifted": f"{src_stem}#{info['key']}",
@@ -653,7 +670,7 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         cp = report.get("input_copied", [])
         miss = report.get("input_missing", [])
         proto = report.get("proto_copied", [])
-        print(f"✓ frame {one_indexed:3d} → key={info['key']!r} ({len(inner)} bytes)")
+        print(f"✓ frame {one_indexed:3d} → key={key!r} ({len(inner)} bytes)")
         if cp: print(f"    input/ copied: {cp}")
         if proto: print(f"    prototypes/ copied: {proto}")
         if miss: print(f"    ✗ input/ MISSING in source: {miss}")
@@ -702,6 +719,14 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
                 pairs = [f"{r['url']} {s}" for r, s in zip(logos, state)]
                 print(f"    ⚠ BRAND-specific clientlogo — new customer likely "
                       f"needs to swap/remove: {pairs}")
+
+    # Nothing lifted (every requested frame out of range / failed extraction):
+    # do NOT rewrite deck.json and exit non-zero, so a caller can't mistake a
+    # no-op for a successful lift.
+    if appended == 0:
+        print("\n✗ no slides lifted — destination deck.json left unchanged",
+              file=sys.stderr)
+        sys.exit(2)
 
     # Optimistic-lock check (F-53): if dst changed on disk since we read it,
     # another process wrote it — refuse so we don't silently clobber that edit.
