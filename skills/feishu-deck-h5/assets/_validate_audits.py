@@ -103,7 +103,7 @@ def audit_copy_rules(html: str, iss: Issues):
         iss.err('R05', "exclamation '!' / '！' detected in slide text")
     if '…' in text or '...' in text:
         iss.err('R05', "ellipsis '…' / '...' detected in slide text")
-    if '???' in text or '???' in text or '？？？' in text:
+    if '???' in text or '？？？' in text:
         iss.err('R05', "'???' detected in slide text")
 
 
@@ -490,16 +490,35 @@ def audit_no_drop_shadows(html: str, iss: Issues):
                 continue
             for sm in re.finditer(r'box-shadow:\s*([^;}]+)', block):
                 value = sm.group(1).strip()
-                if _BOX_SHADOW_INSET_RE.search(value):
-                    continue           # inset shadows OK
-                if _BOX_SHADOW_GLOW_RING_RE.match(value):
-                    continue           # 0 0 0 ... is a glow ring, not a shadow
-                # Anything else with non-zero offset → real drop shadow
-                iss.warn('R12',
-                    f'real drop shadow on `{selector.strip()}` — `box-shadow: {value}` '
-                    '(use hairline + contrast instead, OR add '
-                    '/* allow:drop-shadow */ in the rule if this is a UI-mock '
-                    'window chrome that legitimately needs depth shadow)')
+                # Evaluate EACH comma-separated layer independently (commas inside
+                # rgba()/hsl()/color-mix() must NOT split). A glow-ring or inset
+                # PREFIX layer used to mask a real drop-shadow layer that follows
+                # it (`.match`/`.search` only saw the first/any layer) → R12 was
+                # trivially bypassed by prefixing an allowed layer.
+                layers, depth, buf = [], 0, ''
+                for ch in value:
+                    if ch == '(':
+                        depth += 1; buf += ch
+                    elif ch == ')':
+                        depth = max(0, depth - 1); buf += ch
+                    elif ch == ',' and depth == 0:
+                        layers.append(buf.strip()); buf = ''
+                    else:
+                        buf += ch
+                if buf.strip():
+                    layers.append(buf.strip())
+                for layer in layers:
+                    if not layer or _BOX_SHADOW_INSET_RE.search(layer):
+                        continue           # inset shadow layer OK
+                    if _BOX_SHADOW_GLOW_RING_RE.match(layer):
+                        continue           # 0 0 0 ... glow-ring layer, not a shadow
+                    # A layer with non-zero offset → real drop shadow
+                    iss.warn('R12',
+                        f'real drop shadow on `{selector.strip()}` — `box-shadow: {layer}` '
+                        '(use hairline + contrast instead, OR add '
+                        '/* allow:drop-shadow */ in the rule if this is a UI-mock '
+                        'window chrome that legitimately needs depth shadow)')
+                    break              # one finding per rule is enough
 
 
 def audit_data_decor(slides: list[str], iss: Issues):
@@ -1431,7 +1450,11 @@ def audit_empty_header_zone(html: str, iss: Issues):
         # Is .header hidden for this slide?
         hide_pat = (
             rf'\.slide\[data-slide-key="{re.escape(key)}"\]'
-            r'[^{]*\.header(?![\w-])[^{]*\{[^}]*display\s*:\s*none[^}]*\}'
+            # `.header` must be the LAST simple selector (allow same-element
+            # suffixes :pseudo/.class/[attr] but NO combinator), else a hidden
+            # CHILD/SIBLING (`.header .pageno`, `.header + .stage`) falsely reads
+            # as the whole .header being hidden → bogus R-EMPTY-HEADER-ZONE.
+            r'[^{]*\.header(?![\w-])[^{\s>+~]*\s*\{[^}]*display\s*:\s*none[^}]*\}'
         )
         if not re.search(hide_pat, css):
             continue
@@ -2025,8 +2048,24 @@ def audit_raw_looks_schema(slides: list, iss: 'Issues', path):
         return                                        # can't identify raw → skip
     if not raw_keys:
         return
-    _ICON_VB = ('0 0 24 24', '0 0 20 20', '0 0 16 16')
-    _FLOW_SIGNALS = ('→', '➜', '➡', '⟶', 'connector', 'data-arrow', 'class="arrow')
+    # Structural flow/relationship signals ONLY — a bare arrow GLYPH (→ ➜ …) in
+    # body copy must NOT short-circuit (a flat card list whose text reads
+    # "投入 → 产出" is still a flat card list). Keep markup-level connectors.
+    _FLOW_SIGNALS = ('connector', 'data-arrow', 'class="arrow')
+
+    def _is_icon_vb(vb):
+        # Any small SQUARE viewBox is an icon (24/20/16 — but also 32/48, and
+        # whitespace-tolerant). An exact 3-value whitelist mis-read common icon
+        # sizes as a "diagram svg" and suppressed the nudge.
+        p = vb.split()
+        if len(p) != 4:
+            return False
+        try:
+            w, h = float(p[2]), float(p[3])
+        except ValueError:
+            return False
+        return w == h and 0 < w <= 64
+
     for i, fr in enumerate(slides, 1):
         key = slide_attr(fr, 'slide-key')
         if key not in raw_keys:
@@ -2035,12 +2074,16 @@ def audit_raw_looks_schema(slides: list, iss: 'Issues', path):
             continue
         all_svg = len(re.findall(r'<svg\b', fr))
         icon_svg = sum(1 for vb in re.findall(r'<svg\b[^>]*viewBox="([^"]*)"', fr)
-                       if vb.strip() in _ICON_VB)
+                       if _is_icon_vb(vb))
         if all_svg > icon_svg:                        # a non-icon diagram svg → bespoke
             continue
         if any(sig in fr for sig in _FLOW_SIGNALS):   # arrow/connector → flow/relationship
             continue
-        cards = len(re.findall(r'class="[^"]*\bcard\b', fr))
+        # Count card ELEMENTS — `card` as a standalone class TOKEN, not every
+        # class CONTAINING "card". `\bcard\b` matched card-title/card-body/
+        # card-icon/card-grid too, inflating a real 3-card list to ~12 → outside
+        # 3..6 → silently skipped (the exact over-processing shape this targets).
+        cards = len(re.findall(r'class="(?:[^"]*\s)?card(?:\s[^"]*)?"', fr))
         if 3 <= cards <= 6:
             iss.warn_soft(
                 'R-RAW-LOOKS-SCHEMA',

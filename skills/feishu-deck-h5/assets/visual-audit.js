@@ -1981,10 +1981,28 @@
         } catch (e) { /* exotic decl access — ignore */ }
         return false;
       };
+      // Depth/string-aware comma split — commas inside :is()/:not()/:has()/
+      // [attr="a,b"] must NOT shatter a valid selector (the shards would throw
+      // in querySelectorAll → false 'parse-error' on a HEALTHY animation,
+      // failing the gate). Mirrors the DEAD-RULE pass's _splitSelectorList.
+      const _splitSelList = (sel) => {
+        const parts = []; let depth = 0, inStr = 0, buf = '';
+        for (let i = 0; i < sel.length; i++) {
+          const ch = sel[i];
+          if (inStr) { buf += ch; if (ch === inStr && sel[i - 1] !== '\\') inStr = 0; continue; }
+          if (ch === '"' || ch === "'") { inStr = ch; buf += ch; continue; }
+          if (ch === '(' || ch === '[') depth++;
+          else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+          if (ch === ',' && depth === 0) { parts.push(buf.trim()); buf = ''; continue; }
+          buf += ch;
+        }
+        if (buf.trim()) parts.push(buf.trim());
+        return parts;
+      };
       const _checkSel = (selectorText) => {
         // A rule's selectorText may be a comma list; test each part — any dead
         // part is reported (one dead branch = that target never animates).
-        const parts = (selectorText || '').split(',').map(s => s.trim()).filter(Boolean);
+        const parts = _splitSelList(selectorText || '').filter(Boolean);
         for (const sel of parts) {
           const key = slide_idx + '::' + sel;
           if (seenDead.has(key)) continue;

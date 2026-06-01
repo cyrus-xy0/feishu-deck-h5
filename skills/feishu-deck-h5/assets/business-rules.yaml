@@ -231,13 +231,6 @@ L1:
 
 # ---- A · 客户看不见 (投影上的硬伤) ----
 
-R-OVERFLOW:
-  concern:     "A · 客户看不见"
-  symptom:     "这一页内容超出画面, 边缘被裁掉"
-  consequence: "投影上文字或图被切掉, 客户看不全"
-  fix:
-    - "减少卡片 / 行数, 或把内容拆成两页"
-
 R-OVERLAP:
   concern:     "A · 客户看不见"
   symptom:     "这一页有两块内容叠在一起了"
