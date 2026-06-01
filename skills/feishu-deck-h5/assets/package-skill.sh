@@ -62,7 +62,7 @@ dirsize() { ( cd "$1" 2>/dev/null && du -sh . 2>/dev/null | cut -f1 | tr -d ' ' 
 #  preflight scan cache.)
 EXCLUDE_NAMES=(
   ".git" "__pycache__" ".pytest_cache" ".DS_Store" "runs" "dist"
-  ".feishu-deck-h5-workspace"
+  ".feishu-deck-h5-workspace" ".venv" "venv"
 )
 # rsync --exclude patterns (path/glob aware)
 RSYNC_EXCLUDES=(
@@ -76,6 +76,9 @@ RSYNC_EXCLUDES=(
   --exclude='.feishu-deck-h5-preflight-cache'
   --exclude='*.bak*'
   --exclude='pptx-to-html/example/'
+  --exclude='.venv/'
+  --exclude='venv/'
+  --exclude='*.pyc'
 )
 
 echo "=== feishu-deck-h5 · packaging a lean distribution ==="
