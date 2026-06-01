@@ -18,8 +18,10 @@
         making-of.html         渲染出的纪录片(可分享)
 
 输入/我的回复不靠 hook 实时记 —— 它们本就完整躺在会话 transcript 里,render 时直接捞
-(0 model token,纯文件读)。init 记下当前 transcript 路径+起点,render 取其后的回合,
-按时间线和版本/问题/修复并在一起。
+(0 model token,纯文件读)。init 记下当前 transcript 路径+起点;render 不止读这一个,
+而是**自动发现同 project 下 start_ts 之后改动、且文件内提到本 deck(run-slug 或标题)的
+所有 transcript**,把各自回合合并、按时间重排——这样换了会话(新 sid.jsonl)也不丢今天的
+记录。再和版本/问题/修复并成一条时间线。
 
 子命令
     init      <deck-dir> [--transcript]  搭 log/ 骨架,记下会话 transcript+起点,设为活跃 deck
@@ -128,6 +130,19 @@ def _latest_version(log_dir: Path) -> str | None:
     return f"v{nums[-1]:03d}" if nums else None
 
 
+def _prev_slide_fingerprints(log_dir: Path) -> dict:
+    """上一个 version 事件逐页的 {key: {'h':指纹, 'png':相对路径}},给增量截图比对用。
+    返回空 dict = 没有上一版,或旧版本没存指纹 → snapshot 退化成全量重截。"""
+    versions = [e for e in read_events(log_dir) if e.get("t") == "version"]
+    if not versions:
+        return {}
+    out = {}
+    for s in versions[-1].get("slides", []):
+        if s.get("key"):
+            out[s["key"]] = {"h": s.get("h"), "png": s.get("png")}
+    return out
+
+
 # ------------------------------------------------------ transcript ingest (无 hook 方案)
 # 输入和我的原始回复本来就完整躺在会话 transcript 里(~/.claude/projects/<slug>/<sid>.jsonl)。
 # 不用常驻 hook 实时镜像 —— render 时直接从 transcript 捞这一段(0 model token,纯文件读)。
@@ -146,6 +161,71 @@ def _find_current_transcript() -> str | None:
     if not cands:
         return None
     return str(max(cands, key=lambda p: p.stat().st_mtime).resolve())
+
+
+def _project_dir_for(sess: dict) -> Path | None:
+    """会话 transcript 所在的 project 目录(同一 cwd 起的所有会话都落同一个 ~/.claude/projects/<slug>/)。"""
+    tp = sess.get("transcript")
+    if tp:
+        pp = Path(tp).parent
+        if pp.exists():
+            return pp
+    # 退路:用 cwd 推导 slug —— ~/.claude/projects/<cwd 把 / 换成 ->/
+    cwd = sess.get("cwd")
+    if cwd and _PROJECTS.exists():
+        cand = _PROJECTS / str(Path(cwd).resolve()).replace("/", "-")
+        if cand.exists():
+            return cand
+    return None
+
+
+def _deck_tokens(log_dir: Path, sess: dict) -> list[str]:
+    """判定某 transcript 是否在聊"这份 deck"的特征串:
+    run 目录名(最强——它的路径在工具调用里一定出现过)+ deck 标题。"""
+    toks = [log_dir.parent.name]            # 20260528-192338-zhongan-ai-org
+    if sess.get("title"):
+        toks.append(sess["title"])
+    return [t for t in toks if t]
+
+
+def _relevant_transcripts(log_dir: Path, sess: dict) -> list[Path]:
+    """init 记的那条 + 同 project 下 start_ts 之后改动、且文件内提到本 deck 的所有 transcript。
+
+    解决"换了会话(新 sid.jsonl)→ 今天的回合全丢":render 时按内容自动发现并跨 session 合并。
+    file-level 相关性(整文件出现 run-slug 或标题)挡掉用户并行在做别的 deck 的会话。
+    注:若某会话同时聊了本 deck 和别的 deck,会把它整段都收进来——与旧版只读单 transcript
+    时的粒度一致,粗但稳;真要精确到 turn 级再说。"""
+    found: list[Path] = []
+    seen: set[Path] = set()
+
+    recorded = sess.get("transcript")
+    if recorded and Path(recorded).exists():               # 记下的主会话:无条件收
+        rp = Path(recorded).resolve()
+        found.append(rp); seen.add(rp)
+
+    proj = _project_dir_for(sess)
+    if proj:
+        start = _ts_epoch(sess.get("start_ts"))
+        tokens = _deck_tokens(log_dir, sess)
+        for jf in sorted(proj.glob("*.jsonl")):
+            rp = jf.resolve()
+            if rp in seen:
+                continue
+            try:                                            # 只看 start_ts(留 1h 余量)之后还动过的,别扫历史全集
+                if start != float("-inf") and jf.stat().st_mtime < start - 3600:
+                    continue
+                text = jf.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if tokens and not any(tok in text for tok in tokens):
+                continue                                    # 没提到本 deck → 多半是别的 deck 的会话,跳过
+            found.append(rp); seen.add(rp)
+
+    if not found:                                           # 连记录都没有时退回"当前最近 transcript"
+        cur = _find_current_transcript()
+        if cur:
+            found.append(Path(cur))
+    return found
 
 
 def _is_real_prompt(text: str) -> bool:
@@ -245,6 +325,10 @@ def cmd_init(args) -> int:
 # ----------------------------------------------------------------------------- snapshot
 _SLIDE_META_JS = r"""
 () => {
+  // 内容指纹:djb2 over .slide innerHTML —— 用于增量截图判定"这页变没变"。
+  // 取 innerHTML(内容)而非 outerHTML:截图时往 .slide 上写的 --fs-scale 内联样式
+  // 不进 innerHTML,指纹对截图副作用稳定。
+  const fp = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) { h = ((h << 5) + h + str.charCodeAt(i)) | 0; } return (h >>> 0).toString(36); };
   const frames = [...document.querySelectorAll('.slide-frame')];
   return frames.map((f, i) => {
     const s = f.querySelector('.slide');
@@ -252,6 +336,7 @@ _SLIDE_META_JS = r"""
       idx: i + 1,
       key: (s && (s.getAttribute('data-slide-key') || s.id)) || ('slide-' + (i + 1)),
       layout: (s && s.getAttribute('data-layout')) || '',
+      h: s ? fp(s.innerHTML) : '',
     };
   });
 }
@@ -270,11 +355,16 @@ _SHOW_SLIDE_JS = r"""
 """
 
 
-def _shoot(html_path: Path, out_png_dir: Path, only_slide: int | None = None):
-    """用 Playwright 把每页截成 1920×1080 的 png。返回本次截到的页 meta 列表,失败返回 None。
+def _shoot(html_path: Path, out_png_dir: Path, only_slide: int | None = None,
+           prev_by_key: dict | None = None):
+    """用 Playwright 把页截成 1920×1080 的 png,**默认增量**。返回 ALL 页的 meta 列表
+    (idx/key/layout/h),失败返回 None。每项二选一:
+      · 新截的 → 带 'png'(out_png_dir 下的文件名,如 s03.png);
+      · 与上一版同 key 且内容哈希未变 → 带 'reuse'(指向上一版那张 png 的相对路径,不重截)。
 
-    only_slide:仅截第 N 页(1-based)。用于"每页做完只刷那一页"的增量截图,避免
-    每次都全量重开浏览器逐页跑(deck 越大越慢)。其余页沿用上一版已有的 png。"""
+    prev_by_key:{key: {'h':指纹, 'png':'screenshots/vNN/sMM.png'}} —— 上一版逐页的指纹+png 路径;
+                None/页无指纹 → 退化成全量重截(首次启用增量、或外来旧版本)。
+    only_slide:兼容老的 --slide N(只截这一页、不做增量判断,给"做完一页刷一页"用)。"""
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -283,6 +373,7 @@ def _shoot(html_path: Path, out_png_dir: Path, only_slide: int | None = None):
         return None
     out_png_dir.mkdir(parents=True, exist_ok=True)
     url = html_path.resolve().as_uri()
+    prev_by_key = prev_by_key or {}
     shots = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -298,6 +389,13 @@ def _shoot(html_path: Path, out_png_dir: Path, only_slide: int | None = None):
             if not meta:
                 print(f"  ⚠️ 第 {only_slide} 页不存在,未截图。", file=sys.stderr)
         for m in meta:
+            prev = prev_by_key.get(m.get("key"))
+            # 增量:同 key、上一版有指纹且与本次一致、且那张 png 还在 → 复用,不重截
+            if (only_slide is None and prev and prev.get("h")
+                    and prev.get("h") == m.get("h") and prev.get("png")):
+                m["reuse"] = prev["png"]
+                shots.append(m)
+                continue
             page.evaluate(_SHOW_SLIDE_JS, m["idx"] - 1)
             page.wait_for_timeout(350)
             fn = out_png_dir / f"s{m['idx']:02d}.png"
@@ -354,8 +452,9 @@ def cmd_snapshot(args) -> int:
     v = _next_version(log_dir)
     print(f"📸 {v}  ←  {html_path}")
 
-    # 截图(全套)
-    shots = _shoot(html_path, log_dir / "screenshots" / v)
+    # 截图(默认增量):只截相对上一版内容变了的页,未变页复用上一版 png
+    prev_fp = _prev_slide_fingerprints(log_dir)
+    shots = _shoot(html_path, log_dir / "screenshots" / v, prev_by_key=prev_fp)
 
     # 几何校验
     audit = _run_distribution_audit(html_path)
@@ -379,19 +478,24 @@ def cmd_snapshot(args) -> int:
                     code, sev, msg = "", "", str(f)
                 findings.append({"slide": s.get("idx"), "code": code, "sev": sev, "msg": msg})
 
-    # 落 version + audit 事件(不再保存 deck 当时的 html,只留截图)
+    # 落 version + audit 事件(不存 deck html;只存截图路径 + 逐页内容指纹供下一版增量比对)。
+    # 复用页的 png 指向它真正所在的旧版目录(reuse),磁盘上本版只多出真正改动的页。
     append_event(log_dir, {
         "t": "version", "v": v, "label": args.label or "",
         "html": str(html_path),
         "slides": [{"idx": s["idx"], "key": s.get("key"), "layout": s.get("layout"),
-                    "png": f"screenshots/{v}/{s['png']}"} for s in (shots or [])],
+                    "h": s.get("h"),
+                    "png": s.get("reuse") or f"screenshots/{v}/{s['png']}"} for s in (shots or [])],
         "n_slides": len(shots or []),
     })
     if findings:
         append_event(log_dir, {"t": "audit", "v": v, "findings": findings})
 
     n = len(shots) if shots else 0
-    print(f"   {n} 页截图" + (" · ⚠️ 无截图(playwright?)" if not shots else "")
+    n_reuse = sum(1 for s in (shots or []) if s.get("reuse"))
+    n_new = n - n_reuse
+    detail = f"   {n} 页(新截 {n_new} · 复用上一版 {n_reuse})" if n else "   0 页"
+    print(detail + (" · ⚠️ 无截图(playwright?)" if not shots else "")
           + (f" · {len(findings)} 条校验发现" if findings else " · 校验通过/未跑"))
     _auto_render(log_dir, deck_dir)
     return 0
@@ -449,9 +553,13 @@ def _merge_events_and_turns(log_dir: Path, allow_transcript: bool = True) -> lis
     sess = next((e for e in events if e.get("t") == "session"), {})
     turns = []
     if allow_transcript and not OFF_SWITCH.exists():
-        tp = sess.get("transcript") or _find_current_transcript()
-        if tp:
-            turns = extract_turns(tp, sess.get("start_ts"))
+        start = sess.get("start_ts")
+        for tp in _relevant_transcripts(log_dir, sess):
+            turns.extend(extract_turns(str(tp), start))
+        # 跨多个 transcript 合并后按时间重排 + 全局重新编号(各文件内部从 1 起,合并后会撞号)
+        turns.sort(key=lambda e: _ts_epoch(e.get("ts")))
+        for i, t in enumerate(turns, 1):
+            t["n"] = i
     merged = events + turns
     # 按绝对时间点排序(journal 本地 +08:00 与 transcript UTC Z 混排也不会错位)
     merged.sort(key=lambda e: _ts_epoch(e.get("ts") or e.get("start_ts")))
@@ -468,8 +576,10 @@ def cmd_render(args) -> int:
     out = log_dir / "making-of.html"
     render_html(log_dir, merged, out, inline=args.inline)
     n_turns = sum(1 for e in merged if e.get("t") == "turn")
+    sess = next((e for e in merged if e.get("t") == "session"), {})
+    n_tx = len(_relevant_transcripts(log_dir, sess)) if not OFF_SWITCH.exists() else 0
     print(f"✓ 纪录片已生成:{out}")
-    print(f"  从 transcript 捞到 {n_turns} 个对话回合 · 双击打开即可;发给别人用 `--inline` 出单文件。")
+    print(f"  跨 {n_tx} 个会话 transcript 捞到 {n_turns} 个对话回合 · 双击打开即可;发给别人用 `--inline` 出单文件。")
     return 0
 
 
@@ -527,10 +637,11 @@ def cmd_status(args) -> int:
         print(f"当前活跃 deck:{active}")
         print(f"  版本数:{sum(1 for e in ev if e.get('t')=='version')} · "
               f"问题:{sum(1 for e in ev if e.get('t')=='problem')}")
-        tp = sess.get("transcript")
-        print(f"  transcript:{tp or '(未记录)'}")
-        if tp and on:
-            print(f"  从 transcript 现可捞回合数:{len(extract_turns(tp, sess.get('start_ts')))}")
+        tps = _relevant_transcripts(log_dir, sess) if on else []
+        print(f"  记录的主 transcript:{sess.get('transcript') or '(未记录)'}")
+        if on:
+            n = sum(len(extract_turns(str(tp), sess.get('start_ts'))) for tp in tps)
+            print(f"  跨 {len(tps)} 个会话 transcript 现可捞回合数:{n}")
     else:
         print("当前无活跃 deck(还没 `deck-log init`)。")
     return 0
@@ -540,14 +651,20 @@ def cmd_turns(args) -> int:
     """预览从 transcript 捞到的回合(校验/调试用)。"""
     log_dir = _log_dir(Path(args.deck_dir))
     sess = next((e for e in read_events(log_dir) if e.get("t") == "session"), {})
-    tp = args.transcript or sess.get("transcript") or _find_current_transcript()
-    if not tp:
+    since = None if args.all else sess.get("start_ts")
+    # --transcript 显式指定 → 只看那一个;否则走和 render 一致的跨 session 自动发现
+    tps = [Path(args.transcript)] if args.transcript else _relevant_transcripts(log_dir, sess)
+    if not tps:
         print("✗ 找不到 transcript", file=sys.stderr); return 2
-    turns = extract_turns(tp, None if args.all else sess.get("start_ts"))
-    for t in turns:
-        print(f"#{t['n']:>2} [{t.get('ts','')}]  👤 {t['input'][:70]!r}")
+    turns = []
+    for tp in tps:
+        turns.extend(extract_turns(str(tp), since))
+    turns.sort(key=lambda e: _ts_epoch(e.get("ts")))
+    for i, t in enumerate(turns, 1):
+        t["n"] = i
+        print(f"#{i:>2} [{t.get('ts','')}]  👤 {t['input'][:70]!r}")
         print(f"        🤖 {t['output_raw'][:70]!r}  ({len(t['output_raw'])} 字)")
-    print(f"\n共 {len(turns)} 回合(transcript={tp})")
+    print(f"\n共 {len(turns)} 回合 · 跨 {len(tps)} 个 transcript")
     return 0
 
 
