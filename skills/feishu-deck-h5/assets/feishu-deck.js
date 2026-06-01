@@ -521,7 +521,7 @@
     // Initial auto-balance pass: balances the current slide (present mode) and
     // every laid-out slide (scroll mode). Non-current present-mode slides are
     // content-visibility-hidden here and get balanced on first enter (below).
-    requestAnimationFrame(() => frames.forEach((f) => maybeBalance(f.querySelector('.slide'))));
+    requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => maybeBalance(f.querySelector('.slide'))); });
     const mediaObserver = new MutationObserver((muts) => {
       for (const m of muts) {
         const i = frames.indexOf(m.target);
@@ -532,7 +532,7 @@
         syncFrameMedia(m.target, now);
         // Balance a present-mode slide the first time it becomes visible
         // (content-visibility makes it measurable only now).
-        if (now) requestAnimationFrame(() => maybeBalance(m.target.querySelector('.slide')));
+        if (now) requestAnimationFrame(() => { if (signal.aborted) return; maybeBalance(m.target.querySelector('.slide')); });
       }
     });
     frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
