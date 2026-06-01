@@ -182,6 +182,16 @@ def collect(html: str):
     orphans: list[str] = []
     skipped_at: list[str] = []
 
+    # Pass 1: harvest @keyframes from EVERY head block, regardless of per-slide
+    # selector. Authors routinely put @keyframes in their OWN selector-less
+    # <style> block; gating keyframe collection on a per-slide selector (the
+    # main loop below) dropped those → a moved rule's `animation: X` lost its
+    # keyframe definition after migration → silent dead animation. (#13)
+    for block in _head_blocks(html, spans):
+        for kind, a, b in _walk_top(block):
+            if kind == 'keyframes':
+                keyframes[a] = b
+
     for block in _head_blocks(html, spans):
         # Only blocks that actually target a slide are leaks. A generic/shell
         # <style> (e.g. the R48 re-assertions, present-mode scaling) has no

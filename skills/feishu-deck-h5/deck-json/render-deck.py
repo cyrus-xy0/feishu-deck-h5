@@ -1942,7 +1942,20 @@ def inline_html(out_html: Path, deck: dict) -> None:
         css_path = (out_html.parent / href).resolve()
         if not css_path.is_file():
             return m.group(0)  # leave as-is if not findable
-        return f"<style>{css_path.read_text(encoding='utf-8')}</style>"
+        css = css_path.read_text(encoding='utf-8')
+        # Inline the CSS's OWN url() refs (e.g. `--fs-asset-cover-bg:
+        # url("lark-cover-bg.jpg")`) resolved against the STYLESHEET's dir —
+        # they are relative to the CSS file, NOT to out_html, so the later
+        # out_html-relative background-image pass never finds them and the
+        # "portable single-file" deck would lose its cover/section/content
+        # backgrounds + Lark logo the moment it's moved. `_resolve_bg` keeps
+        # http/data/missing refs untouched.
+        css = re.sub(
+            r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""",
+            lambda u: f"url({_resolve_bg(css_path, u.group(1))})",
+            css,
+        )
+        return f"<style>{css}</style>"
 
     def _inline_script(m):
         src = m.group(1)
@@ -1957,7 +1970,7 @@ def inline_html(out_html: Path, deck: dict) -> None:
         _inline_stylesheet, html_text,
     )
     html_text = re.sub(
-        r'<script\s+src="([^"]+)"></script>',
+        r'<script\b[^>]*?\bsrc="([^"]+)"[^>]*></script>',
         _inline_script, html_text,
     )
     # bg images: handle url('...') and url("...")
