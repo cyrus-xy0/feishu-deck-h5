@@ -128,7 +128,15 @@ def find_slide_index(deck: dict, key: str) -> int:
 
 def backup_path(deck_path: Path, command: str) -> Path:
     ts = time.strftime("%Y%m%d-%H%M%S")
-    return deck_path.with_suffix(f".json.bak-pre-{command}-{ts}")
+    base = deck_path.with_suffix(f".json.bak-pre-{command}-{ts}")
+    if not base.exists():
+        return base
+    # Same-second collision (two writes of the same command within 1s) would
+    # otherwise overwrite the first backup — append a counter.
+    n = 1
+    while (cand := deck_path.parent / f"{base.name}.{n}").exists():
+        n += 1
+    return cand
 
 
 def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
@@ -142,7 +150,14 @@ def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
     write so we don't silently clobber that change. `--force` bypasses the check.
     """
     # 0. Optimistic-lock check — another session may have written since we read.
-    if expected_mtime is not None and not force and deck_path.exists():
+    if expected_mtime is not None and not force:
+        if not deck_path.exists():
+            # A concurrent process DELETED deck.json since we read it — writing
+            # now would silently resurrect it over their delete. Refuse.
+            print(f"deck-cli: REFUSING write — {deck_path.name} was DELETED on disk "
+                  f"since it was read (concurrent edit). Re-read and retry, or --force.",
+                  file=sys.stderr)
+            return False
         cur_mtime = deck_path.stat().st_mtime
         if abs(cur_mtime - expected_mtime) > 1e-6:
             print(f"deck-cli: REFUSING write — {deck_path.name} changed on disk "
@@ -608,7 +623,9 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
 
     slides = deck.setdefault("slides", [])
     n = len(slides)
-    pos = args.position if args.position else n + 1
+    # `is not None` so an explicit `position 0` is validated (and rejected) as
+    # out-of-range rather than silently coerced to append (falsy-zero).
+    pos = args.position if args.position is not None else n + 1
     if not (1 <= pos <= n + 1):
         print(f"deck-cli: position out of range (1..{n+1})", file=sys.stderr)
         return 1, None
@@ -754,7 +771,8 @@ def main(argv=None) -> int:
     sp = sub.add_parser("get", help="get value at dotted path"); sp.add_argument("path")
     sp = sub.add_parser("show", help="pretty-print one slide"); sp.add_argument("key")
     sp = sub.add_parser("lint", help="validate against schema")
-    sp.add_argument("--strict", action="store_true", default=True)
+    sp.add_argument("--strict", action="store_true",
+                    help="promote warnings to errors (default: lenient)")
 
     sp = sub.add_parser("set", help="set value at dotted path")
     sp.add_argument("path"); sp.add_argument("value")
