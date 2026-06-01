@@ -133,8 +133,13 @@
           "type": ["string", "boolean"],
           "description": "Native slide lift marker. Set when a slide is lifted VERBATIM from another deck (value = source ref, e.g. 'opple-ai-lecture#2'). Renderer emits data-lifted; validate.py / visual-audit.js then downgrade this slide's CONTENT-STYLE violations (R06 / R-WHITE-TEXT / R-VIS-BODY-FLOOR / R-VIS-TIER) from error -> WARNING — surfaced so a human chooses to fix, not blocking. GEOMETRY / OVERFLOW rules stay full-severity error (a real overflow is a real failure regardless of lift)."
         },
+        "lift_origin": {
+          "type": "object",
+          "description": "Internal: machine-readable lift provenance written by lift-slides.py (F-70: src_deck / src_path / src_key / src_index / lifted_at). Lets heal/re-lift return to the exact source slide. Renderer-ignored; not authored by hand."
+        },
         "data": { "type": "object" }
       },
+      "additionalProperties": false,
       "allOf": [
         { "if": { "properties": { "layout": { "const": "cover" } },      "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_cover" } },      "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "agenda" } },     "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_agenda" } },     "required": ["data"] } },
