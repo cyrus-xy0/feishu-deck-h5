@@ -64,7 +64,7 @@ if ! mkdir -p "$RUN_DIR/input" "$RUN_DIR/output"; then
   exit 1
 fi
 
-REL_DIR="${RUN_DIR#$RUNS_BASE/}"
+REL_DIR="${RUN_DIR#"$RUNS_BASE"/}"
 
 echo "NEW RUN OK"
 echo "  run name : $RUN_NAME"

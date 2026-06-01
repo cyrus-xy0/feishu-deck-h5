@@ -24,7 +24,7 @@ shift || true
 NAME="deck-editable"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --name) NAME="$2"; shift 2 ;;
+    --name) NAME="${2:?--name requires a value}"; shift 2 ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
