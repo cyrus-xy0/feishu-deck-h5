@@ -32,9 +32,26 @@ description: |
 - **Q2 · 范围?** 单页 / 指名的某几页 / 整 deck。**默认收紧到最小**:除非用户明说
   「整份 / 每一页 / 全 deck / 通改」,否则一律按**单页 或 用户点名的那几页**处理。
   **举证责任在「多动」一侧:多动需要用户授权,不是我自行判断要不要多动。**
-- **Q3 · 哪一页?**(范围含具体页时)锁定 slide 的 `key` + 序号。定位靠 LLM 直接做,
-  不写脚本:URL `#N` → 第 N 页(JS 是 `parseInt(hash)-1` 取 index);「第 N 页 / 某标题 /
-  某 key」→ 查 render 产出的 `slide-index.json` 或 `deck.json` 的 `slides[].key` 对上。
+- **Q3 · 哪一页?**(范围含具体页时)锁定 slide 的 `key` + 序号。**一次查定,别铺开**:
+  - **🔒 唯一权威口径:`page N = frame_index N = slides[N-1]`。** 用户「发链接 `#N`」和
+    「嘴说第 N 页」指**同一个东西** —— feishu-deck.js 同时用 frame_index 写 URL hash
+    (`#${idx+1}`)和屏幕翻页器(`pad(cur+1)`),二者永远相等。**绝不**回 `feishu-deck.js`
+    重新「考据」hash 逻辑(那是已知不变量),也**绝不**把 `screen_label` 的数字前缀
+    (如 frame 46 上写「50 飞书生态」)当页码 —— 那是作者/slide-library 的旧标签、会漂移,
+    **按它定位必错**(已踩)。
+  - **一条命令定位(新老 deck 通用)**:`python3 deck-json/locate-slide.py <deck-dir|slide-index.json|deck.json|index.html> <query>`。
+    query 自动识别:`46` / `#46` / `…/index.html#46` / 区间 `46-48` / 列表 `46,2` / slide `key` /
+    标题·label 子串。输出 `#N key= layout= "label" link=index.html#N`,直接拿去 `deck-cli show/set`。
+    `-v` 看 title+assets,`--json` 给机器读。优先级:`slide-index.json`(render 每次自动产出)→ `deck.json`
+    → `index.html`。**老/外来 deck(无 deck.json)直接喂它的 `index.html`,locate 解析 slide-frame 的
+    DOM 顺序 = `#N` 本义** —— 这正是「我要从老 deck lift」时定位源页的入口。
+  - **renumber 只对目标 deck.json,不对老源 deck**:老 deck 无 deck.json → `--renumber` 套不上,也不需要。
+    lift 时按 frame_index 定位源页(别看 label 数字),`--shake` 会把源的旧 `screen_label`(如「57 收尾 hero」)
+    带进**目标** deck.json;lift 完在**目标**上跑一次 `render-deck.py --renumber`,旧号即重写成目标的真实页码。
+  - **探针与不变量打架先怀疑探针**:若临时数 frame 得到荒谬结果(如「886 页」),那是自己正则/方法错,
+    **重查工具**,别升级成更多轮验证。
+  - **label 漂了想从源头修齐**:`render-deck.py --renumber` 把每页 `screen_label` 的数字前缀重写成
+    其真实 frame_index(回写 deck.json + 自动备份),让 library 标签号与页码/hash 对齐。
 
 ### 确认策略 —— 单页直接做,>1 页或越界才停
 - **单页小改**:出一句锁定陈述「理解 = 改【第 N 页 · 标题(key=xxx)】的 X,只动这一页」,

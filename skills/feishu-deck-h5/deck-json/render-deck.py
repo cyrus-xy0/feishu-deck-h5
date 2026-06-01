@@ -222,6 +222,17 @@ def _derive_screen_label(slide: dict) -> str:
     return cleaned.strip()[:20]
 
 
+def _renumber_label(slide: dict, frame_index: int) -> str:
+    """Canonical screen_label = '<frame_index:02d> <name>'. Strips any existing
+    leading number token ('50 飞书生态' / '04-A 标题' → name), then re-prefixes
+    with the slide's TRUE frame_index, so the library label number stops drifting
+    from the on-screen page number / URL hash after lift / insert / reorder.
+    Used by render --renumber."""
+    base = slide.get("screen_label") or _derive_screen_label(slide)
+    name = re.sub(r"^\s*\d[\w\-]*\s+", "", base).strip() or _derive_screen_label(slide)
+    return f"{frame_index:02d} {name}"
+
+
 def _build_data_attrs(slide: dict) -> str:
     """Compose data-accent + data-decor + per-slide title-style / logo-position
     overrides for the .slide element.
@@ -1645,6 +1656,12 @@ def main(argv=None) -> int:
                     help="run Playwright visual audits after render (R-OVERFLOW / "
                          "R-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR). Adds ~5-10s. "
                          "Requires `pip install playwright && python -m playwright install chromium`.")
+    ap.add_argument("--renumber", action="store_true",
+                    help="rewrite each slide's screen_label leading number to its TRUE "
+                         "frame_index (post-_disabled-skip), persisted back to deck.json "
+                         "(auto-backup .bak-pre-renumber-<ts>). Fixes stale labels after "
+                         "lift/insert/reorder so the library label number matches the "
+                         "on-screen page number / URL hash (#N).")
     args = ap.parse_args(argv)
 
     if args.inline and not args.skip_copy_assets:
@@ -1709,6 +1726,35 @@ def main(argv=None) -> int:
     slides_html = []
     total = len(active_slides)
     deck_dir = args.deck.resolve().parent
+
+    # --renumber: canonicalize every active slide's screen_label leading number
+    # to its true frame_index, BEFORE render (so the emitted data-screen-label +
+    # slide-index.json both follow), and persist back to deck.json with a backup.
+    if getattr(args, "renumber", False):
+        import time
+        changes = []
+        for new_idx, (orig_idx, slide) in enumerate(active_slides):
+            old = slide.get("screen_label") or _derive_screen_label(slide)
+            new = _renumber_label(slide, new_idx + 1)
+            slide["screen_label"] = new          # mutates deck["slides"][orig_idx]
+            if new != old:
+                changes.append((new_idx + 1, old, new))
+        if changes:
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            bak = args.deck.with_name(args.deck.name + f".bak-pre-renumber-{ts}")
+            bak.write_text(args.deck.read_text(encoding="utf-8"), encoding="utf-8")
+            args.deck.write_text(
+                json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(f"  ↻ renumbered {len(changes)} screen_label(s) → frame_index "
+                  f"(backup: {bak.name})", file=sys.stderr)
+            for fi, old, new in changes[:8]:
+                print(f"      #{fi}: '{old}' → '{new}'", file=sys.stderr)
+            if len(changes) > 8:
+                print(f"      … +{len(changes) - 8} more", file=sys.stderr)
+        else:
+            print("  ↻ --renumber: all screen_labels already match frame_index",
+                  file=sys.stderr)
+
     for new_idx, (orig_idx, slide) in enumerate(active_slides):
         try:
             # Pass NEW index (post-skip) for page-number continuity, but include
