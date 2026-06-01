@@ -221,10 +221,20 @@ def _relevant_transcripts(log_dir: Path, sess: dict) -> list[Path]:
                 continue                                    # 没提到本 deck → 多半是别的 deck 的会话,跳过
             found.append(rp); seen.add(rp)
 
-    if not found:                                           # 连记录都没有时退回"当前最近 transcript"
+    if not found:                                           # 连记录都没有时退回"当前 transcript"
         cur = _find_current_transcript()
         if cur:
-            found.append(Path(cur))
+            # 有 deck token 时, fallback transcript 也要真提到它才采用 —— 否则
+            # token-less 的全局最近 fallback 会把别的 session 的 transcript 误挂到本 deck.
+            if not tokens:
+                found.append(Path(cur))
+            else:
+                try:
+                    ctext = Path(cur).read_text(encoding='utf-8', errors='ignore')
+                    if any(tok in ctext for tok in tokens):
+                        found.append(Path(cur))
+                except OSError:
+                    pass
     return found
 
 
@@ -470,7 +480,7 @@ def cmd_snapshot(args) -> int:
             for f in (s.get("signals") or s.get("findings") or []):
                 if isinstance(f, (list, tuple)):
                     code = f[0] if len(f) > 0 else ""
-                    sev = f[1] if len(f) > 2 else ""
+                    sev = f[1] if len(f) > 1 else ""
                     msg = f[-1] if f else ""
                 elif isinstance(f, dict):
                     code, sev, msg = f.get("code", ""), f.get("sev", ""), f.get("msg", "")

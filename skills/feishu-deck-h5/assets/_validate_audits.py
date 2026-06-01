@@ -63,7 +63,7 @@ def audit_titles_one_line(slides: list[str], iss: Issues):
             continue   # cover / image-text / end allow multi-line hero titles
         # Match h2 / h1 with class containing "title" or "title-zh"
         title_re = re.compile(
-            r'<h[12][^>]*class="[^"]*\btitle(?:-zh)?\b[^"]*"[^>]*>(.*?)</h[12]>',
+            r'<h[12][^>]*class="[^"]*(?<![\w-])title(?:-zh)?(?![\w-])[^"]*"[^>]*>(.*?)</h[12]>',
             re.S)
         for h in title_re.findall(fr):
             if '<br' in h:
@@ -377,8 +377,12 @@ def audit_undefined_css_vars(html: str, iss: Issues):
     if not combined:
         return
 
-    # Strip CSS comments to avoid matching commented-out var() / --name:
+    # Strip CSS comments AND string literals so a `--name:` / `var(--x)` inside a
+    # quoted value (e.g. `content: "--foo: bar"`) isn't mistaken for a real
+    # custom-property definition (which would mask a genuinely-undefined var) or
+    # a reference.
     combined_clean = re.sub(r'/\*.*?\*/', '', combined, flags=re.S)
+    combined_clean = re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', '""', combined_clean)
 
     # Definitions: `--name: ...;` (or `--name: ...` at rule end without `;`).
     defined = set(re.findall(r'--([a-zA-Z][\w-]*)\s*:', combined_clean))
