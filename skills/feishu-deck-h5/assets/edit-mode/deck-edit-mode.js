@@ -47,7 +47,14 @@
       // skip elements whose computed display would hide them
       const tag = parent.tagName;
       if (tag === 'TITLE' || tag === 'NOSCRIPT') continue;
-      leaves.add(parent);
+      // Only a TRUE leaf — every child node is text or <br> — may become
+      // contenteditable. A MIXED container (text + child elements, e.g.
+      // `<h2>标题<span class="tag">NEW</span></h2>`) would let an edit or paste
+      // delete/merge its child elements → structural corruption persisted on
+      // save. Skip those (their inner text leaves are still walked separately).
+      if ([...parent.childNodes].every((c) => c.nodeType === 3 || c.nodeName === 'BR')) {
+        leaves.add(parent);
+      }
     }
     return [...leaves];
   }
@@ -91,6 +98,30 @@
       el.setAttribute('contenteditable', 'true');
       el.setAttribute('spellcheck', 'false');
     });
+
+    // Force PLAIN-TEXT paste into editables (#81): rich HTML pasted into a
+    // contenteditable would be serialized verbatim into the saved index.html —
+    // stored XSS / structural corruption in the delivered deck. One delegated,
+    // once-attached handler strips formatting to text.
+    if (!deck.dataset.editPasteGuard) {
+      deck.dataset.editPasteGuard = '1';
+      deck.addEventListener('paste', (e) => {
+        const ed = e.target && e.target.closest && e.target.closest('[contenteditable="true"]');
+        if (!ed) return;
+        e.preventDefault();
+        const cd = e.clipboardData || window.clipboardData;
+        const text = cd ? cd.getData('text/plain') : '';
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          const r = sel.getRangeAt(0);
+          r.deleteContents();
+          r.insertNode(document.createTextNode(text));
+          r.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      });
+    }
 
     // draggable on every slide-frame
     document.querySelectorAll('.slide-frame').forEach((sf) => {
@@ -531,13 +562,19 @@
         return;
       } catch (err) {
         if (err.name === 'AbortError') return;
-        console.warn('FS Access API failed, falling back to download:', err);
+        // A post-pick write FAILURE (disk full, file moved/locked, permission
+        // revoked mid-write) — NOT "unsupported". Surface it honestly and
+        // download a copy so the edits aren't silently lost. (#83)
+        console.warn('FS Access API write failed:', err);
         fileHandle = null;
         try { await idbDel(HANDLE_KEY()); } catch {}
+        downloadHtml(html, 'save-failed');
+        return;
       }
     }
 
-    // Fallback: download (Safari / Firefox / non-secure context)
+    // Fallback: download — browser genuinely lacks the FS Access API
+    // (Safari / Firefox / non-secure context)
     downloadHtml(html, 'fallback');
   }
 
@@ -550,7 +587,9 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-    const suffix = reason === 'download-copy' ? ' (未覆盖原文件)' : ' (浏览器不支持原地保存)';
+    const suffix = reason === 'download-copy' ? ' (未覆盖原文件)'
+                 : reason === 'save-failed'   ? ' (原地保存失败, 已下载副本)'
+                 : ' (浏览器不支持原地保存)';
     showToast('↓ Downloaded ' + a.download + suffix, 2200);
   }
 
@@ -729,6 +768,10 @@
       e.target.tagName === 'TEXTAREA'
     );
 
+    // Ignore keystrokes mid-IME-composition (CJK candidate window): a raw
+    // Escape/Enter here belongs to the IME, not our shortcuts. (#724)
+    if (e.isComposing || e.keyCode === 229) return;
+
     const saveDialog = document.querySelector('.edit-save-dialog');
     if (saveDialog && e.key === 'Escape') {
       e.preventDefault();
@@ -738,7 +781,7 @@
     }
 
     // E to enter edit mode (only when NOT typing)
-    if (!editMode && !inField && e.key === 'e' &&
+    if (!editMode && !inField && e.key.toLowerCase() === 'e' &&
         !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
       e.preventDefault();
       enterEditMode();
@@ -756,14 +799,14 @@
       return;
     }
     // ⌘S / Ctrl+S to save (in edit mode)
-    if (editMode && (e.metaKey || e.ctrlKey) && e.key === 's') {
+    if (editMode && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
       e.stopPropagation();
       save();
       return;
     }
     // ⌘Z / Ctrl+Z to undo last reorder (text undo is browser-native)
-    if (editMode && !inField && (e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+    if (editMode && !inField && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
       e.preventDefault();
       undo();
       return;
