@@ -430,7 +430,18 @@ def cmd_clone(deck: dict, args) -> tuple[int, dict | None]:
         return 1, None
     cloned = copy.deepcopy(deck["slides"][idx])
     cloned["key"] = args.new_key
-    position = args.position if args.position else idx + 2  # default: right after source
+    n = len(deck["slides"])
+    if args.position is not None:
+        # Validate like insert/move-key (clone ADDS a slide → 1..n+1). The old
+        # `args.position if args.position` also silently coerced an explicit
+        # `position 0` to the default, and out-of-range values were absorbed by
+        # list.insert's clamping → slide cloned to the wrong spot with no error.
+        if not (1 <= args.position <= n + 1):
+            print(f"deck-cli: position out of range (1..{n+1})", file=sys.stderr)
+            return 1, None
+        position = args.position
+    else:
+        position = idx + 2  # default: right after source
     deck["slides"].insert(position - 1, cloned)
     print(f"  cloned slides[{idx}] ({args.key}) → position {position} as '{args.new_key}'")
     return 0, deck

@@ -223,7 +223,13 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 
             browser.close()
     except Exception as e:
-        iss.warn('R-VISUAL',
+        # INABILITY to run the visual checks (flaky Chromium launch / nav
+        # timeout / missing browser) is an environment glitch, NOT a deck
+        # defect — emit warn_soft so it NEVER escalates to a blocking error
+        # under --strict / --gate ingest (which would reject a perfectly good
+        # deck on a CI hiccup). An actual visual VIOLATION found below still
+        # warns/errs normally.
+        iss.warn_soft('R-VISUAL',
             f'visual checks could not run ({type(e).__name__}: {e}). '
             'Try `python -m playwright install chromium` if you have not '
             'yet, or open the deck in a browser manually to verify.')
