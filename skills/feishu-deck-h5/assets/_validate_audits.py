@@ -885,15 +885,19 @@ def audit_slide_keys(slides: list[str], iss: Issues):
 
     Rules:
       • Every .slide MUST have data-slide-key set.
-      • Slug must match ^[a-z0-9][a-z0-9-]*$ (kebab-case, starts with
-        alphanumeric, no underscores or uppercase).
+      • Slug must match ^[a-z][a-z0-9-]*$ (kebab-case, starts with a
+        lowercase letter, no underscores or uppercase). MUST match the
+        deck-schema.json / validate-deck.py JSON-gate pattern exactly —
+        a leading-digit key passing here but failing the schema gate (or
+        vice-versa) is a gate divergence that makes a deck pass one path
+        and fail the other.
       • Slugs MUST be unique within the deck (no two slides share a key).
       • Positional slugs are allowed but flagged as warning — the rule
         wants semantic slugs that survive reorder (`slide-NN` /
         `page-N` / `section-N` are positional).
     """
     slug_re = re.compile(r'data-slide-key="([^"]*)"')
-    valid_slug_re = re.compile(r'^[a-z0-9][a-z0-9-]*$')
+    valid_slug_re = re.compile(r'^[a-z][a-z0-9-]*$')  # MUST match deck-schema.json key pattern
     positional_re = re.compile(r'^(slide|page|section|frame)-?\d+$')
 
     seen: dict[str, int] = {}  # slug -> first slide index it appeared in

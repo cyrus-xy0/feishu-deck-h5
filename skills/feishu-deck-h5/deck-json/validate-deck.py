@@ -243,7 +243,11 @@ def check_business_rules(deck: dict, result: Result, strict: bool) -> None:
     for i, slide in enumerate(slides):
         sp = f"$.slides[{i}]"
         layout = slide.get("layout")
-        data = slide.get("data", {}) or {}
+        data = slide.get("data") or {}
+        if not isinstance(data, dict):
+            continue  # a non-dict `data` type is already recorded by schema
+                      # validation; don't let the business-rule checks below
+                      # crash on it (would mask the real schema errors).
         lang = slide.get("language_override") or deck_lang
 
         if layout == "table":
@@ -259,19 +263,23 @@ def check_business_rules(deck: dict, result: Result, strict: bool) -> None:
                 result.err(f"{sp}.data.items",
                            f"agenda has {len(actives)} items marked active; max 1 allowed (recap variant)")
 
-        if is_variant(slide, "flow", "timeline"):
-            cols = data.get("cols", 4)
+        # Only warn when `cols` is EXPLICITLY present and mismatched. `cols` is
+        # optional; the renderer DERIVES the column count from the node/step
+        # count when omitted. Synthesizing a default 4 and comparing it against
+        # the real count (the old code) made any 3/5/6-step flow without an
+        # explicit `cols` warn → render runs validate-deck --strict → warning
+        # promoted to error → the valid slide was unrenderable.
+        if is_variant(slide, "flow", "timeline") and "cols" in data:
             nodes_len = len(data.get("nodes") or [])
-            if cols != nodes_len:
+            if data["cols"] != nodes_len:
                 result.warn(f"{sp}.data.cols",
-                            f"cols={cols} doesn't match nodes count {nodes_len}; renderer will use nodes count")
+                            f"cols={data['cols']} doesn't match nodes count {nodes_len}; renderer will use nodes count")
 
-        if is_variant(slide, "flow", "process"):
-            cols = data.get("cols", 4)
+        if is_variant(slide, "flow", "process") and "cols" in data:
             steps_len = len(data.get("steps") or [])
-            if cols != steps_len:
+            if data["cols"] != steps_len:
                 result.warn(f"{sp}.data.cols",
-                            f"cols={cols} doesn't match steps count {steps_len}")
+                            f"cols={data['cols']} doesn't match steps count {steps_len}")
 
         # 3. content/story-case schema-fit (mirrors render.py ONE_PAGER_FIT_CHECK)
         if is_variant(slide, "content", "story-case"):
