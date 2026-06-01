@@ -64,7 +64,6 @@ BLOCKS_DIR    = TEMPLATES_DIR / "blocks"
 SCHEMA_FILE   = HERE / "deck-schema.json"
 VALIDATE_DECK = HERE / "validate-deck.py"
 VALIDATE_HTML = ASSETS_DIR / "validate.py"
-EXTRACT_TEXTS = ASSETS_DIR / "extract-texts.py"
 COPY_ASSETS   = ASSETS_DIR / "copy-assets.py"
 
 # Phase 4 / post-review-medium-6: there's now ONE pathway for \n→<br>.
@@ -1631,8 +1630,6 @@ def main(argv=None) -> int:
                     help="skip DeckJSON schema validation (NOT recommended)")
     ap.add_argument("--skip-validate-html", action="store_true",
                     help="skip post-render HTML validator (NOT recommended)")
-    ap.add_argument("--skip-texts", action="store_true",
-                    help="skip texts.md sidecar generation (NOT recommended)")
     ap.add_argument("--skip-fit-check", action="store_true",
                     help="skip the content/story-case schema-fit refusal "
                          "(placeholder / too-short / duplicate beat detection)")
@@ -1792,18 +1789,6 @@ def main(argv=None) -> int:
         encoding="utf-8",
     )
 
-    # 5.5 — Generate texts.md sidecar (kills T03 warning, lets users edit copy
-    #       without touching HTML markup).
-    if not args.skip_texts:
-        rc = subprocess.run(
-            [sys.executable, str(EXTRACT_TEXTS), str(out_html),
-             "--out", str(args.output_dir / "texts.md")],
-            capture_output=True, text=True,
-        )
-        if rc.returncode != 0:
-            print(f"render-deck: extract-texts.py failed (non-fatal): {rc.stderr.strip()}",
-                  file=sys.stderr)
-
     # 6. HTML validator gate
     if not args.skip_validate_html:
         # If --visual, run validate.py WITHOUT --no-visual so Playwright audits
@@ -1871,8 +1856,6 @@ def main(argv=None) -> int:
 
     print(f"       deck:   {deck['deck']['title']}")
     print(f"       slides: {total}")
-    if not args.skip_texts:
-        print(f"       sidecar: texts.md")
 
     # Accent review — for any content/story-case slide, print the highlighted
     # word so the author can eyeball that the right pivot is emphasized.

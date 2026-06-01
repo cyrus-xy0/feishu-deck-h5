@@ -133,7 +133,6 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
    - accent ≠ cyan (R49)
    - decor token whitelist
    - 长 title 警告
-   - texts.md 兼容性 hint
 
 3. **HTML validator** (assets/validate.py) — 渲染产物再过一道,~40 条规则 (R02 / R06 / R20 / L1-L4 / BF1-BF12 / 等)
 

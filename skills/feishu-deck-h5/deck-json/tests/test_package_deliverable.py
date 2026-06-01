@@ -26,7 +26,6 @@ class PackageDeliverableTest(unittest.TestCase):
             '<!doctype html><html><body><img src="assets/local.png"></body></html>',
             encoding="utf-8",
         )
-        (self.output / "texts.md").write_text("# Texts\n", encoding="utf-8")
         (self.output / "deck.json").write_text(
             json.dumps({"schema_version": "1.0", "slides": []}),
             encoding="utf-8",
@@ -52,11 +51,13 @@ class PackageDeliverableTest(unittest.TestCase):
             names = set(zf.namelist())
 
         self.assertIn("index.html", names)
-        self.assertIn("texts.md", names)
+        self.assertIn("README.txt", names)
         self.assertIn("deck.json", names)
         self.assertIn("assets-manifest.yaml", names)
         self.assertIn("assets/local.png", names)
-        self.assertIn("apply-texts.py", names)
+        # texts.md / apply-texts.py no longer bundled — editing is in-browser
+        self.assertNotIn("texts.md", names)
+        self.assertNotIn("apply-texts.py", names)
 
 
 if __name__ == "__main__":

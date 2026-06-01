@@ -3,7 +3,7 @@
 #
 # 用法: bash check-only.sh <html-path> [--strict] [--no-visual] [--report PATH]
 #
-# 跟 finalize.sh 不一样: 不跑 copy-assets, 不跑 extract-texts, 不要求
+# 跟 finalize.sh 不一样: 不跑 copy-assets, 不要求
 # 在 runs/<ts>/output/ 工作目录里; 适合对外部 / 他人交付的 HTML deck
 # 做 PR-review 式的合规扫描.
 

@@ -57,6 +57,16 @@ R-WHITE-TEXT:
     - "半透明白色 rgba(255,255,255,0.x) 只能用在装饰 / 完全不重要的边缘元素"
     - "如果是脚注 / 数据来源, 也至少用 #fff @ 92% 不透明度, 别低于这个"
 
+R-ESC-HTML:
+  concern:     "A · 客户看不见"
+  symptom:     "页面上直接显示出 <span class=hl> 这样的代码标签 (乱码)"
+  consequence: "客户看到一串没渲染的 HTML 代码, 整页像坏了一样, 当场出丑"
+  fix:
+    - "这页把 HTML 标签写进了会被转义的文字字段 (content/3up 等的 lede / body / 标题)"
+    - "要做行内高亮 / 特殊排版, 把这页改成 layout:raw, 自己控制整页 markup"
+    - "或者直接去掉标签, 用这个字段本身支持的强调方式"
+    - "需要换行用 \\n (会自动转成 <br>), 不要手写 <br> 标签"
+
 L2:
   concern:     "A · 客户看不见"
   symptom:     "内容堆在画面顶部, 下半留一大块空白"
@@ -105,23 +115,6 @@ R02:
     - "每个 <div class='slide'> 都要有 data-layout='<版式名>' 和 data-screen-label='NN 章节名'"
     - "data-layout 取值参考: cover / agenda / section / content-3up / content-2col / quote / stats / big-stat / image-text / table / timeline / process / end"
     - "data-screen-label 用 'NN 章节名' 格式 (NN 是页码, 跟源 PDF 对得上)"
-
-T01:
-  concern:     "B · 库找不回这张 slide"
-  symptom:     "文字字段标识 (data-text-id) 格式不对"
-  consequence: "改文字工具会拒绝处理这张 slide, 文案编辑流程整条断掉"
-  fix:
-    - "data-text-id 必须是 'slide-NN.field' 格式 (例如 slide-01.title, slide-03.card-02.body)"
-    - "field 部分用 kebab-case, 不能有空格 / 中文 / 特殊符号"
-    - "NN 是 slide 序号, 跟 data-screen-label 上的页码一致"
-
-T02:
-  concern:     "B · 库找不回这张 slide"
-  symptom:     "同一个 data-text-id 在 deck 里出现多次"
-  consequence: "改文字工具会把两处都同时改掉, 一处改文案的需求会污染另一处"
-  fix:
-    - "每个 data-text-id 在 deck 内必须唯一"
-    - "重复的字段加序号: 'card-01.body' / 'card-02.body' 而不是两个 'card.body'"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,3 +221,321 @@ L1:
     - "默认 .slide .wordmark 用彩色: background: var(--fs-asset-logo)"
     - "只在 section 章节页 / 强 glow 背景的 slide 上, 给 .wordmark 加 class='is-mono' 单色"
     - "content / agenda / stats 这类内容页一律彩色 logo"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  补全 (2026-05-31) — 逐页业务报告 (默认输出) 需要每条会触发的规则都有
+#  业务文案. 以下补齐视觉审计 / 放映 / 性能 / 文案外挂等剩余规则.
+#  symptom 是逐页报告必读字段; 缺它就退回不含术语的兜底句.
+# ═══════════════════════════════════════════════════════════════════════
+
+# ---- A · 客户看不见 (投影上的硬伤) ----
+
+R-OVERFLOW:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页内容超出画面, 边缘被裁掉"
+  consequence: "投影上文字或图被切掉, 客户看不全"
+  fix:
+    - "减少卡片 / 行数, 或把内容拆成两页"
+
+R-OVERLAP:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有两块内容叠在一起了"
+  consequence: "文字互相压住, 读不清"
+  fix:
+    - "拉开间距, 让相邻元素不重叠"
+
+R-VIS-TIER:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有些字号偏小 / 不规整"
+  consequence: "投影后排看着吃力, 整页字号忽大忽小不齐整"
+  fix:
+    - "把偏小的字提到正文档, 标题用大档"
+
+R-VIS-BODY-FLOOR:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页正文字太小"
+  consequence: "投影上后排得凑近看, 掉档次"
+  fix:
+    - "把正文字号提到至少 24px"
+
+R-VIS-LABEL-FLOOR:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页卡片里的小标签字太小"
+  consequence: "卡片标签投影上看不清"
+  fix:
+    - "把卡片标签提到至少 24px, 靠加粗 / 颜色区分主次, 别靠缩小"
+
+R-VIS-SHORT-LABEL-FLOOR:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有很短的标签字太小"
+  consequence: "短标签 / 图表轴标投影看不清"
+  fix:
+    - "把短标签提到至少 18px"
+
+R-VIS-HERO-FLOOR:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页主角元素 (大数字 / 封面大标题) 不够大"
+  consequence: "重点不突出, 整页不够大气"
+  fix:
+    - "把主角字号放大到该版式应有的尺寸"
+
+R-VIS-BALANCE:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页内容偏上 / 偏下, 留大块空白"
+  consequence: "上挤下空, 看着像没排完"
+  fix:
+    - "让内容垂直居中, 或补点支撑元素填重心"
+
+R-VIS-CANVAS-CENTER:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页内容整体偏上, 没在画面里居中"
+  consequence: "全页看着上空或下空, 不平衡"
+  fix:
+    - "让内容在标题下方到屏幕底之间垂直居中"
+
+R-VIS-SLACK-FLEX:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页某块内容内部撑开了异常大的空白"
+  consequence: "区块之间间距怪异, 看着松散"
+  fix:
+    - "让内容按自身高度排布并居中, 别强行拉伸"
+
+R-VIS-GUTTER:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页同类卡片的间距 / 内边距不一致"
+  consequence: "卡片排得参差, 不够整齐"
+  fix:
+    - "统一卡片之间的间距和卡内留白"
+
+R-VIS-ORPHAN:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有句子换行后末行只剩一两个字"
+  consequence: "文字换行很碎, 投影上不好看"
+  fix:
+    - "让上下两行字数接近, 或加宽容器避免孤字"
+
+R-FOCAL-CHECK:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页好几个元素一样大, 抓不住重点"
+  consequence: "观众第一眼不知道该看哪, 信息平铺无重点"
+  fix:
+    - "把主角放大 / 用品牌色突出, 其余降一级"
+
+R-VIS-HIER:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页卡片里次要文字比主要文字还醒目"
+  consequence: "卡片内主次颠倒, 观众先看到不重要的"
+  fix:
+    - "把卡片标题 / 重点放大, 说明文字降一级"
+
+R-VIS-CROWD:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页内容太挤, 元素挨得太近"
+  consequence: "信息密度过高, 投影上喘不过气, 读着累"
+  fix:
+    - "拉开间距 / 减少元素, 留出留白"
+
+R-VIS-TITLE-GAP:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页标题和正文之间空隙不合适"
+  consequence: "标题与内容贴太近或离太远, 层次乱"
+  fix:
+    - "调整标题到正文的间距到合适比例"
+
+R-VIS-TITLE-POSITION:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页标题位置不对"
+  consequence: "标题没落在该在的位置, 版面不规整"
+  fix:
+    - "把标题放回标准位置"
+
+R-VIS-PEER-SIZE:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页本该一样大的同级元素大小不一"
+  consequence: "并列卡片 / 条目大小参差, 看着不齐"
+  fix:
+    - "把同级元素的字号 / 尺寸统一"
+
+R-VIS-CARD-OVERFLOW:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页卡片里的内容装不下, 溢出了"
+  consequence: "卡片文字被截断或挤出边框, 客户看不全"
+  fix:
+    - "精简卡片内容 / 放大卡片 / 减少卡片数"
+
+R-VIS-CARD-MIN-HEIGHT-SPARSE:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页卡片内容太少, 卡片显得空"
+  consequence: "卡片大而空, 看着像没填完"
+  fix:
+    - "给卡片补点内容, 或缩小卡片尺寸"
+
+R-VIS-ABSPOS-DUAL-ANCHOR:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有个标签 / 角标被异常拉长了"
+  consequence: "胶囊标签 / 角标被撑到很高, 看着变形"
+  fix:
+    - "重新打包一次 (框架会自动修正这类拉伸)"
+
+R-VISUAL:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页的视觉检查没能完成"
+  consequence: "渲染环境缺失, 这页的视觉问题没查到 (建议装好后重查)"
+  fix:
+    - "装好 playwright + chromium 后重跑检查"
+
+R07:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页缺飞书 logo"
+  consequence: "没有品牌标识, 不像正式飞书材料"
+  fix:
+    - "补上右上角的飞书 logo"
+
+R36:
+  concern:     "A · 客户看不见"
+  symptom:     "放映时内容没居中"
+  consequence: "全屏放映画面偏向一边"
+  fix:
+    - "让内容在放映模式下居中"
+
+R-AUTOBALANCE-PRESENT:
+  concern:     "A · 客户看不见"
+  symptom:     "这份文件没内置最新的自动排版修正"
+  consequence: "文字贴边 / 贴底这类小毛病打开时不会被自动纠正"
+  fix:
+    - "重新打包一次即可 (一条命令, 不动文字和字号)"
+
+# ---- C · 复用 / 品牌 / 规范 ----
+
+R-ECHO:
+  concern:     "C · 复用时会打架"
+  symptom:     "这一页有几段文字内容重复"
+  consequence: "重复啰嗦, 占版面 (若是有意罗列痛点可忽略)"
+  fix:
+    - "删掉重复的部分, 只留新信息"
+
+R-LANG:
+  concern:     "C · 复用时会打架"
+  symptom:     "中文文案下面挂了英文翻译行 (本份是纯中文)"
+  consequence: "多余的中英对照, 版面变挤"
+  fix:
+    - "删掉英文翻译行, 只留中文"
+
+R38:
+  concern:     "C · 复用时会打架"
+  symptom:     "用了无效的装饰背景名"
+  consequence: "装饰背景不生效, 可能显示异常"
+  fix:
+    - "改用规范内的装饰名"
+
+R-BULLET-DASH:
+  concern:     "C · 复用时会打架"
+  symptom:     "列表用了手写横线当圆点"
+  consequence: "跟标准彩色圆点不一致"
+  fix:
+    - "改用标准的彩色圆点列表样式"
+
+R-CSSVAR:
+  concern:     "C · 复用时会打架"
+  symptom:     "用了未定义的样式变量"
+  consequence: "颜色 / 间距可能渲染异常"
+  fix:
+    - "改用已定义的品牌样式变量"
+
+R-EMPTY-HEADER-ZONE:
+  concern:     "C · 复用时会打架"
+  symptom:     "这一页标题区留了一条空带"
+  consequence: "标题和内容之间有块空白, 看着松"
+  fix:
+    - "收紧标题区, 或把内容上移填补"
+
+R-VIS-LIFT-STYLE-LOST:
+  concern:     "C · 复用时会打架"
+  symptom:     "从别处搬来的这一页丢了原有样式"
+  consequence: "样式缺失, 显示和原来不一样"
+  fix:
+    - "用 deck-cli paste 重新搬一次, 让样式跟着走"
+
+R-VIS-OPT-OUT-ABUSE:
+  concern:     "C · 复用时会打架"
+  symptom:     "这一页用了大量豁免标记"
+  consequence: "把校验提醒批量静音, 可能藏住真问题"
+  fix:
+    - "逐个复查豁免, 确属设计意图才保留"
+
+R-VIS-NO-IMAGERY:
+  concern:     "C · 复用时会打架"
+  symptom:     "整份 deck 几乎全是纯文字卡, 偏单调"
+  consequence: "缺图标 / 配图 / 图表, 整体显得平 (建议性)"
+  fix:
+    - "给关键页加图标 / 配图 / 数据图表丰富表达"
+
+R-SELF-CONTAINED:
+  concern:     "C · 复用时会打架"
+  symptom:     "这一页的样式还放在公共头部, 没跟着这页走"
+  consequence: "重渲 / 复用时这页样式可能丢失 (建议性)"
+  fix:
+    - "把每页定制样式放进该页的 custom_css"
+
+# ---- D · 放映功能不全 (不影响内容, 影响演示体验) ----
+
+R29-32:
+  concern:     "D · 放映功能不全"
+  symptom:     "放映控件不完整 (进度条 / 翻页 / 全屏 等)"
+  consequence: "放映时缺进度条 / 翻页 / 全屏等控制, 演示体验打折"
+  fix:
+    - "重新打包一次, 恢复放映控件"
+
+# ---- E · 文件偏大可能卡顿 ----
+
+P50:
+  concern:     "E · 文件偏大可能卡顿"
+  symptom:     "文件里内嵌的图片数据过大"
+  consequence: "文件体积大, 打开 / 传输偏慢"
+  fix:
+    - "改用链接方式引用素材, 别全部内嵌"
+
+P51:
+  concern:     "E · 文件偏大可能卡顿"
+  symptom:     "用了过强的模糊效果"
+  consequence: "翻页可能卡顿"
+  fix:
+    - "把模糊半径降到 10px 以内"
+
+P52:
+  concern:     "E · 文件偏大可能卡顿"
+  symptom:     "页面监听器过多"
+  consequence: "长时间放映可能变卡"
+  fix:
+    - "重新打包一次, 用框架默认实现"
+
+P53:
+  concern:     "E · 文件偏大可能卡顿"
+  symptom:     "事件监听没正确回收"
+  consequence: "长时间放映内存上升"
+  fix:
+    - "重新打包一次, 用框架默认实现"
+
+P54:
+  concern:     "E · 文件偏大可能卡顿"
+  symptom:     "缺渲染性能优化设置"
+  consequence: "翻页动画可能不流畅"
+  fix:
+    - "重新打包一次, 恢复性能设置"
+
+P55:
+  concern:     "E · 文件偏大可能卡顿"
+  symptom:     "缺 GPU 加速设置"
+  consequence: "翻页动画可能不流畅"
+  fix:
+    - "重新打包一次, 恢复性能设置"
+
+# ---- UI 仿真 ----
+
+UI1:
+  concern:     "A · 客户看不见"
+  symptom:     "界面用了截图而不是重绘"
+  consequence: "投影放大后界面发虚, 不精致"
+  fix:
+    - "把界面用 HTML 元素重新画出来, 别贴截图"

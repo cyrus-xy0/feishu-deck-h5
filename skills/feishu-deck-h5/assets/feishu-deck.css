@@ -776,7 +776,18 @@ body {
    不动 1712 行的全局 legacy stretch(其它版式仍依赖它)。
    验证:assets/check-distribution.py 在青啤 slide 3 上 3 findings → 0,全 deck 零回归。 */
 .slide[data-layout="content-3up"] .grid .card {
-  align-self: center;
+  /* 2026-06-01: align-self center → stretch. The 2026-05-30 L3 fix used
+     `center` to stop the fullest card overflowing under the THEN-current
+     fixed-height band. The next day (2026-05-31, ~line 1685) the grid was
+     reworked to `flex:1 + align-content:center`, so the single grid row is
+     now `auto` = tallest card's content height and centered in the band.
+     Under THAT geometry `center` left shorter cards at their own (smaller)
+     content height → visibly ragged card heights (user-reported: "第三个框
+     变大了"). `stretch` makes every card match the row track (= tallest
+     content), giving an even grid WITHOUT overflow — the track is auto-sized
+     to content, so the tallest card's content exactly fits by construction.
+     `justify-content: center` keeps content vertically centered inside. */
+  align-self: stretch;
   justify-content: center;
 }
 
@@ -880,6 +891,24 @@ body {
   border: 1px solid var(--fs-hairline); border-radius: 16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
   position: relative; overflow: hidden;
+}
+/* 规范 L3 (2026-06-01) — SINGLE-child visual panel centers its content vertically.
+   Root cause (pg29 feishu-ai-scene-tools 实战): a panel container (.col-visual /
+   lifted *-pane) holding ONE shorter-than-column block (product shot / single
+   card / mock) left it top-stacked — the panel had no internal vertical
+   centering, only .stage/.grid did. This is the panel-level twin of the
+   content-3up card-centering fix.
+   Guards (do NOT break existing defenses):
+   · BF12 multi-card columns → excluded via :not(:has(card+card)) so equal-height
+     fill still wins;
+   · BF2 self-decorated children (.data-panel etc.) → the BF2 frame-strip rule
+     still applies; centering a single self-decorated panel is harmless;
+   · BF7 hero image (inline min-height directive) → that rule sets its own
+     align; an inline-min-height child fills the column so justify-content has
+     no slack to act on — no conflict.
+   Single-child only: a column with 2+ stacked cards is handled by BF12 above. */
+.slide[data-layout="content-2col"] .col-visual:not(:has(> .canonical-card + .canonical-card)):not(:has(> .news-card + .news-card)):not(:has(> .data-panel + .data-panel)) {
+  display: flex; flex-direction: column; justify-content: center;
 }
 
 /* ============================================================================
@@ -1555,15 +1584,18 @@ body {
    override via the slide's inline <style> with `padding: 0` on .slide,
    or by redeclaring .stage with their own values + !important. */
 .slide[data-layout="raw"]          > .stage {
-  /* 2026-05-15 · symmetric vertical positioning so stage geometric center
-     equals slide geometric center (y=540). Asymmetric top/bottom (e.g.
-     220/110) shifts the stage center below the slide center, producing
-     the "content reads slightly low" complaint from the CTG run feedback.
-     Trade-off: stage is 90 px shorter than the 220/110 layout (680 vs
-     770). Decks that genuinely need the extra height add the
-     `.stage--tall` opt-in class (see below). */
+  /* 2026-05-31 · OWNER DECISION (supersedes the 2026-05-15 symmetric default):
+     anchor the body zone to the [title-bottom → screen-bottom] band so content
+     centers BELOW the title (band mid ≈ 596), per the canonical rule "content
+     centers in [titleBottom→bottom]; the title never participates". The old
+     symmetric 200/200 (center y=540) read as "内容偏上" because it folded the
+     title band into the centering. top:168 clears a two-line title (title
+     bottom ≈ 151); bottom:56 keeps a small floor margin → band mid
+     (168 + 1024)/2 ≈ 596. This REVERSES the 2026-05-15 CTG "reads slightly low"
+     change — owner re-decided 2026-05-31. Dense slides that genuinely want the
+     legacy canvas-center (y=540) opt back via `.stage--center540` (see below). */
   position: absolute;
-  top: 200px; left: 96px; right: 96px; bottom: 200px;
+  top: 168px; left: 96px; right: 96px; bottom: 56px;
   display: flex; flex-direction: column;
   justify-content: center;
   gap: 24px;
@@ -1576,6 +1608,13 @@ body {
    tuned to 770 px stage. */
 .slide > .stage.stage--tall {
   top: 220px; bottom: 110px;
+}
+
+/* 2026-05-31 · opt BACK to the legacy symmetric canvas-center (center y=540).
+   For dense slides where centering-below-title reads as "too low" (the
+   2026-05-15 CTG preference). The default is now title-anchored (≈596). */
+.slide > .stage.stage--center540 {
+  top: 200px; bottom: 200px;
 }
 
 /* 2026-05-29 · CARD-FILL utility class.
@@ -1643,6 +1682,24 @@ body {
   position: static;
   top: auto; right: auto; bottom: auto; left: auto;
 }
+
+/* 2026-05-31 · 生成即对(配合 R-VIS-CANVAS-CENTER 校验):content-2col/3up 的
+   .grid 在 .stage 内 flex:1 撑满 + 行内居中。统一 .stage 锚标题底(top:168/
+   bottom:56,带中线≈596)后,grid 若取自然高会被 stage 的 justify-content:center
+   在 856 带里"硬居中"→ 满铺页悬在偏下(用户反馈"太靠下")。改为 grid flex:1
+   吃满整个 856 带:
+     · 稀疏内容 → align-content:center 在带内居中(中线≈596,= R-VIS-CANVAS-CENTER 基准)
+     · 满铺内容 → 无 slack → 卡片顶对齐铺满饱满(不沉)
+   于是"稀疏居中 / 满铺撑满"成为自动的 CSS 行为,无需阈值判断,render 出来天生对。
+   只 scope content-2col/3up(其它版式内层容器未被 .stage 包裹,不受影响)。 */
+.slide[data-layout="content-2col"] > .stage > .grid,
+.slide[data-layout="content-3up"]  > .stage > .grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: center;
+}
+/* content-2col 视觉列(图/iframe)防被 grid 行拉伸变形 */
+.slide[data-layout="content-2col"] > .stage > .grid { align-items: center; }
 
 /* When timeline is .stage-wrapped, the .axis (still absolutely positioned
    relative to .slide) needs to align with the .nodes' new flow position.

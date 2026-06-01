@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # feishu-deck-h5  ·  finalize a per-run output in one shot.
 #
-# Replaces the manual "remember to call copy-assets, then extract-texts,
-# then validate, then maybe package-deliverable" sequence with a single
-# orchestrated command. Idempotent — safe to re-run after edits.
+# Replaces the manual "remember to call copy-assets, then validate, then
+# maybe package-deliverable" sequence with a single orchestrated command.
+# Idempotent — safe to re-run after edits.
 #
 # Usage:
 #     bash assets/finalize.sh <output-dir> [mode] [--strict] [--name <slug>]
@@ -13,7 +13,7 @@
 #                         convention: lark-<customer>-<presentation-date>
 #                         e.g. --name lark-boyu-starbucks-2026-05-08
 #
-#     local   = copy-assets + extract-texts + validate (+ named copy if --name)
+#     local   = copy-assets + validate (+ named copy if --name)
 #     remote  = local steps + package-deliverable.sh (zip kit, zip name from --name)
 #
 # For single-file inline delivery (base64-inlined CSS/JS/images into one
@@ -24,7 +24,6 @@
 #     0  all green
 #     1  bad arguments
 #     2  copy-assets failed
-#     3  extract-texts failed
 #     4  validate failed (errors — fix the deck and re-run)
 #     5  packaging failed
 
@@ -100,81 +99,7 @@ if ! run_step "copy-assets" python3 "$SCRIPT_DIR/copy-assets.py" "$OUT_DIR"; the
     exit 2
 fi
 
-# ---------- 2 · extract-texts (sidecar) ----------
-TEXTS="$OUT_DIR/texts.md"
-if [ ! -f "$TEXTS" ]; then
-    echo "  · extract-texts (no sidecar found, generating) …"
-    if ! run_step "extract-texts" python3 "$SCRIPT_DIR/extract-texts.py" "$HTML" --out "$TEXTS"; then
-        echo "  ! extract-texts skipped (deck has no data-text-id leaves — fine for Replica decks)"
-    fi
-else
-    echo "  · texts.md sidecar already exists, skip"
-fi
-
-# ---------- 2.5 · FEEDBACK.md (auto-stub when the agent forgot one) ----------
-#
-# Nothing in the current pipeline auto-emits FEEDBACK.md, and the agent
-# forgets to write it more often than not — out of the 17 runs through
-# 2026-05-15, 8 missed it. SKILL.md "RUN-FEEDBACK CAPTURE" says the file is
-# mandatory, but mandatory-by-doc fails against forgetfulness.
-#
-# Defense: if FEEDBACK.md is missing, emit a minimal stub here. The stub
-# is empty of agent decisions (the agent must still fill that in to make
-# it useful) but at least guarantees the file exists at delivery and the
-# user knows where to add observations.
-FEEDBACK="$OUT_DIR/FEEDBACK.md"
-if [ ! -f "$FEEDBACK" ]; then
-    RUN_LABEL="$(basename "$(dirname "$OUT_DIR")")"
-    # AUTO-STUB-SENTINEL · keep verbatim — validator R-FEEDBACK greps for
-    # this exact string to detect that the file exists but is empty of
-    # real content, so the warning still fires until an agent fills it.
-    cat > "$FEEDBACK" <<EOF
-# Run feedback · ${RUN_LABEL}
-
-<!-- FEEDBACK.md.auto-stub · agent: replace this comment and the
-     placeholder sections below with real decisions from this run.
-     R-FEEDBACK in validate.py greps for this sentinel and keeps
-     warning until it's gone. -->
-
-> ⚠️ This file was auto-stubbed by \`finalize.sh\` because the agent
-> didn't write one. RUN-FEEDBACK CAPTURE in SKILL.md makes FEEDBACK.md
-> mandatory, but nothing in the pipeline auto-emits it, so this stub
-> catches the gap. Fill in the agent decisions and surprises
-> from this run, then send to the skill maintainer when you have
-> 3+ items worth raising.
-
-## 关键决策(本 run 实际发生的判断)
-
-> *agent: replace this section with the layout choices, sizing
-> tweaks, validator workarounds, copy decisions you made this run.
-> See SKILL.md "RUN-FEEDBACK CAPTURE" for what makes a good entry.*
-
-### 1. <decision title>
-- **决策**:
-- **为什么**:
-- **你的看法**:
-  - [ ] 对
-  - [ ] 应改成 X
-  - [ ] 备注:
-
-## 本次没解决的小毛病
-
--
-
-## 你的额外建议
-
--
-
----
-
-累计 ≥3 条值得反馈的(打钩 / 备注 / 自填),把这个文件发给 skill 维护者整合到下一版。
-EOF
-    echo "  · FEEDBACK.md was missing — stub written (agent: fill in decisions before hand-off)"
-else
-    echo "  · FEEDBACK.md present"
-fi
-
-# ---------- 3 · validate ----------
+# ---------- 2 · validate ----------
 if [ -n "$STRICT" ]; then
     echo "  · validate --strict …"
 else
@@ -189,7 +114,7 @@ if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $STRICT; then
     exit 4
 fi
 
-# ---------- 4 · delivery-named copy (if --name provided) ----------
+# ---------- 3 · delivery-named copy (if --name provided) ----------
 NAMED_HTML=""
 if [ -n "$NAME" ]; then
     NAMED_HTML="$OUT_DIR/$NAME.html"
@@ -197,7 +122,7 @@ if [ -n "$NAME" ]; then
     echo "  · copied → $NAME.html"
 fi
 
-# ---------- 5 · mode-specific packaging ----------
+# ---------- 4 · mode-specific packaging ----------
 case "$MODE" in
     local)
         echo ""

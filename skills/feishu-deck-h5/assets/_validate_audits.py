@@ -2,10 +2,10 @@
 """
 feishu-deck-h5  ·  validator AUDIT FUNCTIONS (_validate_audits)
 
-The 32 static `audit_*` functions plus their audit-private helpers
-(check_* layout-integrity probes, _lifted_slide_keys, _parse_texts_md_ids,
-the PERF / TEXT_ID constants). Middle layer of the DAG: imports the shared
-kernel, imports nothing from validate.py.
+The static `audit_*` functions plus their audit-private helpers
+(check_* layout-integrity probes, _lifted_slide_keys, the PERF constants).
+Middle layer of the DAG: imports the shared kernel, imports nothing from
+validate.py.
 """
 
 from __future__ import annotations
@@ -285,6 +285,7 @@ def audit_type_ladder(html: str, iss: Issues):
     """
     seen = set()
     comment_re = re.compile(r'/\*.*?\*/', re.S)
+    lifted_keys = _lifted_slide_keys(html)
     for style_m in re.finditer(r'<style[^>]*>(.*?)</style>', html, re.S):
         # Single-pass scan: walk raw CSS with comment-tolerant rule regex
         # so the `/* allow:typescale */` marker is visible in the body.
@@ -294,8 +295,15 @@ def audit_type_ladder(html: str, iss: Issues):
         for rule_m in _RULE_WITH_COMMENTS_RE.finditer(css):
             selector = rule_m.group(1).strip()
             body_with_comments = rule_m.group(2)
-            # Only audit per-page rules (where agents author improvised CSS)
-            if '[data-page=' not in selector:
+            # Only audit per-page rules (where agents author improvised CSS).
+            # Both addressing schemes count: the original `[data-page="NN"]`
+            # AND `[data-slide-key="..."]` (lifted/co-located per-page CSS,
+            # which renders under a slide-key selector — F-52: previously this
+            # gate ignored slide-key rules, making R20 a dead gate on the 36
+            # lift pages whose CSS keys off data-slide-key not data-page).
+            # Aligned with R06's audit_font_sizes gate.
+            if '[data-page=' not in selector \
+               and '[data-slide-key=' not in selector:
                 continue
             if '@' in selector:
                 continue
@@ -317,14 +325,25 @@ def audit_type_ladder(html: str, iss: Issues):
                     continue
                 seen.add(key)
                 nearest = min(TYPE_LADDER_PX, key=lambda r: abs(r - size))
-                iss.err('R20',
+                # F-52: lifted slides → downgrade err→warn (same as R06). The
+                # slide's CSS is verbatim from another deck; a lift surfacing 36
+                # off-ladder pages as hard errors would drown the real problems.
+                # The human CHOOSES whether to snap to the ladder. Mirrors the
+                # _lev() logic in audit_font_sizes.
+                is_lifted = any(f'data-slide-key="{k}"' in selector
+                                for k in lifted_keys)
+                lev = iss.warn if is_lifted else iss.err
+                note = (' — LIFTED slide (verbatim from another deck); '
+                        'downgraded to WARNING, you choose whether to snap '
+                        'to the type ladder') if is_lifted else ''
+                lev('R20',
                     f'font-size {size}px on `{selector[:80]}` is off-tier; '
                     f'nearest tier = {nearest}px '
                     f'(allowed: 16 Foot / 24 Body / 28 Sub / 48 Title — '
                     f'4-tier strict per the canonical PPT→Web mapping). '
                     f'Add /* allow:typescale */ in the rule to override '
                     f'(only for hero exceptions: cover 100, section 88/160, '
-                    f'big-stat 132+, quote 88+, or mockup-internal 10-13).')
+                    f'big-stat 132+, quote 88+, or mockup-internal 10-13).{note}')
 
 
 def audit_undefined_css_vars(html: str, iss: Issues):
@@ -1531,13 +1550,23 @@ def audit_ui_mocks_are_html(html, iss: Issues):
     background-image → ERR(强制改 HTML 重建);正文 `<iframe>` → WARN(内嵌文字
     不可控)。replica-mode(PDF 截图入框)与 imported 外来 deck → 降为 warn(沿用
     降级惯例,不把整批搬运/截图卡在交付门上)。纯照片(brand 资产 / data: URI)豁免。
+
+    作者显式 opt-out(2026-06-01):元素 / slide 上标 `data-ui-screenshot`(或在 style
+    里加 `/* allow:ui-screenshot */`)= 作者声明"这张截图是刻意保留、已确认在投影
+    尺寸下可读 / 是产品复刻所必需",该 slide 的 UI1 raster 判定降为 soft warn(永不
+    阻断、--strict 也不升级)—— 与 R-WHITE-TEXT 的 `/* allow:white-opacity */` 同款
+    可 grep 的显式逃生口。仍打 soft 提示留痕,提醒这是刻意的栅格而非疏忽。
     """
     imported = _deck_imported(html)
     slides = extract_slides(html)
     for i, fr in enumerate(slides, 1):
         replica = ('page-replica' in fr or 'data-layout="replica"' in fr)
         is_iframe_layout = 'data-layout="iframe-embed"' in fr
+        vouched = ('data-ui-screenshot' in fr or 'allow:ui-screenshot' in fr)
         _lev = iss.warn if (replica or imported) else iss.err
+        # author vouched → never block; keep a soft advisory trace instead.
+        if vouched:
+            _lev = lambda code, msg: iss.warn_soft(code, msg + ' 〔作者已 data-ui-screenshot 声明保留〕')
         # (a) content <img> raster screenshots
         for m in re.finditer(r'<img\s[^>]*src="([^"]+)"', fr):
             src = m.group(1)
@@ -1546,7 +1575,8 @@ def audit_ui_mocks_are_html(html, iss: Issues):
             _lev('UI1',
                 f'slide {i}: <img src="{src}"> 当正文 — 系统 UI / 截图请用 .ui-* '
                 '原语重建成 HTML(window/sidebar/toolbar/list/cell…),别贴栅格:'
-                '图里的字号检查够不到、投影会糊。纯照片用 data-decor="photo-bg" 声明。')
+                '图里的字号检查够不到、投影会糊。纯照片用 data-decor="photo-bg" 声明,'
+                '刻意保留截图用 data-ui-screenshot 声明。')
         # (b) raster background-image carrying a UI smell
         for m in re.finditer(r"""background(?:-image)?\s*:[^;}"']*url\(\s*['"]?([^'")]+)""", fr, re.I):
             url = m.group(1)
@@ -1561,107 +1591,6 @@ def audit_ui_mocks_are_html(html, iss: Issues):
             iss.warn('UI1',
                 f'slide {i}: <iframe> 正文嵌入 — 内嵌文字字号检查够不到、不可控。'
                 '把要呈现的内容用 HTML/.ui-* 重建,或只作示意缩略图(非 iframe-embed 版式)。')
-
-
-TEXT_ID_RE = re.compile(r'data-text-id="([^"]+)"')
-TEXT_ID_VALID_RE = re.compile(r'^slide-\d+\.[\w.\-]+$')
-
-
-def audit_text_ids(html: str, html_path: Path, iss: Issues):
-    """T01-T03: data-text-id correctness + sync with paired texts.md.
-
-    - T01: every data-text-id matches the canonical pattern.
-    - T02: data-text-id values are unique within the deck.
-    - T03: if a paired texts.md sits next to the HTML, its id set matches.
-
-    A deck with NO data-text-id at all gets a single warning (texts.md
-    sidecar missing), not 200 individual errors — legacy / external decks
-    still pass through.
-    """
-    body_m = re.search(r'<body[^>]*>(.*)</body>', html, re.S)
-    body = body_m.group(1) if body_m else html
-    # Strip HTML comments FIRST so '<script>' / '</script>' literals inside
-    # comments don't confuse the script-tag stripper (same defense used by
-    # extract_slides above).
-    body = re.sub(r'<!--.*?-->',         '', body, flags=re.S)
-    body = re.sub(r'<script.*?</script>', '', body, flags=re.S)
-    body = re.sub(r'<style.*?</style>',   '', body, flags=re.S)
-    ids = TEXT_ID_RE.findall(body)
-
-    if not ids:
-        iss.warn('T00',
-            'no data-text-id attributes found — text-edit sidecar (texts.md) '
-            'is missing. New decks generated by this skill MUST annotate every '
-            'text leaf and ship a paired texts.md. See SKILL.md "TEXT-EDIT '
-            'SIDECAR" section, or run `assets/extract-texts.py` to retrofit.')
-        return
-
-    # T01 — id format
-    bad = [tid for tid in ids if not TEXT_ID_VALID_RE.match(tid)]
-    for tid in bad[:10]:
-        iss.err('T01',
-            f'data-text-id={tid!r} does not match `slide-NN.field` pattern.')
-
-    # T02 — uniqueness
-    counts = Counter(ids)
-    dups = [(tid, n) for tid, n in counts.items() if n > 1]
-    for tid, n in dups[:10]:
-        iss.err('T02', f'duplicate data-text-id {tid!r} appears {n}× in deck.')
-
-    # T03 — sync with paired texts.md (best-effort, soft errors)
-    # Resolution order: more-specific `<basename>.texts.md` first, then
-    # generic `texts.md` in the same directory. This way a per-run folder
-    # `runs/<ts>/output/{index.html, texts.md}` works, and an example
-    # `examples/{sample-deck.html, sample-deck.texts.md}` also works,
-    # without ambiguity if both happen to exist.
-    specific = html_path.with_suffix('.texts.md')
-    generic  = html_path.parent / 'texts.md'
-    if specific.is_file():
-        sidecar = specific
-    elif generic.is_file():
-        sidecar = generic
-    else:
-        iss.warn('T03',
-            f'paired sidecar not found at {specific.name} or '
-            f'{generic.name} — user cannot edit texts.md and reapply. '
-            'Generate it with `assets/extract-texts.py`.')
-        return
-
-    md_ids = _parse_texts_md_ids(sidecar.read_text(encoding='utf-8'))
-    html_ids = set(ids)
-    missing_md = sorted(html_ids - md_ids)
-    extra_md   = sorted(md_ids - html_ids)
-    if missing_md:
-        iss.err('T03',
-            f'{len(missing_md)} ids in HTML are missing from {sidecar.name} '
-            f'(e.g. {", ".join(missing_md[:3])}). Re-run extract-texts.py '
-            'to regenerate the sidecar.')
-    if extra_md:
-        iss.err('T03',
-            f'{len(extra_md)} ids in {sidecar.name} are not present in HTML '
-            f'(e.g. {", ".join(extra_md[:3])}). Either the HTML drifted or '
-            'the sidecar is stale.')
-
-
-def _parse_texts_md_ids(md: str) -> set[str]:
-    """Extract the set of full ids declared in a texts.md file."""
-    ids: set[str] = set()
-    current_slide: str | None = None
-    slide_hdr = re.compile(r'^##\s+(slide-\d+)\b')
-    kv = re.compile(r'^([A-Za-z0-9_.\-]+)\s*:')
-    for line in md.splitlines():
-        line = line.rstrip()
-        if not line or line.startswith('>'):
-            continue
-        m = slide_hdr.match(line)
-        if m:
-            current_slide = m.group(1); continue
-        if line.startswith('#'):
-            continue
-        m = kv.match(line)
-        if m and current_slide:
-            ids.add(f'{current_slide}.{m.group(1)}')
-    return ids
 
 
 def audit_lift_style_lost(html: str, iss: Issues):
@@ -2007,64 +1936,6 @@ def audit_layout_integrity(html: str, iss: Issues):
 
 
 
-def audit_feedback_md(html_path: Path, iss: Issues):
-    """R-FEEDBACK: every run output should ship a FEEDBACK.md sidecar.
-
-    Path A (render.py) emits FEEDBACK.md inline with each deck. Path B
-    (freehand LLM authoring) has no automation and the agent forgets
-    more often than not — 8 of 17 runs through 2026-05-15 shipped
-    without one. SKILL.md "RUN-FEEDBACK CAPTURE" makes it mandatory;
-    this is the soft enforcement that catches the omission.
-
-    Scope: only flags HTML living under a `runs/<ts>/output/` directory
-    (the per-run output convention from new-run.sh). Files in
-    `examples/`, `templates/`, or arbitrary one-off locations skip
-    this audit — they're not per-run outputs.
-
-    Warning, not error: the deck still works without FEEDBACK.md.
-    `finalize.sh` auto-stubs the file these days, so this rule is
-    mostly a safety net for legacy / one-off runs that bypass finalize.
-    """
-    # Only enforce inside the runs/<ts>/output/ convention
-    parent = html_path.parent
-    grandparent = parent.parent
-    in_run_output = (parent.name == 'output' and
-                     re.match(r'^\d{8}-\d{6}', grandparent.name))
-    if not in_run_output:
-        return
-
-    feedback = parent / 'FEEDBACK.md'
-    if not feedback.is_file():
-        iss.warn_soft('R-FEEDBACK',
-            f'no FEEDBACK.md in {parent}. Every run should '
-            'capture the agent\'s judgment calls + visual workarounds + '
-            'validator escapes for the maintainer to fold into the next '
-            'skill version. Run `bash assets/finalize.sh <output-dir>` '
-            'to auto-stub the file, then fill in agent decisions before '
-            'hand-off. (Path A render.py emits this automatically; '
-            'freehand decks need it written by hand.)')
-        return
-
-    # Detect the finalize.sh auto-stub. If found, the file exists but is
-    # empty of agent-authored content — finalize.sh just created a
-    # placeholder. Keep warning until the agent fills it in.
-    try:
-        content = feedback.read_text(encoding='utf-8', errors='replace')
-    except OSError:
-        return
-    if 'FEEDBACK.md.auto-stub' in content:
-        iss.warn_soft('R-FEEDBACK',
-            f'{feedback.name} exists but is an unfilled auto-stub from '
-            '`finalize.sh`. The agent must replace the placeholder '
-            'sections with real decisions from this run BEFORE hand-off. '
-            'Look for `## 关键决策(本 run 实际发生的判断)` — every entry '
-            'should describe one concrete choice the agent made (layout '
-            'pick, sizing tweak, validator workaround, copy shortening) '
-            'with `**为什么**:` + checkbox. Drop the auto-stub HTML '
-            'comment once you\'ve filled it in to silence this warning.')
-
-
-
 # ---------------------------------------------------------------------------
 #  Design-quality nudge (2026-05-29) — advisory, never blocks
 # ---------------------------------------------------------------------------
@@ -2202,3 +2073,63 @@ def audit_autobalance_present(html, iss):
         '正道:`python3 assets/rebundle-import.py <deck.html> --inplace` 重新内联'
         '当前框架 runtime(字号/chrome/内容零改动)。若该 deck 刻意不要 auto-balance,'
         '在 .deck 上加 data-no-autobalance 显式声明即可豁免本闸。')
+
+
+# Tags that — when found HTML-ESCAPED in rendered slide text — prove raw HTML
+# was typed into a SCHEMA text field the renderer escapes (render-deck.py
+# `{{ field }}` → _esc_br). Matched ONLY in real-markup shape so math/prose
+# comparisons never false-positive:
+#   (A) bare / self-closing / closing tag   `&lt;br&gt;` `&lt;b&gt;` `&lt;/span&gt;`
+#   (B) opening tag WITH an attribute        `&lt;span class=` `&lt;a href=`
+# Crucially NO whitespace is allowed between `&lt;` and the tag name, so
+# "并发 &lt; 16", "QPS &lt; 1000", "0 &lt; a &lt; b" (escaped "&lt; a") and
+# "x&lt;y" all stay clear.
+_ESC_TAGS = (r'span|b|i|em|strong|div|p|br|h[1-6]|ul|ol|li|a|svg|img|'
+             r'small|sup|sub|mark|code')
+_ESCAPED_TAG_RE = re.compile(
+    r'&lt;/?(?:' + _ESC_TAGS + r')\s*/?&gt;'               # (A) <br> </span> <b> <br/>
+    r'|&lt;(?:' + _ESC_TAGS + r')\s+[a-zA-Z][\w-]*\s*=',   # (B) <span class= / <a href=
+    re.I)
+
+
+def audit_escaped_html(slides: list[str], iss: Issues):
+    """R-ESC-HTML (err): raw HTML tag landed in an HTML-ESCAPED text field and
+    now shows as literal "乱码" (e.g. `<span class="hl">` printed verbatim).
+
+    Root cause: schema layouts (content/3up etc.) substitute most text fields
+    via `{{ field }}`, which HTML-escapes through _esc_br — so a literal
+    `<span>` / `<b>` / `<br>` typed into `lede` / `body` / `title` / `title_zh`
+    renders as escaped `&lt;span&gt;` text instead of real markup. (Note: the
+    deck-schema `title` description claiming inline `<span class="hl">` is
+    allowed is misleading — content templates emit `{{ title }}`, which is
+    escaped.)
+
+    Detection IS the bug's exact fingerprint: an ESCAPED tag (`&lt;span`,
+    `&lt;b&gt;`, `&lt;br`…) in the rendered slide. A legitimately-raw field
+    (`{{{ field }}}`, e.g. body_blocks / enricher-composed HTML) or a
+    `layout: raw` slide emits a REAL `<span>` tag, which never appears as
+    `&lt;span` — so this never false-positives on them.
+
+    Fix: move the markup to a `layout: raw` slide (full control over HTML —
+    put inline highlights / svg there), or drop the tag and use the field's
+    own emphasis. For real line breaks use `\\n` (renderer turns it into
+    <br>), never a literal `<br>`.
+    """
+    for i, fr in enumerate(slides, 1):
+        # Scan visible markup only — drop <style>/<script> so CSS/JS content
+        # (selectors, string literals) can't trip the scan.
+        scan = re.sub(r'<style\b[^>]*>.*?</style>', '', fr, flags=re.S | re.I)
+        scan = re.sub(r'<script\b[^>]*>.*?</script>', '', scan, flags=re.S | re.I)
+        hits = _ESCAPED_TAG_RE.findall(scan)
+        if not hits:
+            continue
+        sample = hits[0].replace('&lt;', '<').replace('&gt;', '>')
+        iss.err(
+            'R-ESC-HTML',
+            f'slide {i}: 文本里出现被转义的 HTML 标签(如 `{sample}…`)。'
+            '裸 HTML 进了 schema 的转义文本字段(content/3up 等的 lede / body / '
+            'title 走 `{{ field }}`,会被 _esc_br 转义),所以原样显示成"乱码"。'
+            '修法:把这页改成 `layout: raw` 自己控 markup(行内高亮 / svg 都放这),'
+            '或去掉标签改用该字段支持的强调方式;换行用 \\n(渲染器会转 <br>),'
+            '不要写字面 <br>。raw 页 / `{{{ raw }}}` 字段输出的是真标签、不会变 '
+            '&lt;,因此不会被本规则误报。')

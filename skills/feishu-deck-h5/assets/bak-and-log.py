@@ -81,7 +81,7 @@ def prepend_changes_md(changes: Path, entry_md: str, dir_label: str):
     if not changes.exists():
         body = header
     else:
-        body = changes.read_text()
+        body = changes.read_text(encoding="utf-8")
         if '---' not in body:
             # Existing CHANGES.md without our header layout — prepend our
             # header above the existing content.
@@ -95,7 +95,7 @@ def prepend_changes_md(changes: Path, entry_md: str, dir_label: str):
         new_body = body[:idx] + entry_md + body[idx:]
     else:
         new_body = body + '\n' + entry_md
-    changes.write_text(new_body)
+    changes.write_text(new_body, encoding="utf-8")
 
 
 def prune_old_baks(file: Path, tag: str, keep: int = 3) -> int:

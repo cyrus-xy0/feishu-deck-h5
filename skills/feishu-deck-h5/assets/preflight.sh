@@ -21,10 +21,15 @@
 #
 # Why bootstrap exists: harnesses like Mira mount the skill read-only into
 # /opt or similar. We can't write runs/<ts>/{input,output}/ next to assets/
-# in that case. Instead we rsync the whole skill (minus runs/, .git/) into
-# $PWD/.feishu-deck-h5-workspace (override via FS_DECK_WORKSPACE env var),
-# and tell the agent to cd there. All relative paths inside the skill (CSS
-# link, template lookups, render.py) keep working unchanged.
+# in that case. Instead we mirror the skill (minus runs/, caches, *.bak, and
+# the heavy pptx example corpus) into $PWD/.feishu-deck-h5-workspace (override
+# via FS_DECK_WORKSPACE env var), and tell the agent to cd there. All relative
+# paths inside the skill (CSS link, template lookups, render.py) keep working.
+#
+# The mirror uses the fastest tool available and falls back to python3, which
+# the skill already hard-requires to render — so it never hard-depends on
+# rsync (minimal cloud images frequently lack it; that used to be a hard
+# exit-2 death for any RO-mounted skill).
 #
 # This script is the LAST LINE of the skill's preflight. It's a hard gate;
 # any non-zero exit means the agent must STOP and refuse to proceed.
@@ -112,28 +117,65 @@ if ! ( touch "$PROBE" 2>/dev/null && rm -f "$PROBE" 2>/dev/null ); then
     echo "  skill RW so writes can land next to assets/."
     exit 2
   fi
-  if ! command -v rsync >/dev/null 2>&1; then
-    echo "PREFLIGHT FAIL · exit 2 · rsync required to bootstrap RO mount"
+  mkdir -p "$WORKSPACE"
+  # Mirror the skill into the writable workspace. Try the fastest tool first,
+  # fall back to python3 (guaranteed present — the skill can't render without
+  # it). This removes the old hard dependency on rsync. Excludes keep the
+  # mirror lean: runs/ (user outputs, preserved if already there), VCS/cache
+  # cruft, editor noise, *.bak snapshots, and the 689 MB pptx example corpus —
+  # none are needed to RENDER a deck, and copying them on every RO bootstrap
+  # was a real perf/timeout risk on slim cloud images.
+  MIRROR_OK=0
+  MIRROR_TOOL=""
+  if command -v rsync >/dev/null 2>&1; then
+    if rsync -a --delete \
+        --exclude='runs/' \
+        --exclude='.git/' \
+        --exclude='__pycache__' \
+        --exclude='.pytest_cache' \
+        --exclude='.DS_Store' \
+        --exclude='*.bak*' \
+        --exclude='pptx-to-html/example/' \
+        "$SKILL_ROOT/" "$WORKSPACE/" 2>/dev/null; then
+      MIRROR_OK=1; MIRROR_TOOL="rsync"
+    fi
+  fi
+  if [ "$MIRROR_OK" -eq 0 ] && command -v python3 >/dev/null 2>&1; then
+    if SRC="$SKILL_ROOT" DST="$WORKSPACE" python3 - <<'PY'
+import os, shutil, sys
+src, dst = os.environ["SRC"], os.environ["DST"]
+NAMES = {".git", "__pycache__", ".pytest_cache", ".DS_Store", "runs"}
+def ignore(dirpath, names):
+    skip = {n for n in names if n in NAMES or ".bak" in n}
+    # drop the heavy pptx example corpus (689 MB of slide images)
+    if os.path.basename(dirpath) == "pptx-to-html" and "example" in names:
+        skip.add("example")
+    return skip
+try:
+    shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True, symlinks=True)
+except Exception as e:
+    print(f"python-mirror-failed: {e}", file=sys.stderr); sys.exit(1)
+PY
+    then
+      MIRROR_OK=1; MIRROR_TOOL="python3"
+    fi
+  fi
+  if [ "$MIRROR_OK" -eq 0 ]; then
+    echo "PREFLIGHT FAIL · exit 2 · could not mirror RO skill to a writable area"
     echo
     echo "  Skill root: $SKILL_ROOT (RO)"
-    echo "  rsync isn't installed — can't mirror the skill to a writable area."
-    echo "  Install rsync, or mount the skill RW."
+    echo "  Tried rsync and python3 — neither is available (or both failed)."
+    echo "  Install python3 (or rsync), or mount the skill RW."
     exit 2
   fi
-  mkdir -p "$WORKSPACE"
-  rsync -a --delete \
-    --exclude='runs/' \
-    --exclude='.git/' \
-    --exclude='__pycache__' \
-    --exclude='.DS_Store' \
-    "$SKILL_ROOT/" "$WORKSPACE/"
-  # rsync -a preserves source perms — including the very RO bits we're trying
-  # to escape. Restore owner write/exec on the mirror so the workspace can
-  # actually accept runs/<ts>/ creation, edits, and validate-pass writes.
-  chmod -R u+w "$WORKSPACE"
+  # The mirror may inherit the source's RO perm bits (rsync -a preserves them;
+  # copytree copies file modes too). Restore owner write/exec so the workspace
+  # can accept runs/<ts>/ creation, edits, and validate-pass writes.
+  chmod -R u+w "$WORKSPACE" 2>/dev/null || true
   echo "PREFLIGHT BOOTSTRAPPED"
   echo "  source (RO)    : $SKILL_ROOT"
   echo "  workspace (RW) : $WORKSPACE"
+  echo "  mirrored via   : $MIRROR_TOOL"
   echo "  ephemeral      : no"
   echo "  files          : ${#REQUIRED[@]}/${#REQUIRED[@]} present (mirrored)"
   echo

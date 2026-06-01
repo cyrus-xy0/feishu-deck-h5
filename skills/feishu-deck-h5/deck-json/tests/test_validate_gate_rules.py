@@ -28,8 +28,6 @@ TRIAGE (static-callable vs visual/Playwright-only):
     R48           audit_default_centering(html, iss)  err
     R49           audit_no_cyan_accent(slides, iss)   err
     R56           audit_header_minimal(slides, iss)   warn
-    T01           audit_text_ids(html, path, iss)     err
-    T02           audit_text_ids(html, path, iss)     err
 
   VISUAL / Playwright-only (1 code — NOT statically testable, listed not tested):
     R-OVERFLOW  · emitted ONLY from run_visual_audits() at validate.py:2527,
@@ -51,9 +49,6 @@ Notes verified from code:
     centerable layouts (content-3up/content-2col/agenda/stats/big-stat/quote).
   * R13 & R56 skip HERO_TITLE_LAYOUTS = {cover, image-text, end, section,
     quote}; fixtures use `stats` so the audit actually runs.
-  * T01/T02 live in audit_text_ids(html, html_path, iss). We pass a
-    non-existent html_path so the optional T03 texts.md sidecar check is a
-    no-op warning and never touches T01/T02.
   * R-HIERARCHY / R47 scan AUTHOR CSS only (include_framework=False), so
     fixtures use a plain <style> (no data-source="framework").
 """
@@ -63,10 +58,6 @@ import pathlib
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
 import validate as V  # noqa: E402
-
-# A path that does not exist -> audit_text_ids' T03 sidecar lookup is skipped
-# (it only soft-warns T03; T01/T02 still evaluate normally).
-_NOPATH = pathlib.Path("/nonexistent-test-dir/deck.html")
 
 
 # --------------------------------------------------------------------------
@@ -453,47 +444,6 @@ def test_r56_hero_layout_skipped_no_fire():
             '<h2 class="title-zh">标题</h2></div>')
     slides = [_slide("cover", body)]
     assert "R56" not in _all_codes(V.audit_header_minimal, slides)
-
-
-# ==========================================================================
-# T01  audit_text_ids(html, html_path, iss)  [err]
-#   every data-text-id must match the `slide-NN.field` pattern.
-# ==========================================================================
-
-def test_t01_bad_format_fires():
-    # `title` is missing the `slide-NN.` prefix.
-    html = ("<html><body><div class='slide'>"
-            "<h2 data-text-id=\"title\">标题</h2>"
-            "</div></body></html>")
-    assert "T01" in _err_codes(V.audit_text_ids, html, _NOPATH)
-
-
-def test_t01_valid_format_no_fire():
-    html = ("<html><body><div class='slide'>"
-            "<h2 data-text-id=\"slide-01.title\">标题</h2>"
-            "</div></body></html>")
-    assert "T01" not in _err_codes(V.audit_text_ids, html, _NOPATH)
-
-
-# ==========================================================================
-# T02  audit_text_ids(html, html_path, iss)  [err]
-#   data-text-id values must be unique within the deck.
-# ==========================================================================
-
-def test_t02_duplicate_id_fires():
-    html = ("<html><body><div class='slide'>"
-            "<p data-text-id=\"slide-01.body\">一</p>"
-            "<p data-text-id=\"slide-01.body\">二</p>"
-            "</div></body></html>")
-    assert "T02" in _err_codes(V.audit_text_ids, html, _NOPATH)
-
-
-def test_t02_unique_ids_no_fire():
-    html = ("<html><body><div class='slide'>"
-            "<p data-text-id=\"slide-01.card-01.body\">一</p>"
-            "<p data-text-id=\"slide-01.card-02.body\">二</p>"
-            "</div></body></html>")
-    assert "T02" not in _err_codes(V.audit_text_ids, html, _NOPATH)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ what the user actually provided.
 
 The one-pager case is a **DeckJSON layout**, not a separate engine. Author
 it as a `content` slide with `variant: "story-case"` in `deck.json`, then
-`render-deck.py` produces `index.html` + `texts.md` (see DECK GENERATION
+`render-deck.py` produces `index.html` (see DECK GENERATION
 POLICY for the Path A flow). The 4-beat 痛点/冲突/解法/价值 + hook + scene
 shape maps 1:1 to the `data_content_story_case` schema (field reference
 below). render-deck.py runs the schema-fit refusal + accent review
@@ -95,7 +95,7 @@ brand basics. The validator enforces most of them:
   mono opt-in only on chapter dividers).
 - 16:9 design canvas (1920×1080) — `data-screen-label` on every slide.
 - ZH-only by default (no EN translation tracks under every CN line).
-- All other validator rules (L1-L4, R02-R56, P50-P55, UI1, T01-T03)
+- All other validator rules (L1-L4, R02-R56, P50-P55, UI1)
   must still PASS strict. Deviation is a layout choice, not a license
   to skip integrity checks.
 
@@ -113,8 +113,8 @@ hand-patch the single output's `index.html` (the next render overwrites it,
 and the next case hits the same bug).
 
 If the problem is *copy / wording / strategic emphasis*, edit the slide's
-`data` in `deck.json` (or `texts.md`) and re-render. The template is fine;
-the content was wrong.
+`data` in `deck.json` (e.g. `deck-cli set`) and re-render. The template is
+fine; the content was wrong.
 
 If the problem is *"this case shouldn't have been story-case at all"*,
 switch the slide's layout/variant (see "When story-case doesn't fit"
@@ -188,7 +188,7 @@ story-case slide:
 
 Render with the standard Path A flow:
 `python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/`.
-Outputs `index.html` + `texts.md`; the scene image is copied in. A non-zero
+Outputs `index.html`; the scene image is copied in. A non-zero
 exit on a story-case slide is usually the schema-fit refusal (exit 4) — read
 the offenders, not a template bug.
 

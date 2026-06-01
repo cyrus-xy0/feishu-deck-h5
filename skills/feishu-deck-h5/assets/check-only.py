@@ -5,11 +5,17 @@
 跳过 PREFLIGHT / new-run / asset-copy / sidecar 生成的整套生成流程,
 直接对单文件跑全套 validate.py 审计, 产出 markdown 报告.
 
-两个模式:
+三个模式:
 
-  默认模式 — `bash check-only.sh deck.html`
+  默认模式 — `bash check-only.sh deck.html`  ← 标准输出, 所有人一致
+    逐页业务报告: 从第 1 页到第 N 页全部列出 (干净页标 ✅), 用业务语言
+    区分 🔴错误 / 🟡提醒, 同页同类问题合并计数, 末尾给"最该先看哪几页".
+    业务文案取自 business-rules.yaml (非工程师可直接改措辞).
+    实现 = build_per_page_report().
+
+  工程师视图 — `bash check-only.sh deck.html --by-rule`
     按 family (结构/排版/品牌/...) 分组列违规, 标注 context-dependent 规则.
-    适合 review-style 看一份外部 deck 的整体卫生.
+    排查 framework bug / 改 validator 时用. 实现 = build_default_report().
 
   入库门禁 — `bash check-only.sh deck.html --gate ingest`
     只看 21 条必修规则 (业务关切 A/B/C 三类), 全部 warn 升 error.
@@ -35,34 +41,28 @@ FAMILIES = [
     ('结构 / DOM',           ['R02', 'R07', 'R-DOM']),
     ('排版 / 文案',          ['R05', 'R06', 'R13', 'R20', 'R56',
                               'R-WHITE-TEXT', 'R-HIERARCHY', 'R-ECHO',
-                              'R-BULLET-DASH']),
+                              'R-BULLET-DASH', 'R-ESC-HTML']),
     ('品牌 / 调色板',        ['L1', 'R10', 'R12', 'R38', 'R49', 'R-LANG']),
     ('布局完整性',           ['L2', 'L4', 'R36', 'R47', 'R48', 'R-CSSVAR',
                               'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST',
                               'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
-    ('texts.md 联动',        ['T00', 'T01', 'T02', 'T03']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
     ('视觉 (Playwright)',    ['R-OVERFLOW', 'R-OVERLAP', 'R-VIS-TIER', 'R-VIS-HIER',
                               'R-VIS-LABEL-FLOOR', 'R-VIS-BODY-FLOOR',
-                              'R-VIS-ALIGN', 'R-VIS-ABSPOS-DUAL-ANCHOR',
+                              'R-VIS-ABSPOS-DUAL-ANCHOR',
                               'R-VIS-CARD-OVERFLOW', 'R-VIS-OPT-OUT-ABUSE',
                               'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL',
                               'R-VIS-NO-IMAGERY', 'R-FOCAL-CHECK', 'R-VIS-BALANCE',
                               'R-VIS-CARD-MIN-HEIGHT-SPARSE', 'R-VIS-SLACK-FLEX',
-                              'R-VIS-CROWD', 'R-VIS-TITLE-GAP', 'R-VIS-PEER-SIZE',
+                              'R-VIS-CROWD', 'R-VIS-PANEL-TOP', 'R-VIS-TITLE-GAP', 'R-VIS-PEER-SIZE',
                               'R-VIS-GUTTER', 'R-VIS-HERO-FLOOR',
-                              'R-VIS-SHORT-LABEL-FLOOR']),
-    ('交付物附件',           ['R-FEEDBACK']),
+                              'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-CANVAS-CENTER',
+                              'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE']),
 ]
 
 CONTEXT_NOTES = {
-    'R-FEEDBACK': '别人交给你的 deck 通常没有 FEEDBACK.md (那是 new-run '
-                  '工作流的产物), 这条 warn 可忽略.',
-    'T00':        '如果是 Replica-mode (每页 PDF 截图) 或外部来源 deck, '
-                  '没有 data-text-id 是正常的.',
-    'T03':        '只有同时附 texts.md 才会校验 sync; 纯 HTML 检查不必关注.',
     'P50':        '只在你打算用 inline 单文件交付时才相关; linked 模式的 '
                   'deck 这条只是参考.',
     'UI1':        '如果 deck 是 Replica-mode (PDF 截图 + .page-replica), '
@@ -205,6 +205,143 @@ def detect_mode_hints(html: str, slides_count: int) -> list[str]:
                      '`.deck > .slide-frame > .slide` 约定, 或这根本不是 '
                      '一份 feishu-deck-h5 deck.')
     return hints
+
+
+def _strip_pageno(label: str) -> str:
+    """'03 目录' -> '目录' (去掉开头页码, 标题不重复)."""
+    return re.sub(r'^\s*\d+\s*', '', str(label or '')).strip()
+
+
+def _slides_of_msg(msg: str) -> list:
+    """这条 finding 指向哪几页 (1-based). 聚合型展开为多页, 单页返回 [N],
+    deck 级 (没有 slide 编号) 返回 []."""
+    m_idx = re.search(r'slide indices?:\s*([0-9,\s]+)', msg)
+    if m_idx:
+        return [int(x) for x in re.findall(r'\d+', m_idx.group(1))]
+    m = re.search(r'\bslide (\d+)\b', msg)
+    return [int(m.group(1))] if m else []
+
+
+def build_per_page_report(html_path: Path, slides_count: int, iss,
+                          strict: bool, business_rules: dict, html: str) -> str:
+    """标准报告 (默认输出) — 逐页 · 业务语言 · 区分 🔴错误 / 🟡提醒.
+
+    所有人调 check-only 都得到这个格式, 体验一致. 不按技术规则家族
+    (R06 / R-VIS-TIER…) 聚合 —— 那是工程师视图 (--by-rule). 业务文案
+    取自 business-rules.yaml 的 symptom 字段; 没文案的 code 退回不含
+    术语的兜底句, 绝不把规则代码抖给业务用户.
+    """
+    EMO = {'err': '🔴', 'warn': '🟡'}
+
+    # 每页业务标签: data-screen-label 按文档顺序 (R02 保证每页都有)
+    labels = re.findall(r'data-screen-label="([^"]*)"', html)
+    n = slides_count or len(labels)
+
+    findings = ([(c, m, 'err') for c, m in iss.errors]
+                + [(c, m, 'warn') for c, m in iss.warnings]
+                + [(c, m, 'warn') for c, m in iss.soft_warnings])
+
+    by_slide: dict = {}
+    deck_level: dict = {}
+    for code, msg, sev in findings:
+        idxs = _slides_of_msg(msg)
+        buckets = [by_slide.setdefault(i, {}) for i in idxs] or [deck_level]
+        for bucket in buckets:
+            g = bucket.setdefault(code, {'sev': sev, 'n': 0})
+            g['n'] += 1
+            if sev == 'err':
+                g['sev'] = 'err'
+
+    def biz_line(code: str, g: dict) -> str:
+        meta = business_rules.get(code) or {}
+        sym = meta.get('symptom')
+        cnt = f" (本页 {g['n']} 处)" if g['n'] > 1 else ''
+        emo = EMO[g['sev']]
+        if sym:
+            line = f"- {emo} {sym}{cnt}"
+            if g['sev'] == 'err' and meta.get('fix'):
+                line += f"\n  → 怎么修: {meta['fix'][0]}"
+            return line
+        kind = '需要修正' if g['sev'] == 'err' else '可优化'
+        return f"- {emo} 这一页有一处{kind}的细节{cnt}"
+
+    def ordered(groups: dict) -> list:
+        return sorted(groups.items(),
+                      key=lambda kv: (0 if kv[1]['sev'] == 'err' else 1, kv[0]))
+
+    n_err = len(iss.errors)
+    n_warn = len(iss.warnings) + len(iss.soft_warnings)
+
+    L = ['# 飞书 Deck 检查报告', '']
+    L.append(f'- 文件: `{html_path}`')
+    L.append(f'- 共 {n} 页')
+    if n_err == 0 and n_warn == 0:
+        L.append('- 结论: ✅ 全部通过, 没发现问题')
+    else:
+        parts = []
+        if n_err:
+            parts.append(f'🔴 {n_err} 处错误')
+        if n_warn:
+            parts.append(f'🟡 {n_warn} 处提醒')
+        L.append('- 结论: ' + ' · '.join(parts))
+    L += ['', '> 🔴 错误 = 投影上客户能看到的硬伤, 交付前建议修  ·  '
+          '🟡 提醒 = 可优化的细节, 不挡交付', '']
+
+    # 运行时防漂: 引擎有规则码但 yaml 没文案 → 该码触发时只能退兜底句.
+    # 把它显式横幅出来 (而不是默默退化), 维护者一眼看到 yaml 该补.
+    # 规则只有一套源 (引擎); 这里只是检查 yaml 文案清单是否跟上, 不复制规则.
+    try:
+        _missing = sorted(enumerate_validate_rules() - set(business_rules))
+    except Exception:
+        _missing = []
+    if _missing:
+        L.append(f'> ⚠️ 业务文案未覆盖 {len(_missing)} 条规则码, 命中时会显示为'
+                 f'笼统兜底句 —— 维护者请在 business-rules.yaml 补: '
+                 f'{" ".join(_missing)} (跑 `check-rule-coverage.py` 看详情)')
+        L.append('')
+    L += ['---', '']
+
+    clean = []
+    attention = []   # (idx, n_err, n_warn, label)
+    for i in range(1, n + 1):
+        label = _strip_pageno(labels[i - 1]) if i - 1 < len(labels) else ''
+        L.append(f'## 第 {i} 页' + (f' · {label}' if label else ''))
+        g = by_slide.get(i)
+        if not g:
+            L.append('✅ 没问题')
+            clean.append(i)
+        else:
+            od = ordered(g)
+            pe = sum(1 for _, x in od if x['sev'] == 'err')
+            for code, gg in od:
+                L.append(biz_line(code, gg))
+            attention.append((i, pe, len(od) - pe, label))
+        L.append('')
+
+    if deck_level:
+        L.append('## 整份文件 (不针对某一页)')
+        for code, gg in ordered(deck_level):
+            L.append(biz_line(code, gg))
+        L.append('')
+
+    L += ['---', '', '## 小结']
+    if clean:
+        L.append('- ✅ 干净的页: '
+                 + '、'.join(f'第{p}页' for p in clean) + ' —— 不用管')
+    attention.sort(key=lambda a: (-a[1], -a[2]))
+    top = [a for a in attention if a[1] > 0][:3] or attention[:2]
+    if top:
+        refs = []
+        for i, pe, pw, label in top:
+            tag = []
+            if pe:
+                tag.append(f'{pe}错')
+            if pw:
+                tag.append(f'{pw}提醒')
+            refs.append(f'第{i}页' + (('·' + label) if label else '')
+                        + f'({"/".join(tag)})')
+        L.append('- 🎯 最该先看: ' + ' 、 '.join(refs))
+    return '\n'.join(L)
 
 
 def build_default_report(html_path: Path, slides_count: int, iss,
@@ -467,6 +604,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--gate', choices=['ingest'],
                    help='入库门禁模式. ingest = 21 条必修规则, '
                         '业务语言报告, 库 ingest-package.py 用')
+    p.add_argument('--by-rule', action='store_true',
+                   help='工程师视图: 按技术规则家族 (R06 / R-VIS-TIER…) 分组. '
+                        '默认是逐页业务报告; 排查 framework bug 时用这个.')
     p.add_argument('--report', metavar='PATH',
                    help='把 markdown 报告写到指定路径; 不带则打到 stdout')
     return p
@@ -510,8 +650,21 @@ def main() -> int:
         # exit code 反映 gate 通过与否
         rc = 1 if kept else 0
     else:
-        mode_hints = detect_mode_hints(html, len(slides))
-        report = build_default_report(path, len(slides), iss, strict, mode_hints)
+        # 默认 = 逐页业务报告 (标准格式, 所有人一致). --by-rule = 工程师家族视图.
+        # 业务报告需要 business-rules.yaml; 万一缺/PyYAML 没装, 软退回家族视图.
+        rules = None
+        if not args.by_rule:
+            try:
+                rules = load_business_rules()
+            except SystemExit:
+                rules = None
+        if rules is not None:
+            report = build_per_page_report(path, len(slides), iss, strict,
+                                           rules, html)
+        else:
+            mode_hints = detect_mode_hints(html, len(slides))
+            report = build_default_report(path, len(slides), iss, strict,
+                                          mode_hints)
         rc = 1 if iss.errors else 0
 
     if args.report:

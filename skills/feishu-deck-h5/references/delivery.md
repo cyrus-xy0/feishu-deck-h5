@@ -41,7 +41,7 @@ verify the artifact form. Pick exactly **one** of three valid shapes:
 | Shape | When | What goes back |
 |---|---|---|
 | **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. 90% of cases. | `bash build.sh --inline` → ship `examples/sample-deck-inline.html` (or its renamed copy under `runs/<ts>/output/`). Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. |
-| **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + assets + `texts.md` + optional `deck.json` + `assets-manifest.yaml` + `apply-texts.py` + `apply.command`/`apply.bat` launchers. Recipient unzips, edits `texts.md`, double-clicks the launcher to regenerate. |
+| **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + assets + optional `deck.json` + `assets-manifest.yaml` + `README.txt`. Recipient unzips, opens `index.html`, presses **E** for the built-in visual editor, edits text in-browser, saves with ⌘/Ctrl+S. |
 | **C · hosted URL** *(when the user already deploys to Pages / a CDN)* | Deck lives at a stable web URL. | Ship the URL string. No file attachment. |
 
 **Banned form · single linked HTML**: never hand back just one
@@ -77,7 +77,8 @@ something correct to grab.
 
 If the user typed "把 deck 发我" / "给客户看" / "传到飞书" without
 specifying form, default to **A (inline)**. Only switch to B if they
-say "客户要改文字" / "我要自己改" / mention apply-texts.
+say "客户要改文字" / "我要自己改" (the zip's index.html carries the
+in-browser visual editor — press E).
 
 ### Self-contained output (mandatory · runs before every hand-back)
 
@@ -223,9 +224,8 @@ Default. The user has filesystem access to `runs/<timestamp>/output/`
 already. Just tell them the path:
 
 > 已生成：
-> · `runs/<ts>/output/index.html` — 浏览器双击打开
-> · `runs/<ts>/output/texts.md` — 改文字时编辑这个，然后跑
->   `python3 assets/apply-texts.py runs/<ts>/output/index.html runs/<ts>/output/texts.md`
+> · `runs/<ts>/output/index.html` — 浏览器双击打开（按 E 可在浏览器里直接改文字）
+> · `runs/<ts>/output/deck.json` — 改文案的正道：`deck-cli set slides.N.data.<field> "…"` 再 re-render
 > · `runs/<ts>/output/lark-<customer>-<YYYY-MM-DD>.html` — 命名规范副本，
 >   投递 / 入库 / 同步公网就用这个名字（`finalize.sh --name lark-<...>` 自动产出）
 
@@ -245,36 +245,32 @@ The zip contains:
 
 ```
 deck-editable.zip
-├── index.html        ← the deck (single inlined file, viewable offline)
-├── texts.md          ← editable copy of every visible string
-├── apply-texts.py    ← engine, stdlib-only Python 3
-├── apply.command     ← macOS one-click launcher (double-click)
-├── apply.bat         ← Windows one-click launcher
-└── README.txt        ← user-facing instructions, including macOS Gatekeeper
-                       and Windows Python install notes
+├── index.html        ← the deck (viewable offline; press E for the built-in editor)
+├── assets/           ← fonts / images / logos (if present)
+├── deck.json         ← deck source (if present) — for structural re-gen by the author
+└── README.txt        ← user-facing instructions (browse + in-browser text editing)
 ```
 
 Hand the zip to the harness for delivery. Typical bot flows:
 
 - **Feishu bot**: send as file attachment via `im/v1/messages` with a
-  one-line caption ("飞书风格 deck — 解压后双击 index.html 看，改文字看 README.txt").
-  ~15-30 KB for the launchers/scripts plus whatever the deck weighs
-  (typically 50-300 KB inlined).
+  one-line caption ("飞书风格 deck — 解压后双击 index.html 看，按 E 改文字看 README.txt").
+  Size is whatever the deck + assets weigh (typically 50-300 KB).
 - **OpenClaw remote**: return the zip path; OpenClaw's transport layer
   handles uploading or attaching it to the response.
 - **Slack / email / etc.**: same — attach the zip.
 
-The user does not need Claude Code, OpenClaw, or pip. Only stock
-`python3` (default on macOS, one-time install on Windows).
+The recipient needs nothing installed — the deck opens and edits in any
+browser (in-browser editor is zero-dep client-side JS).
 
 ### Mode 3 · View-only delivery (when editability isn't needed)
 
 If the recipient is "客户/老板看一眼就行" and editing is not in scope,
-ship just the inlined `index.html` (no zip, no texts.md, no scripts).
-Use `build.sh --inline` to produce a fully self-contained single file.
+ship just the inlined `index.html` (no zip). Use `build.sh --inline` to
+produce a fully self-contained single file.
 
-This loses the texts.md edit loop — only choose it when you're certain
-the recipient is consuming, not authoring.
+(The inline single file still carries the in-browser editor unless you
+strip the edit-mode lines; for a strictly read-only handout, remove them.)
 
 ### Choosing between Mode 2 and Mode 3
 

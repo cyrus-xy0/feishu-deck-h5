@@ -160,6 +160,178 @@
       for (const [el, prop, val] of touched) el.style[prop] = val || '';  // incl. title-moved revert
     }
   }
+  // ---- R-VIS-CANVAS-CENTER runtime fix (2026-05-31): vertically center the content
+  //      UNION inside the visual canvas [main-title bottom → 1080], not inside the .stage
+  //      box. .stage is often anchored symmetrically (top:200/bottom:200 → center 540)
+  //      while the canvas center is ~597 once the title eats the top → content reads 偏上
+  //      by a per-page amount. Mechanism = TRANSLATE the band: top += off, bottom -= off.
+  //      Same height, so it is (a) immune to flex:1 children absorbing extra space (the
+  //      trap that hollowed out justify-content in the earlier attempt), and (b) sets
+  //      top/bottom — not transform — so it COMPOSES with the fs-reveal entrance transform
+  //      instead of being overridden by it. Measured AFTER entrance animations settle
+  //      (transform → identity), else the union reads mid-animation. Geometry mirrors the
+  //      validate.py / visual-audit.js R-VIS-CANVAS-CENTER detector.
+  const _ccMeasure = (slide) => {
+    const sr = slide.getBoundingClientRect();
+    const scale = sr.height / 1080;
+    if (scale < 0.01) return null;
+    const top0 = sr.top;
+    const header = slide.querySelector(':scope > .header');
+    const hb = (header && header.getClientRects().length)
+      ? (header.getBoundingClientRect().bottom - top0) / scale : 0;
+    let t = Infinity, b = -Infinity, any = false;
+    slide.querySelectorAll('*').forEach((el) => {
+      if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+      if (header && (el === header || header.contains(el))) return;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+      if (cs.position === 'absolute' || cs.position === 'fixed') return;        // .stage / header / wordmark
+      const tag = el.tagName;
+      const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg' || tag === 'CANVAS' || tag === 'VIDEO';
+      if (!_abHasText(el) && !isMedia && el.children.length) return;            // empty wrappers don't count
+      const r = el.getBoundingClientRect();
+      if (r.width < 6 || r.height < 6) return;
+      // Clamp to clipping ancestors — content clipped away by an overflow:hidden
+      // ancestor (phone-mock chat taller than its frame, input bar below the clip)
+      // is invisible; counting it skews the union. Intersect with each clipping box.
+      let vt = r.top, vb = r.bottom;
+      for (let p = el.parentElement; p && p !== slide; p = p.parentElement) {
+        if (getComputedStyle(p).overflowY !== 'visible') {
+          const pr = p.getBoundingClientRect();
+          if (pr.top > vt) vt = pr.top;
+          if (pr.bottom < vb) vb = pr.bottom;
+        }
+      }
+      if (vb - vt < 6) return;
+      t = Math.min(t, (vt - top0) / scale);
+      b = Math.max(b, (vb - top0) / scale);
+      any = true;
+    });
+    if (!any) return null;
+    const canvasMid = (hb + 1080) / 2;
+    return { offset: canvasMid - (t + b) / 2, hb, ccTop: t, ccBot: b, contentH: b - t, bandH: 1080 - hb };
+  };
+  function _ccApply(slide) {
+    const layout = slide.getAttribute('data-layout') || '';
+    if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return;
+    if (slide.getBoundingClientRect().height < 30) return;          // not laid out / navigated away
+    const m = _ccMeasure(slide);
+    if (!m || m.hb < 40) return;                                    // header-bearing content pages only
+    if (Math.abs(m.offset) <= 12) return;                           // sub-perceptual → leave it
+    if (m.contentH > m.bandH - 8) return;                           // can't fit when centered → genuinely full
+    let el = null;
+    for (const sel of [':scope > .stage', ':scope > .grid', ':scope > .flow',
+                       ':scope > .nodes', ':scope > .toc', ':scope > .table-wrap']) {
+      const c = slide.querySelector(sel); if (c) { el = c; break; }
+    }
+    if (!el) return;
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'absolute' && cs.position !== 'fixed') return;          // band must be positioned
+    const top = parseFloat(cs.top), bot = parseFloat(cs.bottom);
+    if (!isFinite(top) || !isFinite(bot)) return;
+    const off = Math.round(m.offset);
+    // Container-fit gate: only band-translate if the band CONTAINER itself stays on-canvas
+    // after the shift (top inset / bottom inset = how far it can move up / down before an
+    // edge leaves the canvas). If the shift would push it off, the container is already
+    // canvas-filling and the offset is an INTERNAL top-alignment issue (content top-aligned
+    // in a tall container — R-VIS-BALANCE / justify-content territory), NOT a container
+    // mis-anchor. Translating it would just spill it off the edge (e.g. a top-aligned table
+    // in a 770px box). Skip — band-translate is only for mis-anchored containers (the
+    // symmetric .stage [200,880] case), where there is slack on both sides.
+    if (off > 0 ? off > bot - 4 : -off > top - 4) return;
+    // Death rule, scoped for a whole-block translate: protect only titles OUTSIDE the
+    // translated band — the page header/title at the top must never move. A subtitle or
+    // label that lives INSIDE the band is content: it rides the block down as one unit
+    // (relative position preserved), which is exactly what centering should do. (The crowd
+    // pass protects in-box subtitles because it un-stretches peers; here nothing is
+    // displaced relative to the content — the entire composition shifts together.)
+    const titleSnap = _abTitleEls(slide).filter((t) => !el.contains(t))
+      .map((t) => { const r = t.getBoundingClientRect(); return [t, r.top, r.left]; });
+    const pTop = el.style.top, pBot = el.style.bottom;
+    el.style.setProperty('top', Math.round(top + off) + 'px', 'important');
+    el.style.setProperty('bottom', Math.round(bot - off) + 'px', 'important');
+    const after = _ccMeasure(slide);
+    const titleMoved = titleSnap.some(([t, y, x]) => {
+      const r = t.getBoundingClientRect(); return Math.abs(r.top - y) > 1 || Math.abs(r.left - x) > 1;
+    });
+    const ok = after && Math.abs(after.offset) < Math.abs(m.offset) - 2 &&
+               after.ccTop > m.hb - 6 && after.ccBot < 1080 - 4 && !titleMoved;
+    if (ok) slide.setAttribute('data-fs-canvascentered', '');
+    else { el.style.top = pTop; el.style.bottom = pBot; }           // measure-or-revert
+  }
+  // Defer until entrance animations settle (transform back to identity), then apply once.
+  function centerSlideInCanvas(slide) {
+    const anims = (slide.getAnimations ? slide.getAnimations({ subtree: true }) : []).filter((a) => {
+      try { return a.effect.getComputedTiming().iterations !== Infinity; } catch (e) { return false; }
+    });
+    if (!anims.length) { try { _ccApply(slide); } catch (e) { /* best-effort */ } return; }
+    let done = false;
+    const go = () => { if (done) return; done = true; try { _ccApply(slide); } catch (e) { /* best-effort */ } };
+    Promise.all(anims.map((a) => a.finished.catch(() => {}))).then(go);
+    setTimeout(go, 1200);                                           // hard cap if an animation never resolves
+  }
+  // ---- Letterboxed-image unit fix (2026-05-31): the "差得多→分别居中" branch for media
+  //      columns. A column whose media is a `background-size:contain` image sits
+  //      letterboxed in a fixed-height frame (flex:1 / min-height:720), so its label
+  //      floats ABOVE the image (detached) and the image reads shorter than a sibling
+  //      column. Size the frame to the IMAGE's own aspect ratio → the label rides
+  //      directly on the photo as one tight unit → the cell's centering then centers
+  //      that unit. Only fires when the image is meaningfully letterboxed vertically
+  //      (>18% slack); a small letterbox is left to the whole-block pass ("差不多→整体
+  //      对齐"). Flow columns already center via align-items — this is only for the
+  //      contain-image case that align-items can't reach. Runs BEFORE canvas-center so
+  //      the block pass measures the tightened, internally-balanced columns.
+  const _ccImageFrames = (slide) => {
+    const out = [];
+    slide.querySelectorAll('*').forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.backgroundSize !== 'contain') return;
+      const m = cs.backgroundImage && cs.backgroundImage.match(/url\(["']?(.*?)["']?\)/);
+      if (m) out.push({ el, url: m[1] });
+    });
+    return out;
+  };
+  function balanceColumns(slide) {
+    const layout = slide.getAttribute('data-layout') || '';
+    if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return Promise.resolve();
+    const frames = _ccImageFrames(slide);
+    if (!frames.length) return Promise.resolve();
+    const sc = (slide.getBoundingClientRect().height / 1080) || 1;
+    return Promise.all(frames.map(({ el, url }) => new Promise((resolve) => {
+      const r = el.getBoundingClientRect();
+      const frameW = r.width / sc, frameH = r.height / sc;
+      if (frameW < 40 || frameH < 40) return resolve();
+      const im = new Image();
+      im.onerror = () => resolve();
+      im.onload = () => {
+        const ar = im.naturalWidth / im.naturalHeight;
+        if (!ar || ar <= frameW / frameH) return resolve();          // not wider than frame → no vertical letterbox
+        const containedH = frameW / ar;                              // image's rendered height in the frame
+        if (containedH >= frameH * 0.82) return resolve();           // <18% slack → 差不多 → leave for block pass
+        const cell = el.parentElement;
+        const prev = [el.style.flex, el.style.minHeight, el.style.height, el.style.aspectRatio,
+                      el.style.width, el.style.backgroundSize, el.style.maxHeight,
+                      cell && cell.style.justifyContent];
+        el.style.setProperty('flex', '0 0 auto', 'important');
+        el.style.setProperty('min-height', '0', 'important');
+        el.style.setProperty('height', 'auto', 'important');
+        el.style.setProperty('aspect-ratio', im.naturalWidth + '/' + im.naturalHeight);
+        el.style.setProperty('width', '100%', 'important');
+        el.style.setProperty('background-size', 'cover', 'important');
+        el.style.setProperty('max-height', Math.round(frameH) + 'px', 'important');
+        if (cell) cell.style.setProperty('justify-content', 'center', 'important');
+        if (el.getBoundingClientRect().height / sc > frameH - 6) {   // didn't actually tighten → revert
+          el.style.flex = prev[0]; el.style.minHeight = prev[1]; el.style.height = prev[2];
+          el.style.aspectRatio = prev[3]; el.style.width = prev[4]; el.style.backgroundSize = prev[5];
+          el.style.maxHeight = prev[6]; if (cell) cell.style.justifyContent = prev[7] || '';
+        } else {
+          slide.setAttribute('data-fs-colbalanced', '');
+        }
+        resolve();
+      };
+      im.src = url;
+    })));
+  }
   function maybeBalance(slide) {
     if (!slide || slide.hasAttribute('data-fs-balanced')) return;
     const deck = slide.closest('.deck');
@@ -171,6 +343,12 @@
     if (!probe || probe.getBoundingClientRect().height < 30) return;
     slide.setAttribute('data-fs-balanced', '');
     try { balanceSlide(slide); } catch (e) { /* never break the deck over layout */ }
+    // columns first (tightens letterboxed media → internally-balanced cols), then the
+    // whole-block canvas-center on the tightened layout. balanceColumns resolves after
+    // any image loads (or immediately when there are none).
+    balanceColumns(slide)
+      .catch(() => {})
+      .then(() => { try { centerSlideInCanvas(slide); } catch (e) { /* best-effort */ } });
   }
 
   function init() {

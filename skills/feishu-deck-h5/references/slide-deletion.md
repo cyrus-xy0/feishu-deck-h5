@@ -25,7 +25,7 @@ Before ANY operation that **net-removes** a slide from a deck:
    count** — if the user said "trim the deck" earlier, that's not approval
    to delete a specific slide; surface the list and ask again.
 4. **Once confirmed, offer a backup.** Default is to copy the deck file
-   (and `texts.md` if present) to a `.bak-pre-delete-<YYYYMMDD-HHMMSS>`
+   (and its `deck.json` if present) to a `.bak-pre-delete-<YYYYMMDD-HHMMSS>`
    sibling beside the original. The user can decline ("no backup, just go")
    or pick a different option (git commit, separate folder, etc.). The
    agent's default phrasing:
@@ -43,10 +43,9 @@ Before ANY operation that **net-removes** a slide from a deck:
 | `rm` of the entire `output/` folder | **Yes** | Wholesale wipe |
 | Re-rendering a `deck.json` with FEWER `content/story-case` (or any) slides than the current `index.html` has | **Yes** | Net delete via regen |
 | Replacing N slides with M < N slides in one operation | **Yes** | Net-removed = N − M |
-| Editing texts.md to drop a `## slide-NN` section, then running `apply-texts.py` | **Yes** | `apply-texts.py` itself only patches text leaves, but if the user's intent was "drop this slide", confirm + back up the HTML before applying |
 | Inserting slides (M > N) | No | Pure addition is reversible by deleting back |
 | Reordering slides (same N, same content) | No | But announce the new order before applying — separate "non-destructive change confirmation" |
-| Editing a slide's content (title / cards / CSS / text-id values) | No | The slide still exists; content edits are routine |
+| Editing a slide's content (title / cards / CSS) | No | The slide still exists; content edits are routine |
 | Replacing one slide with one different slide (1:1 swap) | **Yes** | The previous slide's content IS deleted; back it up |
 
 When in doubt, treat the operation as a delete and ask. One IM ping is
@@ -99,7 +98,7 @@ Tags scope retention. Use one tag per edit class (`delete-slide-7`,
 `iframe-fix`, `p20-rewrite`) so unrelated edits don't compete for the
 3-slot quota.
 
-For paired files (`index.html` + `texts.md`), run the helper TWICE
+For paired files (e.g. `index.html` + `deck.json`), run the helper TWICE
 with the SAME tag and similar descriptions — both files get backed
 up under the same retention slot, and both edits get one CHANGES.md
 entry per call (consider consolidating description in the second
@@ -116,7 +115,7 @@ helper produces so retention logic still recognises the files:
 
 Examples:
 - `runs/.../output/index.html.bak-pre-delete-slide-7-20260518-160000`
-- `runs/.../output/texts.md.bak-pre-delete-slide-7-20260518-160000`
+- `runs/.../output/deck.json.bak-pre-delete-slide-7-20260518-160000`
 
 Without the helper you don't get the CHANGES.md entry or pruning —
 which is how the historical 53-bak pile-up happened. Use the helper.

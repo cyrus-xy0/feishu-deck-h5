@@ -198,8 +198,139 @@
              can_grow: growNeeded <= room, in_box: !!framed };
   };
 
-  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [], crowd: [], title_gap: [], peer_size: [], gutter: [], hero_floor: [], short_label_floor: [] };
+  const out = { overflow: [], tier: [], hier: [], align: [], label_floor: [], overlap: [], band_collide: [], body_floor: [], card_overflow: [], opt_out_abuse: [], title_position: [], abspos_dual_anchor: [], orphan: [], balance: [], focal: [], slack_flex: [], card_min_height_sparse: [], crowd: [], panel_top: [], title_gap: [], peer_size: [], gutter: [], hero_floor: [], short_label_floor: [], canvas_center: [], dead_anim: [], dead_rule: [] };
   const slides = document.querySelectorAll('.slide');
+
+  // ===========================================================================
+  //  R-VIS-DEAD-RULE (F-68) · 死规则 / 死选择器探测器(F-57 dead_anim 的非动画超集)
+  // ===========================================================================
+  // F-57 (dead_anim · 见下方主测量循环末尾的 producer) 只覆盖 animation。但同一类
+  // "规则声明在源里、运行时选择器零匹配、元素静默退回浏览器默认值"的盲区还有非动画
+  // 属性:冰山 `.hero-pct` 从 100px 死成 16px(16 是合规档,字号闸全绿不会报)、
+  // `.loop-row` 从 grid 死成 block(排版塌掉、无报警)。这条把 dead-selector 判定扩到
+  // position:absolute|fixed / display:grid|flex / font-size≥48px / width|height≥120px
+  // 这些一旦失效就视觉塌陷的重要属性。
+  //
+  // 为什么必须运行时判定,不能看注释 / 静态读 CSS:
+  //   (1) 选择器之间的注释 = 空白(后代组合子)。`.a /*c*/ .b{}` ≡ 合法的 `.a .b{}`,
+  //       浏览器照常应用 → 含注释 ≠ 死。判"死没死"的唯一可靠方法是运行时
+  //       querySelectorAll(sel).length===0 或解析抛错。
+  //   (2) 前缀注入 / lift 用正则啃选择器,把合法的 `.slide-frame.is-current` 啃成
+  //       `-frame.is-current`(`-frame` 是合法 CSS ident,能解析,但没有 `<-frame>`
+  //       元素 → 永不匹配)。静态逐条读 CSS 每条都合法,看不出。
+  //
+  // 只查 slide 自身的 <style>(inline per-slide / custom_css),不碰 head 框架样式表。
+  //
+  // ⚠️ 隔离:present 模式下很多 scoped 选择器挂 `.is-current`,只有当前页 frame 带它,
+  // 其余页合法 scoped 选择器会"假性零匹配"。所以临时给所有 .slide-frame 强加 is-current,
+  // 测完立刻还原 —— 但这个 toggle **必须包在这个自成一体的 bracketed pass 里**(add →
+  // 全部扫完 → finally remove,绝不泄漏进下面的主测量循环)。框架
+  // `.slide-frame.is-current .slide>*` reveal 会把 .slide 直接子元素初态置
+  // opacity:0 / transform 偏移,污染 R-VIS-TITLE-POSITION / R-OVERFLOW 等的 bbox。
+  // dead-rule 只看 querySelectorAll 命中数(与布局/可见性无关),放隔离 pass 既拿到正确
+  // scoped 解析、又不影响后续测量。dead_anim(F-57)有它自己独立的 producer(主循环末尾),
+  // 这里**只发 dead_rule,绝不碰 out.dead_anim**(否则会双报死动画)。
+  {
+    const _DEAD_BIG_PX = 48;     // hero/font threshold (master sub-hero & up)
+    const _DEAD_SIZE_PX = 120;   // width/height threshold — a real layout block, not a chip
+    // Parse the selector list of a CSS rule, splitting on top-level commas only
+    // (commas inside :is()/:not()/:has()/[attr="a,b"] must NOT split the list).
+    const _splitSelectorList = (sel) => {
+      const parts = []; let depth = 0, inStr = 0, buf = '';
+      for (let i = 0; i < sel.length; i++) {
+        const ch = sel[i];
+        if (inStr) { buf += ch; if (ch === inStr && sel[i - 1] !== '\\') inStr = 0; continue; }
+        if (ch === '"' || ch === "'") { inStr = ch; buf += ch; continue; }
+        if (ch === '(' || ch === '[') depth++;
+        else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+        if (ch === ',' && depth === 0) { parts.push(buf.trim()); buf = ''; continue; }
+        buf += ch;
+      }
+      if (buf.trim()) parts.push(buf.trim());
+      return parts;
+    };
+    // Decide which IMPORTANT visual property a CSSStyleRule declares (for F-68).
+    // Returns {prop, detail} of the first hit, or null. animation handled by F-57.
+    const _importantVisualProp = (style) => {
+      const pos = style.getPropertyValue('position');
+      if (pos === 'absolute' || pos === 'fixed') return { prop: 'position', detail: pos };
+      const disp = style.getPropertyValue('display');
+      if (disp === 'grid' || disp === 'inline-grid') return { prop: 'display', detail: disp };
+      if (disp === 'flex' || disp === 'inline-flex') return { prop: 'display', detail: disp };
+      // font-size (direct or via `font:` shorthand) ≥ _DEAD_BIG_PX (px only — em/% unresolved at parse time)
+      let fs = style.getPropertyValue('font-size');
+      if (!fs) { const f = style.getPropertyValue('font'); if (f) { const m = f.match(/(\d+(?:\.\d+)?)px/); if (m) fs = m[0]; } }
+      if (fs) { const m = fs.match(/^(\d+(?:\.\d+)?)px$/); if (m && parseFloat(m[1]) >= _DEAD_BIG_PX) return { prop: 'font-size', detail: fs }; }
+      for (const dim of ['width', 'height']) {
+        const v = style.getPropertyValue(dim);
+        const m = v && v.match(/^(\d+(?:\.\d+)?)px$/);
+        if (m && parseFloat(m[1]) >= _DEAD_SIZE_PX) return { prop: dim, detail: v };
+      }
+      return null;
+    };
+    // Recursively walk a CSSRuleList, collecting style rules (descends into @media
+    // and other grouping at-rules so nested per-slide grid/position rules count).
+    const _collectStyleRules = (ruleList, acc) => {
+      for (const rule of ruleList) {
+        if (rule.type === 1 /* STYLE_RULE */) acc.push(rule);
+        else if (rule.cssRules) _collectStyleRules(rule.cssRules, acc);  // @media / @supports / @layer
+      }
+    };
+    // For one slide: read its OWN inline <style> elements, parse each rule, and for
+    // every rule that declares an IMPORTANT non-animation visual property, test
+    // whether ANY selector in the list matches at runtime. Zero match → dead_rule.
+    const _auditDeadRulesOnly = (slide, slide_idx, label) => {
+      const styleEls = slide.querySelectorAll('style');
+      const seen = new Set();
+      styleEls.forEach(styleEl => {
+        let sheet = null;
+        try { sheet = styleEl.sheet; } catch (e) { return; }
+        if (!sheet) return;
+        let rules; try { rules = sheet.cssRules; } catch (e) { return; }  // cross-origin guard
+        const styleRules = [];
+        try { _collectStyleRules(rules, styleRules); } catch (e) { return; }
+        for (const rule of styleRules) {
+          const selText = rule.selectorText;
+          if (!selText) continue;
+          const impProp = _importantVisualProp(rule.style);
+          if (!impProp) continue;  // animation-only rules are F-57's job, NOT dead_rule
+          // Does the selector list match anything? Treat a parse error on ANY
+          // member as "dead" (an illegal selector silently kills the whole rule).
+          let matchCount = 0, parseError = false;
+          for (const member of _splitSelectorList(selText)) {
+            if (!member) continue;
+            try { matchCount += document.querySelectorAll(member).length; }
+            catch (e) { parseError = true; }
+          }
+          if (matchCount > 0 && !parseError) continue;  // healthy — at least one element styled
+          const reason = parseError ? 'parse-error' : 'no-match';
+          const key = selText + '::' + impProp.prop;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const lifted = !!(slide.closest && slide.closest('[data-lifted]'))
+                       || !!(slide.querySelector && slide.querySelector('[data-lifted]'));
+          out.dead_rule.push({ slide_idx, label, selector: selText, reason, lifted,
+                               prop: impProp.prop, value: impProp.detail });
+        }
+      });
+    };
+    // Force is-current on every frame so runtime-scoped selectors resolve; restore
+    // in finally so it NEVER leaks into the main measurement loop below.
+    const _forcedFrames = [];
+    document.querySelectorAll('.slide-frame').forEach(f => {
+      if (!f.classList.contains('is-current')) { f.classList.add('is-current'); _forcedFrames.push(f); }
+    });
+    try {
+      slides.forEach((slide, idx) => {
+        const slide_idx = idx + 1;
+        const label = slide.getAttribute('data-screen-label') || `slide-${slide_idx}`;
+        _auditDeadRulesOnly(slide, slide_idx, label);
+      });
+    } finally {
+      _forcedFrames.forEach(f => f.classList.remove('is-current'));
+    }
+  }
+
   slides.forEach((slide, idx) => {
     const slide_idx = idx + 1;
     const label = slide.getAttribute('data-screen-label') || `slide-${slide_idx}`;
@@ -227,6 +358,30 @@
           out.crowd.push({
             idx: slide_idx, label, sel: shortSel(box),
             top_px: Math.round(distTop), bottom_px: Math.round(distBottom),
+          });
+        }
+        // ---- R-VIS-PANEL-TOP (2026-06-01 · pg29 feishu-ai-scene-tools) ----
+        // Twin of crowd, OTHER direction: a framed panel whose SINGLE content
+        // block hugs the TOP with a big empty band BELOW → panel容器没把内容
+        // 垂直居中(贴顶留下大片空)。Root cause = panel container (.col-visual /
+        // lifted .product-pane/.copy-pane/.case-pane) lacking flex+justify-center;
+        // framework default now centers .col-visual single-child, but lifted/raw
+        // panels + custom containers still need this catch.
+        // Guards (避免误报顶对齐设计):
+        //  · 只在内容确实"矮于容器一大截"时报(distBottom 大、distTop 小);
+        //  · single content block:内容并集高 < 容器高的 ~62%(多卡填充列、
+        //    顶对齐表格/时间轴会占满,不触发);
+        //  · 对称 ±12px 容差,贴顶判定 distTop < distBottom - 60(底空比顶空多
+        //    至少 60px = 明显一头沉),阈值给足余量防抖。
+        const cuH = (cu.bottom - cu.top) / _scale;
+        const boxH = r.height / _scale;
+        if (boxH > 160 && cuH > 0 && cuH < boxH * 0.62 &&
+            distTop < 24 && distBottom > distTop + 60) {
+          out.panel_top = out.panel_top || [];
+          out.panel_top.push({
+            idx: slide_idx, label, sel: shortSel(box),
+            top_px: Math.round(distTop), bottom_px: Math.round(distBottom),
+            content_h: Math.round(cuH), box_h: Math.round(boxH),
           });
         }
       }
@@ -265,6 +420,30 @@
       if (clips) {
         const dh = el.scrollHeight - el.clientHeight;
         if (dh > 4) {
+          // F-58 · 区分"可滚出 vs 永久不可见":overflow:hidden|clip 把超框内容裁掉,
+          // 有两种危害程度。
+          //   (a) recoverable:容器(或某祖先)有 USER 可用滚动 → 内容能滚出来,危害低。
+          //   (b) non-recoverable:无 user 滚动机制 → 内容彻底丢、客户永远看不到,危害高
+          //       (顶格 err)。pg40/41 手机 mock 的裁切属此类。
+          //
+          // 关键校准(实测 Chromium):**编程式 `el.scrollTop=N` 在 overflow:hidden 上
+          // 也能移动**(spec:hidden=programmatically-scrollable but NOT user-scrollable;
+          // clip=两者皆否)。所以"写 scrollTop 能不能动"是个陷阱信号——会把几乎所有
+          // hidden 框误判成 recoverable,正好把 F-58 判反。USER 能不能看到被裁内容,
+          // 取决于 computed `overflow-y` 是不是 auto|scroll(有滚动条/滚轮),而本分支
+          // (clips)按定义 overflow-y ∈ {hidden, clip} → 该盒自身 user 不可滚。
+          //
+          // 唯一的 recoverable 子类:有一个祖先是真正的 user 滚动视口
+          // (overflow-y:auto|scroll 且自身确有可滚高度),把这块内容纳入其滚动范围。
+          // 这种(framework 内部滚动面板)危害低。否则 non-recoverable。
+          let recoverable = false;
+          for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
+            const ncs = window.getComputedStyle(n);
+            const oy = ncs.overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && (n.scrollHeight - n.clientHeight) > 4) {
+              recoverable = true; break;
+            }
+          }
           out.card_overflow.push({
             slide_idx,
             selector: shortSel(el),
@@ -272,6 +451,7 @@
             card_h: el.clientHeight,
             overflow_px: dh,
             direction: 'vertical',
+            recoverable,
           });
         }
       } else {
@@ -804,6 +984,56 @@
         }
       }
     });
+
+    // ---- R-VIS-BAND-COLLIDE (2026-05-31 · P05 vs-wecom case) ----
+    // A content-bearing band (takeaway / cta / principle-band) declared
+    // position:absolute as a .slide sibling collides with the centered body.
+    // The sibling-overlap check above skips absolute els (usually decor); AND
+    // the runtime canvas-centering (centerSlideInCanvas) EXCLUDES absolute els
+    // from its content union → it silently centers the body UNDER such a band.
+    // A framed, text-bearing absolute band is real content, not decor: flag it.
+    if (!['cover', 'image-text', 'end', 'section'].includes(layout)) {
+      const bands = Array.from(slide.children).filter(el => {
+        const cs = getComputedStyle(el);
+        if (cs.position !== 'absolute' && cs.position !== 'fixed') return false;
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+        if (el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+        if (hasAnyClass(el, CHROME_WHITELIST)) return false;
+        if (hasAnyClass(el, ['wordmark', 'pageno', 'deck-progress', 'deck-controls', 'grid-bg', 'aurora', 'decor'])) return false;
+        if (!_isFramedBox(el) || _isMediaBox(el)) return false;     // pure decor / media → not a content band
+        if (el.textContent.trim().length < 4) return false;          // must carry real copy
+        return true;
+      });
+      if (bands.length) {
+        const hosts = Array.from(slide.querySelectorAll(
+          ':scope > .stage, :scope > .grid, :scope > .flow, :scope > .nodes, :scope > .toc, :scope > .stack, :scope > .table-wrap'));
+        bands.forEach(band => {
+          const bb = band.getBoundingClientRect();
+          let hit = null;
+          for (const host of hosts) {
+            if (host === band || host.contains(band) || band.contains(host)) continue;
+            for (const leaf of host.querySelectorAll('*')) {
+              if (!hasOwnText(leaf)) continue;
+              const cs = getComputedStyle(leaf);
+              if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+              const lr = leaf.getBoundingClientRect();
+              if (lr.width < 2 || lr.height < 2) continue;
+              const ox = Math.min(bb.right, lr.right) - Math.max(bb.left, lr.left);
+              const oy = Math.min(bb.bottom, lr.bottom) - Math.max(bb.top, lr.top);
+              if (ox > 2 && oy > 4) { hit = { host, leaf, ox, oy }; break; }   // real vertical intrusion onto body text
+            }
+            if (hit) break;
+          }
+          if (hit) {
+            out.band_collide.push({
+              slide_idx, band_sel: shortSel(band),
+              host_sel: shortSel(hit.host), content_sel: shortSel(hit.leaf),
+              overlap_x: Math.round(hit.ox), overlap_y: Math.round(hit.oy),
+            });
+          }
+        });
+      }
+    }
 
     // ---- R-VIS-ABSPOS-DUAL-ANCHOR ----
     // An override that adds `top:` to a pill/badge WITHOUT resetting an
@@ -1582,6 +1812,81 @@
     }
     _heroFloorCheck([KPI_FLOOR]);
 
+    // ---- R-VIS-CANVAS-CENTER · 内容并集相对画布垂直居中 (2026-05-31) ----
+    // 现状漏洞:R-VIS-BALANCE 只看内容在 .stage 内部的上下留白是否均衡。当
+    // .stage 自身相对"画布"偏上(对称 top:200/bottom:200 → 中心 540,画布中心
+    // ~597),容器内 topGap≈bottomGap → 漏报。这里直接量【内容并集中心】对
+    // 【画布中心 (header.bottom + 1080)/2】的垂直偏移,绕开容器。
+    //   offset = canvasMid - contentMid  (>0 内容偏上, <0 内容偏下)
+    //   is_full = 内容高 / (1080 - header.bottom) > 0.72  → 满铺豁免(顶对齐铺满是对的)
+    // 所有坐标先减 slide 顶、再 / _scale 还原成设计 px,与 1080 同系。
+    if (!isHeroLayout && !slide.hasAttribute('data-allow-imbalance')) {
+      const _ccSr = slide.getBoundingClientRect();
+      const _ccSlideTop = _ccSr.top;
+      const ccHeader = slide.querySelector(':scope > .header');
+      const ccHeaderRendered = !!ccHeader && ccHeader.getClientRects().length > 0;
+      const _ccHb = ccHeaderRendered
+        ? (ccHeader.getBoundingClientRect().bottom - _ccSlideTop) / _scale
+        : 0;
+      let ccTop = Infinity, ccBot = -Infinity, ccAny = false;
+      slide.querySelectorAll('*').forEach((el) => {
+        if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+        if (ccHeader && (el === ccHeader || ccHeader.contains(el))) return;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+        if (cs.position === 'absolute' || cs.position === 'fixed') return;
+        const tag = el.tagName;
+        const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg'
+          || tag === 'CANVAS' || tag === 'VIDEO';
+        const isLeaf = el.children.length === 0;
+        if (!hasOwnText(el) && !isMedia && !isLeaf) return;
+        const r = el.getBoundingClientRect();
+        if (r.width < 6 || r.height < 6) return;
+        // Clamp to clipping ancestors: content scrolled/clipped away by an
+        // overflow:hidden ancestor (e.g. a phone-mock chat taller than its frame,
+        // input bar laid out below the clip) is NOT visible — counting its
+        // getBoundingClientRect skews the union downward. Intersect with each
+        // non-visible-overflow ancestor's box; drop the element if fully clipped.
+        let vt = r.top, vb = r.bottom;
+        for (let p = el.parentElement; p && p !== slide; p = p.parentElement) {
+          if (getComputedStyle(p).overflowY !== 'visible') {
+            const pr = p.getBoundingClientRect();
+            if (pr.top > vt) vt = pr.top;
+            if (pr.bottom < vb) vb = pr.bottom;
+          }
+        }
+        if (vb - vt < 6) return;
+        const t = (vt - _ccSlideTop) / _scale;
+        const b = (vb - _ccSlideTop) / _scale;
+        if (t < ccTop) ccTop = t;
+        if (b > ccBot) ccBot = b;
+        ccAny = true;
+      });
+      if (ccAny) {
+        const contentMid = (ccTop + ccBot) / 2;
+        const canvasMid = (_ccHb + 1080) / 2;
+        const offset = canvasMid - contentMid;   // >0 偏上, <0 偏下
+        const contentH = ccBot - ccTop;
+        const bandH = 1080 - _ccHb;
+        // is_full = the content union genuinely CANNOT be centered without spilling the
+        // canvas (taller than the band) → top-aligned/overflow is correct, exempt. The old
+        // `contentH/bandH > 0.72` proxy wrongly exempted tall-but-fitting layouts (e.g. two
+        // boxes with a gap spanning 83% of the band but sitting 偏上) — those should center.
+        const isFull = bandH <= 8 || contentH > (bandH - 8);
+        out.canvas_center.push({
+          slide_idx,
+          container_sel: shortSel(slide),
+          content_mid: Math.round(contentMid),
+          canvas_mid: Math.round(canvasMid),
+          offset: Math.round(offset),
+          is_full: isFull,
+          top: Math.round(ccTop),
+          bot: Math.round(ccBot),
+          hb: Math.round(_ccHb),
+        });
+      }
+    }
+
     // ---- R-VIS-SHORT-LABEL-FLOOR · 1–7 字短标签 / SVG 轴标 < 18px (2026-05-31) ----
     // R-VIS-BODY-FLOOR 有 directText.length<8 → return 门槛(豁免图标/单位/短数字),
     // 不能删;但它放过了图表轴标 / 短分类标签(1–7 字,投影看不清)。这条补缝,
@@ -1624,6 +1929,100 @@
           lifted: !!(el.closest && el.closest('[data-lifted]')),
         });
       });
+    }
+
+    // ---- R-VIS-DEAD-ANIM · 声明了 animation 的选择器运行时零匹配 (F-57 · 2026-06-01) ----
+    // Closes the F-51 class: lift / prefix-injection chewed a scope selector into
+    // an illegal-but-parseable shape (e.g. `.slide[...] -frame.is-current .x` —
+    // `-frame` is a valid CSS ident so it PARSES, but no `<-frame>` element exists
+    // → querySelectorAll returns [] → the rule never applies → the element stays in
+    // its initial animation state, typically opacity:0, and is permanently invisible).
+    // validate.py never caught this: static CSS analysis reads each rule fine, and
+    // nothing checked whether the selector actually resolves at runtime.
+    //
+    // Detection (name-free, geometry/DOM only — no class whitelist):
+    //   ① ONLY inspect this slide's OWN <style> blocks (custom_css co-located as
+    //      `<style data-fs-custom-css>` + any raw-layout inline <style>). The head
+    //      framework stylesheet is NEVER touched — its `.slide-frame.is-current
+    //      .slide > *` reveal lives there and is healthy, so zero framework noise.
+    //   ② Walk the sheet's CSSOM (recurse into @media/@supports group rules; skip
+    //      @keyframes/@font-face — their "selectors" are keyframe names, not DOM).
+    //   ③ A rule counts only if it actually declares animation / animation-name
+    //      (≠ '' / 'none'). Read via CSSOM, not regex, so shorthand + longhand both
+    //      count and commented-out decls don't.
+    //   ④ Selector resolution: `.is-current` is a RUNTIME-toggled class the deck JS
+    //      puts on the active .slide-frame; at audit time only ONE frame has it, so a
+    //      healthy `.slide-frame.is-current …` rule on every OTHER slide would falsely
+    //      read as zero-match. To measure "would this selector EVER match" we force
+    //      `.is-current` onto every .slide-frame for the test, then restore. A truly
+    //      dead `-frame.is-current` selector is STILL zero (no `<-frame>` element),
+    //      so the force doesn't mask real breakage.
+    //   ⑤ querySelectorAll in try/catch: a selector the parser rejects (malformed
+    //      `:is()` / `:has()` etc.) throws → that's "dead" too (reason: parse-error).
+    //      Zero matches on a valid selector → reason: no-match.
+    // Scoping note: each slide's custom_css is prefixed `.slide[data-slide-key="K"]`,
+    // so a slide-A rule only ever matches inside slide A — we attribute the finding
+    // to the slide whose <style> block holds the rule. Dedup per slide+selector.
+    {
+      const seenDead = new Set();
+      // Force .is-current on every frame so runtime-scoped selectors resolve;
+      // record which ones we touched so we can restore exactly.
+      const _forcedFrames = [];
+      slide.ownerDocument.querySelectorAll('.slide-frame').forEach(f => {
+        if (!f.classList.contains('is-current')) { f.classList.add('is-current'); _forcedFrames.push(f); }
+      });
+      const _declaresAnim = (styleDecl) => {
+        try {
+          const name = (styleDecl.animationName || '').trim();
+          if (name && name !== 'none') return true;
+          const sh = (styleDecl.animation || '').trim();
+          // shorthand `animation: none` / empty → not a real animation
+          if (sh && !/^none(\s|$)/i.test(sh)) return true;
+        } catch (e) { /* exotic decl access — ignore */ }
+        return false;
+      };
+      const _checkSel = (selectorText) => {
+        // A rule's selectorText may be a comma list; test each part — any dead
+        // part is reported (one dead branch = that target never animates).
+        const parts = (selectorText || '').split(',').map(s => s.trim()).filter(Boolean);
+        for (const sel of parts) {
+          const key = slide_idx + '::' + sel;
+          if (seenDead.has(key)) continue;
+          let reason = null;
+          try {
+            if (slide.ownerDocument.querySelectorAll(sel).length === 0) reason = 'no-match';
+          } catch (e) {
+            reason = 'parse-error';
+          }
+          if (reason) {
+            seenDead.add(key);
+            out.dead_anim.push({ slide_idx, label, selector: sel, reason });
+          }
+        }
+      };
+      const _walkRules = (rules) => {
+        for (const rule of rules) {
+          // CSSStyleRule = 1; group rules (@media/@supports/@container) expose .cssRules.
+          if (rule.type === 1 && rule.selectorText && rule.style && _declaresAnim(rule.style)) {
+            _checkSel(rule.selectorText);
+          } else if (rule.cssRules && rule.constructor && /Keyframes|FontFace/i.test(rule.constructor.name) === false) {
+            // @media / @supports / @container etc. — recurse. @keyframes/@font-face
+            // expose cssRules too but their inner rules are keyframe steps, not
+            // DOM selectors, so skip them by constructor name.
+            try { _walkRules(rule.cssRules); } catch (e) { /* opaque group rule */ }
+          }
+        }
+      };
+      slide.querySelectorAll('style').forEach(styleEl => {
+        let sheet = null;
+        try { sheet = styleEl.sheet; } catch (e) { sheet = null; }
+        if (!sheet) return;
+        let rules = null;
+        try { rules = sheet.cssRules; } catch (e) { rules = null; }  // cross-origin / not-yet-parsed
+        if (rules) _walkRules(rules);
+      });
+      // Restore: remove only the .is-current we added.
+      _forcedFrames.forEach(f => f.classList.remove('is-current'));
     }
   });
 

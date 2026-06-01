@@ -124,22 +124,16 @@ Required CSS (one block, applies to every slide):
 ```
 
 Validator behaviour:
-- **No `data-text-id` annotations** are added (image is the content).
-- Validator emits exactly **one T00 warning** ("no data-text-id
-  attributes found"). This is **expected for Replica mode** — do
-  NOT silence it by adding fake text-ids to images.
-- All other rules (R02 / R07 / R48 / etc.) pass on stub conditions.
-- `texts.md` is NOT generated for Replica decks (there's no editable
-  text leaf to edit — if the user wants copy changes, they re-export
-  the source PDF).
+- All rules (R02 / R07 / R48 / etc.) pass on stub conditions.
+- Replica decks have no editable text leaves — if the user wants copy
+  changes, they re-export the source PDF.
 
 #### Rewrite mode (LLM re-authors each page · OPT-IN)
 
 Each page is hand-authored in feishu-deck-h5 native HTML — every
 `.ui-window` mock is rebuilt from `.ui-*` primitives, every logo
 matrix becomes a `.logo-cell` text grid, every brand palette item
-maps to `--fs-*` tokens. Full `data-text-id` + `texts.md` flow is
-in scope.
+maps to `--fs-*` tokens.
 
 This is the mode the rest of SKILL.md (Steps 1–5, layout recipes,
 narrative patterns) describes. It's the right call when:

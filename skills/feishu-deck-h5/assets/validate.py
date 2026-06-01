@@ -23,7 +23,7 @@ from collections import Counter
 from pathlib import Path
 
 # ===========================================================================
-#  VALIDATOR MAP — the 32 static audits by family (F-10 navigability index).
+#  VALIDATOR MAP — the static audits by family (F-10 navigability index).
 #  Find a rule fast: rule code → audit function → `grep "def <name>"`. The audit
 #  SET is data-driven via the STATIC_AUDITS registry (just above main()); this
 #  map is the human index into the monolith. Visual/Playwright rules (R-OVERFLOW,
@@ -62,12 +62,10 @@ from pathlib import Path
 #    audit_lift_style_lost       R-VIS-LIFT-STYLE-LOST lifted raw slide lost framework CSS
 #  CSS / TECHNICAL
 #    audit_undefined_css_vars    R-CSSVAR         var(--x) with no def/fallback
-#  UI-MOCK · texts.md · RICHNESS · PERF · DELIVERY
+#  UI-MOCK · RICHNESS · PERF · DELIVERY
 #    audit_ui_mocks_are_html     UI1              mock UIs are HTML, not images
-#    audit_text_ids              T00-T03          data-text-id format + texts.md sync
 #    audit_visual_richness       R-VIS-NO-IMAGERY deck reads flat (advisory)
 #    audit_perf                  P50-P55          inline-size / asset budgets
-#    audit_feedback_md           R-FEEDBACK       FEEDBACK.md present at hand-off
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
@@ -96,7 +94,7 @@ from _validate_common import (
 # imported BEFORE that registry is built.
 from _validate_audits import *
 from _validate_audits import (
-    _lifted_slide_keys, _parse_texts_md_ids, _SPARSE_BY_DESIGN, _deck_imported,
+    _lifted_slide_keys, _SPARSE_BY_DESIGN, _deck_imported,
 )
 
 # ---------------------------------------------------------------------------
@@ -116,9 +114,6 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
       R-VIS-HIER       · within each card / panel, meta-class fontSize ≤
                          body-class fontSize (renderer-confirmed, not just
                          static CSS — catches inheritance / overrides)
-      R-VIS-ALIGN      · grid containers (.overview-grid / .todo-grid / etc.)
-                         have all direct children at roughly the same
-                         bounding-box height (within 4 px tolerance)
       R-VIS-BODY-FLOOR · 2026-05-19 · text elements with ≥ 8 chars of direct
                          text rendered at < 24 px while NOT inside a mockup
                          container or chrome class. Catches the gap where
@@ -280,18 +275,6 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'shrink meta to ≤ body, or rename to a column-pill class if '
             'this element is actually a column title (not meta).')
 
-    for entry in report.get('align', [])[:20]:
-        # Soft: 4 px tolerance is genuinely fuzzy (sub-pixel rounding on
-        # Chromium fractional scale can produce 5 px deltas on perfectly
-        # aligned grids). Editorial — flagged but never promoted to error.
-        iss.warn_soft('R-VIS-ALIGN',
-            f'slide {entry["slide_idx"]} · grid `{entry["grid_sel"]}` has '
-            f'{entry["count"]} direct children with heights '
-            f'{entry["heights"]} — max diff {entry["delta"]} px '
-            f'(> 4 px tolerance). For canonical-card / overview-card '
-            'grids the cards should be equal-height; check `flex: 1` is '
-            'applied or `align-items: stretch` is set on the container.')
-
     for entry in report.get('title_position', [])[:20]:
         iss.err('R-VIS-TITLE-POSITION',
             f'slide {entry["slide_idx"]} (layout `{entry["layout"]}`) · '
@@ -364,14 +347,43 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 'tighten padding / gap, or give the box more height. (Geometry — '
                 'stays ERROR even on lifted slides; a visible spill is a real defect.)')
         else:
-            _lev('R-VIS-CARD-OVERFLOW',
-                f'slide {entry["slide_idx"]} · `{entry["selector"]}` has '
-                f'`overflow:hidden` but content ({entry["content_h"]} px) is '
-                f'{entry["overflow_px"]} px taller than the container '
-                f'({entry["card_h"]} px) — text is being clipped silently. '
-                'Fix: shorten body copy, drop a row/item, shrink padding/gap, '
-                'increase card height (more stage space), OR drop overflow:hidden '
-                'so the issue is at least visible.')
+            # F-58 · 区分两种 overflow:hidden 裁切的危害程度:
+            #   (b) 永久不可见(non-recoverable):该盒 user 不可滚、祖先也没有真正的
+            #       user 滚动视口 → 被裁内容彻底丢、客户永远看不到 → 顶格 ERR(无视 px
+            #       阈值,即便溢出几 px 也是真内容丢失)。pg40/41 手机 mock 属此类。
+            #   (a) 可滚出(recoverable):某祖先是真正的 user 滚动视口
+            #       (overflow-y:auto|scroll 且有可滚高度)→ 内容能滚出来,危害低 →
+            #       维持原 px 分级(小溢出降 warn)。
+            #   注意:绝不用"el.scrollTop=N 能不能动"判 recoverable —— overflow:hidden 也
+            #   能编程式滚,会判反。producer 按 computed overflow-y 走祖先链判定。
+            _recoverable = entry.get('recoverable', False)
+            if not _recoverable:
+                _clev = iss.warn if entry.get('lifted') else iss.err
+                _clev('R-VIS-CARD-OVERFLOW',
+                    (('LIFTED slide(逐字搬运)— 降为 WARNING,你决定是否修。 ')
+                     if entry.get('lifted') else '') +
+                    f'slide {entry["slide_idx"]} · `{entry["selector"]}` has '
+                    f'`overflow:hidden` but content ({entry["content_h"]} px) is '
+                    f'{entry["overflow_px"]} px taller than the container '
+                    f'({entry["card_h"]} px), AND there is NO user-scrollable '
+                    'viewport (该盒 overflow-y 是 hidden/clip,user 不可滚;祖先也没有 '
+                    'overflow-y:auto|scroll 的真实滚动视口)→ 被裁内容永久不可见 '
+                    '(non-recoverable clip),客户永远看不到这部分,内容彻底丢。'
+                    'Fix: shorten body copy, drop a row/item, shrink padding/gap, '
+                    'increase card height (more stage space), OR drop overflow:hidden '
+                    'so the issue is at least visible. (内容丢失是硬伤 — 即便溢出很小'
+                    '也顶格 ERROR;lifted 页降 warn 由你定夺。)')
+            else:
+                _clev = iss.err if _px > 16 else iss.warn
+                _clev('R-VIS-CARD-OVERFLOW',
+                    f'slide {entry["slide_idx"]} · `{entry["selector"]}` has '
+                    f'`overflow:hidden` but content ({entry["content_h"]} px) is '
+                    f'{entry["overflow_px"]} px taller than the container '
+                    f'({entry["card_h"]} px) — text is being clipped, but the box '
+                    'HAS a usable scroll mechanism (内容能滚出来,危害低)。'
+                    'Fix: shorten body copy, drop a row/item, shrink padding/gap, '
+                    'increase card height (more stage space), OR drop overflow:hidden '
+                    'so the clipped content is visible without scrolling.')
 
     for entry in report.get('overlap', [])[:20]:
         iss.err('R-OVERLAP',
@@ -384,6 +396,74 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'vs default 680 px height), or add `min-height: 0; overflow: hidden` '
             'on the overflowing element so excess content is clipped instead of '
             'bleeding into siblings.')
+
+    for entry in report.get('band_collide', [])[:20]:
+        iss.err('R-VIS-BAND-COLLIDE',
+            f'slide {entry["slide_idx"]} · 绝对定位内容带 `{entry["band_sel"]}` 压住正文 '
+            f'`{entry["content_sel"]}`(交叠 {entry["overlap_x"]}×{entry["overlap_y"]}px)。'
+            '底部/顶部内容带(takeaway / cta / principle-band 等有文字有底色的"带")若用 '
+            'position:absolute 挂在 .slide 上,运行时画布居中(centerSlideInCanvas)会把 '
+            'absolute 元素排除在内容并集外 → 把正文居中进带子下面、视觉重叠(旧 R-OVERLAP '
+            '只查同容器兄弟,查不出这种)。Fix:把内容带作为 `.stage`(flex column)最后一个 '
+            '流式子元素 + `margin-top` 间隔,让正文+带子作为整体被居中;或把 .stage 调高 / 内容下沉。'
+            '绝不靠缩字号或让内容贴边。')
+
+    # ---- R-VIS-DEAD-ANIM · 声明了 animation 但选择器运行时零匹配 (F-57 · 堵 F-51 整类) ----
+    # 该页自己的 <style>/custom_css 里某条规则声明了 animation,但其选择器在 present
+    # 模式下 document.querySelectorAll() 命中 0 个元素(no-match)或直接解析抛错
+    # (parse-error)→ 这条动画永不触发,被它驱动的元素停在动画初态(常是 opacity:0)
+    # → 内容永久隐身/永不上滚。最常见成因:lift / 前缀注入用正则啃选择器,把合法的
+    # `.slide-frame.is-current` 啃成非法的 `-frame.is-current`(`-frame` 是合法 CSS
+    # ident 故能解析,但没有 `<-frame>` 元素 → 永不匹配)。静态 CSS 分析看不出(每条
+    # 规则单独读都合法),只有运行时 querySelectorAll 才暴露。err 级(内容隐身是硬伤)。
+    for entry in report.get('dead_anim', [])[:20]:
+        _why = ('选择器解析失败(伪类 :is()/:has() 等写法非法)'
+                if entry.get('reason') == 'parse-error'
+                else '选择器运行时零匹配(很可能被前缀注入/lift 啃坏,'
+                     '如合法的 `.slide-frame.is-current` 被啃成非法的 `-frame.is-current`)')
+        iss.err('R-VIS-DEAD-ANIM',
+            f'slide {entry["slide_idx"]} · 该页 CSS 里 `{entry["selector"]}` 声明了 '
+            f'animation,但{_why} —— 这条动画永不触发,被它驱动的元素停在动画初态'
+            '(通常是 opacity:0 / transform 偏移),内容在投影上永久隐身或永不进场/上滚。'
+            'Fix: 把选择器修正到合法、运行时真能命中的形态(常见即把 `-frame.is-current` '
+            '还原成 `.slide-frame.is-current`,或把损坏的伪类写对);若该规则本就该删,'
+            '连 animation 声明一起删,别留死规则。(几何/DOM 判定,lift 页同样报 err —— '
+            '动画静默失效就是真缺陷。)')
+
+    # ---- R-VIS-DEAD-RULE · 声明了重要视觉属性但选择器运行时零匹配 (F-68 · F-57 超集) ----
+    # F-57 (dead_anim) 只覆盖 animation。但同一类"规则声明在源里、运行时选择器死掉、
+    # 元素静默退回浏览器默认值"的盲区还有非动画属性:冰山 `.hero-pct` 从 100px 死成
+    # 16px(16 是合规档,R20/R-VIS-TIER 全绿、无任何闸报警)、`.loop-row` 从 grid 死成
+    # block(排版塌掉、无报警)。这条把 dead-selector 判定扩到 position:absolute|fixed /
+    # display:grid|flex / font-size≥48px / width|height≥120px 这些一旦失效就视觉塌陷的
+    # 重要属性。判定逻辑同 dead_anim:运行时 querySelectorAll 零匹配或解析抛错才算死,
+    # 绝不靠"选择器里有没有注释"(`.a /*c*/ .b{}` ≡ 合法的 `.a .b{}`,注释=空白后代组合
+    # 子,照常应用,不一定死)。与主区 dead_anim 消费块口径一致:恒 err 不降级(规则静默
+    # 失效是硬伤,lift 页同样报 err)。
+    _DEAD_RULE_PROP_NOTE = {
+        'position':  ('退回 static → 定位元素跑位 / 叠层错乱', 'position:absolute|fixed'),
+        'display':   ('退回 block → grid/flex 排版整体塌掉(行/列变竖排)', 'display:grid|flex'),
+        'font-size': ('退回浏览器默认 ~16px → hero/大字号文字缩成小字,且 16 是合规档、'
+                      '字号闸(R20 / R-VIS-TIER)全绿不会报', '大字号'),
+        'width':     ('退回 auto → 尺寸塌缩 / 布局错位', '具体宽度'),
+        'height':    ('退回 auto → 尺寸塌缩 / 布局错位', '具体高度'),
+    }
+    for entry in report.get('dead_rule', [])[:20]:
+        _why = ('选择器解析失败(伪类 :is()/:has() 等写法非法)'
+                if entry.get('reason') == 'parse-error'
+                else '选择器运行时零匹配(很可能被前缀注入/lift 啃坏,'
+                     '如合法的 `.slide-frame.is-current` 被啃成非法的 `-frame.is-current`)')
+        _effect, _label = _DEAD_RULE_PROP_NOTE.get(
+            entry.get('prop'), ('元素退回浏览器默认值', entry.get('prop', '?')))
+        iss.err('R-VIS-DEAD-RULE',
+            f'slide {entry["slide_idx"]} · 该页 CSS 里 `{entry["selector"]}` 声明了 '
+            f'`{entry["prop"]}: {entry.get("value", "")}`({_label}),但{_why} —— '
+            f'这条规则永不生效,被它本该驱动的元素静默{_effect}。源里逐条读都合法、'
+            '字号/排版闸全绿,只有运行时 querySelectorAll 才暴露。'
+            'Fix: 把选择器修正到合法、运行时真能命中的形态(常见即把 `-frame.is-current` '
+            '还原成 `.slide-frame.is-current`,或把损坏的伪类写对);若该规则本就该删,'
+            '连声明一起删,别留死规则。(几何/DOM 判定,lift 页同样报 err —— '
+            '规则静默失效就是真缺陷。)')
 
     for entry in report.get('label_floor', [])[:20]:
         _lev = iss.warn if entry.get('lifted') else iss.err
@@ -504,6 +584,36 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
                 '窄条飘着 → 加宽或配伴随块。真有图但被判空说明图是 media→已计入不会误报;'
                 '故意留白 → `data-allow-imbalance`。')
 
+    # ---- R-VIS-CANVAS-CENTER · 内容整体在"画布"里垂直居中 (2026-05-31) ----
+    # R-VIS-BALANCE 只看"内容在 body 容器(.stage)内部"的上下留白是否均衡 —— 但
+    # 当 .stage 本身相对画布偏上时(如对称定位 top:200/bottom:200,中心 540,而画布
+    # 中心 ~597),内容在 .stage 内部均衡却整体偏上,balance 检测不出 → 漏报。这条补
+    # 这个洞:画布 = [主标题.header 底边 → 屏幕底 1080];内容并集(排除 .header)的垂直
+    # 中心 content_mid 应 ≈ 画布中心 canvas_mid = (hb + 1080)/2。offset = canvas_mid
+    # - content_mid(正=偏上,负=偏下)。is_full(内容比可用带还高、居中必然溢出画布)豁免
+    # ——这种顶对齐/溢出是对的。注意 is_full ≠"填满 72%":那种"两框带 gap 占 83% 但整体偏上"
+    # 的页放得下、应该居中,旧 0.72 阈值会误豁免(见 visual-audit.js 注释)。几何 name-free。
+    # Warn 级(留白判断主观,可 opt-out)。运行时 feishu-deck.js 已就地居中=本规则通常静默。
+    for entry in report.get('canvas_center', [])[:20]:
+        if entry.get('is_full'):
+            continue
+        offset = entry['offset']
+        if abs(offset) <= 40:
+            continue
+        _dir = '偏上' if offset > 0 else '偏下'
+        iss.warn('R-VIS-CANVAS-CENTER',
+            f'slide {entry["slide_idx"]} · `{entry["container_sel"]}` '
+            f'内容整体未在[标题底→屏幕底]画布垂直居中:{_dir} {abs(offset)}px'
+            f'(内容中心 {entry["content_mid"]}px / 画布中心 {entry["canvas_mid"]}px)'
+            ' —— 内容在 .stage 内部看似均衡,但 .stage 相对画布整体偏移,所以全页'
+            '看着上空/下空。这跟 R-VIS-BALANCE 互补:balance 看内容在容器内部的上下'
+            '留白,这条看内容并集中心 vs 画布([主标题底边→1080])中心。'
+            'Fix: 内容并集应在 [标题底→屏幕底] 画布里垂直居中;根因常是 .stage 用对称'
+            '定位(top/bottom 相等)使中心固定 540,而画布中心因标题占顶被推到 ~597 → '
+            '整体偏上。正解在 framework:让 content 的 .grid `flex:1` 撑满 stage + '
+            '`align-content:center`(稀疏自动居中、满铺自动顶对齐铺满);或确属设计意图 '
+            '→ 在 .slide 加 `data-allow-imbalance` 跳过。')
+
     # ---- R-VIS-CROWD · 框内文字挤到底边 (2026-05-30) ----
     # 框内文字离卡片可见底边过近且明显下偏 = "文字离下面太近"(qingdao 3up 等高卡
     # 实测离底 5px / 顶部 34px)。几何 name-free,不按版式名:松(下方大留白,如
@@ -515,6 +625,22 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
             'Fix: 让卡片按内容尺寸 + 垂直居中(参考 content-3up `align-self: center; '
             'justify-content: center`),或给框一个最小下内距 / 减少该框内容;'
             '若等高框内文字贴底是刻意设计 → 在 `.slide` 加 `data-allow-imbalance`。')
+
+    # R-VIS-PANEL-TOP · 框内单内容贴顶、下方大片空(crowd 的反向孪生,2026-06-01 pg29)。
+    # 一个 framed 面板容器(.col-visual / lifted .product-pane/.copy-pane/.case-pane)装着
+    # 一个比容器矮一大截的单内容块,内容贴顶、下方留大空 = 面板没把内容垂直居中。
+    # 框架已给 content-2col 的 .col-visual 单子加 flex 居中默认;这条兜 lifted/raw 页里
+    # 自定义 panel 容器仍贴顶的情况。warn 级(--strict 升 err),data-allow-imbalance 跳过。
+    for entry in report.get('panel_top', [])[:20]:
+        iss.warn('R-VIS-PANEL-TOP',
+            f'slide {entry["idx"]} · `{entry["sel"]}` 面板内单内容贴顶 —— 内容高 '
+            f'{entry["content_h"]}px 只占框 {entry["box_h"]}px 的一部分,顶距 '
+            f'{entry["top_px"]}px、底部却空了 {entry["bottom_px"]}px,内容卡在框顶。'
+            'Fix: 给该面板容器(panel/pane/col-visual 类)加 `display:flex; '
+            'flex-direction:column; justify-content:center`,让单内容在框内垂直居中'
+            '(框架已对 content-2col `.col-visual` 单子默认居中;lifted/raw 页的自定义 '
+            'panel 需在该页 `custom_css` 补这条);若刻意顶对齐 → `.slide` 加 '
+            '`data-allow-imbalance`。')
 
     # ---- R-VIS-SLACK-FLEX · flex:1 子容器撑出内部空白 ----
     # R-VIS-BALANCE 看的是 body container 顶级 children 之间的 sibling gap;
@@ -652,9 +778,13 @@ _VISUAL_AUDIT_JS_CACHE = None
 def _visual_audit_js():
     global _VISUAL_AUDIT_JS_CACHE
     if _VISUAL_AUDIT_JS_CACHE is None:
+        # visual-audit.js holds CJK bytes; a bare .read_text() decodes with the
+        # locale default, which under C/POSIX (the default in minimal Linux
+        # containers / CI) is ASCII and raises UnicodeDecodeError — crashing the
+        # DEFAULT validate path. Pin UTF-8 so it's locale-independent.
         _VISUAL_AUDIT_JS_CACHE = (
             Path(__file__).resolve().parent / 'visual-audit.js'
-        ).read_text()
+        ).read_text(encoding='utf-8')
     return _VISUAL_AUDIT_JS_CACHE
 
 
@@ -697,6 +827,7 @@ def inline_linked(html_text, base_dir):
 # is cosmetic). Adding/removing an audit = one registry line, both entries.
 STATIC_AUDITS = [
     (audit_dom_integrity,      ('html', 'iss')),
+    (audit_escaped_html,       ('slides', 'iss')),
     (audit_lift_style_lost,    ('html', 'iss')),
     (audit_structure,          ('slides', 'iss')),
     (audit_titles_one_line,    ('slides', 'iss')),
@@ -727,8 +858,6 @@ STATIC_AUDITS = [
     (audit_self_contained,     ('html', 'iss')),
     (audit_autobalance_present, ('html', 'iss')),
     (audit_perf,               ('html', 'iss')),
-    (audit_text_ids,           ('html', 'path', 'iss')),
-    (audit_feedback_md,        ('path', 'iss')),
 ]
 
 
@@ -751,7 +880,7 @@ def main():
                         '"column bleeds into legend" bug that static CSS '
                         'analysis cannot), R-VIS-TIER (computed fontSize on '
                         '4-tier ladder), R-VIS-HIER (meta ≤ body in each '
-                        'card), R-VIS-ALIGN (grid children equal height). '
+                        'card). '
                         'DEFAULT: on (~1-5s extra per deck). Use --no-visual '
                         'to skip (e.g. CI without Chromium). Gracefully '
                         'skips when playwright is not installed.')
@@ -806,8 +935,8 @@ def main():
         run_visual_audits(path, iss, want_screenshots=args.screenshots)
 
     if args.strict:
-        # Promote regular warnings to errors. SOFT warnings (R-FEEDBACK,
-        # R-VIS-ALIGN, etc.) stay as warnings — they are editorial
+        # Promote regular warnings to errors. SOFT warnings (R-VIS-NO-IMAGERY,
+        # R-SELF-CONTAINED, etc.) stay as warnings — they are editorial
         # advisories that should never fail CI.
         iss.errors.extend(iss.warnings)
         iss.warnings = []

@@ -27,8 +27,7 @@ bash skills/feishu-deck-h5/assets/reskin.sh <input.html> \
   output often hits R-OVERFLOW / R-VIS-LABEL-FLOOR on dense foreign
   content, needs human iteration)
 
-Output: `runs/<ts>-reskin-<slug>/output/index.html` + `deck.json` +
-`FEEDBACK.md`. Single-file inline delivery: `--inline` on render-deck.py,
+Output: `runs/<ts>-reskin-<slug>/output/index.html` + `deck.json`. Single-file inline delivery: `--inline` on render-deck.py,
 or `build.sh --inline` after.
 
 ### PRECONDITION — source canvas MUST be 1920×1080 (CHECK BEFORE INVOKING)
@@ -172,7 +171,6 @@ input.html
    ↓ PREFLIGHT (writable mount check)
    ↓ new-run.sh reskin-<slug> → runs/<ts>-reskin-<slug>/{input,output}/
    ↓ cp input.html → input/
-   ↓ FEEDBACK.md stub (so render-time validate doesn't warn R-FEEDBACK)
    ↓ reskin.py canvas preflight (1920×1080 required; else exit 3)
    ↓ reskin.py transforms (above 9 mandatory + Mode 1/2 split)
 deck.json {layout: "raw", data: {html: "<style>...</style>" + body content}}
