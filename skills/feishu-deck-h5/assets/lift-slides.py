@@ -334,8 +334,29 @@ def extract_head_slide_rules(src_head_css, slide_key, page_map):
             if mapped:
                 keys.add(mapped)
         if slide_key in keys:
-            new_sel = re.sub(r'\[data-page="?[\w-]+"?\]',
-                             f'[data-slide-key="{slide_key}"]', selector)
+            # `[data-page="N"]` matched the source FRAME (an ANCESTOR of `.slide`).
+            # The lifted raw slide carries the key ON `.slide` itself, so a plain
+            # token-swap yields `[data-slide-key="K"] .slide …` — which needs a
+            # `.slide` NESTED in the keyed node (none exists) → rule matches 0
+            # elements → the slide's bespoke layout collapses on lift (qingdao
+            # `feishu-ecosystem` repro: diagram + compare-table vanish). Fuse the
+            # redundant `(>) .slide` descendant onto the keyed `.slide` first,
+            # then re-anchor any remaining bare `[data-page]` token onto `.slide`.
+            #
+            # Strip CSS comments from the SELECTOR first: authors annotate rule
+            # groups inline (`[data-page="47"] /* 单 frame 卡片 */ .slide .card`),
+            # and a comment between `[data-page]` and `.slide` breaks the fusion
+            # → leaves a phantom ` .slide` descendant (radial icon positions
+            # `.i1`..`.i6`, card `height:100%`, table cell sizing silently die →
+            # "比例不对"). Comments are decorative in selector position; dropping
+            # them is semantically safe. Rule-body comments are untouched.
+            sel = re.sub(r'/\*[\s\S]*?\*/', ' ', selector)
+            new_sel = re.sub(
+                r'\[data-page="?[\w-]+"?\]\s*(?:>\s*)?\.slide\b',
+                f'.slide[data-slide-key="{slide_key}"]', sel)
+            new_sel = re.sub(
+                r'\[data-page="?[\w-]+"?\]',
+                f'.slide[data-slide-key="{slide_key}"]', new_sel)
             keep.append(f"{new_sel} {{ {body} }}")
     return "\n".join(keep)
 
@@ -362,22 +383,30 @@ def extract_one(src_lines, frame_start, frame_end):
             break
     if slide_open is None:
         raise ValueError(f"no <div class='slide'> found between lines {frame_start}..{frame_end}")
-    # Find the slide close by reverse-scanning from frame_end.
-    # The slide-frame structure is:
-    #   <div class="slide-frame">
-    #     <div class="slide">…</div>      ← we want THIS close
-    #   </div>                              ← slide-frame close
-    # So the slide close is the SECOND-from-end <code>&lt;/div&gt;</code>, not the first.
-    # (Earlier off-by-one bug stopped at slide-frame close and pulled an
-    # extra </div> into the inner — 2026-05-29 P15 R-DOM imbalance.)
-    closes_seen = 0
-    slide_close = frame_end - 1
-    while slide_close > slide_open:
-        if src_lines[slide_close - 1].strip().startswith('</div>'):
-            closes_seen += 1
-            if closes_seen == 2:
-                break
-        slide_close -= 1
+    # Find the slide close by DIV-DEPTH balance from the slide open — the line
+    # whose </div> brings depth back to 0 IS the slide close. The old "2nd
+    # </div>-line from the end" heuristic mis-counted whenever the .slide-frame
+    # close `</div>` sat on its own line below the .slide close: lift() passes
+    # frame_end = (next-frame start − 1) = the frame-close line, so the reverse
+    # scan started one line too low, counted the slide-close + the slide's LAST
+    # CHILD close as its "two" closes, and stopped early → the slide's final
+    # container (e.g. `.stage`) lost its </div> → +1 imbalance → R-DOM frame
+    # nesting on lift (qingdao `feishu-product-leadership` repro, 2026-06-01).
+    # Depth-balance is position-agnostic (works whether frame_end points at the
+    # frame-close line, a trailing blank, or a combined `</div></div>` line).
+    # Inline <style>/comments are masked (newlines preserved) so stray `<div`
+    # text in co-located CSS can't corrupt the count.
+    _frame_text = "".join(src_lines[slide_open - 1:frame_end])
+    _blank = lambda m: re.sub(r'[^\n]', ' ', m.group(0))
+    _masked = re.sub(r'<style[^>]*>.*?</style>', _blank, _frame_text, flags=re.S)
+    _masked = re.sub(r'<!--.*?-->', _blank, _masked, flags=re.S)
+    depth = 0
+    slide_close = frame_end
+    for _off, _ltext in enumerate(_masked.splitlines(keepends=True)):
+        depth += len(re.findall(r'<div\b', _ltext)) - len(re.findall(r'</div\s*>', _ltext))
+        if depth <= 0:
+            slide_close = slide_open + _off   # 1-indexed line holding the .slide close
+            break
 
     opening = src_lines[slide_open - 1]
 
@@ -434,18 +463,30 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
             inner = inner.replace(
                 f"url({q}assets/{f}{q}", f"url({q}{SKILL_PREFIX}assets/{f}{q}")
 
-    # 5) Auto-copy input/<file> references + leave path local
-    for m in re.finditer(r'''url\(['"]?input/([^'")\s]+)['"]?\)''', inner):
-        fname = m.group(1)
-        src = src_input_dir / fname
-        dst = dst_input_dir / fname
-        if src.is_file():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
-                shutil.copy2(src, dst)
-            report.setdefault("input_copied", []).append(fname)
-        else:
-            report.setdefault("input_missing", []).append(fname)
+    # 5) Auto-copy input/<file> references + leave path local. Scan EVERY asset
+    #    syntax (<img>/<source>/<video>/<iframe>/url()) via the SAME patterns the
+    #    F-45 report uses — NOT just CSS url() — else `<img src="input/…">` assets
+    #    silently fail to carry (broken images on lift) while the report still
+    #    claims them "carried". (F-76)
+    _input_seen = set()
+    for _pat in _ASSET_REF_PATTERNS:
+        for _m in _pat.finditer(inner):
+            _url = _m.group(1).strip()
+            if _classify_asset_ref(_url) != "input" or _url in _input_seen:
+                continue
+            _input_seen.add(_url)
+            fname = _url.split("?", 1)[0].split("#", 1)[0].lstrip("./")[len("input/"):]
+            if not fname:
+                continue
+            src = src_input_dir / fname
+            dst = dst_input_dir / fname
+            if src.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
+                    shutil.copy2(src, dst)
+                report.setdefault("input_copied", []).append(fname)
+            else:
+                report.setdefault("input_missing", []).append(fname)
 
     # 5.5) Inline framework `[data-layout=X]` CSS rescoped to slide-key.
     # When source's layout-specific rules (`.slide[data-layout="X"] …`) style the
@@ -629,8 +670,13 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         # F-45: informational asset-reference report. Surface what this page
         # references so a human can decide to swap/remove — never silent.
         if asset_refs:
-            present = [r for r in asset_refs
-                       if r["exists"] is True and r["kind"] != "clientlogo"]
+            # "carried" = actually copied by transform (input/ + prototypes/).
+            # `other`-kind refs (sibling .html, relative ../paths) resolve in the
+            # source but are NOT auto-copied — don't claim they're carried (F-76).
+            carried = [r for r in asset_refs
+                       if r["exists"] is True and r["kind"] in ("input", "prototype")]
+            other_present = [r for r in asset_refs
+                             if r["exists"] is True and r["kind"] == "other"]
             # clientlogo refs get their own line (with present/missing state), so
             # exclude them from the generic missing bucket to avoid double-listing.
             missing = [r for r in asset_refs
@@ -638,9 +684,12 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             logos = [r for r in asset_refs if r["kind"] == "clientlogo"]
             fw = [r for r in asset_refs if r["kind"] == "framework"]
             print(f"    ── asset refs ({len(asset_refs)}) ──")
-            if present:
+            if carried:
                 print(f"    ✓ present (carried): "
-                      f"{[r['url'] for r in present]}")
+                      f"{[r['url'] for r in carried]}")
+            if other_present:
+                print(f"    ⚠ present in source but NOT auto-copied (relink/verify): "
+                      f"{[r['url'] for r in other_present]}")
             if fw:
                 print(f"    ✓ framework/shared (resolve in skill): "
                       f"{[r['url'] for r in fw]}")
