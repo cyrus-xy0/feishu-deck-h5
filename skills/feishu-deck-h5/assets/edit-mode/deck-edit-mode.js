@@ -256,7 +256,9 @@
     dragSrc = e.currentTarget;
     dragSrc.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', dragSrc.dataset.slideKey || '');
+    // data-slide-key lives on the inner .slide, NOT the dragged .slide-frame —
+    // reading dragSrc.dataset.slideKey always gave '' (empty drag payload).
+    e.dataTransfer.setData('text/plain', dragSrc.querySelector('.slide')?.dataset.slideKey || '');
     snapshot('reorder');
   }
   function onDragEnd() {

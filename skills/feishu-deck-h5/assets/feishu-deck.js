@@ -489,7 +489,9 @@
       if (!raw) return false;
       if (/^\d+$/.test(raw)) {
         const idx = Math.max(0, Math.min(frames.length - 1, parseInt(raw, 10) - 1));
-        goTo(deck, frames, idx, false);
+        // updateHash=true normalizes an out-of-range / `#0` hash to the clamped
+        // slide's canonical #N (was left stale, mismatching the shown slide).
+        goTo(deck, frames, idx, true);
         return true;
       }
       // data-slide-key / id live on the inner .slide, not on .slide-frame
