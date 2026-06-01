@@ -867,6 +867,8 @@ this skill is the wrong choice — its design tokens are brand-locked.
 
 > 📎 转换 PDF/PPT/HTML/docs:**默认 1:1 页数不压缩(博裕&星巴克教训);先判 Replica vs Rewrite**。详见 `references/converting-existing-material.md`
 
+> **PPTX 资源 · EMF 矢量 logo 还原(2026-06-02 实战)**:PPTX 里的矢量 logo 常是 `.emf`,macOS `qlmanage`/`sips`/PIL 都渲染成**空白**(整页缩略图里这些格子是空白卡)。但这类 EMF 多是 **EMF+PDF 混合体**——`strings <f>.emf | grep -a %PDF` 命中即说明内嵌 PDF;切出来渲染即得无损清晰图:`d=open(f,'rb').read(); open('x.pdf','wb').write(d[d.find(b'%PDF'):d.rfind(b'%%EOF')+5])` 再 `sips -s format png -Z 1200 x.pdf --out x.png`。**铁律:拿到不认识的二进制资源先 `file`/`strings` 验格式,别先 `qlmanage` 渲染了凭糊图猜**——否则白走一圈 render→裁切→拼图才发现空白。
+
 ## SMALL-EDIT DISCIPLINE (mandatory) — 单点小改要秒级,别把简单事做成重活
 
 用户说「改这一页 / 这页字号不对 / 把 X 改成 Y / 这几个字」时,这是**单点编辑**,
@@ -1090,6 +1092,8 @@ Enforced by `validate.py` rule **R48** (`audit_default_centering`) — blocks de
 1. **生成即对(主力)** —— 居中、内容尺寸、卡片分布等布局正确性由**框架 CSS / schema 默认**保证(`.stage` 居中;版式 scoped 默认,如 content-3up / process / matrix / before-after / logo-wall 的"内容尺寸 + 共享中线 + 卡内垂直居中")。schema 路径理想是"零 finding":你描述 *what*,框架负责 *layout*,不手调字号/位置去凑。
 2. **校验(R48 / R-VIS-BALANCE / R-VIS-CROWD / L1–L4 …)= 安全网,不是主力** —— 只兜 construction 保证不了的(`layout: raw` 手写页、极端内容、外来 deck)。理想状态它越来越安静;**靠校验反复抓同一类布局问题 = 信号:该把它修进框架默认**。
 3. **反复出现的版式缺陷 → 修框架,别只加检测、更别每个 deck 局部 workaround。** 维护者标准打法:对该版式写 **scoped CSS 默认**(覆盖该 `data-layout`,不动全局 legacy 规则)→ 用 `assets/check-distribution.py`(三层 name-free 几何分布审计:画布/组/框;`--css` 注入测、`--fix` gated 修正)在**不均内容**上验证 findings 下降 **且其它版式零回归** → 再合;能升 schema 默认就别留给人手调。豁免要几何/结构判定(如 stats KPI 列顶基线对齐),**不要按版式名开白名单**。
+
+> **`layout:raw` 网格页一次写对,别等溢出/留白再修(2026-06-02 实战)**:① CSS Grid `repeat(N,1fr)` 默认 = `minmax(auto,1fr)`,子项内容(方/高 logo、长图)会把轨道撑过 1fr → **整行溢出被裁**(典型:logo 墙最后一行不见了)。固定行列**一律 `repeat(N,minmax(0,1fr))`(行、列都要)+ 子项 `min-width:0;min-height:0;overflow:hidden`**。② `position:absolute` 且 top/bottom 定高的 grid 容器(自定义 `.stage`)**单行仍按内容高** → 必须显式 `grid-template-rows:minmax(0,1fr)` 列才拉满高度,否则内容顶不到底、底部留白(`flex:1` 的 flex 列容器无此坑)。第一遍就写上,省掉「渲染→量→改→再渲染」2~3 个重周期。
 
 > 📎 细节见 `references/layout-recipes.md`
 
