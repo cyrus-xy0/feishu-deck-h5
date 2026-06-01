@@ -919,6 +919,10 @@
       if (mode === 'present' && typeof idx === 'number') {
         frames.forEach((f, i) => f.classList.toggle('is-current', i === idx));
         scaleNow(idx);
+        // Keep the URL hash in sync (#914): the mobile patch toggles is-current
+        // directly instead of going through the main goTo(), so without this a
+        // reload / shared link restored the wrong slide.
+        try { history.replaceState(null, '', '#' + (idx + 1)); } catch (e) {}
       } else if (mode === 'scroll') {
         frames.forEach((_, i) => scaleNow(i));
       }
@@ -931,6 +935,7 @@
         frames.forEach((f, i) => f.classList.toggle('is-current', i === next));
         scaleNow(next);
         updatePageNo();
+        try { history.replaceState(null, '', '#' + (next + 1)); } catch (e) {}
       }
     }
 
