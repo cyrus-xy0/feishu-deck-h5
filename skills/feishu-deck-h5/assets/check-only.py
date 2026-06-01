@@ -18,7 +18,7 @@
     排查 framework bug / 改 validator 时用. 实现 = build_default_report().
 
   入库门禁 — `bash check-only.sh deck.html --gate ingest`
-    只看 21 条必修规则 (业务关切 A/B/C 三类), 全部 warn 升 error.
+    只看 业务必修规则 (业务关切 A/B/C 三类), 全部 warn 升 error.
     用 business-rules.yaml 把每条违规渲染成业务语言: 业务症状 / 不修后果 /
     具体修改步骤 + 技术代码做小字附注.
     适合 ingest-package.py 调来做 slide-library 准入扫描.
@@ -94,7 +94,7 @@ CONCERN_ORDER = [
 
 
 def load_business_rules() -> dict:
-    """从 business-rules.yaml 加载 21 条必修规则的业务文案."""
+    """从 business-rules.yaml 加载 业务必修规则的业务文案."""
     try:
         import yaml
     except ImportError:
@@ -453,7 +453,7 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
     lines.append(f'- **Slide 数**: {slides_count}')
 
     if not violations:
-        lines.append(f'- **结果**: ✅ **通过** —— 21 条必修规则全部满足, 可入库')
+        lines.append(f'- **结果**: ✅ **通过** —— 业务必修规则全部满足, 可入库')
         lines.append('')
         lines.append('---')
         lines.append('')
@@ -597,7 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
   # 默认模式: 按 family 分组 review-style 报告
   python3 check-only.py ../examples/sample-deck.html
 
-  # 入库门禁模式: 21 条必修规则, 业务语言报告, 任一违规即 exit 1
+  # 入库门禁模式: 业务必修规则, 业务语言报告, 任一违规即 exit 1
   python3 check-only.py /path/to/deck.html --gate ingest
 
   # 写报告到文件 (默认或 gate 模式都可)
@@ -613,7 +613,7 @@ def build_parser() -> argparse.ArgumentParser:
                         '(CI 无 chromium 时); --gate ingest 强制开启. '
                         '未装 playwright/chromium 时自动跳过, 不硬失败')
     p.add_argument('--gate', choices=['ingest'],
-                   help='入库门禁模式. ingest = 21 条必修规则, '
+                   help='入库门禁模式. ingest = 业务必修规则, '
                         '业务语言报告, 库 ingest-package.py 用')
     p.add_argument('--by-rule', action='store_true',
                    help='工程师视图: 按技术规则家族 (R06 / R-VIS-TIER…) 分组. '
@@ -655,7 +655,7 @@ def main() -> int:
         # F-18: warn (don't block) if yaml lists a code validate.py no longer
         # emits — otherwise that rule silently drops out of the gate.
         warn_on_gate_rule_drift(set(rules.keys()), enumerate_validate_rules())
-        # 只保留 yaml 里覆盖的规则 (21 条必修)
+        # 只保留 yaml 里覆盖的规则 (业务必修)
         kept = [(c, m) for c, m in iss.errors if c in rules]
         report = build_gate_report(path, len(slides), kept, rules)
         # exit code 反映 gate 通过与否
