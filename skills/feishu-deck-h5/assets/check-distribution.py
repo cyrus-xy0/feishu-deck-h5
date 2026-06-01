@@ -179,8 +179,8 @@ MEASURE_JS = r"""
         bottomInset: content ? (cbox.bottom - content.bottom) / scale : null,
         leftInset: content ? (content.left - cbox.left) / scale : null,
         rightInset: content ? (cbox.right - content.right) / scale : null,
-        fillV: content ? (content.bottom - content.top) / cbox.h : null,
-        fillH: content ? (content.right - content.left) / cbox.w : null,
+        fillV: (content && cbox.h) ? (content.bottom - content.top) / cbox.h : null,
+        fillH: (content && cbox.w) ? (content.right - content.left) / cbox.w : null,
         blockCount: blocks.length,
       },
       gaps,
@@ -227,7 +227,11 @@ def signals_for(s):
     # ---------- L2 · GROUP ----------
     gaps = sorted(s["gaps"])
     if len(gaps) >= 2:
-        med = gaps[len(gaps)//2]
+        # LOWER median (typical gap, excluding the outlier max). The old
+        # `gaps[len//2]` picked the UPPER-middle, so for exactly 2 gaps it
+        # equalled the max → `mx > 1.9*med` was `mx > 1.9*mx` → the dead-band
+        # check could never fire on a 2-gap group.
+        med = gaps[(len(gaps) - 1) // 2]
         mx = gaps[-1]
         edge = min([v for v in [ti, bi] if v is not None] or [9999])
         if med > 0 and mx > 1.9 * med and mx > 1.4 * edge and mx > 120:
@@ -368,7 +372,7 @@ def main():
 
     show_after = bool(args.fix or args.css)
 
-    if args.slide:
+    if args.slide is not None:  # slides are 0-indexed; `--slide 0` is valid, not "no filter"
         data = [s for s in data if s["idx"] == args.slide]
         if data_after:
             data_after = [s for s in data_after if s["idx"] == args.slide]
