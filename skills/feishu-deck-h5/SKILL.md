@@ -6,22 +6,24 @@ description: |
   "汇报材料", "客户提案", "h5 deck", "16:9 网页演示", "用 html 模仿 ppt", or the user
   attaching the 飞书 .thmx master. Produces a dark, cinematic deck at 1920×1080 with
   auto scale-to-fit + a mobile vertical browse mode in one file. Default language is
-  CHINESE-ONLY; bilingual ZH+EN is opt-in (external bilingual pitch). Output looks
-  indistinguishable from a hand-built Lark sales deck. Do NOT use for a real PowerPoint
-  .pptx — that's the pptx skill. Also runs in CHECK-ONLY mode when the user hands over
-  a finished HTML and asks for review / validation (e.g. "帮我检查这份 HTML",
-  "validate this", "审一下这个 deck") — see MODE SELECTION in SKILL.md body for the
-  full trigger list and what each mode does.
+  CHINESE-ONLY; bilingual ZH+EN is opt-in (external bilingual pitch). Do NOT use for a
+  real PowerPoint .pptx — that's the pptx skill. GENERATION default (never skip): first
+  run the design phase (per-page, default-on), then default every page to layout:raw —
+  fall back to a schema layout only for plain standard shapes. Also runs in CHECK-ONLY
+  mode when the user hands over a finished HTML and asks for review / validation (e.g.
+  "帮我检查这份 HTML", "validate this", "审一下这个 deck") — see MODE SELECTION in
+  SKILL.md body for the full trigger list and what each mode does.
 ---
 
 # feishu-deck-h5
 
 > **🛑 STOP — read this preflight before doing anything else.**
 
-> **🚦 两道硬闸 · 任何 GENERATION 都不许跳过(2026-06-01 · Mira "case-b" 事故后加):**
+> **🚦 三道硬闸 · 任何 GENERATION 都不许跳过(2026-06-01 · Mira "case-b" 事故后加;2026-06-02 补第 3 道):**
 > 1. **产出 deck 只能靠 `render-deck.py`(写 `deck.json` 再渲染),绝不用 `Write`/`Edit` 手搓 `index.html`。** Path B(整页手写)是极少数逃生口 —— 用前必须显式声明「走 Path B,原因=X」且事后仍跑 `validate.py`;默认一律 Path A。手搓 index.html = 把渲染器自带的 validate / 官方 assets / 四档字号 / 品牌色板**全部绕过** → logo·字体·母版色必错(这正是事故根因)。
 > 2. **没过 `validate.py` 不算完成、不许交付。** Path A 渲染器每次自动跑;任何手搓 / post-render 编辑后必须显式 `python3 assets/validate.py <html> --no-visual`,exit≠0 改到 0 为止。
-> Claude Code 侧已有 PostToolUse hook 自动拦截手搓的 deck index.html(挂了就打回);Mira 等无 hook 的 harness **靠你自觉守这两条**。
+> 3. **GENERATION 必先走设计、且每页默认 raw —— 绝不直接出 deck。** 任何「做 / 改 deck」先在 chat 跑 **DESIGN PHASE**(逐页判定、默认开,见下 `## DESIGN PHASE`);然后每页**默认 `layout:"raw"`**(走框架原语:字号 `var(--fs-*)` + `fs-` 组件类 + 词汇库 pattern,不裸写 CSS),**只有**命中「纯标准形状白名单」(封面 / 收尾 / 单 quote / 纯目录 / 单排 KPI / 纯并列卡 / 纯对比表 / replica)才回退 schema layout(见下 `## DECK GENERATION POLICY`)。跳过设计、或无脑套 schema / 手搓,都是违闸。**这两个默认本来埋在正文 11–28% 处;无 hook 的 harness(Mira)会静默跳过中段 prose,所以提到顶部当硬闸。**
+> Claude Code 侧已有 PostToolUse hook 自动拦截手搓的 deck index.html(挂了就打回);Mira 等无 hook 的 harness **靠你自觉守这三条**。
 
 ## REQUEST ROUTER (step 0 · mandatory) — 收到任何请求,先锁定「模式 / 范围 / 哪一页」再动手
 
