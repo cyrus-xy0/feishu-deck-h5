@@ -121,13 +121,18 @@ def rewrite_palette(css: str, rules: dict, warnings: list[str]) -> str:
         # Grayscale-ish colors (muted text, dim borders) stay as source.
         if _is_grayscale_ish(rgb):
             return None
-        # Cyan redirect: anything close to cyan goes to --fs-blue per R49
-        if _rgb_distance(rgb, cyan_rgb) < 60:
-            return f"var({cyan_redirect})"
+        # Nearest palette color FIRST, then the R49 cyan redirect — so a
+        # legitimate brand color that happens to sit within 60 of cyan but is
+        # AT LEAST AS CLOSE to a real palette token (e.g. --fs-teal) maps to
+        # that token instead of being force-redirected to blue.
         closest_var, closest_rgb = min(
             fs_colors, key=lambda kv: _rgb_distance(rgb, kv[1])
         )
-        if _rgb_distance(rgb, closest_rgb) <= threshold:
+        closest_dist = _rgb_distance(rgb, closest_rgb)
+        cyan_dist = _rgb_distance(rgb, cyan_rgb)
+        if cyan_dist < 60 and not (closest_dist <= threshold and closest_dist <= cyan_dist):
+            return f"var({cyan_redirect})"   # cyan-ish with no closer real match → blue (R49)
+        if closest_dist <= threshold:
             return f"var({closest_var})"
         return None  # too far, keep original
 
@@ -416,16 +421,22 @@ def strip_drop_shadows(css: str, warnings: list[str]) -> str:
     def fix(m):
         nonlocal stripped
         val = m.group(1)
+        term = m.group(2)            # the `;` or `}` that ended the declaration
         parts = _split_csv_respecting_parens(val)
         kept = [p for p in parts if keep_part(p)]
         dropped = len(parts) - len(kept)
         stripped += dropped
         if not kept:
-            return ""  # delete whole declaration
-        return f"box-shadow: {', '.join(kept)};"
+            # Drop the whole declaration, but KEEP a `}` terminator (it closes
+            # the rule). A `;` terminator goes away with the declaration.
+            return "}" if term.strip() == "}" else ""
+        return f"box-shadow: {', '.join(kept)}{term}"
 
     css = re.sub(
-        r"box-shadow\s*:\s*([^;]+);",
+        # Stop at `;` OR `}` and re-emit the terminator — a box-shadow that is
+        # the LAST declaration in its block (no trailing `;`) otherwise lets
+        # `[^;]+` run past `}` into the next rule.
+        r"box-shadow\s*:\s*([^;}]+)(\s*[;}])",
         fix,
         css,
     )
@@ -1124,11 +1135,20 @@ def drop_foreign_chrome_rules(css: str, rules: dict, warnings: list[str]) -> str
         if len(css) != before:
             n_dropped += 1
 
-    # Neutralize background on selectors matching substrings
+    # Match a neutralize-sub as a STANDALONE selector token — a bare substring
+    # `s in sel` wrongly neutralized `.card-body` / `.slide-frame` because
+    # 'body' / '.slide' are substrings of them.
+    def _sel_token_present(sub, sel):
+        if sub[:1] in ('.', '#'):           # class / id — only a right boundary
+            return re.search(re.escape(sub) + r'(?![\w-])', sel) is not None
+        # element selector — standalone token (not a class / word suffix)
+        return re.search(r'(?<![\w.#-])' + re.escape(sub) + r'(?![\w-])', sel) is not None
+
+    # Neutralize background on selectors matching the neutralize-subs
     def neutralize(m):
         nonlocal n_dropped
         sel, body = m.group(1), m.group(2)
-        if any(s in sel for s in bg_neutralize_subs):
+        if any(_sel_token_present(s, sel) for s in bg_neutralize_subs):
             # Drop background:/background-image:/background-color: from body
             new_body = re.sub(
                 r"background(?:-color|-image)?\s*:[^;]+;?",
@@ -1324,7 +1344,11 @@ def reskin(input_html: str, slug: str, rules: dict, keep_source_typography: bool
     # default font doesn't cascade into source content.
     source_font_family: str | None = None
     m_ff = re.search(
-        r"(?:^|\s)(?:html|body)(?:\s*,\s*(?:html|body))?\s*\{[^}]*?font-family\s*:\s*([^;]+);",
+        # Stop the capture at `;` OR `}` — a font-family that is the LAST
+        # declaration in its block (no trailing `;`) otherwise let `[^;]+` run
+        # past the closing `}` into the next rule until some later `;`, capturing
+        # garbage markup as the "font stack".
+        r"(?:^|\s)(?:html|body)(?:\s*,\s*(?:html|body))?\s*\{[^}]*?font-family\s*:\s*([^;}]+)\s*[;}]",
         css,
         re.IGNORECASE | re.DOTALL,
     )

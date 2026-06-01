@@ -4,6 +4,25 @@
 > 候选 184 →(去重)**173 工单 F-77..F-249**:🔴 高 23 · 🟡 中 56 · ⚪ 低 94。
 > 工具产物:workflow `wf_112af030-c7f`(task `wkc59ueqr`)。
 
+## 修复进度(2026-06-02 · 在 main 上分批 commit,不 push)
+**全部 HIGH 已修复或带理由延后。** 提交序列(每批 `py_compile`/`node --check` + 复现/集成测试 + `226 passed`):
+- 模板引擎族 R1/R2 + scope_selectors 融合 + 5 处 exact-`class="slide"` 正则
+- validate-deck R3(cols 误拒)+ R-KEY↔schema 对齐 + data 类型守卫
+- 资产扫描族:lift `<img src>`(#9)/key 去重(#8)/appended==0;deck-cli paste 裸图(#6)
+- 校验器正确性:DEAD-ANIM(#14)/R12 多层/空头区误报/raw-looks 卡片·viewBox·箭头/死代码/yaml 重复键
+- check-only D/E 关切(#78)· bak-and-log 删除守卫(#77)· import-html key slug+渲染失败传播(#10/#11)
+- copy-assets 仓内 run 本地化(#18)+ 路径穿越守卫 · edit-mode 结构/XSS/保存失败/快捷键(#80/#81/#83/#724)
+- render `--inline` 丢框架图(#3)+ migrate `@keyframes`(#13)· CSS 双箭头(#84,需视觉抽查)
+- 中危批:Playwright 故障不阻断 · text-swap 备份不覆盖 · clone 位置校验 · check-distribution 死带/Infinity/--slide 0
+
+**⏸️ 带理由延后(非清晰可修,需交互/视觉验证或属设计权衡)**
+- `feishu-deck.js centerSlideInCanvas`(R-VIS-BAND-COLLIDE 运行时根因):纳入 `position:absolute` 会把装饰层卷入并集 → 误居中**每一份** deck;无干净的内容/装饰启发式,且 sanctioned 修法是已存在的 `R-VIS-BAND-COLLIDE` 作者侧校验。
+- `edit-mode #82`(undo 快照 `innerHTML` vs 保存 `documentElement`):undo 作用域重构需交互验证。
+- `feishu-deck.js` 移动端监听泄漏/setMode 脱同步/媒体重播(by-design)等运行时项:需浏览器验证。
+- schema `additionalProperties`/variant 约束(会拒存量 deck)· `R-ESC-HTML` 短标签(会漏真 bug)· schema `search→fullmatch`(JSON-Schema 语义)· import `#12`(走 `lift --shake`)。
+
+**🔜 剩余尾巴(下表 ☐ 未勾选者):** 主要是 `reskin.py`、`log-tool`、`reconcile/clean-lifted`、`sync-index`/`_css_utils` 的 CSS-解析鲁棒性、各文件零散 low、schema/模板/shell/tests-docs。多为低危或需交互验证。
+
 ## 测试基线
 - 审计当时(`raw-first-stance` @ `1a14115`):`221 passed, 1 FAILED`(`R-RAW-LOOKS-SCHEMA` 未写进 `references/validator-rules.md`)。
 - 现 `main`(并行 session 合并 raw-first + 3 个新提交后):**`226 passed, 0 failed`**。
