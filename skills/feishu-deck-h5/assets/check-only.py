@@ -88,6 +88,8 @@ CONCERN_ORDER = [
     'A · 客户看不见',
     'B · 库找不回这张 slide',
     'C · 复用时会打架',
+    'D · 放映功能不全',
+    'E · 文件偏大可能卡顿',
 ]
 
 
@@ -474,7 +476,14 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
     lines.append('按下列业务关切分组列出, 优先处理 A (客户看不见) > B (库找不回) > C (复用打架).')
     lines.append('')
 
-    by_concern: dict[str, list] = {c: [] for c in CONCERN_ORDER}
+    # Effective bucket order: the canonical A–E prefix PLUS any other concern
+    # value present in business_rules (so a future concern can't be silently
+    # misrouted into the "未覆盖" section — the bug that hit D/E). Sorted so a
+    # new "F · …" lands after E.
+    extra = sorted({(r.get('concern') or '?') for r in business_rules.values()}
+                   - set(CONCERN_ORDER) - {'?'})
+    order = CONCERN_ORDER + extra
+    by_concern: dict[str, list] = {c: [] for c in order}
     unknown_codes = []
     for code, msg in violations:
         rule = business_rules.get(code)
@@ -482,15 +491,12 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
             unknown_codes.append((code, msg))
             continue
         concern = rule.get('concern', '?')
-        # tolerant matching: yaml 里可能没完全用 CONCERN_ORDER 字面值
-        matched_bucket = next(
-            (b for b in CONCERN_ORDER if b == concern), None)
-        if matched_bucket is None:
-            unknown_codes.append((code, msg))
+        if concern not in by_concern:
+            unknown_codes.append((code, msg))  # rule carries no recognizable concern
             continue
-        by_concern[matched_bucket].append((code, msg, rule))
+        by_concern[concern].append((code, msg, rule))
 
-    for concern in CONCERN_ORDER:
+    for concern in order:
         violations_in_bucket = by_concern[concern]
         if not violations_in_bucket:
             continue
