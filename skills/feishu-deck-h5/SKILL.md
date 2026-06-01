@@ -18,6 +18,11 @@ description: |
 
 > **🛑 STOP — read this preflight before doing anything else.**
 
+> **🚦 两道硬闸 · 任何 GENERATION 都不许跳过(2026-06-01 · Mira "case-b" 事故后加):**
+> 1. **产出 deck 只能靠 `render-deck.py`(写 `deck.json` 再渲染),绝不用 `Write`/`Edit` 手搓 `index.html`。** Path B(整页手写)是极少数逃生口 —— 用前必须显式声明「走 Path B,原因=X」且事后仍跑 `validate.py`;默认一律 Path A。手搓 index.html = 把渲染器自带的 validate / 官方 assets / 四档字号 / 品牌色板**全部绕过** → logo·字体·母版色必错(这正是事故根因)。
+> 2. **没过 `validate.py` 不算完成、不许交付。** Path A 渲染器每次自动跑;任何手搓 / post-render 编辑后必须显式 `python3 assets/validate.py <html> --no-visual`,exit≠0 改到 0 为止。
+> Claude Code 侧已有 PostToolUse hook 自动拦截手搓的 deck index.html(挂了就打回);Mira 等无 hook 的 harness **靠你自觉守这两条**。
+
 ## REQUEST ROUTER (step 0 · mandatory) — 收到任何请求,先锁定「模式 / 范围 / 哪一页」再动手
 
 任何请求进来,**动手前先答完这三问并锁定**。这是防止「用户改一页、我却整了
