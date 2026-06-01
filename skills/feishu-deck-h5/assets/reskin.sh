@@ -103,8 +103,19 @@ echo "==> reskin: input=$INPUT_ABS slug=$SLUG"
 
 # ──────────────────────────────────────────────────────── 1. PREFLIGHT
 
-if ! bash "$SCRIPT_DIR/preflight.sh" >/dev/null 2>&1; then
-  echo "✗ preflight failed — run 'bash assets/preflight.sh' for details" >&2
+PF_OUT="$(bash "$SCRIPT_DIR/preflight.sh" 2>&1)"; PF_RC=$?
+if [ "$PF_RC" -ne 0 ]; then
+  echo "✗ preflight failed:" >&2
+  printf '%s\n' "$PF_OUT" | sed 's/^/    /' >&2
+  exit 2
+fi
+# A read-only-mount bootstrap prints PREFLIGHT BOOTSTRAPPED + a writable
+# workspace path. reskin can't keep operating in the RO mount — surface it so
+# the caller cd's into the workspace and re-runs (the old code discarded this
+# output and silently proceeded in the wrong dir).
+if printf '%s' "$PF_OUT" | grep -q "PREFLIGHT BOOTSTRAPPED"; then
+  echo "✗ reskin: skill mounted read-only — cd into the writable workspace below and re-run:" >&2
+  printf '%s\n' "$PF_OUT" | grep -i "workspace" | sed 's/^/    /' >&2
   exit 2
 fi
 

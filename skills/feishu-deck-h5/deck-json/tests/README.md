@@ -4,12 +4,14 @@ Minimal test suite added in P3 (post local-multi-agent review). Catches the
 drift bugs the reviewers found:
 
 - `test_validate_examples.py` — every example deck.json validates clean
-- `test_render_examples.py` — every example renders + every emitted
-  data-text-id reverse-maps via editor.js textIdToSlidePath
-- `test_editor_schema_parity.py` — editor.js BLOCK_TYPES / EXTRA_FIELDS /
-  ARRAY_FIELDS field names + enums match deck-schema.json $defs
+- `test_render_deck_golden.py` — example decks render to a stable golden snapshot
 - `test_deck_cli_smoke.py` — CLI subcommands round-trip safely (backup +
   rollback on schema fail)
+- plus the broader `test_validate_*` / `test_vis_*` / `test_lift_slides` /
+  `test_css_utils` / `test_check_only_gate` suites
+
+(Historical note: `test_render_examples.py` and `test_editor_schema_parity.py`
+were removed alongside the `data-text-id` editor sidecar — don't reference them.)
 
 ## Running
 
