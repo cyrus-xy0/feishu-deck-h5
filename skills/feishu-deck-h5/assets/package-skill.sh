@@ -144,6 +144,11 @@ if [ "$VERIFY" -eq 1 ]; then
     exit 2
   fi
   rm -f /tmp/pkg-verify-$$.log
+  # check-mira / preflight write scratch INTO the staged copy during verify
+  # (preflight cache + RO-mount workspace mirror). Strip it so the scratch
+  # doesn't ship inside the distribution tarball. (#132)
+  rm -rf "$STAGE/.feishu-deck-h5-preflight-cache" \
+         "$STAGE/.feishu-deck-h5-workspace" 2>/dev/null || true
 fi
 
 # ---- Tarball ---------------------------------------------------------------

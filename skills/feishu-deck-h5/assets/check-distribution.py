@@ -392,8 +392,11 @@ def main():
                     cb = s['container']; ca = a['container']
                     print(f"     container insets T/B {px(cb['topInset'])}/{px(cb['bottomInset'])} → "
                           f"{px(ca['topInset'])}/{px(ca['bottomInset'])} · fillV {pct(cb['fillV'])}→{pct(ca['fillV'])}")
-                    for i,(bx) in enumerate(s['boxes']):
-                        ax = a['boxes'][i] if i < len(a['boxes']) else None
+                    # Pair before/after boxes by selector, not positional index:
+                    # --fix/--css can change which elements qualify as framed
+                    # boxes, so index i may point at a different element. (#391)
+                    for bx in s['boxes']:
+                        ax = next((x for x in a['boxes'] if x.get('sel') == bx.get('sel')), None)
                         if ax and not bx.get('media'):
                             print(f"     box {bx['sel']:<16} T/B {px(bx['topInset'])}/{px(bx['bottomInset'])} → "
                                   f"{px(ax['topInset'])}/{px(ax['bottomInset'])}")
