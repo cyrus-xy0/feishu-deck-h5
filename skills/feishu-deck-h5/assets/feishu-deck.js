@@ -185,7 +185,20 @@
       if (header && (el === header || header.contains(el))) return;
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
-      if (cs.position === 'absolute' || cs.position === 'fixed') return;        // .stage / header / wordmark
+      if (cs.position === 'absolute' || cs.position === 'fixed') {
+        // Skip structural/chrome (.stage / header / wordmark) and decorative
+        // absolute layers — but INCLUDE an absolutely-positioned CONTENT BAND
+        // (a DIRECT child of .slide, i.e. a sibling of .stage, that bears text),
+        // else the runtime centers the in-flow content right UNDER it
+        // (R-VIS-BAND-COLLIDE root). Deliberately narrow: ONLY that exact band
+        // shape is newly measured — chrome, decorative layers, and deeper
+        // absolute labels stay skipped, so normal decks are unaffected.
+        const isBand = el.parentElement === slide && _abHasText(el)
+          && !el.classList.contains('stage')
+          && !el.classList.contains('header')
+          && !el.classList.contains('wordmark');
+        if (!isBand) return;
+      }
       const tag = el.tagName;
       const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg' || tag === 'CANVAS' || tag === 'VIDEO';
       if (!_abHasText(el) && !isMedia && el.children.length) return;            // empty wrappers don't count
