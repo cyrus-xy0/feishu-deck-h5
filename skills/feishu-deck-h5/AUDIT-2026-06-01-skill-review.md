@@ -4,24 +4,35 @@
 > 候选 184 →(去重)**173 工单 F-77..F-249**:🔴 高 23 · 🟡 中 56 · ⚪ 低 94。
 > 工具产物:workflow `wf_112af030-c7f`(task `wkc59ueqr`)。
 
-## 修复进度(2026-06-02 · 在 main 上分批 commit,不 push)
-**全部 HIGH 已修复或带理由延后。** 提交序列(每批 `py_compile`/`node --check` + 复现/集成测试 + `226 passed`):
-- 模板引擎族 R1/R2 + scope_selectors 融合 + 5 处 exact-`class="slide"` 正则
-- validate-deck R3(cols 误拒)+ R-KEY↔schema 对齐 + data 类型守卫
-- 资产扫描族:lift `<img src>`(#9)/key 去重(#8)/appended==0;deck-cli paste 裸图(#6)
-- 校验器正确性:DEAD-ANIM(#14)/R12 多层/空头区误报/raw-looks 卡片·viewBox·箭头/死代码/yaml 重复键
-- check-only D/E 关切(#78)· bak-and-log 删除守卫(#77)· import-html key slug+渲染失败传播(#10/#11)
-- copy-assets 仓内 run 本地化(#18)+ 路径穿越守卫 · edit-mode 结构/XSS/保存失败/快捷键(#80/#81/#83/#724)
-- render `--inline` 丢框架图(#3)+ migrate `@keyframes`(#13)· CSS 双箭头(#84,需视觉抽查)
-- 中危批:Playwright 故障不阻断 · text-swap 备份不覆盖 · clone 位置校验 · check-distribution 死带/Infinity/--slide 0
+## 修复进度(2026-06-02 · 分批 commit,不 push · 25 批)
+**全部三类(高/中/低)都走了一遍。** 测试:`231 passed, 0 failed`(原 226 + 5 个新回归测试)。每批 `py_compile`/`node --check` + 复现/集成测试。`[需视觉抽查]` 标记的 JS/CSS 运行时改动须在浏览器里抽查。
 
-**⏸️ 带理由延后(非清晰可修,需交互/视觉验证或属设计权衡)**
-- `feishu-deck.js centerSlideInCanvas`(R-VIS-BAND-COLLIDE 运行时根因):纳入 `position:absolute` 会把装饰层卷入并集 → 误居中**每一份** deck;无干净的内容/装饰启发式,且 sanctioned 修法是已存在的 `R-VIS-BAND-COLLIDE` 作者侧校验。
-- `edit-mode #82`(undo 快照 `innerHTML` vs 保存 `documentElement`):undo 作用域重构需交互验证。
-- `feishu-deck.js` 移动端监听泄漏/setMode 脱同步/媒体重播(by-design)等运行时项:需浏览器验证。
-- schema `additionalProperties`/variant 约束(会拒存量 deck)· `R-ESC-HTML` 短标签(会漏真 bug)· schema `search→fullmatch`(JSON-Schema 语义)· import `#12`(走 `lift --shake`)。
+### ✅ 已修复(按域)
+- **模板引擎族**:R1(花括号崩)/R2(custom_css 丢)+ `scope_selectors` `[data-page]` 融合 + `_css_utils` `_match_brace`(string/comment-aware)+ 5 处 exact-`class="slide"` 正则
+- **validate-deck**:R3(cols 误拒)+ R-KEY↔schema 对齐 + data 类型守卫 + pattern `fullmatch`(尾换行洞)
+- **资产扫描族**:lift `<img src>`(#9)/key 去重(#8)/appended==0;deck-cli paste 裸图(#6);copy-assets 仓内 run 本地化(#18)+ 路径穿越守卫
+- **校验器正确性**:DEAD-ANIM(#14)/R12 多层/空头区误报/raw-looks(卡片·viewBox·箭头)/R13·undefined-var·font-size 精度/iframe vouch/inline_linked 顺序/视觉报告 try 容错/死代码/yaml 重复键
+- **check-only** D/E 关切(#78)· **bak-and-log** 删除守卫(#77)· **import-html** key slug + 渲染失败传播(#10/#11)+ slides 守卫
+- **edit-mode**:结构/XSS/保存失败/快捷键(#80/#81/#83/#724)+ 拖拽回灌侧栏(#246)+ data-mode(#305)+ drag key(#228)+ undo 恢复 scale/侧栏(#82 实际故障)
+- **render**:`--inline` 丢框架图(#3)+ script defer · **migrate** `@keyframes`(#13)+ 幂等 · **CSS** 双箭头(#84)
+- **feishu-deck.js**:`centerSlideInCanvas` 纳入绝对定位内容带(R-VIS-BAND-COLLIDE,最窄改法)+ 移动端 hash 同步(#914)+ maybeBalance abort 守卫 + #0 hash 归一
+- **deck-cli**:锁/备份碰撞/clone 位置/lint/set-variant 补字段(#309)· **reskin** font-family/box-shadow/bg-neutralize/cyan
+- **杂项**:sync-index 回灌拖拽重排 · schema `additionalProperties`+lift_origin · Playwright 故障不阻断 · text-swap 备份不覆盖 · check-distribution 死带/Infinity/--slide 0/配对 · reconcile-reflow `_probe` 对齐 · log-tool transcript/sev · reconcile/clean-lifted 正则 · rebundle 路径守卫 · shell(finalize/new-run/build/migrate-shared/reskin.sh/package-skill)· README/extract/story-case
 
-**🔜 剩余尾巴(下表 ☐ 未勾选者):** 主要是 `reskin.py`、`log-tool`、`reconcile/clean-lifted`、`sync-index`/`_css_utils` 的 CSS-解析鲁棒性、各文件零散 low、schema/模板/shell/tests-docs。多为低危或需交互验证。
+### ⚠️ 改了→回滚(亲测会坏)
+- `_validate_common` 伪造 framework 标记(nonce):实现后挂 2 个测试(夹具手搓 `data-source="framework"`),破坏既有约定;洞本质是作者藏自己的 CSS=自伤。已干净回滚。
+
+### 🚫 查证后确认不改(改了更糟 / moot / 根本限制 · 附理由)
+- `R-ESC-HTML` 短标签:正则本就要求 `&lt;`+标签名间无空格,数学比较不匹配,误报近乎零;建议的「要求属性」会漏 `<b>word</b>` 真 bug。
+- preflight `pipefail`:实测无 `|head/tail/grep -q` 早关管道,pipefail 空操作;`-u` 进硬闸门会因可选未设变量假失败阻断全技能。
+- 视频进场重播:本有 `data-no-restart` opt-out。
+- `#869` 移动监听:`wire()` 有幂等守卫(只接一次),静态 deck 无 teardown 调用方,加 AbortController=无消费者死机器。
+- schema 单版式禁 variant:多版式 variant enum **已存在**;禁单版式 stray variant 会拒存量 deck(renderer 本就忽略)。
+- migrate 重复 `_page_to_key`:两份**非**字节相同(`_FRAME_OPEN` vs 内联正则),合并=行为变更风险、无 bug。
+- lift 锁序:孤儿资产文件无害;事务化拷贝过重。
+- deck-cli 锁 mtime 精度:粗 mtime 文件系统根本限制,content-hash/size 改动过广。
+- `feishu-deck.css` eyebrow 死块/overflow 泄漏/标题截断:纯 CSS 视觉、有回归风险、低价值。
+- `_renumber_text_ids`:`data-text-id` 系统已废弃、惰性无害。
 
 ## 测试基线
 - 审计当时(`raw-first-stance` @ `1a14115`):`221 passed, 1 FAILED`(`R-RAW-LOOKS-SCHEMA` 未写进 `references/validator-rules.md`)。
