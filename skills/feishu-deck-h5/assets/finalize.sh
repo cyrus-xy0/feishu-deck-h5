@@ -116,6 +116,18 @@ if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $STRICT; then
     exit 4
 fi
 
+# D-14: a default (non-strict) validate pass can still be REJECTED at
+# slide-library ingest, because the ingest gate (`check-only.py --gate ingest`)
+# forces strict (warn→error) + visual audit. Surface that stricter bar here so a
+# "done" deck doesn't surprise-fail on hand-off. Only nag when not already strict.
+if [ -z "$STRICT" ]; then
+    echo ""
+    echo "  ℹ️  slide-library 入库门禁更严:strict(warn→error) + 视觉审计。"
+    echo "      入库前想按同一档门槛预检,任选其一:"
+    echo "        bash $(basename "$0") \"$OUT_DIR\" $MODE --strict"
+    echo "        python3 \"$SCRIPT_DIR/check-only.py\" \"$HTML\" --gate ingest"
+fi
+
 # ---------- 3 · delivery-named copy (if --name provided) ----------
 NAMED_HTML=""
 if [ -n "$NAME" ]; then
