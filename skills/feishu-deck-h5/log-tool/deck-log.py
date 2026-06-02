@@ -83,6 +83,29 @@ def _journal(log_dir: Path) -> Path:
     return log_dir / "journal.jsonl"
 
 
+def _first_session_event(log_dir: Path) -> dict | None:
+    """已 init 过的标志:journal 里第一条 session 事件(含原始 start_ts)。
+    用于 init 幂等 —— new-run.sh 自动 init 之后若又手动 init,不该重戳 start_ts
+    (会把起点推后,render 按新 start_ts 过滤就丢掉最早几轮)。"""
+    jp = _journal(log_dir)
+    if not jp.exists():
+        return None
+    try:
+        for line in jp.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if ev.get("t") == "session":
+                return ev
+    except OSError:
+        return None
+    return None
+
+
 def append_event(log_dir: Path, obj: dict) -> dict:
     """往 journal.jsonl 追加一条事件(append-only,永不重写)。"""
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -315,6 +338,16 @@ def cmd_init(args) -> int:
     # 记下"当前活跃 deck"(供 status 查看;render 用 session 事件里的 transcript)
     ACTIVE_PTR.parent.mkdir(parents=True, exist_ok=True)
     ACTIVE_PTR.write_text(str(log_dir.resolve()), encoding="utf-8")
+
+    # 幂等守卫:已 init 过就保留原 start_ts、不再追加 session 事件,只把活跃指针指回本 deck。
+    # 否则二次 init(new-run.sh 已自动 init,agent 又照旧手动 init)会把起点推后 → 丢最早几轮。
+    # 仅当显式 --transcript 重指时才允许刷新(罕见:自动探测找错了 transcript)。
+    existing = _first_session_event(log_dir)
+    if existing and not args.transcript:
+        print(f"✓ deck-log 已初始化,保留原 start_ts={existing.get('start_ts')}(跳过重复 init)。")
+        print(f"  活跃指针 → {ACTIVE_PTR}")
+        return 0
+
     title = args.title or log_dir.parent.name
     transcript = args.transcript or _find_current_transcript()
     start_ts = _now_iso()

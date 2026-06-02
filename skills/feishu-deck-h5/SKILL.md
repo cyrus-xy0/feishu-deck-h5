@@ -785,13 +785,19 @@ North star: **the deck must not silently invent material the user couldn't defen
 记录一份 deck 是怎么一步步做出来的(给同学还原过程 + 给自己诊断 skill bug),
 平行存放在 `runs/<deck>/log/`,**绝不进 `out/`**。工具:`log-tool/deck-log.py`
 (schema/细节见 `log-tool/README.md`)。**默认开**;`deck-log off` 全局停录。
+**`init` 已焊进 `assets/new-run.sh`(2026-06-02)——建工作区即自动初始化 `log/`,不靠 agent 记得;
+`cmd_init` 也已幂等(二次 init 保留原 start_ts),所以下面步骤 1 不再需要手动跑。** 这是补
+"Mira case 之外的另一个无-hook 静默漏录"漏洞:deck-log 没有 hook,唯一的 chokepoint 就是 new-run。
 
 固定动作(做 GENERATION 类 deck 时按部就班执行,无需用户提醒):
 
-1. **开工**(建好 WORKSPACE 后):`deck-log init <run-dir> --title "<deck 名>"`
-   → 搭 `log/` 骨架、记下当前会话 transcript 路径、设为活跃 deck。**每个回合的输入+我的
-   原始回复无需手动记**:它们本就在会话 transcript 里,`render` 时自动捞 `start_ts` 之后
-   那段(0 token,纯文件读;**不挂任何常驻 hook**)。自动找错了用 `init --transcript <path>`。
+1. **开工 = 自动(别再手动 init)**:`assets/new-run.sh` 建工作区时**已自动跑 `deck-log init`**
+   (搭 `log/` 骨架、记当前会话 transcript、设活跃 deck),它会打印 `deck-log : making-of log started`。
+   **不要再手动 `deck-log init`** —— init 现已幂等(二次跑只保留原 start_ts 并跳过,不会丢最早几轮),
+   但手动重跑是多余动作。只有两种情况才手动碰:① new-run 打印 `deck-log : auto-init skipped`(全局 OFF
+   或异常)→ 按它给的命令补;② 自动探测找错 transcript → `deck-log init <run-dir> --transcript <path>`
+   重指(这是唯一会刷新 start_ts 的逃生口)。**每个回合的输入+我的原始回复无需手动记**:它们本就在
+   会话 transcript 里,`render` 时自动捞 `start_ts` 之后那段(0 token,纯文件读;**不挂任何常驻 hook**)。
 2. **每出一版**:`deck-log snapshot <run-dir> --label "<这版做了啥>"`
    → 冻结副本 + Playwright 截全套图(每页 1920×1080)+ 跑 check-distribution 校验。
 3. **用户吐槽某页 / 我发现问题**:`deck-log event <run-dir> --type problem --slide N

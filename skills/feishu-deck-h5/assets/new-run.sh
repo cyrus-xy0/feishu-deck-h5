@@ -71,5 +71,24 @@ echo "  run name : $RUN_NAME"
 echo "  input    : $REL_DIR/input/    ← user drops source files here"
 echo "  output   : $REL_DIR/output/   ← agent writes the deck here"
 echo "  abs path : $RUN_DIR"
+
+# --- making-of log: auto-start (default-on; global off via ~/.claude/deck-log.off) ---
+# Mandated by SKILL.md "MAKING-OF LOG". Bolted into new-run.sh so the log can NEVER be
+# silently skipped — deck-log has no hook, so relying on the agent to remember
+# `deck-log init` is exactly the no-hook miss mode the skill warns about. This is the
+# single chokepoint for new workspaces, so initialising here guarantees coverage for
+# EVERY harness (Mira included), not just hook-capable ones.
+# Guards: failure must never break workspace creation, and the final stdout line MUST
+# stay "$RUN_DIR" (the caller captures the last line as the run path), so all deck-log
+# chatter is muted and the status note is printed in the human block above it.
+if [[ -f "$HOME/.claude/deck-log.off" ]]; then
+  echo "  deck-log : globally OFF (~/.claude/deck-log.off present) — not recording"
+elif [[ -f "$SKILL_ROOT/log-tool/deck-log.py" ]] \
+  && python3 "$SKILL_ROOT/log-tool/deck-log.py" init "$RUN_DIR" --title "${SLUG:-$RUN_NAME}" >/dev/null 2>&1; then
+  echo "  deck-log : making-of log started → $REL_DIR/log/  (snapshot/event as you iterate)"
+else
+  echo "  deck-log : auto-init skipped — run: python3 $SKILL_ROOT/log-tool/deck-log.py init $RUN_DIR"
+fi
+
 echo "$RUN_DIR"
 exit 0
