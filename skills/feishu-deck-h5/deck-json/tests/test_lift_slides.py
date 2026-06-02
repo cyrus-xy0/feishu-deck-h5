@@ -613,5 +613,116 @@ class LiftSlidesBase64HeadTest(unittest.TestCase):
                          "(restore failed).")
 
 
+class LiftSlidesDeCollideCssTest(unittest.TestCase):
+    """F-255 · a de-collided lift key must follow into the slide's inlined CSS.
+
+    Lifting `hero` into a target that ALREADY has a `hero` key renames the lifted
+    key to `hero-2`. transform() inlined that slide's per-slide CSS under the
+    ORIGINAL key (`.slide[data-slide-key="hero"] .matrix`), so the wrapper/entry
+    got `hero-2` while its embedded selectors stayed on `hero` → matched nothing
+    → garbled slide, dead @keyframes (the exact "lift came over garbled, animation
+    gone" failure on the everbright deck, 2026-06-03). Guard BOTH lift sinks.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-decollide-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML, encoding="utf-8")
+        (src_dir / "input" / "icon.svg").write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg"></svg>', encoding="utf-8")
+
+        # --- sink A: deck.json --shake, into a deck that already owns key `hero`
+        cls.dj_dir = tmp / "dst-json"
+        cls.dj_dir.mkdir()
+        cls.dj_deck = cls.dj_dir / "deck.json"
+        cls.dj_deck.write_text(
+            '{"version":"1.0","deck":{"title":"t","author":"a","date":"2026-06"},'
+            '"slides":[{"key":"hero","layout":"cover","accent":"blue",'
+            '"data":{"title":"t","author":"a","date":"2026-06"}}]}',
+            encoding="utf-8")
+        cls.proc_json = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dj_deck), "--shake"],
+            capture_output=True, text=True,
+        )
+
+        # --- sink B: --to-html, into a legacy index.html that already owns `hero`
+        cls.html_dir = tmp / "dst-html"
+        (cls.html_dir / "input").mkdir(parents=True)
+        cls.dst_html = cls.html_dir / "index.html"
+        cls.dst_html.write_text(
+            '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+            '</head><body><div class="deck">\n'
+            '<div class="slide-frame">\n'
+            '<div class="slide" data-layout="cover" data-slide-key="hero" '
+            'data-screen-label="01 existing"><div class="stage"><h1>own hero</h1>'
+            '</div></div>\n</div>\n'
+            '</div></body></html>\n', encoding="utf-8")
+        cls.proc_html = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_html), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    # ---- sink A: deck.json --shake ----
+    def _lifted_json_html(self) -> str:
+        self.assertEqual(self.proc_json.returncode, 0,
+                         f"deck.json lift exited {self.proc_json.returncode}\n"
+                         f"{self.proc_json.stderr}")
+        deck = json.loads(self.dj_deck.read_text(encoding="utf-8"))
+        lifted = [s for s in deck["slides"] if s.get("key") == "hero-2"]
+        self.assertEqual(len(lifted), 1,
+                         "lift did not de-collide the key to 'hero-2'.\n"
+                         f"keys: {[s.get('key') for s in deck['slides']]}\n"
+                         f"stdout:\n{self.proc_json.stdout}")
+        return lifted[0]["data"]["html"]
+
+    def test_json_inlined_css_follows_decollided_key(self):
+        css = self._lifted_json_html()
+        self.assertRegex(
+            css, r'\.slide\[data-slide-key="hero-2"\]\s+\.matrix',
+            "inlined per-slide CSS did not follow the de-collided key to "
+            "'hero-2' (F-255 regressed) — slide renders unstyled.")
+        self.assertNotRegex(
+            css, r'data-slide-key="hero"(?!-)',
+            "a bare 'hero' selector survived in the de-collided slide's CSS "
+            "(F-255 regressed) — it now matches the WRONG (original) page.")
+
+    def test_json_original_hero_untouched(self):
+        deck = json.loads(self.dj_deck.read_text(encoding="utf-8"))
+        orig = [s for s in deck["slides"] if s.get("key") == "hero"]
+        self.assertEqual(len(orig), 1, "the pre-existing 'hero' slide vanished.")
+        self.assertEqual(orig[0]["layout"], "cover",
+                         "the de-collision rewrote the WRONG slide.")
+
+    # ---- sink B: --to-html ----
+    def test_to_html_inlined_css_follows_decollided_key(self):
+        self.assertEqual(self.proc_html.returncode, 0,
+                         f"--to-html lift exited {self.proc_html.returncode}\n"
+                         f"{self.proc_html.stderr}")
+        html = self.dst_html.read_text(encoding="utf-8")
+        # the spliced frame's wrapper got hero-2; its <style> must too.
+        self.assertIn('data-slide-key="hero-2"', html,
+                      "--to-html did not de-collide the wrapper key to 'hero-2'.")
+        self.assertRegex(
+            html, r'\.slide\[data-slide-key="hero-2"\]\s+\.matrix',
+            "--to-html embedded CSS did not follow the de-collided key "
+            "(F-255 regressed).")
+        # exactly one bare `hero` slide remains (the target's own pre-existing
+        # one); the lifted page's selectors are all rekeyed to hero-2.
+        self.assertEqual(
+            len(re.findall(r'data-slide-key="hero"(?!-)', html)), 1,
+            "expected exactly one bare 'hero' (the target's own slide); the "
+            "lifted page's CSS leaked bare-'hero' selectors (F-255 regressed).")
+
+
 if __name__ == "__main__":
     unittest.main()

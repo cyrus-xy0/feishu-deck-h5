@@ -620,6 +620,34 @@ def _map_retired_vars(slide: dict) -> tuple[dict, int]:
     return walk(slide), total
 
 
+def _rekey_slide_css(slide: dict, old_key: str, new_key: str) -> tuple[dict, int]:
+    """F-255: follow a de-collided / renamed key into the slide's embedded keyed
+    CSS. A raw slide's `data.html` (or a `custom_css` that already carries a
+    `.slide[data-slide-key=...]` prefix — e.g. a slide that was itself lifted via
+    lift-slides.py) anchors its selectors to the slide's ORIGINAL key. cmd_paste
+    rewrites `slide["key"]`, but those embedded anchors stay on the old key → the
+    slide renders unstyled and its @keyframes never fire. Rewrite the anchor
+    across the slide's strings. No-op for the common prefix-free custom_css case;
+    the trailing `"` anchors the match so `OLD` is never confused with `OLD-2`."""
+    if not old_key or old_key == new_key:
+        return slide, 0
+    needle, repl = f'data-slide-key="{old_key}"', f'data-slide-key="{new_key}"'
+    total = 0
+
+    def walk(v):
+        nonlocal total
+        if isinstance(v, str):
+            total += v.count(needle)
+            return v.replace(needle, repl)
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+
+    return walk(slide), total
+
+
 def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     """Copy one slide from ANOTHER deck.json (args.from_deck) into this deck.
 
@@ -662,6 +690,11 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
         print(f"  key collision: '{requested}' already in target → renamed '{new_key}'")
     slide["key"] = new_key
 
+    # F-255: if the key changed (collision OR explicit --new-key), follow it into
+    # any embedded keyed CSS (raw data.html <style> / prefixed custom_css) so the
+    # slide's selectors don't orphan onto the old key → unstyled, dead @keyframes.
+    slide, n_css = _rekey_slide_css(slide, matches[0].get("key"), new_key)
+
     # Strip source-deck-bound data-text-id attrs (else T03 collision in target).
     slide, n_ids = _strip_text_ids(slide)
 
@@ -691,6 +724,8 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     variant = f"/{slide['variant']}" if slide.get("variant") else ""
     print(f"  pasted '{matches[0].get('key')}' from {src_path.name} → position {pos} "
           f"as '{new_key}' (layout={slide.get('layout')}{variant})")
+    if n_css:
+        print(f"    rekeyed {n_css} embedded data-slide-key selector(s) → '{new_key}'")
     if n_ids:
         print(f"    stripped {n_ids} source-bound data-text-id attr(s) "
               f"(re-render regenerates the sidecar)")

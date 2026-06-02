@@ -1065,6 +1065,11 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             key = f"{base}-{j}"
             print(f"    key collision: '{info['key']}' already in target → renamed '{key}'")
         existing_keys.add(key)
+        # F-255: a de-collided key must follow into the slide's inlined per-slide
+        # CSS (`data.html` carries a <style> block transform() scoped to the
+        # ORIGINAL key); without this the entry's key is `-2` while its embedded
+        # selectors still point at the bare key → unstyled slide, dead @keyframes.
+        inner = _rekey_inner_css(inner, info["key"], key)
         entry = {
             "key": key,
             "layout": "raw",
@@ -1270,6 +1275,30 @@ def _existing_html_keys(html_text):
     return set(re.findall(r'data-slide-key="([^"]+)"', html_text))
 
 
+def _rekey_inner_css(inner, old_key, new_key):
+    """F-255: follow a de-collided key into the co-located <style> block.
+
+    When a lifted page's key collides with the target and gets renamed
+    (`KEY` → `KEY-2`), `transform()` has ALREADY inlined that page's per-slide
+    CSS under the ORIGINAL key — the recovered head rules and the F-40-fused
+    `[data-page=N]` rewrites are all scoped to `.slide[data-slide-key="KEY"]`.
+    The wrapper div gets the NEW key (via `_wrap_frame` / the deck.json entry),
+    but those embedded selectors stay on the old key and match NOTHING → the
+    slide renders unstyled and its @keyframes never fire. That is the exact
+    "lifted page came over garbled, animation gone" failure.
+
+    Rewrite the anchor inside INNER to track the rename. The trailing `"` anchors
+    the match so `KEY` is never confused with an already-suffixed `KEY-2`, and
+    INNER carries no `.slide` wrapper of its own (asserted by both callers), so
+    only style-block selectors are touched — never a real slide's key attribute.
+    @keyframes names stay global/shared (identical across the colliding pages,
+    same lineage), matching the tool's keyframes-resolve-globally contract."""
+    if not old_key or old_key == new_key:
+        return inner
+    return inner.replace(f'data-slide-key="{old_key}"',
+                         f'data-slide-key="{new_key}"')
+
+
 def _wrap_frame(inner, info, label, key):
     """Wrap a transformed slide INNER (no .slide wrapper) into a complete
     `<div class="slide-frame"><div class="slide" …>INNER</div></div>`, matching
@@ -1434,6 +1463,10 @@ def lift_to_html(src_html_path, frame_indices, dst_html, shake=False,
                 j += 1
             key = f"{base}-{j}"
             print(f"    key collision: '{info['key']}' → '{key}'")
+        # F-255: the de-collided key must follow into the inlined per-slide CSS,
+        # else the embedded `.slide[data-slide-key="OLD"]` selectors match nothing
+        # → page renders garbled + @keyframes dead. No-op when key was unchanged.
+        inner = _rekey_inner_css(inner, info["key"], key)
         n_frames = cur.count('<div class="slide-frame"')
         name = _strip_label_number(info.get("label")) or info["key"]
         label = f"{n_frames + 1:02d} {name}"  # canonical: leading number = frame_index
