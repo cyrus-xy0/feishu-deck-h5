@@ -71,12 +71,29 @@ def _ts_epoch(s) -> float:
 
 
 def _log_dir(deck_dir: Path) -> Path:
-    """deck-dir 是含 out/ 的那个 run 目录;log/ 是它的兄弟。"""
+    """deck-dir 是含 output/(本技能)或 out/(旧约定)的那个 run 目录;log/ 是它的兄弟。"""
     deck_dir = deck_dir.resolve()
-    # 容错:用户可能直接把 out/ 或 log/ 传进来
-    if deck_dir.name in ("out", "log"):
+    # 容错:用户可能直接把 output/ / out/ / log/ 传进来
+    if deck_dir.name in ("out", "output", "log"):
         deck_dir = deck_dir.parent
     return deck_dir / "log"
+
+
+def _deck_html(deck_dir: Path) -> Path:
+    """解析 deck 成品 index.html 的位置。本技能 feishu-deck-h5 用 `output/`,旧约定/别处
+    可能用 `out/` 或直接放 run 根。依次找 output/ → out/ → run 根,返回第一个存在的;
+    都不存在则返回 output/ 候选(本技能约定,供 not-found 报错显示)。
+    (历史 bug:原 cmd_snapshot 只认 out/,导致本技能所有 output/ deck 截不了图。)"""
+    deck_dir = deck_dir.resolve()
+    if deck_dir.name in ("out", "output", "log"):   # 传进来的是 output//out//log/ 时回到 run 根
+        deck_dir = deck_dir.parent
+    for sub in ("output", "out"):
+        cand = deck_dir / sub / "index.html"
+        if cand.exists():
+            return cand
+    if (deck_dir / "index.html").exists():
+        return deck_dir / "index.html"
+    return deck_dir / "output" / "index.html"
 
 
 def _journal(log_dir: Path) -> Path:
@@ -468,9 +485,7 @@ def _run_distribution_audit(html_path: Path) -> dict | None:
 def cmd_snapshot(args) -> int:
     deck_dir = Path(args.deck_dir).resolve()
     log_dir = _log_dir(deck_dir)
-    html_path = Path(args.html) if args.html else (
-        deck_dir / "out" / "index.html" if (deck_dir / "out").exists()
-        else deck_dir / "index.html")
+    html_path = Path(args.html) if args.html else _deck_html(deck_dir)
     if not html_path.exists():
         print(f"✗ 找不到 deck html:{html_path}", file=sys.stderr)
         return 2
