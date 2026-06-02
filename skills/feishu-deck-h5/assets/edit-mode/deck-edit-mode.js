@@ -313,6 +313,13 @@
         sf.addEventListener('dragover',  onDragOver);
         sf.addEventListener('drop',      onDrop);
       });
+      // innerHTML restore wiped the inline --fs-scale refitFrames set + left the
+      // sidebar's IntersectionObserver bound to detached frames; restore both so
+      // undo leaves a fully-working editor, not unscaled slides + a stale
+      // sidebar. (#82 — the real glitch; the deeper innerHTML-vs-documentElement
+      // scope question is moot here since all editable state lives in .deck.)
+      refitFrames();
+      rebuildSidebar();
     }
     showToast('↶ undone', 700);
   }
