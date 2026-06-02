@@ -150,6 +150,24 @@ _B64_EXT_BY_MIME = {
 _B64_DATA_URI_RE = re.compile(
     r'data:(image/(?:png|jpe?g|gif|webp));base64,([A-Za-z0-9+/=]+)')
 
+# --- F-84: self-contain per-deck content assets that live OUTSIDE output/ ----
+# A SOURCE deck's slide can reference a per-run CONTENT asset via a leading
+# `../input/<file>` — which, in the source run, resolves to the run-level
+# `input/` (a SIBLING of `output/`). Lifted verbatim, the `../input/...` ref
+# carries into the target and the file lands in the TARGET's run-level `input/`
+# (also outside `output/`). That breaks the moment `output/` is moved/zipped/
+# delivered or the run-level `input/` is cleaned (kangshifu `taste-shifts-3pains`
+# product images 404'd this way). F-84 detects this family, copies the file into
+# the target's `output/input/`, and rewrites the ref to the output-internal
+# `input/<file>` form so the lifted slide is self-contained under `output/`.
+#
+# IMPORTANT scope: ONLY a single leading `../` followed by `input/` (the run-
+# level content-asset sibling). Framework/shared linked refs
+# (`../../../skills/feishu-deck-h5/assets/...`) are INTENTIONAL linked-mode refs
+# handled by copy-assets.py at delivery — this pattern's `\.\./input/` anchor
+# never matches them (they go `../../../skills/...`), so they are left untouched.
+_REL_INPUT_RE = re.compile(r'^(?:\./)*\.\./input/(?P<file>[^?#]+)')
+
 
 def extract_framework_layout_css(framework_css, layout, slide_key):
     """Extract all rules from framework_css that target `.slide[data-layout=LAYOUT]`
@@ -413,18 +431,38 @@ def _is_local_asset_ref(url):
     return True
 
 
+def _strip_leading_dotslash(u):
+    """Strip leading `./` segments only — NOT `../`. The old `lstrip("./")`
+    stripped the *characters* `.`+`/` in any combination, so `../input/x.png`
+    collapsed to `input/x.png` (mis-bucketed `input`) and `../../../skills/...`
+    lost its `../`. F-84 needs `../input/...` to stay distinct from a plain
+    `input/...`, so strip ONLY repeated `./` and stop at the first `../`."""
+    while u.startswith("./"):
+        u = u[2:]
+    return u
+
+
 def _classify_asset_ref(url):
     """Bucket a LOCAL asset ref for the report:
       'framework' — assets/shared/* or assets/lark-* (resolve in the SKILL, not
-                    the per-deck dir; carried by path-rewrite, always present)
+                    the per-deck dir; carried by path-rewrite, always present);
+                    also the linked-mode `../../../skills/.../assets/...` form.
       'clientlogo'— assets/shared/clientlogo/* (BRAND-specific → flag for swap)
       'input'     — input/* per-run screenshots/source files (copied by transform)
+      'rel-input' — ../input/* per-run CONTENT asset reached via a leading `../`
+                    (resolves OUTSIDE output/ in the source run). F-84 copies it
+                    INTO output/input/ and rewrites the ref to `input/...`.
       'prototype' — prototypes/<slug>/* iframe bodies (copied by transform)
       'other'     — any other local path (e.g. a sibling .html iframe body, a
                     relative ../foo.png) — these are the silent-break risk.
     """
-    u = url.strip().lstrip("./")
+    u = _strip_leading_dotslash(url.strip())
     low = u.lower()
+    # F-84: a single leading `../` + input/ is the run-level content-asset family.
+    # Check BEFORE the framework/clientlogo branches scan substrings — but the
+    # framework `../../../skills/...` form has TWO+ `../` so it never matches this.
+    if _REL_INPUT_RE.match(url.strip()):
+        return "rel-input"
     if "shared/clientlogo/" in low or low.startswith("clientlogo/"):
         return "clientlogo"
     if low.startswith("assets/shared/") or re.match(r'assets/lark-', low):
@@ -459,9 +497,16 @@ def scan_asset_refs(inner, src_dir):
                 # prototypes/<slug>/... → check the <slug> dir exists in source
                 mm = re.match(r'(?:\./)?prototypes/([^/]+)/', url)
                 exists = (src_dir / "prototypes" / mm.group(1)).is_dir() if mm else None
+            elif kind == "rel-input":
+                # F-84: `../input/foo.png` resolves to the RUN-LEVEL input/
+                # (sibling of src_dir=output/), with output/input/ as a fallback.
+                fname = _REL_INPUT_RE.match(url).group("file").split("?", 1)[0].split("#", 1)[0]
+                exists = ((src_dir.parent / "input" / fname).is_file()
+                          or (src_dir / "input" / fname).is_file())
             else:
                 # input/clientlogo/other → resolve the path against source dir
-                rel = url.split("?", 1)[0].split("#", 1)[0].lstrip("./")
+                rel = _strip_leading_dotslash(
+                    url.split("?", 1)[0].split("#", 1)[0])
                 exists = (src_dir / rel).is_file()
             refs.append({"url": url, "kind": kind, "exists": exists})
     return refs
@@ -747,6 +792,55 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
             else:
                 report.setdefault("input_missing", []).append(fname)
 
+    # 5b) F-84: self-contain `../input/<file>` refs. A source slide may point a
+    #     content asset (product photo etc.) at `../input/foo.png`, which in the
+    #     source run resolves to the RUN-LEVEL `input/` (a sibling of `output/`,
+    #     OUTSIDE it). Carried verbatim, that file lands outside the target's
+    #     `output/` too → it 404s the moment `output/` is moved/zipped/delivered
+    #     or the run-level `input/` is cleaned. Copy it INTO the target's
+    #     `output/input/` and rewrite the ref to the output-internal `input/foo.png`
+    #     so the lifted slide is self-contained under `output/`. Scan EVERY asset
+    #     syntax (<img>/<source>/<video>/<iframe>/url()) via the F-45 patterns.
+    #     Source resolution: `../input/foo.png` is relative to the source `output/`
+    #     (= src_input_dir.parent), i.e. the run-level `input/`
+    #     (src_input_dir.parent.parent / "input"); also fall back to the source's
+    #     own `output/input/` (= src_input_dir) — both may hold the file.
+    #     SCOPE: only a single leading `../` + `input/` matches; framework/shared
+    #     linked refs (`../../../skills/...`) never match → left untouched (F-84).
+    _src_output_dir = src_input_dir.parent
+    _src_run_input = _src_output_dir.parent / "input"
+    _rel_seen = {}
+    for _pat in _ASSET_REF_PATTERNS:
+        for _m in _pat.finditer(inner):
+            _url = _m.group(1).strip()
+            _rm = _REL_INPUT_RE.match(_url)
+            if not _rm or _url in _rel_seen:
+                continue
+            _fname = _rm.group("file")
+            # Resolve from run-level input/ first (the `../input` target), then
+            # the source output/input/ fallback. Skip if neither has it.
+            _src = None
+            for _cand in (_src_run_input / _fname, src_input_dir / _fname):
+                if _cand.is_file():
+                    _src = _cand
+                    break
+            if _src is None:
+                _rel_seen[_url] = None
+                report.setdefault("rel_input_missing", []).append(_url)
+                continue
+            _dst = dst_input_dir / _fname
+            _dst.parent.mkdir(parents=True, exist_ok=True)
+            # Idempotent: copy only if absent or the source is newer.
+            if not _dst.exists() or _src.stat().st_mtime > _dst.stat().st_mtime:
+                shutil.copy2(_src, _dst)
+            _rel_seen[_url] = f"input/{_fname}"
+            report.setdefault("rel_input_copied", []).append(_fname)
+    # Rewrite each carried `../input/...` ref to its output-internal form. Replace
+    # the exact as-written URL token (longest first, so `../input/a` can't clobber
+    # a longer match) so we only touch the resolved refs, never partial overlaps.
+    for _old_url in sorted((u for u, v in _rel_seen.items() if v), key=len, reverse=True):
+        inner = inner.replace(_old_url, _rel_seen[_old_url])
+
     # 5.5) Inline framework `[data-layout=X]` CSS rescoped to slide-key.
     # When source's layout-specific rules (`.slide[data-layout="X"] …`) style the
     # slide, lifting to `raw` makes them stop matching → slide renders at browser
@@ -1005,6 +1099,10 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if cp: print(f"    input/ copied: {cp}")
         if proto: print(f"    prototypes/ copied: {proto}")
         if miss: print(f"    ✗ input/ MISSING in source: {miss}")
+        rel_cp = report.get("rel_input_copied", [])
+        rel_miss = report.get("rel_input_missing", [])
+        if rel_cp: print(f"    ../input/ self-contained → output/input/ (F-84): {rel_cp}")
+        if rel_miss: print(f"    ✗ ../input/ MISSING in source (left as-is): {rel_miss}")
         inlined = report.get("inlined_layout_css", [])
         if inlined: print(f"    auto-inlined framework CSS for: {inlined}")
         rec = report.get("head_css_recovered", [])
@@ -1351,7 +1449,11 @@ def lift_to_html(src_html_path, frame_indices, dst_html, shake=False,
               f"({len(inner)} bytes) · target now {n_after} frames · bak {bak.name}")
         for rk, rl in (("input_copied", "input/ copied"),
                        ("proto_copied", "prototypes/ copied"),
-                       ("input_missing", "✗ input/ MISSING in source")):
+                       ("input_missing", "✗ input/ MISSING in source"),
+                       ("rel_input_copied",
+                        "../input/ self-contained → output/input/ (F-84)"),
+                       ("rel_input_missing",
+                        "✗ ../input/ MISSING in source (left as-is)")):
             if report.get(rk):
                 print(f"    {rl}: {report[rk]}")
         if report.get("keyframes_pulled"):

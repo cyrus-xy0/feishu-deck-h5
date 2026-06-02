@@ -1,6 +1,33 @@
 # CHANGES — feishu-deck-h5 历史/已固化的修复记录
 > 从 SKILL.md 拆出(F-30)。这些防御的可执行部分已固化进 feishu-deck.css / validate.py;此处仅留叙事供追溯。
 
+## F-84 — lift 把出界的 `../input/` 内容资源自包含进 `output/input/`(2026-06-03)
+
+源 deck 的一页可能用 `../input/<file>` 引用 per-run 内容图(产品照等)—— 在源 run 里
+这解析到 **run 级 `input/`**(`output/` 的兄弟目录,在 output **外**)。lift 原样搬这个
+`../input/...` 路径,文件落到 **目标的 run 级 `input/`**(同样在 output 外)→ 一旦
+`output/` 被移动/打包/交付,或 run 级 `input/` 被清理,`<img src="../input/...">` 立刻
+404(康师傅 `taste-shifts-3pains` 三张产品图就这样断的)。
+
+修法(只改 `assets/lift-slides.py`,+106 行):
+- 新增 `_REL_INPUT_RE`,只匹配 **单个前导 `../` + `input/`** 的 run 级内容资源;框架/
+  共享链接(`../../../skills/feishu-deck-h5/assets/...`,两个以上 `../`)**永不匹配** →
+  保持链接模式不动(由 copy-assets 在交付时处理)。
+- 顺修潜伏 bug:旧 `lstrip("./")` 会把字符 `.`/`/` 任意组合都剥掉,使 `../input/x.png`
+  被误缩成 `input/x.png`(错分桶)。改成 `_strip_leading_dotslash`,只剥重复 `./`、遇第一个
+  `../` 即停。
+- `transform` 新增 5b 步:扫所有资源语法(F-45 patterns),把 `../input/<file>` 从源 run 级
+  `input/`(回落源 `output/input/`)**拷进目标 `output/input/`**,引用改写成 output 内
+  `input/<file>`;幂等(按 mtime),最长优先替换。
+- 报告新增 `rel_input_copied` / `rel_input_missing`,`--to-html` / deck.json 路径都打印。
+
+复现/回归(只读 `runs/`,写临时副本):
+- kangshifu `taste-shifts-3pains`(3 张 `../input/` 产品图)lift 进临时目标:3 张落进目标
+  `output/input/`、**0 泄漏到 run 级 `input/`**、`../input/` 引用全改写成 `input/`;
+- 框架/共享 `../../../skills/...` 引用不变(scope 正确);全量 265 测试 PASS。
+
+承 F-83;`../input/` 自包含 + 交付前 copy-assets = 彻底消除"图丢了"那类断链。
+
 ## F-83 — lift `--preview` / `--to-html` 检测目标框架是否缺少该版式的 CSS(2026-06-02)
 
 把一页 `iframe-embed`(或任何非 `raw` 版式)lift 进一个 **旧快照** 目标 deck
