@@ -276,5 +276,342 @@ class LiftSlidesBase64Test(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+# BUG5 · multi-line .slide opening tag — heavily hand-edited decks wrap the
+# .slide tag across lines (attrs on their own lines). extract_one() read attrs
+# from ONLY the first line, so data-slide-key / data-screen-label (on later
+# lines) were missed → key=None → --index shows "?", --key can't find the slide,
+# src_key=None, and (worst) the slide_key never reached extract_head_slide_rules
+# so the slide's own per-slide CSS was DROPPED → layout collapsed to block flow.
+# It also leaked the wrapped attr lines into the body as VISIBLE TEXT.
+# (merged-49pages back-1000stores / back-store-pipeline repro, 2026-06-02.)
+SRC_HTML_MULTILINE = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+[data-page="2"] .slide .matrix { display: grid; grid-template-columns: 1fr 1fr; }
+</style>
+</head><body><div class="deck">
+<div class="slide-frame" data-idx="1">
+<div class="slide" data-layout="content-2col" data-page="2"
+            data-screen-label="02 Hero"
+            data-slide-key="hero" data-accent="blue">
+<div class="header"><h2 class="title-zh">Hero</h2></div>
+<div class="stage">
+<div class="matrix"><div class="cell">x</div></div>
+</div>
+</div>
+</div>
+<div class="slide-frame" data-idx="0">
+<div class="slide" data-layout="cover" data-slide-key="tail" data-screen-label="01">
+<div class="stage"><h1>tail</h1></div>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+class LiftSlidesMultilineTagTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-slides-multiline-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML_MULTILINE, encoding="utf-8")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _hero(self):
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"]
+        self.assertEqual(len(hero), 1,
+                         "--key hero did not resolve through the multi-line "
+                         ".slide opening tag (BUG5 regressed).\n"
+                         f"stdout:\n{self.proc.stdout}\nstderr:\n{self.proc.stderr}")
+        return hero[0]
+
+    def test_lift_succeeded_key_resolved(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
+        self._hero()  # asserts the key was read off the wrapped tag
+
+    def test_no_attr_leak_into_body(self):
+        html = self._hero()["data"]["html"]
+        self.assertFalse(re.match(r'data-[a-z-]+=', html.lstrip()),
+                         "wrapped opening-tag attr lines leaked into the slide "
+                         "body as visible text (BUG5 regressed).")
+        self.assertNotIn('data-screen-label="02 Hero"', html,
+                         "data-screen-label= leaked into the body (BUG5 regressed).")
+
+    def test_per_slide_css_recovered_no_collapse(self):
+        html = self._hero()["data"]["html"]
+        self.assertRegex(
+            html, r'\.slide\[data-slide-key="hero"\]\s+\.matrix',
+            "the slide's own [data-page]-scoped grid rule was NOT recovered for "
+            "the multi-line-tag slide (BUG5 → layout collapse regressed).")
+        self.assertIn("display: grid", html,
+                      "recovered per-slide rule lost its grid declaration.")
+
+
+# BUG6 · lift asset/drift gaps (P1, 2026-06-02) — three classes that left a
+# lifted page broken on a CURRENT-framework target:
+#   (a) prototypes/<demo>.html DIRECT-FILE iframe body — the copy regex required
+#       a trailing slash so only prototypes/<dir>/ subdirs copied; direct files
+#       were dropped → blank iframe.
+#   (b) a foreign deck's iframe body at a NON-STANDARD local path
+#       (assets/custom/<demo>/x.html) — bucketed "other" and never copied.
+#   (c) a RETIRED framework CSS var (var(--fs-accent4)) — undefined in the
+#       current framework → declaration silently fails on render (R-CSSVAR).
+SRC_HTML_P1 = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+[data-page="2"] .slide .lead b { color: var(--fs-accent4); }
+</style>
+</head><body><div class="deck">
+<div class="slide-frame" data-page="2">
+<div class="slide" data-layout="content-2col" data-slide-key="hero" data-screen-label="02 Hero" data-accent="blue">
+<div class="stage">
+<p class="lead"><b>x</b></p>
+<iframe src="prototypes/demo.html"></iframe>
+<iframe src="assets/custom/widget/widget.html"></iframe>
+</div>
+</div>
+</div>
+<div class="slide-frame" data-page="1">
+<div class="slide" data-layout="cover" data-slide-key="tail" data-screen-label="01">
+<div class="stage"><h1>tail</h1></div>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+class LiftSlidesAssetAndDriftTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-slides-p1-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "prototypes").mkdir()
+        (src_dir / "prototypes" / "demo.html").write_text(
+            "<!doctype html><body>demo</body>", encoding="utf-8")
+        (src_dir / "assets" / "custom" / "widget").mkdir(parents=True)
+        (src_dir / "assets" / "custom" / "widget" / "widget.html").write_text(
+            "<!doctype html><body>widget</body>", encoding="utf-8")
+        (src_dir / "assets" / "custom" / "widget" / "dep.js").write_text(
+            "// sibling dep", encoding="utf-8")
+        (src_dir / "index.html").write_text(SRC_HTML_P1, encoding="utf-8")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _hero_html(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"]
+        self.assertEqual(len(hero), 1, "lift did not append exactly one hero slide")
+        return hero[0]["data"]["html"]
+
+    def test_prototype_direct_file_copied(self):
+        self._hero_html()
+        self.assertTrue((self.dst_dir / "prototypes" / "demo.html").is_file(),
+                        "prototypes/demo.html (direct-file iframe body) was not "
+                        "copied (BUG6a regressed) → blank iframe.")
+
+    def test_other_iframe_body_folder_copied(self):
+        self._hero_html()
+        self.assertTrue(
+            (self.dst_dir / "assets" / "custom" / "widget" / "widget.html").is_file(),
+            "non-standard iframe body assets/custom/widget/widget.html was not "
+            "copied (BUG6b regressed) → blank iframe.")
+        self.assertTrue(
+            (self.dst_dir / "assets" / "custom" / "widget" / "dep.js").is_file(),
+            "the iframe demo's sibling dep was not carried (folder copy regressed).")
+
+    def test_retired_css_var_remapped(self):
+        html = self._hero_html()
+        self.assertNotIn("var(--fs-accent4)", html,
+                         "retired var(--fs-accent4) was not remapped (BUG6c "
+                         "regressed) → R-CSSVAR render-fail.")
+        self.assertIn("var(--fs-teal)", html,
+                      "var(--fs-accent4) should map to var(--fs-teal).")
+
+
+# BUG7 · inline single-file lift gaps (P1, 2026-06-02, wudeli-final.html) —
+#   (a) MULTI-CLASS .slide div — an iframe-embed/special page tagged
+#       `class="slide embedded-management-page"` was missed by the exact-string
+#       matcher → frame keyed "?" / unliftable. _SLIDE_OPEN_RE now allows extra
+#       classes (but still excludes class="slide-frame").
+#   (b) recovered head rule scoped `[data-slide-key=K][data-layout=X]` — the
+#       lifted slide renders as data-layout="raw", so the [data-layout] filter
+#       never matches → R-VIS-DEAD-RULE, layout silently lost. The [data-layout]
+#       filter is now stripped from recovered head rules too (not just inner CSS).
+SRC_HTML_MULTICLASS = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+.slide[data-slide-key="hero"][data-layout="content-2col"] .grid { display: grid; gap: 10px; }
+</style>
+</head><body><div class="deck">
+<div class="slide-frame" data-page="2">
+<div class="slide embedded-special-page" data-layout="content-2col" data-slide-key="hero" data-screen-label="02 Hero" data-accent="blue">
+<div class="grid"><div class="cell">x</div></div>
+</div>
+</div>
+<div class="slide-frame" data-page="1">
+<div class="slide" data-layout="cover" data-slide-key="tail" data-screen-label="01">
+<div class="stage"><h1>tail</h1></div>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+class LiftSlidesInlineMulticlassTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-slides-multiclass-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML_MULTICLASS, encoding="utf-8")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _hero(self):
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"]
+        self.assertEqual(len(hero), 1,
+                         "--key hero did not resolve through a MULTI-CLASS .slide "
+                         "div `class=\"slide embedded-special-page\"` (BUG7a "
+                         f"regressed).\nstdout:\n{self.proc.stdout}\nstderr:\n{self.proc.stderr}")
+        return hero[0]["data"]["html"]
+
+    def test_multiclass_slide_lifts(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
+        self._hero()
+
+    def test_data_layout_filter_stripped_from_recovered_rules(self):
+        html = self._hero()
+        self.assertNotRegex(
+            html, r'\[data-slide-key="hero"\]\[data-layout=',
+            "recovered head rule kept its [data-layout] filter (BUG7b regressed) "
+            "→ dead on the raw-lifted slide.")
+        self.assertRegex(
+            html, r'\.slide\[data-slide-key="hero"\]\s+\.grid',
+            "recovered grid rule not present/fused after [data-layout] strip.")
+        self.assertIn("display: grid", html,
+                      "recovered rule lost its grid declaration.")
+
+
+# BUG8 · base64-in-head-CSS perf + correctness (P1, 2026-06-02, wudeli inline) —
+# inline single-file decks embed MB-scale images as url(data:…;base64,…) right in
+# the head CSS (a 248MB block on wudeli). extract_head_slide_rules brace-parsed it
+# verbatim → O(n²) in _match_brace (≈15s). Fix: stash data: URIs to short tokens
+# before parsing, restore only in kept rules. GUARD the correctness of that
+# stash/restore: a kept slide-key rule's data: URI survives intact, another
+# slide's data: URI is not pulled, and no stash token leaks into the output.
+SRC_HTML_BASE64HEAD = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+.slide[data-slide-key="hero"] .bg { background-image: url(data:image/png;base64,iVBORKEEPME12345); }
+.slide[data-slide-key="other"] .junk { background-image: url(data:image/png;base64,SHOULDNOTLEAK999); }
+</style>
+</head><body><div class="deck">
+<div class="slide-frame" data-page="2">
+<div class="slide" data-layout="content-2col" data-slide-key="hero" data-screen-label="02 Hero" data-accent="blue">
+<div class="bg">x</div>
+</div>
+</div>
+<div class="slide-frame" data-page="1">
+<div class="slide" data-layout="cover" data-slide-key="tail" data-screen-label="01">
+<div class="stage"><h1>tail</h1></div>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+class LiftSlidesBase64HeadTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-slides-b64head-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML_BASE64HEAD, encoding="utf-8")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _hero(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"]
+        self.assertEqual(len(hero), 1, "lift did not append exactly one hero slide")
+        return hero[0]["data"]["html"]
+
+    def test_kept_rule_base64_intact(self):
+        html = self._hero()
+        self.assertIn("data:image/png;base64,iVBORKEEPME12345", html,
+                      "the kept slide-key rule's data: URI was corrupted by the "
+                      "stash/restore (BUG8 regressed).")
+
+    def test_other_slide_base64_not_pulled(self):
+        html = self._hero()
+        self.assertNotIn("SHOULDNOTLEAK999", html,
+                         "a different slide's data: URI leaked into the lifted slide.")
+
+    def test_no_stash_token_leaks(self):
+        html = self._hero()
+        self.assertNotIn("\x00DURI", html,
+                         "a base64-stash placeholder token leaked into the output "
+                         "(restore failed).")
+
+
 if __name__ == "__main__":
     unittest.main()

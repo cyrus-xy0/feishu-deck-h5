@@ -117,6 +117,14 @@ SKILL_PREFIX = "../../../skills/feishu-deck-h5/"
 # the framework's rules scoped to the new slide-key to preserve the visual.
 HEAVY_FRAMEWORK_LAYOUTS = {"quote", "cover", "section", "big-stat", "end"}
 
+# Framework-drift modernization: an OLD deck may reference a CSS custom property
+# the CURRENT framework no longer defines. var(--undefined) makes the WHOLE
+# declaration fail in the browser — for a `font:` shorthand that means the size
+# silently falls back to 16px (R-CSSVAR render-fail on lift). Map known-retired
+# tokens to their current equivalent. `--fs-accent4` was the teal keyword-jump
+# accent (ACCENT4 = teal per the copy rules) → now `--fs-teal`. (2026-06-02)
+_RETIRED_VAR_MAP = {"--fs-accent4": "--fs-teal"}
+
 # --shake recovers source-head per-slide CSS VERBATIM (step 5.55). Old decks
 # often inline MB-scale background images as `data:…;base64,…` right there, and
 # the same blob is frequently referenced 2×+. Carried verbatim, one such page
@@ -389,8 +397,23 @@ def extract_head_slide_rules(src_head_css, slide_key, page_map):
     decks lift clean WITHOUT first running the migrate codemod. @keyframes the
     rules reference are pulled by the closure step (5.6). Over-inclusive: a
     multi-target rule is kept whole when this slide is one of its targets."""
+    # Inline single-file decks embed MB-scale images as `url(data:…;base64,…)`
+    # right in the head CSS — a 248MB block is not unusual (wudeli). Brace-parsing
+    # that verbatim is O(n²) in _match_brace (≈15s of a 21s lift). Stash the
+    # `data:` URIs to short tokens BEFORE parsing, then restore them only in the
+    # (few) rules we keep → byte-identical output, ~3× faster lift. The `data:`
+    # guard keeps the normal-deck path (no data URIs) untouched. (wudeli, 2026-06-02)
+    _uri_stash = {}
+
+    def _stash_uri(m):
+        tok = f"\x00DURI{len(_uri_stash)}\x00"
+        _uri_stash[tok] = m.group(0)
+        return tok
+
+    light = (re.sub(r'data:[^)\s"\']+', _stash_uri, src_head_css)
+             if 'data:' in src_head_css else src_head_css)
     keep = []
-    for selector, body in iter_css_rules(src_head_css):
+    for selector, body in iter_css_rules(light):
         keys = set(re.findall(r'\[data-slide-key="([^"]+)"\]', selector))
         for n in re.findall(r'\[data-page="?([\w-]+)"?\]', selector):
             mapped = page_map.get(n)
@@ -420,7 +443,11 @@ def extract_head_slide_rules(src_head_css, slide_key, page_map):
             new_sel = re.sub(
                 r'\[data-page="?[\w-]+"?\]',
                 f'.slide[data-slide-key="{slide_key}"]', new_sel)
-            keep.append(f"{new_sel} {{ {body} }}")
+            rule = f"{new_sel} {{ {body} }}"
+            if _uri_stash:
+                rule = re.sub(r'\x00DURI\d+\x00',
+                              lambda mm: _uri_stash[mm.group(0)], rule)
+            keep.append(rule)
     return "\n".join(keep)
 
 
@@ -434,14 +461,22 @@ def find_frame_lines(src_lines):
     return starts
 
 
+# Match the `.slide` opening tag — allowing EXTRA classes (`class="slide foo"`,
+# e.g. iframe-embed pages tagged `class="slide embedded-management-page"`). The
+# old exact string `'<div class="slide"'` missed multi-class slide divs → frame
+# keyed "?" / unliftable. The `(?:\s[^"]*)?` keeps `class="slide-frame"` OUT (a
+# `-` follows `slide`, not whitespace or the closing quote). (wudeli inline, 2026-06-02)
+_SLIDE_OPEN_RE = re.compile(r'<div\s+class="slide(?:\s[^"]*)?"')
+
+
 def extract_one(src_lines, frame_start, frame_end):
     """Slice the inner of the slide inside frame_start..frame_end (1-indexed
     inclusive). Returns dict with: key, label, accent, decor, orig_layout,
     lifted, inner_html, image_refs."""
-    # Find <div class="slide" within
+    # Find <div class="slide" within (allowing extra classes via _SLIDE_OPEN_RE)
     slide_open = None
     for i in range(frame_start, frame_end):
-        if re.search(r'<div class="slide"', src_lines[i]):
+        if _SLIDE_OPEN_RE.search(src_lines[i]):
             slide_open = i + 1  # 1-indexed
             break
     if slide_open is None:
@@ -471,7 +506,19 @@ def extract_one(src_lines, frame_start, frame_end):
             slide_close = slide_open + _off   # 1-indexed line holding the .slide close
             break
 
-    opening = src_lines[slide_open - 1]
+    # The .slide opening tag may wrap across MULTIPLE lines (attrs on their own
+    # lines). Read the full tag — from `<div class="slide"` up to its closing
+    # `>` — not just the first line, or attrs that wrapped (data-slide-key /
+    # data-screen-label) are missed → key=None → --index shows "?", --key can't
+    # find the slide, src_key=None, and (worst) the slide_key never reaches
+    # extract_head_slide_rules so the slide's own per-slide CSS is NOT recovered
+    # → layout collapses to block flow on lift. (merged-49pages `back-1000stores`
+    # repro: 3-line .slide tag → grid dropped → vertical collapse, 2026-06-02.)
+    _join = "".join(src_lines[slide_open - 1:frame_end])
+    _sm = _SLIDE_OPEN_RE.search(_join)
+    _sopen = _sm.start() if _sm else -1
+    _sgt = _join.find('>', _sopen) if _sopen != -1 else -1
+    opening = _join[_sopen:_sgt + 1] if (_sopen != -1 and _sgt != -1) else src_lines[slide_open - 1]
 
     def attr(name):
         m = re.search(rf'{name}="([^"]*)"', opening)
@@ -485,7 +532,14 @@ def extract_one(src_lines, frame_start, frame_end):
         "lifted_original": attr("data-lifted"),
         "orig_layout": attr("data-layout"),
     }
-    inner = "".join(src_lines[slide_open : slide_close - 1])
+    # Start inner AFTER the (possibly multi-line) opening tag's `>` — otherwise
+    # the wrapped attribute lines (data-screen-label / data-slide-key on their
+    # own lines) leak into the body as VISIBLE TEXT at the top of the slide.
+    # (merged-49pages `back-store-pipeline` tag-attribute leak, 2026-06-02.)
+    _body = "".join(src_lines[slide_open - 1:slide_close - 1])
+    _bm = _SLIDE_OPEN_RE.search(_body)
+    _bgt = _body.find('>', _bm.start()) if _bm else -1
+    inner = _body[_bgt + 1:] if _bgt != -1 else "".join(src_lines[slide_open:slide_close - 1])
     return info, inner
 
 
@@ -644,6 +698,14 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
     # decks lift clean WITHOUT the migrate codemod. (Keyframes pulled by 5.6.)
     if shake and src_head_css and slide_key:
         head_rules = extract_head_slide_rules(src_head_css, slide_key, page_map or {})
+        # Recovered rules may be scoped `[data-slide-key=K][data-layout=X]` (the
+        # inline/render-deck co-location pattern). The lifted slide renders as
+        # `data-layout="raw"`, so a `[data-layout="X"]` filter would NEVER match →
+        # DEAD rule (R-VIS-DEAD-RULE), layout silently lost. Drop it — same rescope
+        # step 3 applies to the slide's own inner CSS (which runs before this
+        # recovery, so these head rules missed it). (wudeli inline, 2026-06-02)
+        head_rules = re.sub(
+            r'(\[data-slide-key="[^"]+"\])\[data-layout="[^"]+"\]', r'\1', head_rules)
         if head_rules:
             inner = (
                 '<style>\n/* AUTO-RECOVERED source-head per-slide CSS '
@@ -679,17 +741,58 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
     # stay inline. Runs AFTER all CSS-injection steps so it catches both sources.
     inner = externalize_large_base64(inner, dst_input_dir, slide_key, report)
 
-    # 6) Auto-copy prototypes/<slug>/ for iframe src="prototypes/..."
-    for m in re.finditer(r'''src=['"]prototypes/([^/'"]+)/''', inner):
-        slug = m.group(1)
-        src = src_proto_dir / slug
-        dst = dst_proto_dir / slug
+    # 6) Auto-copy prototypes/ iframe bodies — BOTH a subdir (prototypes/<slug>/…)
+    #    AND a direct file (prototypes/<demo>.html). The old regex required a
+    #    trailing slash → direct-file iframe bodies were silently dropped (blank
+    #    iframe on lift), same class as the deck-cli paste bug. (2026-06-02)
+    for seg in sorted(set(re.findall(
+            r'''(?:src|href)=['"](?:\./)?prototypes/([^/'"]+)''', inner))):
+        src = src_proto_dir / seg
+        dst = dst_proto_dir / seg
         if src.is_dir():
             if not dst.exists():
                 shutil.copytree(src, dst)
-            report.setdefault("proto_copied", []).append(slug)
+            report.setdefault("proto_copied", []).append(seg + "/")
+        elif src.is_file():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
+                shutil.copy2(src, dst)
+            report.setdefault("proto_copied", []).append(seg)
         else:
-            report.setdefault("proto_missing", []).append(slug)
+            report.setdefault("proto_missing", []).append(seg)
+
+    # 6b) Copy OTHER deck-local refs the standard buckets miss — e.g. a foreign
+    #     deck's iframe body at a non-standard path (assets/custom/<demo>/x.html).
+    #     scan_asset_refs buckets these "other" (the silent-break risk) and nothing
+    #     copied them → blank iframe / 404 on lift. Copy preserving the deck-
+    #     relative path; an iframe/demo .html in a subfolder brings its whole
+    #     folder (so the demo's own deps come too). (B#43 jay-xhs-review, 2026-06-02)
+    src_root, dst_root = src_input_dir.parent, dst_input_dir.parent
+    for _r in scan_asset_refs(inner, src_root):
+        if _r["kind"] != "other" or not _r.get("exists"):
+            continue
+        rel = _r["url"].split("?", 1)[0].split("#", 1)[0].lstrip("./")
+        if not rel or rel.startswith("/") or rel.startswith("../") or "/../" in rel:
+            continue
+        if rel.lower().endswith((".html", ".htm")) and "/" in rel:
+            sub = rel.rsplit("/", 1)[0]
+            if not (dst_root / sub).exists() and (src_root / sub).is_dir():
+                shutil.copytree(src_root / sub, dst_root / sub)
+            report.setdefault("local_copied", []).append(sub + "/")
+        elif (src_root / rel).is_file():
+            d = dst_root / rel
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if not d.exists() or (src_root / rel).stat().st_mtime > d.stat().st_mtime:
+                shutil.copy2(src_root / rel, d)
+            report.setdefault("local_copied", []).append(rel)
+
+    # 6c) Modernize retired framework CSS vars (framework drift) — see
+    #     _RETIRED_VAR_MAP. var(--undefined) silently kills the whole declaration
+    #     (a `font:` shorthand → 16px fallback) → R-CSSVAR render-fail on lift.
+    for _old, _new in _RETIRED_VAR_MAP.items():
+        if f"var({_old})" in inner:
+            inner = inner.replace(f"var({_old})", f"var({_new})")
+            report.setdefault("retired_vars_mapped", []).append(f"{_old}→{_new}")
 
     # F-250: deref inlined `var(--fs-asset-X)` → `url("assets/<file>")` so the
     # background image actually loads in the lifted (data.html-inline) slide.
@@ -851,10 +954,22 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             # "carried" = actually copied by transform (input/ + prototypes/).
             # `other`-kind refs (sibling .html, relative ../paths) resolve in the
             # source but are NOT auto-copied — don't claim they're carried (F-76).
+            # `other`-kind refs that step 6b copied (foreign-deck iframe bodies /
+            # non-standard local paths) are now CARRIED, not stranded.
+            _local_done = set(report.get("local_copied", []))
+
+            def _carried_by_6b(url):
+                rel = url.split("?", 1)[0].split("#", 1)[0].lstrip("./")
+                return rel in _local_done or (
+                    "/" in rel and (rel.rsplit("/", 1)[0] + "/") in _local_done)
+
             carried = [r for r in asset_refs
-                       if r["exists"] is True and r["kind"] in ("input", "prototype")]
+                       if r["exists"] is True and (
+                           r["kind"] in ("input", "prototype")
+                           or (r["kind"] == "other" and _carried_by_6b(r["url"])))]
             other_present = [r for r in asset_refs
-                             if r["exists"] is True and r["kind"] == "other"]
+                             if r["exists"] is True and r["kind"] == "other"
+                             and not _carried_by_6b(r["url"])]
             # clientlogo refs get their own line (with present/missing state), so
             # exclude them from the generic missing bucket to avoid double-listing.
             missing = [r for r in asset_refs

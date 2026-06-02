@@ -537,15 +537,26 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
             copied["input"].append(fname)
         else:
             copied["missing"].append(f"input/{fname}")
-    for slug in sorted(set(re.findall(r"prototypes/([^/\s\"'<>()\\?#]+)/", text))):
-        s = src_dir / "prototypes" / slug
-        d = dst_dir / "prototypes" / slug
+    # prototypes/ refs come in two shapes: a SUBDIR (`prototypes/<slug>/...`, a
+    # multi-file demo) OR a DIRECT FILE (`prototypes/<demo>.html`, the common
+    # iframe-embed src). The old regex required a trailing slash → it copied only
+    # subdirs and silently DROPPED direct files (iframe-embed src=prototypes/x.html
+    # → blank iframe after paste). Capture the first path segment and copy whichever
+    # it is. (cross-tenant-org-demo.html repro, 2026-06-02.)
+    for seg in sorted(set(re.findall(r"prototypes/([^/\s\"'<>()\\?#]+)", text))):
+        s = src_dir / "prototypes" / seg
+        d = dst_dir / "prototypes" / seg
         if s.is_dir():
             if not d.exists():
                 shutil.copytree(s, d)
-            copied["prototypes"].append(slug)
+            copied["prototypes"].append(seg + "/")
+        elif s.is_file():
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
+                shutil.copy2(s, d)
+            copied["prototypes"].append(seg)
         else:
-            copied["missing"].append(f"prototypes/{slug}/")
+            copied["missing"].append(f"prototypes/{seg}")
     # Bare/relative deck-local media refs (scene.png, ./img.jpg, deck-local
     # assets/foo.png, replica page_image, image.src, …): NOT under input/ or
     # prototypes/, NOT framework (assets/shared·lark-)/http/data, NOT escaping
@@ -576,6 +587,37 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
         else:
             copied["missing"].append(rel)
     return copied
+
+
+# Framework-drift modernization: retired CSS custom properties an OLD deck may
+# reference. var(--undefined) silently kills the whole declaration on render (a
+# `font:` shorthand → 16px fallback) → R-CSSVAR. Map to the current equivalent.
+# `--fs-accent4` was the teal keyword-jump accent (ACCENT4 = teal) → `--fs-teal`.
+_RETIRED_VAR_MAP = {"--fs-accent4": "--fs-teal"}
+
+
+def _map_retired_vars(slide: dict) -> tuple[dict, int]:
+    """Remap retired framework CSS vars (var(--old) → var(--new)) across every
+    string in the slide (data.html / custom_css / nested data). Returns
+    (slide, count_of_occurrences_remapped)."""
+    pairs = [(f"var({o})", f"var({n})") for o, n in _RETIRED_VAR_MAP.items()]
+    total = 0
+
+    def walk(v):
+        nonlocal total
+        if isinstance(v, str):
+            for old, new in pairs:
+                if old in v:
+                    total += v.count(old)
+                    v = v.replace(old, new)
+            return v
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+
+    return walk(slide), total
 
 
 def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
@@ -623,6 +665,10 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     # Strip source-deck-bound data-text-id attrs (else T03 collision in target).
     slide, n_ids = _strip_text_ids(slide)
 
+    # Modernize retired framework CSS vars (framework drift) so an old slide
+    # doesn't render-fail on R-CSSVAR after paste into a current-framework deck.
+    slide, n_vars = _map_retired_vars(slide)
+
     # Provenance — the validator downgrades typography/color violations to
     # warnings for slides carrying `lifted` (same contract as lift-slides.py).
     slide["lifted"] = f"{src_path.parent.name}#{matches[0].get('key')}"
@@ -648,6 +694,9 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     if n_ids:
         print(f"    stripped {n_ids} source-bound data-text-id attr(s) "
               f"(re-render regenerates the sidecar)")
+    if n_vars:
+        print(f"    remapped {n_vars} retired CSS var ref(s) "
+              f"({', '.join(f'{o}→{n}' for o, n in _RETIRED_VAR_MAP.items())})")
     if report["input"]:
         print(f"    input/ copied: {report['input']}")
     if report["prototypes"]:

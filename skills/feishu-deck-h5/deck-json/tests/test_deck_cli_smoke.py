@@ -72,5 +72,64 @@ class DeckCliSmokeTest(unittest.TestCase):
         self.assertIn(src, keys)
 
 
+class DeckCliPasteDriftTest(unittest.TestCase):
+    """`paste` must (a) copy a prototypes/<demo>.html DIRECT-FILE iframe body
+    (old regex only matched prototypes/<dir>/ subdirs → blank iframe) and
+    (b) remap retired framework CSS vars (var(--fs-accent4)→var(--fs-teal)) so an
+    old slide doesn't render-fail on R-CSSVAR after paste. (P1, 2026-06-02)"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="deck-cli-paste-test-"))
+        self.src_dir = self.tmp / "src"
+        (self.src_dir / "prototypes").mkdir(parents=True)
+        (self.src_dir / "prototypes" / "demo.html").write_text(
+            "<!doctype html><body>demo</body>", encoding="utf-8")
+        src_deck = {
+            "version": "1.0",
+            "deck": {"title": "s", "author": "a", "date": "2026-06"},
+            "slides": [{
+                "key": "src-raw", "layout": "raw", "accent": "blue",
+                "data": {"html": '<div class="lead">'
+                                 '<b style="color:var(--fs-accent4)">x</b></div>'
+                                 '<iframe src="prototypes/demo.html"></iframe>'},
+            }],
+        }
+        (self.src_dir / "deck.json").write_text(json.dumps(src_deck), encoding="utf-8")
+        self.dst_dir = self.tmp / "dst"
+        self.dst_dir.mkdir()
+        self.dst = self.dst_dir / "deck.json"
+        shutil.copy(SAMPLE, self.dst)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _paste(self):
+        return subprocess.run(
+            [sys.executable, str(CLI), str(self.dst), "--yes",
+             "paste", "--from", str(self.src_dir / "deck.json"), "--key", "src-raw"],
+            capture_output=True, text=True,
+        )
+
+    def test_prototype_direct_file_copied(self):
+        proc = self._paste()
+        self.assertEqual(proc.returncode, 0,
+                         f"paste failed: {proc.stderr}\n{proc.stdout}")
+        self.assertTrue((self.dst_dir / "prototypes" / "demo.html").is_file(),
+                        "prototypes/demo.html direct-file iframe body was not "
+                        "copied by paste (blank iframe).")
+
+    def test_retired_var_remapped(self):
+        proc = self._paste()
+        self.assertEqual(proc.returncode, 0,
+                         f"paste failed: {proc.stderr}\n{proc.stdout}")
+        deck = json.loads(self.dst.read_text(encoding="utf-8"))
+        pasted = [s for s in deck["slides"] if s.get("key") == "src-raw"][0]
+        html = pasted["data"]["html"]
+        self.assertNotIn("var(--fs-accent4)", html,
+                         "paste did not remap retired var(--fs-accent4).")
+        self.assertIn("var(--fs-teal)", html,
+                      "var(--fs-accent4) should map to var(--fs-teal).")
+
+
 if __name__ == "__main__":
     unittest.main()
