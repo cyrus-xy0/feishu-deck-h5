@@ -883,6 +883,51 @@ def run_static_audits(audits, *, html, slides, path, iss):
         fn(*(ctx[a] for a in sig))
 
 
+def filter_issues_to_slide(slide_arg, slides, iss):
+    """F-254 · diagnostic single-slide filter.
+
+    Mutate `iss` in place, keeping only findings that pertain to ONE slide so a
+    one-page edit isn't buried in deck-wide pre-existing noise. `slide_arg` is a
+    data-slide-key ("cover") or a 1-based ordinal ("30" / "#30"). A finding
+    matches when its message contains `data-slide-key="<key>"` OR `slide <N>`
+    (the two conventions every audit emits). Returns a short human note.
+    """
+    idx_to_key = {}
+    for i, s in enumerate(slides, 1):
+        m = re.search(r'data-slide-key="([^"]+)"', s)
+        if m:
+            idx_to_key[i] = m.group(1)
+    key_to_idx = {v: k for k, v in idx_to_key.items()}
+
+    arg = slide_arg.strip().lstrip('#')
+    if arg.isdigit():
+        ordinal = int(arg)
+        key = idx_to_key.get(ordinal)
+    else:
+        key = arg
+        ordinal = key_to_idx.get(key)
+
+    known = (key in key_to_idx) or (ordinal in idx_to_key)
+
+    def _match(msg):
+        if key and f'data-slide-key="{key}"' in msg:
+            return True
+        if ordinal and re.search(rf'\bslide {ordinal}\b', msg):
+            return True
+        return False
+
+    iss.errors        = [e for e in iss.errors        if _match(e[1])]
+    iss.warnings      = [w for w in iss.warnings      if _match(w[1])]
+    iss.soft_warnings = [w for w in iss.soft_warnings if _match(w[1])]
+
+    label = (f'#{ordinal} {key}' if (ordinal and key)
+             else f'#{ordinal}' if ordinal else (key or arg))
+    if not known:
+        return (f'⚠ slide "{slide_arg}" not found among {len(slides)} slides — '
+                'matched by substring anyway (0 findings likely means a typo).')
+    return f'filtered to slide {label}'
+
+
 def main():
     p = argparse.ArgumentParser(description='feishu-deck-h5 self-check')
     p.add_argument('html', help='Path to the assembled deck HTML file')
@@ -914,6 +959,14 @@ def main():
                         '(run-regression.py, analyze-prompts.py) consume '
                         'validator output — parsing the human report via '
                         'regex is brittle to format tweaks.')
+    p.add_argument('--slide', metavar='KEY_OR_N', default=None,
+                   help='Diagnostic single-slide filter (F-254): keep only '
+                        'findings for ONE slide — by data-slide-key (e.g. '
+                        '"cover") or 1-based ordinal (e.g. "30" / "#30"). Exit '
+                        'code reflects ONLY that slide. Use when editing a single '
+                        'page so its findings are not buried in deck-wide '
+                        'pre-existing noise. Does NOT change which audits run — '
+                        'only what is reported/exited on; NOT a delivery gate.')
     args = p.parse_args()
     if args.screenshots and not args.visual:
         args.visual = True   # --screenshots implies --visual
@@ -958,6 +1011,10 @@ def main():
                 f'visual report formatting failed ({type(e).__name__}: {e}) — '
                 'a malformed audit entry; visual findings may be incomplete.')
 
+    slide_filter_note = None
+    if args.slide is not None:
+        slide_filter_note = filter_issues_to_slide(args.slide, slides, iss)
+
     if args.strict:
         # Promote regular warnings to errors. SOFT warnings (R-VIS-NO-IMAGERY,
         # R-SELF-CONTAINED, etc.) stay as warnings — they are editorial
@@ -1001,6 +1058,8 @@ def main():
         return 0 if not iss.errors else 1
 
     print(f'feishu-deck-h5 validator  ·  {path.name}')
+    if slide_filter_note:
+        print(f'  ⟂ {slide_filter_note} · F-254 single-slide diagnostic (NOT a delivery gate)')
     print(f'  slides: {len(slides)}')
     print(f'  errors:   {len(iss.errors)}')
     print(f'  warnings: {len(all_warnings)}')

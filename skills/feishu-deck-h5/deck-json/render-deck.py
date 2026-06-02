@@ -1666,9 +1666,14 @@ def main(argv=None) -> int:
                     help="single-file delivery mode — base64-inline all CSS/JS/images. "
                          "Mutually exclusive with copy-assets (auto-skips it).")
     ap.add_argument("--visual", action="store_true",
-                    help="run Playwright visual audits after render (R-OVERFLOW / "
-                         "R-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR). Adds ~5-10s. "
-                         "Requires `pip install playwright && python -m playwright install chromium`.")
+                    help="run Playwright visual audits as part of the GATE "
+                         "(R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-BODY-FLOOR "
+                         "'字偏小' content-below-24px / R-VIS-LABEL-FLOOR). Adds "
+                         "~5-10s. Requires `pip install playwright && python -m "
+                         "playwright install chromium`. NOTE: even without this "
+                         "flag, real decks under runs/ get these audits as a "
+                         "NON-BLOCKING advisory (F-253); --visual promotes them "
+                         "into the pass/fail gate.")
     ap.add_argument("--renumber", action="store_true",
                     help="rewrite each slide's screen_label leading number to its TRUE "
                          "frame_index (post-_disabled-skip), persisted back to deck.json "
@@ -1859,6 +1864,42 @@ def main(argv=None) -> int:
         rc = subprocess.run(validate_cmd, capture_output=True, text=True)
         # Always show validator output (digest is helpful)
         print(rc.stdout)
+
+        # 6b. Readability advisory (F-253) — NON-BLOCKING, never affects exit code,
+        # and runs REGARDLESS of the static gate's pass/fail. A "字偏小" miss can
+        # coexist with unrelated static errors on OTHER pages — that was the exact
+        # situation it was added to catch, so it must run even when the gate below
+        # is about to `return 4`. The default gate is STATIC-only (`--no-visual`),
+        # so the visual readability audits never run — chiefly R-VIS-BODY-FLOOR,
+        # which flags REAL content rendered below the 24px body floor (16px content
+        # in an ambiguously-named class passes both R20 — 16 is on the 4-tier
+        # ladder — AND the static R06 class-name heuristic). For real decks (under
+        # runs/) run the visual audits now as an advisory so that miss is surfaced
+        # automatically — without forcing every render, or the /tmp smoke tests,
+        # through Playwright. Skipped when --visual already ran them in the gate;
+        # a no-op when Playwright is absent (validate.py degrades → no R-VIS).
+        if not args.visual and "/runs/" in str(args.output_dir.resolve()):
+            adv = subprocess.run(
+                [sys.executable, str(VALIDATE_HTML), str(out_html), "--visual", "--json"],
+                capture_output=True, text=True,
+            )
+            try:
+                import json as _json
+                _data = _json.loads(adv.stdout or "{}")
+                _vis = [f for f in (_data.get("warnings", []) + _data.get("errors", []))
+                        if str(f.get("code", "")).startswith("R-VIS")]
+                if _vis:
+                    print("\n📐 readability advisory · visual audits "
+                          "(NOT a delivery gate · F-253):", file=sys.stderr)
+                    for f in _vis[:20]:
+                        print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
+                    if len(_vis) > 20:
+                        print(f"  … +{len(_vis) - 20} more", file=sys.stderr)
+                    print(f"  ↳ focus one page: python3 {VALIDATE_HTML.name} "
+                          "<html> --visual --slide <key>", file=sys.stderr)
+            except Exception:
+                pass  # an advisory must NEVER break a render
+
         if rc.returncode != 0:
             print(file=sys.stderr)
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)

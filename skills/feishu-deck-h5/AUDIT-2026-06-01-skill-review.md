@@ -276,3 +276,30 @@
 - F-252 的 `--photos-as-bg` 安全自动转换(检测"父容器有显式尺寸 + img object-fit:cover"才转)。
 - 是否把 F-250 推广成更稳的 render 期修法(render-deck 在 `<head>` 注入文档相对正确的 `:root{--fs-asset-*}` 覆盖,可同时救 skill-relative 模式 + 任何 inline 用 var 的 custom_css)—— 改共享 render 路径,回归面更大,留作选项。
 - 是否合并本分支到 main / 是否推送。
+
+---
+
+## 单页 redesign 实操发现(2026-06-02 · 众安 deck #30 → 泰康保险 AI 先锋案例)
+
+**触发**:用户把 #30(`feishu-ai-scene-tools`)按给定文案重做成泰康 4 案例矩阵(raw 页)。全程跑通,暴露两个**校验/迭代**层缺口(与代码审计 F-77..F-252 正交,非 lift 路径);先记待办,后续按 ID 清。
+
+| ID | 文件 | 摘要 | 修法 | 状态 |
+|---|---|---|---|---|
+| F-253 | `assets/_validate_audits.py`(R06 ~185-258)+ `assets/visual-audit.js` | 真正的正文**内容**渲染在 16px(chrome foot 档)时 R06/R20 都查不出 → 静默"字偏小"。R06 BODY-floor 只认名字像正文的选择器(body/description/caption/list/cell/arch-*);raw 页自定义内容类(`.tk-sec`/卡内 `em` 等)不在表里 → 不当正文 → 16px==foot floor 放行;R20 同理(16px 是合法 Foot 档)。实测本会话 #30 v1:卡副标 + 次要指标行 16px,validator **0 finding**,用户当场指"字偏小"。系"合法档位下的内容语义盲区"(与 F-158 裸子串 / F-159 lifted 不降级同族、不同角度)。 | 加 computed-size 审计(visual-audit.js,量真实 px):叶子 <24px 且非已知 chrome 类/角色且含句子级文本(≥~6 CJK / 多词)→ warn「内容低于 24px 正文下限」。或让 R06 body 启发式不再只靠类名(回退:`.stage` 内 + 非 chrome 类 + 有实质文本 = 正文)。 | ✅ |
+| F-254 | `deck-json/render-deck.py` · `assets/validate.py` | 无**单页**渲染/校验模式:改一页必须整份 render+validate。本会话改 1 页 → 71 err + 142 warn,**无一条**在被改页上 → 单页信号被全 deck 存量噪音淹没(只能靠 grep 自己 key,见纪律 F-68)。 | render-deck 加 `--only <key>`(或 validate 加 `--slide <key>`):只渲染/校验目标页 + 只打印该页 finding,加速单页迭代;默认仍整份(三道闸"整份校验"契约不破,`--only` 仅诊断/迭代用)。 | ✅ |
+
+**副记(文档建议,非工单)**:raw 卡内 stat hero 大数字用 `font-size:64px;/* allow:typescale */` 实测可压住 R20 off-tier。`references/` 目前只列 cover/section/big-stat/quote 为合法 typescale 例外,建议补「raw 页卡内 KPI 大数字」一项,免得后人不敢用、退回偏小的 48。
+
+> 过程慢的**执行层**教训(非技能 bug:误把"validator 干净"当"视觉干净"、看降采样缩略图不量真实 px、shell 抽风时反复 grep 而非写文件用 Read、对结构化 PDF 过度铺 workflow 而非"读目录→定位→读目标页")已入个人工作记忆,不在此技能审计追。
+
+---
+
+### F-253 / F-254 修复进度(2026-06-02 · 工作树未 commit / 未 push)
+
+**F-254 ✅ — `validate.py --slide <key|N>` 单页诊断过滤**(`assets/validate.py`:新增 `filter_issues_to_slide` + `--slide` 参数)。按 data-slide-key 或 1-based 序号(`30` / `#30`)只保留该页 finding、exit 只看该页;不改跑哪些审计,仅改报告/退出口径,**非交付闸**。key↔序号互通(`aaa`=`#1`,"slide N" 文案也归该页)。实测真 deck:`--slide system-integration-thesis` → 只报该页 **3 条 R20**(而非全 deck 71),`--slide feishu-ai-scene-tools` → 0 finding / PASS。测试 `tests/test_validate_slide_filter.py`(5 例)。render-deck `--only` 透传留作可选(`validate --slide` 已覆盖核心诉求)。
+
+**F-253 ✅ — 关键更正 + 真正修法**:动手才发现 **content-floor 审计早已存在 = `R-VIS-BODY-FLOOR`**(`visual-audit.js:853`,2026-05-19 加)——它**正是**抓"模糊命名类的 <24px 正文"(注释明写抓 `.rt/.d/.ind-tag` 这类过 R20+R06 的缝),我的 `.tk-sec`/`.tk-sub` 16px **会**被它抓到。**没触发的真因**:`render-deck` 默认强加 `--no-visual` → 所有视觉可读性审计**休眠**(而 `validate.py` 自己默认 visual=ON)。所以修法**不是**新写审计(会重复),而是让既有审计在默认渲染路径可达:**render-deck 现对 runs/ 下的真实 deck 把视觉审计作为「非阻断 readability advisory」自动跑**(打到 stderr,不影响 exit code),且**无论静态闸过不过都跑**(字偏小 与他页静态错可共存——正是 #30 的情形)。`/tmp` 路径跳过(测试不被拖入 Playwright)、无 Playwright 时静默 no-op。**实地验证**:runs/ 下放一页 16px 正文、`render-deck`(无 --visual)→ 静态闸 exit 0,advisory 仍打出 `[R-VIS-BODY-FLOOR] … renders at 16px … must be ≥ 24 px`。测试 `tests/test_readability_advisory.py`。
+- **决策记录**:把 render-deck `--visual` 默认翻成全局 ON 被否——会让每次渲染(含 golden / 全测试套)强依赖 Playwright;「只对 runs/ 出 advisory」是测试安全的折中。
+- **残留**:无 Playwright 的环境仍漏字偏小(advisory no-op;静态 R06 看不到渲染文本,不强加噪音静态规则,维持现状)。副记的 typescale 文档补充未落 `references/`(可选)。
+
+**回归**:静态校验类 **96 passed**、新增 **8 例**(F-254×5 + F-253×2 + 接线)、render-deck golden/chart/review-fixes **10 passed**。改动文件:`assets/validate.py`、`deck-json/render-deck.py` + 两个新测试。**仅工作树,未 commit / 未 push**。
