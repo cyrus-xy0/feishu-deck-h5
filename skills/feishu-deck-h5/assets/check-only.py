@@ -18,7 +18,7 @@
     排查 framework bug / 改 validator 时用. 实现 = build_default_report().
 
   入库门禁 — `bash check-only.sh deck.html --gate ingest`
-    只看 21 条必修规则 (业务关切 A/B/C 三类), 全部 warn 升 error.
+    只看 业务必修规则 (业务关切 A/B/C 三类), 全部 warn 升 error.
     用 business-rules.yaml 把每条违规渲染成业务语言: 业务症状 / 不修后果 /
     具体修改步骤 + 技术代码做小字附注.
     适合 ingest-package.py 调来做 slide-library 准入扫描.
@@ -45,7 +45,8 @@ FAMILIES = [
     ('品牌 / 调色板',        ['L1', 'R10', 'R12', 'R38', 'R49', 'R-LANG']),
     ('布局完整性',           ['L2', 'L4', 'R36', 'R47', 'R48', 'R-CSSVAR',
                               'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST',
-                              'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT']),
+                              'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT',
+                              'R-RAW-LOOKS-SCHEMA']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
@@ -72,6 +73,10 @@ CONTEXT_NOTES = {
     'R-SELF-CONTAINED': '老 deck 把每页 CSS 放在 head <style> 里很常见; 这条只是 '
                         '提醒「该页 CSS 没跟着 slide 走, lift/republish 会丢」. '
                         '非阻塞 (warn_soft); 迁到 deck.json 的 custom_css 即可消除.',
+    'R-RAW-LOOKS-SCHEMA': 'raw-first 立场下的过度处理兜底: 一张手搓 raw 页若其实只是 '
+                        '一排标准卡片 (图标+标题+正文, 无示意图/动画/箭头连接), 提醒 '
+                        '改用 content/3up·blocks 更省更稳. 非阻塞 (warn_soft); 这页若有 '
+                        '定制/关系/叙事实质, 保持 raw 忽略即可.',
 }
 
 
@@ -83,11 +88,13 @@ CONCERN_ORDER = [
     'A · 客户看不见',
     'B · 库找不回这张 slide',
     'C · 复用时会打架',
+    'D · 放映功能不全',
+    'E · 文件偏大可能卡顿',
 ]
 
 
 def load_business_rules() -> dict:
-    """从 business-rules.yaml 加载 21 条必修规则的业务文案."""
+    """从 business-rules.yaml 加载 业务必修规则的业务文案."""
     try:
         import yaml
     except ImportError:
@@ -446,7 +453,7 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
     lines.append(f'- **Slide 数**: {slides_count}')
 
     if not violations:
-        lines.append(f'- **结果**: ✅ **通过** —— 21 条必修规则全部满足, 可入库')
+        lines.append(f'- **结果**: ✅ **通过** —— 业务必修规则全部满足, 可入库')
         lines.append('')
         lines.append('---')
         lines.append('')
@@ -469,7 +476,14 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
     lines.append('按下列业务关切分组列出, 优先处理 A (客户看不见) > B (库找不回) > C (复用打架).')
     lines.append('')
 
-    by_concern: dict[str, list] = {c: [] for c in CONCERN_ORDER}
+    # Effective bucket order: the canonical A–E prefix PLUS any other concern
+    # value present in business_rules (so a future concern can't be silently
+    # misrouted into the "未覆盖" section — the bug that hit D/E). Sorted so a
+    # new "F · …" lands after E.
+    extra = sorted({(r.get('concern') or '?') for r in business_rules.values()}
+                   - set(CONCERN_ORDER) - {'?'})
+    order = CONCERN_ORDER + extra
+    by_concern: dict[str, list] = {c: [] for c in order}
     unknown_codes = []
     for code, msg in violations:
         rule = business_rules.get(code)
@@ -477,15 +491,12 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
             unknown_codes.append((code, msg))
             continue
         concern = rule.get('concern', '?')
-        # tolerant matching: yaml 里可能没完全用 CONCERN_ORDER 字面值
-        matched_bucket = next(
-            (b for b in CONCERN_ORDER if b == concern), None)
-        if matched_bucket is None:
-            unknown_codes.append((code, msg))
+        if concern not in by_concern:
+            unknown_codes.append((code, msg))  # rule carries no recognizable concern
             continue
-        by_concern[matched_bucket].append((code, msg, rule))
+        by_concern[concern].append((code, msg, rule))
 
-    for concern in CONCERN_ORDER:
+    for concern in order:
         violations_in_bucket = by_concern[concern]
         if not violations_in_bucket:
             continue
@@ -586,7 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
   # 默认模式: 按 family 分组 review-style 报告
   python3 check-only.py ../examples/sample-deck.html
 
-  # 入库门禁模式: 21 条必修规则, 业务语言报告, 任一违规即 exit 1
+  # 入库门禁模式: 业务必修规则, 业务语言报告, 任一违规即 exit 1
   python3 check-only.py /path/to/deck.html --gate ingest
 
   # 写报告到文件 (默认或 gate 模式都可)
@@ -602,7 +613,7 @@ def build_parser() -> argparse.ArgumentParser:
                         '(CI 无 chromium 时); --gate ingest 强制开启. '
                         '未装 playwright/chromium 时自动跳过, 不硬失败')
     p.add_argument('--gate', choices=['ingest'],
-                   help='入库门禁模式. ingest = 21 条必修规则, '
+                   help='入库门禁模式. ingest = 业务必修规则, '
                         '业务语言报告, 库 ingest-package.py 用')
     p.add_argument('--by-rule', action='store_true',
                    help='工程师视图: 按技术规则家族 (R06 / R-VIS-TIER…) 分组. '
@@ -644,7 +655,7 @@ def main() -> int:
         # F-18: warn (don't block) if yaml lists a code validate.py no longer
         # emits — otherwise that rule silently drops out of the gate.
         warn_on_gate_rule_drift(set(rules.keys()), enumerate_validate_rules())
-        # 只保留 yaml 里覆盖的规则 (21 条必修)
+        # 只保留 yaml 里覆盖的规则 (业务必修)
         kept = [(c, m) for c, m in iss.errors if c in rules]
         report = build_gate_report(path, len(slides), kept, rules)
         # exit code 反映 gate 通过与否

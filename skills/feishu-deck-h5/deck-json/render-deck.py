@@ -188,15 +188,22 @@ def render_template(template: str, data: dict) -> str:
       {{{ field }}}  raw   — value substituted as-is (use for known HTML)
       {{ field }}    safe  — value HTML-escaped (default)
 
-    Raw substitutions run first so they're not double-processed.
-    Supports dotted paths: {{ scene.caption }}.
+    Raw substitutions are resolved FIRST and parked behind NUL sentinels so the
+    subsequent safe `{{ }}` pass never re-scans raw-injected author HTML — a raw
+    slide's data.html or an enricher-built `*_html` slot may legitimately contain
+    a literal `{{ word }}` (e.g. a templating-syntax demo or copy with double
+    braces), which must NOT be re-interpreted as a missing-field placeholder
+    (that would SystemExit the whole render). Supports dotted paths: {{ a.b }}.
     """
+    raw_chunks: list[str] = []
+
     def sub_raw(m):
         path = m.group(1).strip()
         try:
-            return str(get_path(data, path))
+            raw_chunks.append(str(get_path(data, path)))
         except KeyError:
             raise SystemExit(f"render-deck: template references missing field {{{{{{ {path} }}}}}}")
+        return f"\x00RAW{len(raw_chunks) - 1}\x00"
     template = re.sub(r"\{\{\{\s*([\w.]+)\s*\}\}\}", sub_raw, template)
 
     def sub_safe(m):
@@ -206,7 +213,10 @@ def render_template(template: str, data: dict) -> str:
         except KeyError:
             raise SystemExit(f"render-deck: template references missing field {{{{ {path} }}}}")
         return _esc_br(str(value))
-    return re.sub(r"\{\{\s*([\w.]+)\s*\}\}", sub_safe, template)
+    template = re.sub(r"\{\{\s*([\w.]+)\s*\}\}", sub_safe, template)
+
+    # Restore parked raw chunks AFTER the safe pass, verbatim (never re-scanned).
+    return re.sub(r"\x00RAW(\d+)\x00", lambda m: raw_chunks[int(m.group(1))], template)
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +230,17 @@ def _derive_screen_label(slide: dict) -> str:
     cleaned = re.sub(r"\s+", " ", re.sub(r"[·:：—\-]+", " ", title))
     cleaned = cleaned.replace("\n", " ").replace("<br>", " ")
     return cleaned.strip()[:20]
+
+
+def _renumber_label(slide: dict, frame_index: int) -> str:
+    """Canonical screen_label = '<frame_index:02d> <name>'. Strips any existing
+    leading number token ('50 飞书生态' / '04-A 标题' → name), then re-prefixes
+    with the slide's TRUE frame_index, so the library label number stops drifting
+    from the on-screen page number / URL hash after lift / insert / reorder.
+    Used by render --renumber."""
+    base = slide.get("screen_label") or _derive_screen_label(slide)
+    name = re.sub(r"^\s*\d[\w\-]*\s+", "", base).strip() or _derive_screen_label(slide)
+    return f"{frame_index:02d} {name}"
 
 
 def _build_data_attrs(slide: dict) -> str:
@@ -1605,10 +1626,13 @@ def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
     block = (f'<style data-slide-key="{slide_key}" data-fs-custom-css>\n'
              f'{scoped}\n'
              f'        </style>')
-    # `class="slide"` (closing quote pins the class to exactly "slide", so this
-    # never matches `class="slide-frame"`). First match is the real .slide open.
+    # Match the `.slide` open div ALLOWING extra classes (`slide story-case`,
+    # `slide page-replica`, …). `(?:\s[^"]*)?` keeps `class="slide-frame"` OUT
+    # (after `slide` must come `"` or whitespace, never `-`), so the first match
+    # is still the real `.slide` open. Anchoring on exact `class="slide"` used to
+    # silently drop custom_css on story-case / replica slides (n=0 → no-op).
     new_html, n = re.subn(
-        r'(<div class="slide"[^>]*>)',
+        r'(<div class="slide(?:\s[^"]*)?"[^>]*>)',
         lambda m: m.group(0) + "\n        " + block,
         slide_html, count=1,
     )
@@ -1642,9 +1666,20 @@ def main(argv=None) -> int:
                     help="single-file delivery mode — base64-inline all CSS/JS/images. "
                          "Mutually exclusive with copy-assets (auto-skips it).")
     ap.add_argument("--visual", action="store_true",
-                    help="run Playwright visual audits after render (R-OVERFLOW / "
-                         "R-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR). Adds ~5-10s. "
-                         "Requires `pip install playwright && python -m playwright install chromium`.")
+                    help="run Playwright visual audits as part of the GATE "
+                         "(R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-BODY-FLOOR "
+                         "'字偏小' content-below-24px / R-VIS-LABEL-FLOOR). Adds "
+                         "~5-10s. Requires `pip install playwright && python -m "
+                         "playwright install chromium`. NOTE: even without this "
+                         "flag, real decks under runs/ get these audits as a "
+                         "NON-BLOCKING advisory (F-253); --visual promotes them "
+                         "into the pass/fail gate.")
+    ap.add_argument("--renumber", action="store_true",
+                    help="rewrite each slide's screen_label leading number to its TRUE "
+                         "frame_index (post-_disabled-skip), persisted back to deck.json "
+                         "(auto-backup .bak-pre-renumber-<ts>). Fixes stale labels after "
+                         "lift/insert/reorder so the library label number matches the "
+                         "on-screen page number / URL hash (#N).")
     args = ap.parse_args(argv)
 
     if args.inline and not args.skip_copy_assets:
@@ -1709,6 +1744,35 @@ def main(argv=None) -> int:
     slides_html = []
     total = len(active_slides)
     deck_dir = args.deck.resolve().parent
+
+    # --renumber: canonicalize every active slide's screen_label leading number
+    # to its true frame_index, BEFORE render (so the emitted data-screen-label +
+    # slide-index.json both follow), and persist back to deck.json with a backup.
+    if getattr(args, "renumber", False):
+        import time
+        changes = []
+        for new_idx, (orig_idx, slide) in enumerate(active_slides):
+            old = slide.get("screen_label") or _derive_screen_label(slide)
+            new = _renumber_label(slide, new_idx + 1)
+            slide["screen_label"] = new          # mutates deck["slides"][orig_idx]
+            if new != old:
+                changes.append((new_idx + 1, old, new))
+        if changes:
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            bak = args.deck.with_name(args.deck.name + f".bak-pre-renumber-{ts}")
+            bak.write_text(args.deck.read_text(encoding="utf-8"), encoding="utf-8")
+            args.deck.write_text(
+                json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(f"  ↻ renumbered {len(changes)} screen_label(s) → frame_index "
+                  f"(backup: {bak.name})", file=sys.stderr)
+            for fi, old, new in changes[:8]:
+                print(f"      #{fi}: '{old}' → '{new}'", file=sys.stderr)
+            if len(changes) > 8:
+                print(f"      … +{len(changes) - 8} more", file=sys.stderr)
+        else:
+            print("  ↻ --renumber: all screen_labels already match frame_index",
+                  file=sys.stderr)
+
     for new_idx, (orig_idx, slide) in enumerate(active_slides):
         try:
             # Pass NEW index (post-skip) for page-number continuity, but include
@@ -1800,6 +1864,42 @@ def main(argv=None) -> int:
         rc = subprocess.run(validate_cmd, capture_output=True, text=True)
         # Always show validator output (digest is helpful)
         print(rc.stdout)
+
+        # 6b. Readability advisory (F-253) — NON-BLOCKING, never affects exit code,
+        # and runs REGARDLESS of the static gate's pass/fail. A "字偏小" miss can
+        # coexist with unrelated static errors on OTHER pages — that was the exact
+        # situation it was added to catch, so it must run even when the gate below
+        # is about to `return 4`. The default gate is STATIC-only (`--no-visual`),
+        # so the visual readability audits never run — chiefly R-VIS-BODY-FLOOR,
+        # which flags REAL content rendered below the 24px body floor (16px content
+        # in an ambiguously-named class passes both R20 — 16 is on the 4-tier
+        # ladder — AND the static R06 class-name heuristic). For real decks (under
+        # runs/) run the visual audits now as an advisory so that miss is surfaced
+        # automatically — without forcing every render, or the /tmp smoke tests,
+        # through Playwright. Skipped when --visual already ran them in the gate;
+        # a no-op when Playwright is absent (validate.py degrades → no R-VIS).
+        if not args.visual and "/runs/" in str(args.output_dir.resolve()):
+            adv = subprocess.run(
+                [sys.executable, str(VALIDATE_HTML), str(out_html), "--visual", "--json"],
+                capture_output=True, text=True,
+            )
+            try:
+                import json as _json
+                _data = _json.loads(adv.stdout or "{}")
+                _vis = [f for f in (_data.get("warnings", []) + _data.get("errors", []))
+                        if str(f.get("code", "")).startswith("R-VIS")]
+                if _vis:
+                    print("\n📐 readability advisory · visual audits "
+                          "(NOT a delivery gate · F-253):", file=sys.stderr)
+                    for f in _vis[:20]:
+                        print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
+                    if len(_vis) > 20:
+                        print(f"  … +{len(_vis) - 20} more", file=sys.stderr)
+                    print(f"  ↳ focus one page: python3 {VALIDATE_HTML.name} "
+                          "<html> --visual --slide <key>", file=sys.stderr)
+            except Exception:
+                pass  # an advisory must NEVER break a render
+
         if rc.returncode != 0:
             print(file=sys.stderr)
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)
@@ -1883,7 +1983,20 @@ def inline_html(out_html: Path, deck: dict) -> None:
         css_path = (out_html.parent / href).resolve()
         if not css_path.is_file():
             return m.group(0)  # leave as-is if not findable
-        return f"<style>{css_path.read_text(encoding='utf-8')}</style>"
+        css = css_path.read_text(encoding='utf-8')
+        # Inline the CSS's OWN url() refs (e.g. `--fs-asset-cover-bg:
+        # url("lark-cover-bg.jpg")`) resolved against the STYLESHEET's dir —
+        # they are relative to the CSS file, NOT to out_html, so the later
+        # out_html-relative background-image pass never finds them and the
+        # "portable single-file" deck would lose its cover/section/content
+        # backgrounds + Lark logo the moment it's moved. `_resolve_bg` keeps
+        # http/data/missing refs untouched.
+        css = re.sub(
+            r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""",
+            lambda u: f"url({_resolve_bg(css_path, u.group(1))})",
+            css,
+        )
+        return f"<style>{css}</style>"
 
     def _inline_script(m):
         src = m.group(1)
@@ -1898,7 +2011,7 @@ def inline_html(out_html: Path, deck: dict) -> None:
         _inline_stylesheet, html_text,
     )
     html_text = re.sub(
-        r'<script\s+src="([^"]+)"></script>',
+        r'<script\b[^>]*?\bsrc="([^"]+)"[^>]*></script>',
         _inline_script, html_text,
     )
     # bg images: handle url('...') and url("...")

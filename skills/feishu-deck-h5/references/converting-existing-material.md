@@ -17,6 +17,23 @@ specifically called out before:
 - pre-existing watermarks / page numbers carried over
 - **silently compressing N source pages into ~M pages** (the "I'll distill 54 → 17 because it's tighter" failure)
 
+### Step -1 · Classify uploaded HTML role before conversion
+
+For HTML specifically, classify the file before applying the conversion rules:
+
+- **Source HTML**: the user says to reference, imitate, remake, recreate, learn
+  from, or use the HTML as material. This is a conversion/generation input. Run
+  Parser, then Designer, Renderer, and Validator. The output is a new deck.
+- **Target HTML**: the user says to modify, adjust, optimize, fix, replace copy,
+  tune style/layout, or continue from the current HTML. This is not a normal
+  source conversion. Import/analyze it into current-state artifacts first:
+  `source-dossier.json`, `DESIGN-PLAN.md`, `outline.json`, `deck.json`, and
+  `index.html`; mark them as `imported_existing_state`; then route to Editor.
+
+Only Source HTML enters the Replica vs Rewrite decision below. Target HTML edits
+must preserve the submitted file's current state unless the user explicitly asks
+to regenerate or redesign.
+
 ### Step 0 · Preserve the page count — DO NOT compress by default
 
 When the user hands you a source deck (PDF / PPT / HTML) and asks for a
@@ -185,6 +202,36 @@ Second attempt was Rewrite (1:1 page count) — rejected with "整体
 
 If ambiguous, **ask the user once** before deciding — the rebuild
 cost between modes is high, but the question cost is one IM line.
+
+### PPTX EMF/PDF logo recovery
+
+PPTX vector logos often arrive as `.emf`. On macOS, `qlmanage`, `sips`, and PIL
+can render these as blank thumbnails. Before trusting a blank render, inspect the
+binary:
+
+```bash
+file logo.emf
+strings logo.emf | grep -a %PDF
+```
+
+Many of these files are EMF wrappers with an embedded PDF payload. If `%PDF` and
+`%%EOF` are present, extract that slice and render the PDF:
+
+```python
+from pathlib import Path
+
+d = Path("logo.emf").read_bytes()
+start = d.find(b"%PDF")
+end = d.rfind(b"%%EOF")
+Path("logo.pdf").write_bytes(d[start:end + 5])
+```
+
+```bash
+sips -s format png -Z 1200 logo.pdf --out logo.png
+```
+
+Rule: for unfamiliar binary assets, inspect with `file`/`strings` before doing a
+full render/crop pipeline based on a blurry or blank preview.
 
 #### Per-page polish mode (4th mode · iterative)
 
@@ -977,4 +1024,3 @@ logo, R13 br-in-title, R56 eyebrow-in-header, P50 base64 budget),
 | Free-style `font-size` like 16 / 17 / 19 / 20 / 24 / 26 / 30 / 32 / 36 / 40 / 48 / 72 / 96 in per-page CSS | Forbidden by R20 modular type-scale | Pick from {14, 18, 22, 28, 38, 44, 52, 56, 64, 88, 100, 132, 160}. Body content ≥ 22. If master truly says exactly 96 px, add `/* allow:typescale */` in the rule and document why |
 
 ---
-

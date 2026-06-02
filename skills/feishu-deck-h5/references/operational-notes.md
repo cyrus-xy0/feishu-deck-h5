@@ -34,6 +34,36 @@
 - **回答「这页字是不是小了」**:量**那一页**的字号(一次 Playwright eval 或
   直接读该 slide 的 scoped CSS + 框架默认档)即可,2~3 秒,**不要**为一个
   字号问题启动全 deck 视觉审计。
+- **已知步骤的单页操作不要甩给 subagent**:换 demo 文件、改 `src`、改 `title`、
+  套 `custom_css`、单页字号这类步骤已知且约 10 步以内的工作,主对话线性完成。
+- **依赖链不要塞进并行 block**:`copy → render → inspect → edit → render` 这类
+  顺序工作必须一步一确认。并行只用于互不依赖的读/查。
+- **单页编辑的校验报告只看这一页**:渲染器可能全 deck render/validate,但判断
+  本次改动是否干净只看锁定 slide key。其他页存量 finding 不主动报告、不顺手扩
+  scope。
+- **多 session 同改一份 deck 时写前重读**:`deck.json` 是单文件 SSOT,last-writer
+  wins。写入前重读并确认关键字段仍是预期;遇到 mtime/git 状态变化或工具报
+  concurrent modification,先 rebase 自己的改动到最新版。
+
+## Workspace Layout
+
+After preflight and before generating new HTML, create a per-run workspace under
+repo-root `runs/`, not under `skills/<skill-name>/`:
+
+```text
+<repo-root>/runs/YYYYMMDD-HHMMSS-<slug>/
+  input/
+  output/
+```
+
+Use `assets/new-run.sh <slug>`. The slug is derived from the topic/customer,
+ASCII/kebab-case, about 25 chars or shorter. Never use Chinese characters in the
+slug and do not use a bare timestamp unless no topic exists. Announce the absolute
+run path, tell the user where `input/` and `output/` are, and write all generated
+deck artifacts under that run's `output/`.
+
+Do not create a new run when the user explicitly asks to edit an existing
+`runs/.../output/` deck.
 
 ## ❌ 绝不用裸 `find` 找渲染器 / 工具(空指针根因 · mandatory)
 
@@ -61,4 +91,3 @@ skill 常以 **symlink** 挂在 `~/.claude/skills/feishu-deck-h5 → <repo>/skil
 手撸 echo 刷屏。
 
 ---
-

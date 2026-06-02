@@ -7,6 +7,28 @@ These four failure modes recurred in the 2026-05-14 CTG run and burned
 30+ minutes of debug time each. Read this section BEFORE doing any
 delete-slide / insert-slide / reorder-slide / custom-layout work.
 
+## Editing Copy
+
+The correct path for copy changes is `deck.json` → rerender. Do not post-render
+edit `index.html` unless intentionally doing browser edit mode followed by
+round-trip recovery.
+
+Examples:
+
+```bash
+python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title "新标题"
+python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.cards.0.body "新正文"
+python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
+```
+
+The old `texts.md` / `apply-texts.py` sidecar flow is retired. Residual
+`data-text-id` attributes in old decks are harmless, but do not author new flows
+around them.
+
+Every `.slide` must have stable semantic `data-slide-key`: unique within the deck,
+kebab-case, not positional (`slide-01` / `page-7`), and stable across reorder.
+Hand-authored/lifted HTML must add/preserve it before delivery or library ingest.
+
 ### E1. Identifier sync on delete/insert — what's mandatory vs conditional
 
 A slide can carry up to three numeric identifiers, at different DOM levels:
@@ -226,4 +248,3 @@ R-VIS-CARD-OVERFLOW, cards too tall to fit). Add and delete are symmetric
 — both shift the layout, both need a rebalance check.
 
 ---
-

@@ -24,7 +24,7 @@ shift || true
 NAME="deck-editable"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --name) NAME="$2"; shift 2 ;;
+    --name) NAME="${2:?--name requires a value}"; shift 2 ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -75,20 +75,41 @@ ZIP_ITEMS=(
   README.txt
 )
 
+add_optional_file() {
+  local rel="$1"
+  if [ -f "$OUT_DIR/$rel" ]; then
+    mkdir -p "$STAGE/$(dirname "$rel")"
+    cp "$OUT_DIR/$rel" "$STAGE/$rel"
+    ZIP_ITEMS+=("$rel")
+  fi
+}
+
+add_optional_dir() {
+  local rel="$1"
+  if [ -d "$OUT_DIR/$rel" ]; then
+    mkdir -p "$STAGE/$(dirname "$rel")"
+    cp -R "$OUT_DIR/$rel" "$STAGE/$rel"
+    ZIP_ITEMS+=("$rel")
+  fi
+}
+
 if [ -d "$OUT_DIR/assets" ]; then
   cp -R "$OUT_DIR/assets" "$STAGE/assets"
   ZIP_ITEMS+=(assets)
 fi
 
-if [ -f "$OUT_DIR/assets-manifest.yaml" ]; then
-  cp "$OUT_DIR/assets-manifest.yaml" "$STAGE/assets-manifest.yaml"
-  ZIP_ITEMS+=(assets-manifest.yaml)
-fi
+add_optional_file "assets-manifest.yaml"
+add_optional_file "deck.json"
+add_optional_file "slide-index.json"
+add_optional_file "making-of.html"
+add_optional_dir "input"
+add_optional_dir "prototypes"
+add_optional_dir "deck-log"
 
-if [ -f "$OUT_DIR/deck.json" ]; then
-  cp "$OUT_DIR/deck.json" "$STAGE/deck.json"
-  ZIP_ITEMS+=(deck.json)
-fi
+for sidecar in "$OUT_DIR"/*.xml; do
+  [ -e "$sidecar" ] || continue
+  add_optional_file "$(basename "$sidecar")"
+done
 
 ZIP_PATH="$OUT_DIR/${NAME}.zip"
 rm -f "$ZIP_PATH"

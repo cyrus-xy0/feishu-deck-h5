@@ -221,7 +221,15 @@ def iter_user_prompts(path: Path):
             if not isinstance(msg, dict):
                 continue
             content = msg.get('content')
-            # Tool results come as list-of-blocks; we want strings only.
+            if isinstance(content, list):
+                # User messages can be list-of-blocks (text + attachments) — pull
+                # the text blocks. tool_result/tool_use blocks contribute nothing,
+                # so a pure tool-result message still yields '' and is skipped
+                # below (the old code dropped ALL list content, losing real
+                # user-authored prompts that arrive as blocks).
+                content = '\n'.join(
+                    b.get('text', '') for b in content
+                    if isinstance(b, dict) and b.get('type') == 'text')
             if not isinstance(content, str):
                 continue
             content = content.strip()

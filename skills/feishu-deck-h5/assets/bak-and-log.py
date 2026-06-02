@@ -71,30 +71,31 @@ def prepend_changes_md(changes: Path, entry_md: str, dir_label: str):
     """Insert entry_md after the file's header block (after first `---`
     separator). Creates the file with a standard header if absent.
     """
+    # Unique insertion anchor: the newest entry is always spliced directly below
+    # this marker, regardless of any `---`/`-` sequence inside entry descriptions
+    # or a pre-existing file. The old "first `---\n\n`" anchor could land INSIDE
+    # a prior entry (entries end with `---\n\n`) and corrupt the timeline.
+    SENTINEL = '<!-- bak-log: newest entries inserted directly below this line -->\n'
     header = (
         f'# CHANGES · {dir_label}\n\n'
         'Edit history for this output directory. Each entry is written\n'
         'by `bak-and-log.sh` (or `bak-and-log.py`) whenever a backup is\n'
         'taken before a destructive edit. Newest entries at the top.\n\n'
         '---\n\n'
+        + SENTINEL
     )
     if not changes.exists():
         body = header
     else:
         body = changes.read_text(encoding="utf-8")
-        if '---' not in body:
-            # Existing CHANGES.md without our header layout — prepend our
-            # header above the existing content.
+        if SENTINEL not in body:
+            # Legacy file (or one without our marker) — prepend a fresh header
+            # WITH the sentinel above the existing content so this and every
+            # future insert share a stable anchor.
             body = header + body
 
-    # Insert entry_md immediately after the FIRST `---\n\n` line group.
-    # If not found, insert right after the first `---`.
-    sep = '---\n\n'
-    if sep in body:
-        idx = body.index(sep) + len(sep)
-        new_body = body[:idx] + entry_md + body[idx:]
-    else:
-        new_body = body + '\n' + entry_md
+    idx = body.index(SENTINEL) + len(SENTINEL)
+    new_body = body[:idx] + entry_md + body[idx:]
     changes.write_text(new_body, encoding="utf-8")
 
 
@@ -111,11 +112,26 @@ def prune_old_baks(file: Path, tag: str, keep: int = 3) -> int:
         rf'^{re.escape(file.name)}\.bak-pre-{re.escape(tag)}-\d{{8}}-\d{{6}}(?:\.\d+)?$'
     )
     candidates = [p for p in file.parent.iterdir() if bak_re.match(p.name)]
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    # Sort by the FILENAME-embedded timestamp + collision counter, NOT st_mtime:
+    # every backup is a shutil.copy2 of the source, which PRESERVES the source's
+    # mtime, so all backups of an unchanged source share one identical mtime →
+    # an mtime sort is non-deterministic on the ties and can delete the NEWEST
+    # backup (this is the delete-guard's last line of defense). The filename
+    # timestamp (YYYYMMDD-HHMMSS) is lexically chronological; the .N collision
+    # suffix breaks same-second ties (higher N = newer).
+    def _chrono_key(p):
+        m = re.search(r'-(\d{8}-\d{6})(?:\.(\d+))?$', p.name)
+        return (m.group(1), int(m.group(2) or 0)) if m else ('', 0)
+    candidates.sort(key=_chrono_key, reverse=True)
     to_delete = candidates[keep:]
+    deleted = 0
     for p in to_delete:
-        p.unlink()
-    return len(to_delete)
+        try:
+            p.unlink()
+            deleted += 1
+        except FileNotFoundError:
+            pass  # a concurrent session already pruned it — harmless
+    return deleted
 
 
 def main():

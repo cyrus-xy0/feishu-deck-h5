@@ -384,6 +384,21 @@ def _unique_key(base: str, taken: set[str]) -> str:
     return f"{base}-imported-{n}"
 
 
+def _slugify_key(raw: str) -> str:
+    """Normalize a (possibly foreign) slide-key to the schema slug pattern
+    ^[a-z][a-z0-9-]*$: lowercase, non-[a-z0-9] → '-', collapse/trim dashes,
+    ensure a leading letter. 'Feiling_Product' → 'feiling-product'; a
+    digit-leading key → 'imported-<key>'; empty → 'imported'. Without this a
+    foreign data-slide-key was copied verbatim → the schema gate rejected the
+    whole deck.json → no index.html produced after the destructive insert."""
+    s = re.sub(r'[^a-z0-9]+', '-', (raw or '').lower()).strip('-')
+    if not s:
+        return 'imported'
+    if not s[0].isalpha():
+        s = 'imported-' + s
+    return s
+
+
 def _strip_slide_wrappers(frag: str) -> tuple[str, dict]:
     """Pull out the data-* attrs from the `.slide` element and return
     (inner_html, attrs). inner_html is everything between the .slide's
@@ -394,7 +409,7 @@ def _strip_slide_wrappers(frag: str) -> tuple[str, dict]:
     so we keep ONLY the inner DOM tree of the original slide.
     """
     # Match the .slide opening tag and capture its attributes
-    m_open = re.search(r'<div\s+class="slide"([^>]*)>', frag)
+    m_open = re.search(r'<div\s+class="slide(?:\s[^"]*)?"([^>]*)>', frag)
     if not m_open:
         return frag, {}
     open_end = m_open.end()
@@ -443,6 +458,9 @@ def _renumber_text_ids(html: str, new_slide_no: int) -> str:
 
 def insert_into_json(deck_path: Path, fragments: list[str], position: int) -> None:
     deck = json.loads(deck_path.read_text(encoding="utf-8"))
+    if not isinstance(deck.get("slides"), list):
+        raise SystemExit(f"{deck_path.name}: malformed deck.json — missing/invalid "
+                         f"'slides' array")
     existing_keys = {s.get("key") for s in deck["slides"]}
     new_slides = []
     for offset, frag in enumerate(fragments):
@@ -454,7 +472,7 @@ def insert_into_json(deck_path: Path, fragments: list[str], position: int) -> No
 
         raw_key = attrs.get("slide-key") or slide_key_in(frag) or f"imported-{datetime.now():%H%M%S}"
         orig_layout = attrs.get("layout") or "raw"
-        new_key = _unique_key(raw_key, existing_keys)
+        new_key = _unique_key(_slugify_key(raw_key), existing_keys)
         existing_keys.add(new_key)
 
         # `_orig_layout` lives at slide level (schema 'slide.properties'),
@@ -490,7 +508,7 @@ def insert_into_json(deck_path: Path, fragments: list[str], position: int) -> No
     _ok(f"inserted {len(new_slides)} slide(s) into {deck_path.name} at position {position + 1}")
 
 
-def re_render(deck_path: Path) -> None:
+def re_render(deck_path: Path) -> int:
     out_dir = deck_path.parent
     _info(f"re-rendering → {out_dir}")
     proc = subprocess.run(
@@ -500,8 +518,9 @@ def re_render(deck_path: Path) -> None:
     if proc.returncode != 0:
         _err("re-render failed:")
         _err(proc.stdout + proc.stderr)
-        return
+        return proc.returncode
     _ok("re-render OK")
+    return 0
 
 
 # ──────────────────────────────────────────────────────── insertion · Mode B (HTML)
@@ -616,6 +635,9 @@ def main(argv=None) -> int:
     # Pick position
     if mode == "A":
         deck = json.loads(target.read_text(encoding="utf-8"))
+        if not isinstance(deck.get("slides"), list):
+            _err(f"{target.name}: malformed deck.json — missing/invalid 'slides' array")
+            return 2
         slides_view = deck["slides"]
     else:
         text = target.read_text(encoding="utf-8")
@@ -629,7 +651,12 @@ def main(argv=None) -> int:
     # Apply
     if mode == "A":
         insert_into_json(target, accepted, position)
-        re_render(target)
+        rc = re_render(target)
+        if rc != 0:
+            _err("import mutated deck.json but the re-render FAILED — the deck "
+                 "may now be invalid. Fix the error shown above and re-render; "
+                 "NOT reporting success.")
+            return rc
     else:
         insert_into_html(target, accepted, position)
 

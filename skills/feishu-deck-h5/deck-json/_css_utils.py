@@ -31,6 +31,33 @@ import re
 # Top-level rule iterator (moved verbatim from lift-slides.py — single source)
 # ---------------------------------------------------------------------------
 
+def _match_brace(css: str, open_idx: int) -> int:
+    """Index just AFTER the `}` matching the `{` at `open_idx`, ignoring braces
+    inside string literals (`content: "}"`) and `/* comments */` — a naive
+    brace counter mis-balanced on either and split a rule mid-body."""
+    n = len(css)
+    depth, k, instr = 1, open_idx + 1, ''
+    while k < n and depth > 0:
+        c = css[k]
+        if instr:
+            if c == instr and css[k - 1] != '\\':
+                instr = ''
+            k += 1
+            continue
+        if c in '"\'':
+            instr = c
+        elif css[k:k + 2] == '/*':
+            end = css.find('*/', k + 2)
+            k = end + 2 if end != -1 else n
+            continue
+        elif c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        k += 1
+    return k
+
+
 def iter_css_rules(css: str):
     """Yield (selector, body) for top-level CSS rules. Skips @-rules (media,
     keyframes, etc.) and comments. Doesn't handle nested rules (CSS doesn't
@@ -56,30 +83,15 @@ def iter_css_rules(css: str):
             if brace == -1 or (semi != -1 and semi < brace):
                 i = (semi + 1) if semi != -1 else n
                 continue
-            # @-rule with body — scan balanced braces
-            depth, k = 1, brace + 1
-            while k < n and depth > 0:
-                c = css[k]
-                if c == '{':
-                    depth += 1
-                elif c == '}':
-                    depth -= 1
-                k += 1
-            i = k
+            # @-rule with body — scan balanced braces (string/comment aware)
+            i = _match_brace(css, brace)
             continue
         # Regular rule: selector { body }
         brace = css.find('{', i)
         if brace == -1:
             break
         selector = css[i:brace].strip()
-        depth, k = 1, brace + 1
-        while k < n and depth > 0:
-            c = css[k]
-            if c == '{':
-                depth += 1
-            elif c == '}':
-                depth -= 1
-            k += 1
+        k = _match_brace(css, brace)
         body = css[brace + 1: k - 1].strip()
         yield selector, body
         i = k
@@ -129,8 +141,19 @@ def _scope_one_selector(part: str, scope: str) -> str:
         return p
     if "[data-slide-key=" in p:
         return p
-    if "[data-page=" in p:
-        return re.sub(r'\[data-page=[^\]]*\]', scope, p)
+    if "[data-page" in p:
+        # `[data-page=N]` is usually the FRAME-level ancestor of `.slide` (the
+        # page-anim head pattern `[data-page="03"] .slide .card`). A plain token
+        # swap yields `scope .slide .card` — a PHANTOM nested `.slide` that
+        # matches 0 elements (scope already IS the keyed `.slide`), so a migrated
+        # rule silently dies. Mirror lift-slides.extract_head_slide_rules: strip
+        # selector-position comments, FUSE `[data-page=N](>) .slide` onto the
+        # keyed scope, then re-anchor any remaining bare `[data-page]` token.
+        # (Also handles bare `[data-page]` with no `=`.)
+        p = re.sub(r'/\*[\s\S]*?\*/', ' ', p)
+        p = re.sub(r'\[data-page(?:=[^\]]*)?\]\s*(?:>\s*)?\.slide(?![\w-])',
+                   lambda m: scope, p)
+        return re.sub(r'\[data-page(?:=[^\]]*)?\]', lambda m: scope, p)
     # `.slide` as the leading token (but NOT `.slide-frame` / `.slideshow`)
     if re.match(r'\.slide(?![\w-])', p):
         return re.sub(r'^\.slide', scope, p, count=1)
@@ -174,14 +197,8 @@ def _scope_block(css: str, scope: str) -> str:
                 out.append(css[i:end])
                 i = end
                 continue
-            # block @-rule — find matching close brace
-            depth, k = 1, brace + 1
-            while k < n and depth > 0:
-                if css[k] == "{":
-                    depth += 1
-                elif css[k] == "}":
-                    depth -= 1
-                k += 1
+            # block @-rule — find matching close brace (string/comment aware)
+            k = _match_brace(css, brace)
             if name in _AT_NESTED:
                 header = css[i:brace]
                 body = css[brace + 1:k - 1]
@@ -197,13 +214,7 @@ def _scope_block(css: str, scope: str) -> str:
             out.append(css[i:])
             break
         selector = css[i:brace]
-        depth, k = 1, brace + 1
-        while k < n and depth > 0:
-            if css[k] == "{":
-                depth += 1
-            elif css[k] == "}":
-                depth -= 1
-            k += 1
+        k = _match_brace(css, brace)
         body = css[brace + 1:k - 1]
         parts = _split_top_level_commas(selector)
         scoped_sel = ", ".join(_scope_one_selector(p, scope) for p in parts)

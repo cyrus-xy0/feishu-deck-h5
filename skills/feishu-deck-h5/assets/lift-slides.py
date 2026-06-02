@@ -94,10 +94,14 @@ Per SKILL.md "Native slide lift" rules, lifted slides keep `lifted` metadata
 which the validator uses to downgrade typography/color violations to warnings.
 """
 import argparse
+import base64
+import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # iter_css_rules is single-sourced in deck-json/_css_utils.py (LIFT-ARCHITECTURE
@@ -112,6 +116,31 @@ SKILL_PREFIX = "../../../skills/feishu-deck-h5/"
 # slide renders at browser defaults (e.g. 92px blockquote → 16px). Auto-inline
 # the framework's rules scoped to the new slide-key to preserve the visual.
 HEAVY_FRAMEWORK_LAYOUTS = {"quote", "cover", "section", "big-stat", "end"}
+
+# --shake recovers source-head per-slide CSS VERBATIM (step 5.55). Old decks
+# often inline MB-scale background images as `data:…;base64,…` right there, and
+# the same blob is frequently referenced 2×+. Carried verbatim, one such page
+# balloons to 10-20 MB → every subsequent render-deck.py / validate.py pass
+# re-parses the whole thing → the lift FEELS slow (the lift itself is instant;
+# the tools choking on a bloated string is the cost). So at lift time we
+# externalize any base64 blob over this threshold to an `input/` file (deduped
+# by content hash, so N identical refs share ONE file) and rewrite the refs.
+# Small inline blobs (icons, tiny textures) stay inline — self-contained is fine
+# at small sizes; only the heavyweight ones are worth a file. Threshold is in
+# base64 CHARACTERS (~4/3 of decoded bytes): 100_000 chars ≈ 75 KB decoded.
+B64_EXTERNALIZE_MIN_CHARS = 100_000
+# When Pillow is importable, also downscale the externalized raster to this max
+# long-edge (decks are 1920×1080; a slide image rarely needs more) — pure weight
+# win for delivery. Format is preserved (no lossy PNG→JPEG conversion, so diagram
+# text stays crisp). If Pillow is absent we still externalize the RAW bytes — the
+# parse-speed + dedupe win does NOT depend on Pillow.
+B64_DOWNSCALE_MAX_EDGE = 1600
+_B64_EXT_BY_MIME = {
+    "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+    "image/gif": "gif", "image/webp": "webp",
+}
+_B64_DATA_URI_RE = re.compile(
+    r'data:(image/(?:png|jpe?g|gif|webp));base64,([A-Za-z0-9+/=]+)')
 
 
 def extract_framework_layout_css(framework_css, layout, slide_key):
@@ -149,6 +178,40 @@ def get_framework_css():
         _FRAMEWORK_CSS = "\n".join(
             p.read_text(encoding="utf-8") for p in sheets if p.exists())
     return _FRAMEWORK_CSS
+
+
+# --- lift-fidelity helpers (F-250 asset-var deref · F-251 title seed) ------
+_ASSET_VAR_DEF_RE = re.compile(
+    r'--fs-asset-([a-z0-9-]+)\s*:\s*url\(\s*["\']?([^"\')]+)["\']?\s*\)', re.I)
+_ASSET_VAR_USE_RE = re.compile(r'var\(\s*--fs-asset-([a-z0-9-]+)\s*\)', re.I)
+
+
+def _asset_var_filemap():
+    """`--fs-asset-NAME` → filename, parsed from feishu-deck.css :root."""
+    m = {}
+    for name, url in _ASSET_VAR_DEF_RE.findall(get_framework_css()):
+        m[name.lower()] = url.rsplit('/', 1)[-1]
+    return m
+
+
+def _deref_asset_vars(css):
+    """F-250: a `var(--fs-asset-X)` that ends up INLINED in the lifted slide's
+    data.html resolves its url() relative to the HTML *document* (not the
+    feishu-deck.css that defines the var) → 404 → black/blank background. Replace
+    known asset vars with an explicit `url("assets/<file>")` — the path
+    copy-assets lands framework brand assets at for linked-local delivery (the
+    default + delivered form). Unknown vars are left untouched."""
+    fm = _asset_var_filemap()
+    def repl(mt):
+        fn = fm.get(mt.group(1).lower())
+        return f'url("assets/{fn}")' if fn else mt.group(0)
+    return _ASSET_VAR_USE_RE.sub(repl, css)
+
+
+def _source_title(html):
+    """F-251: source deck <title> text, for seeding a new target deck.title."""
+    m = re.search(r'<title[^>]*>(.*?)</title>', html, re.I | re.S)
+    return re.sub(r'\s+', ' ', m.group(1)).strip() if m else ""
 
 
 # --- Keyframe closure (L6) ------------------------------------------------
@@ -334,8 +397,29 @@ def extract_head_slide_rules(src_head_css, slide_key, page_map):
             if mapped:
                 keys.add(mapped)
         if slide_key in keys:
-            new_sel = re.sub(r'\[data-page="?[\w-]+"?\]',
-                             f'[data-slide-key="{slide_key}"]', selector)
+            # `[data-page="N"]` matched the source FRAME (an ANCESTOR of `.slide`).
+            # The lifted raw slide carries the key ON `.slide` itself, so a plain
+            # token-swap yields `[data-slide-key="K"] .slide …` — which needs a
+            # `.slide` NESTED in the keyed node (none exists) → rule matches 0
+            # elements → the slide's bespoke layout collapses on lift (qingdao
+            # `feishu-ecosystem` repro: diagram + compare-table vanish). Fuse the
+            # redundant `(>) .slide` descendant onto the keyed `.slide` first,
+            # then re-anchor any remaining bare `[data-page]` token onto `.slide`.
+            #
+            # Strip CSS comments from the SELECTOR first: authors annotate rule
+            # groups inline (`[data-page="47"] /* 单 frame 卡片 */ .slide .card`),
+            # and a comment between `[data-page]` and `.slide` breaks the fusion
+            # → leaves a phantom ` .slide` descendant (radial icon positions
+            # `.i1`..`.i6`, card `height:100%`, table cell sizing silently die →
+            # "比例不对"). Comments are decorative in selector position; dropping
+            # them is semantically safe. Rule-body comments are untouched.
+            sel = re.sub(r'/\*[\s\S]*?\*/', ' ', selector)
+            new_sel = re.sub(
+                r'\[data-page="?[\w-]+"?\]\s*(?:>\s*)?\.slide\b',
+                f'.slide[data-slide-key="{slide_key}"]', sel)
+            new_sel = re.sub(
+                r'\[data-page="?[\w-]+"?\]',
+                f'.slide[data-slide-key="{slide_key}"]', new_sel)
             keep.append(f"{new_sel} {{ {body} }}")
     return "\n".join(keep)
 
@@ -362,22 +446,30 @@ def extract_one(src_lines, frame_start, frame_end):
             break
     if slide_open is None:
         raise ValueError(f"no <div class='slide'> found between lines {frame_start}..{frame_end}")
-    # Find the slide close by reverse-scanning from frame_end.
-    # The slide-frame structure is:
-    #   <div class="slide-frame">
-    #     <div class="slide">…</div>      ← we want THIS close
-    #   </div>                              ← slide-frame close
-    # So the slide close is the SECOND-from-end <code>&lt;/div&gt;</code>, not the first.
-    # (Earlier off-by-one bug stopped at slide-frame close and pulled an
-    # extra </div> into the inner — 2026-05-29 P15 R-DOM imbalance.)
-    closes_seen = 0
-    slide_close = frame_end - 1
-    while slide_close > slide_open:
-        if src_lines[slide_close - 1].strip().startswith('</div>'):
-            closes_seen += 1
-            if closes_seen == 2:
-                break
-        slide_close -= 1
+    # Find the slide close by DIV-DEPTH balance from the slide open — the line
+    # whose </div> brings depth back to 0 IS the slide close. The old "2nd
+    # </div>-line from the end" heuristic mis-counted whenever the .slide-frame
+    # close `</div>` sat on its own line below the .slide close: lift() passes
+    # frame_end = (next-frame start − 1) = the frame-close line, so the reverse
+    # scan started one line too low, counted the slide-close + the slide's LAST
+    # CHILD close as its "two" closes, and stopped early → the slide's final
+    # container (e.g. `.stage`) lost its </div> → +1 imbalance → R-DOM frame
+    # nesting on lift (qingdao `feishu-product-leadership` repro, 2026-06-01).
+    # Depth-balance is position-agnostic (works whether frame_end points at the
+    # frame-close line, a trailing blank, or a combined `</div></div>` line).
+    # Inline <style>/comments are masked (newlines preserved) so stray `<div`
+    # text in co-located CSS can't corrupt the count.
+    _frame_text = "".join(src_lines[slide_open - 1:frame_end])
+    _blank = lambda m: re.sub(r'[^\n]', ' ', m.group(0))
+    _masked = re.sub(r'<style[^>]*>.*?</style>', _blank, _frame_text, flags=re.S)
+    _masked = re.sub(r'<!--.*?-->', _blank, _masked, flags=re.S)
+    depth = 0
+    slide_close = frame_end
+    for _off, _ltext in enumerate(_masked.splitlines(keepends=True)):
+        depth += len(re.findall(r'<div\b', _ltext)) - len(re.findall(r'</div\s*>', _ltext))
+        if depth <= 0:
+            slide_close = slide_open + _off   # 1-indexed line holding the .slide close
+            break
 
     opening = src_lines[slide_open - 1]
 
@@ -395,6 +487,67 @@ def extract_one(src_lines, frame_start, frame_end):
     }
     inner = "".join(src_lines[slide_open : slide_close - 1])
     return info, inner
+
+
+def externalize_large_base64(inner, dst_input_dir, slide_key, report):
+    """Move oversized inline `data:image/*;base64,…` blobs out of `inner` into
+    `input/` files and rewrite every reference to the file path. Identical blobs
+    (by content hash) share ONE file → N duplicate refs collapse to one. Blobs
+    under B64_EXTERNALIZE_MIN_CHARS stay inline. With Pillow available, rasters
+    are also downscaled to B64_DOWNSCALE_MAX_EDGE (format preserved); without it,
+    raw bytes are written (parse-speed + dedupe win is Pillow-independent).
+    Returns the rewritten HTML."""
+    # Collect unique oversized blobs (dedupe by exact base64 text).
+    blobs = {}  # b64text -> (mime, count)
+    for m in _B64_DATA_URI_RE.finditer(inner):
+        mime, b64 = m.group(1), m.group(2)
+        if len(b64) < B64_EXTERNALIZE_MIN_CHARS:
+            continue
+        rec = blobs.get(b64)
+        blobs[b64] = (mime, (rec[1] + 1) if rec else 1)
+    if not blobs:
+        return inner
+
+    key_slug = re.sub(r'[^a-zA-Z0-9_-]', '-', slide_key or "slide")
+    for b64, (mime, count) in blobs.items():
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            continue  # malformed → leave it inline rather than corrupt the page
+        ext = _B64_EXT_BY_MIME.get(mime, "png")
+        digest = hashlib.md5(b64.encode("ascii", "ignore")).hexdigest()[:8]
+        out_bytes, out_ext = raw, ext
+        # Optional downscale — never a hard dependency.
+        try:
+            import io
+            from PIL import Image
+            im = Image.open(io.BytesIO(raw))
+            w, h = im.size
+            if max(w, h) > B64_DOWNSCALE_MAX_EDGE:
+                scale = B64_DOWNSCALE_MAX_EDGE / max(w, h)
+                im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                               Image.LANCZOS)
+                buf = io.BytesIO()
+                save_fmt = {"jpg": "JPEG"}.get(ext, ext.upper())
+                save_kw = {"optimize": True}
+                if save_fmt == "JPEG":
+                    im = im.convert("RGB")
+                    save_kw["quality"] = 88
+                im.save(buf, save_fmt, **save_kw)
+                out_bytes = buf.getvalue()
+        except Exception:
+            pass  # Pillow missing or decode failed → keep raw decoded bytes
+
+        fname = f"lift-{key_slug}-{digest}.{out_ext}"
+        dst_input_dir.mkdir(parents=True, exist_ok=True)
+        (dst_input_dir / fname).write_bytes(out_bytes)
+        # Rewrite the whole `data:…;base64,…` token (preserving surrounding
+        # quotes/paren) to the local path — all `count` occurrences at once.
+        inner = inner.replace(f"data:{mime};base64,{b64}", f"input/{fname}")
+        report.setdefault("base64_externalized", []).append(
+            {"file": fname, "refs": count,
+             "kb": len(out_bytes) // 1024, "from_kb": len(raw) // 1024})
+    return inner
 
 
 def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
@@ -424,28 +577,42 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
         inner
     )
 
-    # 4) Rewrite shared/framework asset paths to skill-relative
-    for q in ("'", '"'):
-        inner = inner.replace(
-            f"url({q}assets/shared/", f"url({q}{SKILL_PREFIX}assets/shared/")
-        for f in ("lark-logo.png", "lark-logo-mono-white.png",
-                  "lark-cover-bg.jpg", "lark-content-bg.jpg",
-                  "lark-section-bg.jpg", "lark-slogan.png"):
-            inner = inner.replace(
-                f"url({q}assets/{f}{q}", f"url({q}{SKILL_PREFIX}assets/{f}{q}")
+    # 4) Rewrite shared/framework asset paths (assets/shared/* + assets/lark-*,
+    #    matching _classify_asset_ref) to skill-relative — in url(), <img src>,
+    #    href=, poster= alike (NOT just url()), and for ANY framework file (no
+    #    hardcoded filename list). The leading quote/paren guard leaves already-
+    #    prefixed refs (preceded by `/`) untouched, so this is idempotent. The
+    #    old url()-only + 6-file-list version left `<img src="assets/lark-*">` and
+    #    any 7th framework file un-rewritten → 404 in the target (F-76 class).
+    inner = re.sub(
+        r'''(['"(]\s*)((?:assets/shared/|assets/lark-)[^'")\s]*)''',
+        lambda m: f"{m.group(1)}{SKILL_PREFIX}{m.group(2)}",
+        inner)
 
-    # 5) Auto-copy input/<file> references + leave path local
-    for m in re.finditer(r'''url\(['"]?input/([^'")\s]+)['"]?\)''', inner):
-        fname = m.group(1)
-        src = src_input_dir / fname
-        dst = dst_input_dir / fname
-        if src.is_file():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
-                shutil.copy2(src, dst)
-            report.setdefault("input_copied", []).append(fname)
-        else:
-            report.setdefault("input_missing", []).append(fname)
+    # 5) Auto-copy input/<file> references + leave path local. Scan EVERY asset
+    #    syntax (<img>/<source>/<video>/<iframe>/url()) via the SAME patterns the
+    #    F-45 report uses — NOT just CSS url() — else `<img src="input/…">` assets
+    #    silently fail to carry (broken images on lift) while the report still
+    #    claims them "carried". (F-76)
+    _input_seen = set()
+    for _pat in _ASSET_REF_PATTERNS:
+        for _m in _pat.finditer(inner):
+            _url = _m.group(1).strip()
+            if _classify_asset_ref(_url) != "input" or _url in _input_seen:
+                continue
+            _input_seen.add(_url)
+            fname = _url.split("?", 1)[0].split("#", 1)[0].lstrip("./")[len("input/"):]
+            if not fname:
+                continue
+            src = src_input_dir / fname
+            dst = dst_input_dir / fname
+            if src.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
+                    shutil.copy2(src, dst)
+                report.setdefault("input_copied", []).append(fname)
+            else:
+                report.setdefault("input_missing", []).append(fname)
 
     # 5.5) Inline framework `[data-layout=X]` CSS rescoped to slide-key.
     # When source's layout-specific rules (`.slide[data-layout="X"] …`) style the
@@ -504,6 +671,14 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
             report.setdefault("keyframes_pulled", []).extend(
                 n for n in sorted(referenced) if n not in have and n in src_kf)
 
+    # 5.7) Externalize oversized inline base64 images. --shake's head-CSS
+    # recovery (5.55) and source markup can carry MB-scale `data:…;base64,…`
+    # blobs (often duplicated), inflating the slide to 10-20 MB → every later
+    # render/validate re-parses the bloat → the lift FEELS slow. Move big blobs
+    # to deduped `input/` files (Pillow downscales when present). Small blobs
+    # stay inline. Runs AFTER all CSS-injection steps so it catches both sources.
+    inner = externalize_large_base64(inner, dst_input_dir, slide_key, report)
+
     # 6) Auto-copy prototypes/<slug>/ for iframe src="prototypes/..."
     for m in re.finditer(r'''src=['"]prototypes/([^/'"]+)/''', inner):
         slug = m.group(1)
@@ -515,6 +690,18 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
             report.setdefault("proto_copied", []).append(slug)
         else:
             report.setdefault("proto_missing", []).append(slug)
+
+    # F-250: deref inlined `var(--fs-asset-X)` → `url("assets/<file>")` so the
+    # background image actually loads in the lifted (data.html-inline) slide.
+    inner = _deref_asset_vars(inner)
+
+    # F-252: a lifted page using `<img>` for content photos/avatars FAILS UI1 on
+    # render (every <img> in body is flagged). Surface it at LIFT time with the
+    # fix, not as a render-time wall. Skip imgs already vouched by UI1 escapes.
+    content_imgs = [m for m in re.findall(r'<img\b[^>]*>', inner)
+                    if 'data-ui-screenshot' not in m and 'data-decor' not in m]
+    if content_imgs:
+        report["content_imgs"] = len(content_imgs)
 
     return inner
 
@@ -547,7 +734,12 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         deck = json.loads(dst_deck_json.read_text(encoding="utf-8"))
     else:
         dst_mtime = None  # new file — nothing to clobber
-        deck = {"version": "1.0", "deck": {}, "slides": []}
+        # F-251: seed deck.title so the FIRST render of a freshly-lifted NEW deck
+        # doesn't fail schema validation (deck.title is required). Prefer the
+        # source deck's <title>; fall back to the source folder name. The human
+        # renames it later — an un-renderable deck.json is the worse default.
+        seed_title = _source_title(full_src_html) or src_stem or "未命名 deck"
+        deck = {"version": "1.0", "deck": {"title": seed_title}, "slides": []}
 
     print(f"source : {src_html_path}")
     print(f"frames : {len(starts)} total in source; lifting {frame_indices}")
@@ -556,6 +748,7 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
     print()
 
     appended = 0
+    existing_keys = {s.get("key") for s in deck["slides"] if s.get("key")}
     for one_indexed in frame_indices:
         if one_indexed < 1 or one_indexed > len(starts):
             print(f"✗ frame {one_indexed} out of range (source has {len(starts)})")
@@ -582,8 +775,22 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if '<div class="slide"' in inner:
             print(f"  ⚠ frame {one_indexed} ({info['key']}): nested .slide remains in inner — "
                   f"check frame boundary")
+        # De-collide the lifted key against the destination deck AND other frames
+        # lifted in this same run. The source key was previously used verbatim →
+        # a collision produced a deck.json that render --strict rejects (R-KEY)
+        # with no rollback. render-deck sets data-slide-key from this entry key on
+        # the wrapper and `inner` carries no .slide of its own (checked above), so
+        # renaming the entry key suffices. Provenance below keeps the SOURCE key.
+        key = info["key"]
+        if key in existing_keys:
+            base, j = key, 2
+            while f"{base}-{j}" in existing_keys:
+                j += 1
+            key = f"{base}-{j}"
+            print(f"    key collision: '{info['key']}' already in target → renamed '{key}'")
+        existing_keys.add(key)
         entry = {
-            "key": info["key"],
+            "key": key,
             "layout": "raw",
             "screen_label": info["label"],
             "lifted": f"{src_stem}#{info['key']}",
@@ -612,7 +819,7 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         cp = report.get("input_copied", [])
         miss = report.get("input_missing", [])
         proto = report.get("proto_copied", [])
-        print(f"✓ frame {one_indexed:3d} → key={info['key']!r} ({len(inner)} bytes)")
+        print(f"✓ frame {one_indexed:3d} → key={key!r} ({len(inner)} bytes)")
         if cp: print(f"    input/ copied: {cp}")
         if proto: print(f"    prototypes/ copied: {proto}")
         if miss: print(f"    ✗ input/ MISSING in source: {miss}")
@@ -622,15 +829,32 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if rec: print(f"    recovered source-head per-slide CSS for: {rec}")
         kf = report.get("keyframes_pulled", [])
         if kf: print(f"    pulled @keyframes from source head: {kf}")
+        ext = report.get("base64_externalized", [])
+        for e in ext:
+            saved = (f", downscaled {e['from_kb']}→{e['kb']} KB"
+                     if e['kb'] < e['from_kb'] else f", {e['kb']} KB")
+            print(f"    externalized inline base64 → input/{e['file']} "
+                  f"({e['refs']}× ref{saved})")
         hint = report.get("shake_hint", [])
         if hint:
             print(f"    ⓘ layout {hint} has framework CSS that won't survive "
                   f"lift-to-raw — re-run with --shake to inline it")
+        nimg = report.get("content_imgs")
+        if nimg:
+            print(f"    ⚠ {nimg} content <img> → will FAIL UI1 on render. Convert to "
+                  f"`<div style=\"background-image:url(...);background-size:cover\">` "
+                  f"(photos/avatars, per brand rule), or add data-ui-screenshot if "
+                  f"intentionally a screenshot.")
         # F-45: informational asset-reference report. Surface what this page
         # references so a human can decide to swap/remove — never silent.
         if asset_refs:
-            present = [r for r in asset_refs
-                       if r["exists"] is True and r["kind"] != "clientlogo"]
+            # "carried" = actually copied by transform (input/ + prototypes/).
+            # `other`-kind refs (sibling .html, relative ../paths) resolve in the
+            # source but are NOT auto-copied — don't claim they're carried (F-76).
+            carried = [r for r in asset_refs
+                       if r["exists"] is True and r["kind"] in ("input", "prototype")]
+            other_present = [r for r in asset_refs
+                             if r["exists"] is True and r["kind"] == "other"]
             # clientlogo refs get their own line (with present/missing state), so
             # exclude them from the generic missing bucket to avoid double-listing.
             missing = [r for r in asset_refs
@@ -638,9 +862,12 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             logos = [r for r in asset_refs if r["kind"] == "clientlogo"]
             fw = [r for r in asset_refs if r["kind"] == "framework"]
             print(f"    ── asset refs ({len(asset_refs)}) ──")
-            if present:
+            if carried:
                 print(f"    ✓ present (carried): "
-                      f"{[r['url'] for r in present]}")
+                      f"{[r['url'] for r in carried]}")
+            if other_present:
+                print(f"    ⚠ present in source but NOT auto-copied (relink/verify): "
+                      f"{[r['url'] for r in other_present]}")
             if fw:
                 print(f"    ✓ framework/shared (resolve in skill): "
                       f"{[r['url'] for r in fw]}")
@@ -653,6 +880,14 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
                 pairs = [f"{r['url']} {s}" for r, s in zip(logos, state)]
                 print(f"    ⚠ BRAND-specific clientlogo — new customer likely "
                       f"needs to swap/remove: {pairs}")
+
+    # Nothing lifted (every requested frame out of range / failed extraction):
+    # do NOT rewrite deck.json and exit non-zero, so a caller can't mistake a
+    # no-op for a successful lift.
+    if appended == 0:
+        print("\n✗ no slides lifted — destination deck.json left unchanged",
+              file=sys.stderr)
+        sys.exit(2)
 
     # Optimistic-lock check (F-53): if dst changed on disk since we read it,
     # another process wrote it — refuse so we don't silently clobber that edit.
@@ -720,6 +955,321 @@ def resolve_keys_to_frames(src_html_path, keys):
     return frames, missing
 
 
+# ── F-80: lift straight into a legacy index.html target (no deck.json) ────────
+# The deck.json path (lift()) is the native route, but OLD/hand-authored decks
+# have NO deck.json — index.html IS the source. Before this, lifting a page into
+# such a target was ~8 hand steps (extract frame / shake CSS / copy assets / wrap
+# / renumber / div-balance splice / backup / validate). --to-html chains them
+# into ONE command, reusing extract_one + transform (same as the deck.json path)
+# and the div-balance splice that proved correct on the everbright/kangshifu lift
+# (2026-06-02). Key contract (F-82): a raw slide's `inner` has NO `.slide`
+# wrapper (render-deck adds it); so we re-wrap here exactly as render-deck does.
+
+def _strip_label_number(label):
+    """Drop a leading '16 ' / '04-A ' chapter number from a screen_label, leaving
+    the descriptive name. Mirrors render-deck._canonical_screen_label's strip."""
+    if not label:
+        return ""
+    return re.sub(r"^\s*\d[\w\-]*\s+", "", label).strip()
+
+
+def _existing_html_keys(html_text):
+    """Set of data-slide-key values already present in a rendered index.html."""
+    return set(re.findall(r'data-slide-key="([^"]+)"', html_text))
+
+
+def _wrap_frame(inner, info, label, key):
+    """Wrap a transformed slide INNER (no .slide wrapper) into a complete
+    `<div class="slide-frame"><div class="slide" …>INNER</div></div>`, matching
+    render-deck's raw wrapper: data-layout = the source's data-layout (so the
+    framework's `.slide[data-layout=X]` rules in the target's linked
+    feishu-deck.css still engage — same as render-deck's effective_layout =
+    _orig_layout)."""
+    eff_layout = info.get("orig_layout") or "raw"
+    attrs = [f'data-layout="{eff_layout}"']
+    if info.get("accent"):
+        attrs.append(f'data-accent="{info["accent"]}"')
+    if info.get("decor"):
+        attrs.append(f'data-decor="{info["decor"]}"')
+    attrs.append(f'data-screen-label="{label}"')
+    attrs.append(f'data-slide-key="{key}"')
+    body = inner if inner.startswith("\n") else "\n" + inner
+    body = body if body.endswith("\n") else body + "\n"
+    return ('    <div class="slide-frame">\n'
+            f'      <div class="slide" {" ".join(attrs)}>{body}'
+            '      </div>\n    </div>\n    ')
+
+
+def _deck_close_offset(text):
+    """Char offset of the `</div>` closing `<div class="deck">`, found by
+    <div>/</div> balance from the deck open (robust: .deck closes before any body
+    <script>, so balance hits 0 there first). None if not found."""
+    dopen = text.find('<div class="deck"')
+    if dopen == -1:
+        return None
+    tags = sorted([(m.start(), +1) for m in re.finditer(r'<div\b', text)] +
+                  [(m.start(), -1) for m in re.finditer(r'</div>', text)])
+    bal = 0
+    for pos, delta in tags:
+        if pos < dopen:
+            continue
+        bal += delta
+        if bal == 0:
+            return pos
+    return None
+
+
+def _splice_into_html(dst_html, frame_block, position="end"):
+    """Insert one complete .slide-frame block into a legacy index.html's
+    <div class="deck">. position='end' → before .deck close; int N → before the
+    Nth existing frame. Writes a .bak first. Returns (n_frames_after, bak_path)."""
+    dst = Path(dst_html).resolve()
+    t = dst.read_text(encoding="utf-8")
+    frame_opens = [m.start() for m in re.finditer(r'<div class="slide-frame"', t)]
+    close = _deck_close_offset(t)
+    if close is None:
+        raise ValueError(f"{dst.name}: could not locate <div class=\"deck\"> close")
+    if '<div class="slide-frame"' in t[close:]:
+        raise ValueError(f"{dst.name}: .deck-close detection failed (frames after close)")
+    if position in ("end", None):
+        insert_at = close
+    else:
+        p = int(position)
+        insert_at = frame_opens[p - 1] if 1 <= p <= len(frame_opens) else close
+    block = frame_block if frame_block.endswith("\n") else frame_block + "\n"
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak = dst.with_name(dst.name + f".bak-pre-lift-{ts}")
+    shutil.copy(dst, bak)
+    new_t = t[:insert_at] + block + t[insert_at:]
+    dst.write_text(new_t, encoding="utf-8")
+    return new_t.count('<div class="slide-frame"'), bak
+
+
+def _validate_after_lift(dst_html, lifted_keys):
+    """Run validate.py on the assembled index.html (no deck.json needed) and judge
+    THIS lift only (F-68/F-63): R-DOM must be clean + no finding may reference the
+    lifted key(s). Legacy targets carry pre-existing findings → the global exit
+    code is NOT the signal; the two gates here are."""
+    vp = Path(__file__).resolve().parent / "validate.py"
+    try:
+        r = subprocess.run([sys.executable, str(vp), str(dst_html), "--no-visual"],
+                           capture_output=True, text=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠ validate skipped: {e}")
+        return
+    out = (r.stdout or "") + (r.stderr or "")
+    dom_err = [ln.strip() for ln in out.splitlines() if "R-DOM" in ln and "✗" in ln]
+    key_find = [ln.strip() for ln in out.splitlines()
+                if any(k in ln for k in lifted_keys)]
+    if dom_err:
+        print("✗ R-DOM STRUCTURAL ERROR — the lift broke the DOM:")
+        for ln in dom_err:
+            print("   " + ln)
+    else:
+        print("✓ R-DOM clean (frame structure intact)")
+    if key_find:
+        print(f"⚠ {len(key_find)} finding(s) reference the lifted key(s) (the page's own — review):")
+        for ln in key_find[:8]:
+            print("   " + ln)
+    else:
+        print("✓ no validator finding references the lifted key(s)")
+    print(f"  (validate.py exit {r.returncode}; legacy targets carry pre-existing findings — "
+          f"expected. The two gates above are what matter for THIS lift.)")
+
+
+def lift_to_html(src_html_path, frame_indices, dst_html, shake=False,
+                 position="end", run_validate=True):
+    """Lift slides from a source deck's index.html straight into a legacy target
+    index.html (no deck.json). Per frame: extract_one → transform (asset-copy +
+    optional tree-shake, reused from lift()) → _wrap_frame → de-collide key →
+    div-balance splice before .deck close. Then validate (R-DOM + new-key gate)."""
+    src_html_path = Path(src_html_path).resolve()
+    dst_html = Path(dst_html).resolve()
+    if not dst_html.exists():
+        print(f"✗ target {dst_html} does not exist — --to-html needs an existing index.html",
+              file=sys.stderr)
+        sys.exit(2)
+
+    src_dir = src_html_path.parent
+    src_input_dir, src_proto_dir = src_dir / "input", src_dir / "prototypes"
+    out_dir = dst_html.parent
+    dst_input_dir, dst_proto_dir = out_dir / "input", out_dir / "prototypes"
+
+    src_lines = src_html_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    starts = find_frame_lines(src_lines)
+    full_src = "".join(src_lines)
+    src_head_css = _source_author_css(full_src) if shake else ""
+    page_map = _page_to_key(full_src) if shake else {}
+
+    print(f"source : {src_html_path}")
+    print(f"target : {dst_html}  (legacy index.html, no deck.json)")
+    print(f"frames : {len(starts)} in source; lifting {frame_indices} → position {position}")
+    print()
+
+    appended, lifted_keys = 0, []
+    for one_indexed in frame_indices:
+        if one_indexed < 1 or one_indexed > len(starts):
+            print(f"✗ frame {one_indexed} out of range (source has {len(starts)})")
+            continue
+        fs = starts[one_indexed - 1]
+        fe = starts[one_indexed] - 1 if one_indexed < len(starts) else len(src_lines)
+        try:
+            info, inner = extract_one(src_lines, fs, fe)
+        except ValueError as e:
+            print(f"✗ frame {one_indexed}: {e}")
+            continue
+        if not info.get("key"):
+            print(f"✗ frame {one_indexed}: source .slide has no data-slide-key "
+                  f"(multi-line open tag?) — can't lift safely, skipped")
+            continue
+        report = {}
+        asset_refs = scan_asset_refs(inner, src_dir)
+        inner = transform(inner, src_input_dir, src_proto_dir,
+                          dst_input_dir, dst_proto_dir, report,
+                          orig_layout=info.get("orig_layout"),
+                          slide_key=info.get("key"),
+                          shake=shake, src_head_css=src_head_css, page_map=page_map)
+        if '<div class="slide"' in inner:
+            print(f"  ⚠ frame {one_indexed} ({info['key']}): nested .slide remains — check boundary")
+
+        # Re-read target each iteration (keys + frame count change as we splice).
+        cur = dst_html.read_text(encoding="utf-8")
+        existing = _existing_html_keys(cur)
+        key = info["key"]
+        if key in existing:
+            base, j = key, 2
+            while f"{base}-{j}" in existing:
+                j += 1
+            key = f"{base}-{j}"
+            print(f"    key collision: '{info['key']}' → '{key}'")
+        n_frames = cur.count('<div class="slide-frame"')
+        name = _strip_label_number(info.get("label")) or info["key"]
+        label = f"{n_frames + 1:02d} {name}"  # canonical: leading number = frame_index
+        frame = _wrap_frame(inner, info, label, key)
+        try:
+            n_after, bak = _splice_into_html(dst_html, frame, position)
+        except ValueError as e:
+            print(f"✗ splice failed: {e}", file=sys.stderr)
+            sys.exit(3)
+        appended += 1
+        lifted_keys.append(key)
+        print(f"✓ frame {one_indexed:3d} → key={key!r}, label={label!r} "
+              f"({len(inner)} bytes) · target now {n_after} frames · bak {bak.name}")
+        for rk, rl in (("input_copied", "input/ copied"),
+                       ("proto_copied", "prototypes/ copied"),
+                       ("input_missing", "✗ input/ MISSING in source")):
+            if report.get(rk):
+                print(f"    {rl}: {report[rk]}")
+        if report.get("keyframes_pulled"):
+            print(f"    pulled @keyframes from source head: {report['keyframes_pulled']}")
+        if report.get("head_css_recovered"):
+            print(f"    recovered source-head per-slide CSS for: {report['head_css_recovered']}")
+        if report.get("shake_hint"):
+            print(f"    ⓘ layout {report['shake_hint']} has framework CSS that may not survive "
+                  f"lift-to-raw if the target lacks it — re-run with --shake to inline")
+        carried = [r["url"] for r in asset_refs
+                   if r["exists"] and r["kind"] in ("input", "prototype")]
+        missing = [r["url"] for r in asset_refs
+                   if r["exists"] is False and r["kind"] != "clientlogo"]
+        logos = [r["url"] for r in asset_refs if r["kind"] == "clientlogo"]
+        if carried:
+            print(f"    ✓ assets present (carried): {carried}")
+        if missing:
+            print(f"    ✗ SOURCE ASSET MISSING (page may render broken): {missing}")
+        if logos:
+            print(f"    ⚠ BRAND clientlogo — new customer likely needs to swap: {logos}")
+
+    if appended == 0:
+        print("\n✗ no slides lifted — target left unchanged", file=sys.stderr)
+        sys.exit(2)
+
+    print(f"\n✓ {appended} slide(s) lifted into {dst_html.name}")
+    if run_validate:
+        _validate_after_lift(dst_html, lifted_keys)
+    return appended
+
+
+# ── F-81: read-only preview — one command, all the lift judgments ─────────────
+def cmd_preview(src_html_path, sel, against=None):
+    """Read-only judgment for lifting frame `sel` (#N or slide-key) from src.
+    Prints a compact JSON verdict (self-contained? CSS inline/head? @keyframes
+    closure? asset refs present? key collision vs target?) so the caller decides
+    in ONE call instead of hand-grepping 5 things. Writes nothing."""
+    src_html_path = Path(src_html_path).resolve()
+    rows = build_manifest(src_html_path)
+    frame_index = None
+    if str(sel).isdigit():
+        frame_index = int(sel)
+    else:
+        for r in rows:
+            if r["key"] == sel:
+                frame_index = r["frame_index"]
+                break
+    if not frame_index or frame_index < 1 or frame_index > len(rows):
+        print(json.dumps({"error": f"slide not found in source: {sel}"}, ensure_ascii=False))
+        return 1
+    src_lines = src_html_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    starts = find_frame_lines(src_lines)
+    fs = starts[frame_index - 1]
+    fe = starts[frame_index] - 1 if frame_index < len(starts) else len(src_lines)
+    try:
+        info, inner = extract_one(src_lines, fs, fe)
+    except ValueError as e:
+        print(json.dumps({"error": str(e), "frame_index": frame_index}, ensure_ascii=False))
+        return 1
+    full_src = "".join(src_lines)
+    src_dir = src_html_path.parent
+    page_map = _page_to_key(full_src)
+    # Exclude THIS frame's own lines when scanning for "external head CSS":
+    # _source_author_css() returns ALL non-framework <style> bodies (head AND
+    # every frame's inline block), so counting this frame's OWN inline <style> as
+    # "head CSS" would falsely flag a self-contained page as NOT self-contained.
+    non_frame = "".join(src_lines[:fs - 1]) + "".join(src_lines[fe:])
+    head_css = _source_author_css(non_frame)
+    head_rules = (extract_head_slide_rules(head_css, info.get("key"), page_map)
+                  if info.get("key") else "")
+    inline_kf = list(_extract_keyframes(inner).keys())
+    head_kf = list(_extract_keyframes(head_css).keys())
+    ref_anim = sorted(_referenced_anim_names(inner))
+    need_shake_kf = [a for a in ref_anim if a not in inline_kf and a in head_kf]
+    css_in_inner = "<style" in inner
+    css_location = ("inline" if css_in_inner and not head_rules else
+                    "head" if head_rules and not css_in_inner else
+                    "both" if head_rules and css_in_inner else
+                    "none-or-framework-only")
+    asset_refs = scan_asset_refs(inner, src_dir)
+    self_contained = (css_in_inner and not head_rules and not need_shake_kf
+                      and all(r["exists"] in (True, None) for r in asset_refs))
+    result = {
+        "frame_index": frame_index,
+        "key": info.get("key"),
+        "orig_layout": info.get("orig_layout"),
+        "label": info.get("label"),
+        "bytes": len(inner),
+        "self_contained": self_contained,
+        "css_location": css_location,
+        "head_scoped_rules_for_this_key": bool(head_rules),
+        "inline_keyframes": inline_kf,
+        "referenced_anim_names": ref_anim,
+        "keyframes_only_in_head_need_shake": need_shake_kf,
+        "asset_refs": asset_refs,
+        "recommend_shake": bool(head_rules or need_shake_kf),
+    }
+    if against:
+        atext = Path(against).read_text(encoding="utf-8")
+        result["against"] = {
+            "target": str(against),
+            "target_frames": atext.count('<div class="slide-frame"'),
+            "key_collision": info.get("key") in _existing_html_keys(atext),
+            "assets_present_in_target": [
+                r["url"] for r in asset_refs if r["kind"] == "input"
+                and (Path(against).parent / r["url"].lstrip("./")).is_file()
+            ],
+        }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Lift slides from a source feishu-deck-h5 deck into a target deck.json",
@@ -743,11 +1293,39 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="bypass concurrent-modification (optimistic-lock) check — write "
                          "DEST_DECK_JSON even if it changed on disk since it was read (F-53)")
-    args = ap.parse_args()
+    ap.add_argument("--preview", action="store_true",
+                    help="F-81: read-only. Print a JSON judgment for lifting the selected "
+                         "slide (self-contained? CSS inline/head? @keyframes closure? asset "
+                         "refs? key collision vs --against?) and exit. Writes nothing.")
+    ap.add_argument("--pos", default="end",
+                    help="F-80 (--to-html only): insert position — 'end' (default) or a "
+                         "1-indexed frame number to insert BEFORE")
+    ap.add_argument("--against", default=None,
+                    help="--preview only: a target index.html to check key-collision/assets against")
+    ap.add_argument("--no-validate", action="store_true",
+                    help="--to-html only: skip the post-lift validate.py gate (not recommended)")
+    # `--key K DEST.json --shake` is the documented/native-lift form. Plain
+    # argparse stops collecting the `rest` positional after an optional when
+    # `nargs="*"` is involved, so DEST.json can be reported as "unrecognized".
+    # Intermixed parsing keeps the legacy positional contract while allowing
+    # options before or after DEST.json.
+    parse_args = getattr(ap, "parse_intermixed_args", ap.parse_args)
+    args = parse_args()
 
     if args.index:
         print_manifest(args.src_html)
         return 0
+
+    if args.preview:
+        rest = list(args.rest)
+        if args.key:
+            sel = args.key.split(",")[0].strip()
+        elif rest:
+            sel = rest[0]
+        else:
+            print("✗ --preview needs a slide: --key K  or  a frame number", file=sys.stderr)
+            return 1
+        return cmd_preview(args.src_html, sel, against=args.against)
 
     rest = list(args.rest)
     if args.key:
@@ -773,7 +1351,13 @@ def main():
         dst = rest[1]
         out = rest[2] if len(rest) > 2 else None
 
-    lift(args.src_html, frames, dst, out, shake=args.shake, force=args.force)
+    # Route by destination type: *.html → splice into a legacy index.html (F-80,
+    # no deck.json needed); *.json → the native deck.json path (lift()).
+    if str(dst).endswith(".html"):
+        lift_to_html(args.src_html, frames, dst, shake=args.shake,
+                     position=args.pos, run_validate=not args.no_validate)
+    else:
+        lift(args.src_html, frames, dst, out, shake=args.shake, force=args.force)
     return 0
 
 

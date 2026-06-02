@@ -128,7 +128,15 @@ def find_slide_index(deck: dict, key: str) -> int:
 
 def backup_path(deck_path: Path, command: str) -> Path:
     ts = time.strftime("%Y%m%d-%H%M%S")
-    return deck_path.with_suffix(f".json.bak-pre-{command}-{ts}")
+    base = deck_path.with_suffix(f".json.bak-pre-{command}-{ts}")
+    if not base.exists():
+        return base
+    # Same-second collision (two writes of the same command within 1s) would
+    # otherwise overwrite the first backup — append a counter.
+    n = 1
+    while (cand := deck_path.parent / f"{base.name}.{n}").exists():
+        n += 1
+    return cand
 
 
 def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
@@ -142,7 +150,14 @@ def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
     write so we don't silently clobber that change. `--force` bypasses the check.
     """
     # 0. Optimistic-lock check — another session may have written since we read.
-    if expected_mtime is not None and not force and deck_path.exists():
+    if expected_mtime is not None and not force:
+        if not deck_path.exists():
+            # A concurrent process DELETED deck.json since we read it — writing
+            # now would silently resurrect it over their delete. Refuse.
+            print(f"deck-cli: REFUSING write — {deck_path.name} was DELETED on disk "
+                  f"since it was read (concurrent edit). Re-read and retry, or --force.",
+                  file=sys.stderr)
+            return False
         cur_mtime = deck_path.stat().st_mtime
         if abs(cur_mtime - expected_mtime) > 1e-6:
             print(f"deck-cli: REFUSING write — {deck_path.name} changed on disk "
@@ -337,13 +352,24 @@ def cmd_set_variant(deck: dict, args) -> tuple[int, dict | None]:
     # Drop incompatible fields
     for f in dropped:
         del data[f]
+    # Scaffold the new variant's required fields that are now MISSING (TODO
+    # placeholders) so the switch yields a SCHEMA-VALID deck the user fills in —
+    # instead of write_deck_with_validation rejecting + rolling back the whole
+    # switch because the new variant's required fields aren't present. (#309)
+    scaffolded = []
+    sc = build_scaffold(layout, new_variant, args.key)
+    if sc and isinstance(sc.get("data"), dict):
+        for f, v in sc["data"].items():
+            if f not in data:
+                data[f] = copy.deepcopy(v)   # deepcopy: don't share the SCAFFOLDS literal
+                scaffolded.append(f)
     slide["data"] = data
     slide["variant"] = new_variant
     print(f"  slides[{idx}] (key={args.key}) variant: {old_variant!r} → {new_variant!r}")
     if dropped:
         print(f"    dropped fields: {dropped}")
-    print(f"    NOTE: required fields for {layout}/{new_variant} may now be missing — "
-          f"fill via set commands before render.")
+    if scaffolded:
+        print(f"    scaffolded TODO fields for {layout}/{new_variant}: {scaffolded} (fill before render)")
     return 0, deck
 
 
@@ -430,7 +456,18 @@ def cmd_clone(deck: dict, args) -> tuple[int, dict | None]:
         return 1, None
     cloned = copy.deepcopy(deck["slides"][idx])
     cloned["key"] = args.new_key
-    position = args.position if args.position else idx + 2  # default: right after source
+    n = len(deck["slides"])
+    if args.position is not None:
+        # Validate like insert/move-key (clone ADDS a slide → 1..n+1). The old
+        # `args.position if args.position` also silently coerced an explicit
+        # `position 0` to the default, and out-of-range values were absorbed by
+        # list.insert's clamping → slide cloned to the wrong spot with no error.
+        if not (1 <= args.position <= n + 1):
+            print(f"deck-cli: position out of range (1..{n+1})", file=sys.stderr)
+            return 1, None
+        position = args.position
+    else:
+        position = idx + 2  # default: right after source
     deck["slides"].insert(position - 1, cloned)
     print(f"  cloned slides[{idx}] ({args.key}) → position {position} as '{args.new_key}'")
     return 0, deck
@@ -489,7 +526,7 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     refs resolve identically in both decks, so they need no copy. Returns a
     report dict {input, prototypes, missing}."""
     text = _slide_asset_text(slide)
-    copied = {"input": [], "prototypes": [], "missing": []}
+    copied = {"input": [], "prototypes": [], "local": [], "missing": []}
     for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "input" / fname
         d = dst_dir / "input" / fname
@@ -509,6 +546,35 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
             copied["prototypes"].append(slug)
         else:
             copied["missing"].append(f"prototypes/{slug}/")
+    # Bare/relative deck-local media refs (scene.png, ./img.jpg, deck-local
+    # assets/foo.png, replica page_image, image.src, …): NOT under input/ or
+    # prototypes/, NOT framework (assets/shared·lark-)/http/data, NOT escaping
+    # the deck dir via ../ or /. These were previously neither copied nor
+    # reported → silent broken image after paste. Copy preserving the deck-
+    # relative path, else flag missing.
+    _MEDIA = r'(?:png|jpe?g|gif|webp|svg|avif|mp4|webm|mov|m4v)'
+    already = set(copied["input"]) | {f"prototypes/{s}" for s in copied["prototypes"]}
+    _ref_re = r'''([^\s"'<>()\\?#]+\.''' + _MEDIA + r''')(?=[\s"'<>()?#]|$)'''
+    for m in re.finditer(_ref_re, text, re.I):
+        ref = m.group(1)
+        low = ref.lower()
+        norm = low.lstrip("./")
+        if (norm.startswith(("input/", "prototypes/", "assets/shared/", "assets/lark-"))
+                or low.startswith(("http://", "https://", "data:", "//", "/"))
+                or ref.startswith("../") or "/../" in ref):
+            continue  # handled above / framework / external / escapes deck dir
+        rel = ref.lstrip("./")
+        if rel in already or rel in copied["local"]:
+            continue
+        s = src_dir / rel
+        if s.is_file():
+            d = dst_dir / rel
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
+                shutil.copy2(s, d)
+            copied["local"].append(rel)
+        else:
+            copied["missing"].append(rel)
     return copied
 
 
@@ -568,7 +634,9 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
 
     slides = deck.setdefault("slides", [])
     n = len(slides)
-    pos = args.position if args.position else n + 1
+    # `is not None` so an explicit `position 0` is validated (and rejected) as
+    # out-of-range rather than silently coerced to append (falsy-zero).
+    pos = args.position if args.position is not None else n + 1
     if not (1 <= pos <= n + 1):
         print(f"deck-cli: position out of range (1..{n+1})", file=sys.stderr)
         return 1, None
@@ -584,6 +652,8 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
         print(f"    input/ copied: {report['input']}")
     if report["prototypes"]:
         print(f"    prototypes/ copied: {report['prototypes']}")
+    if report.get("local"):
+        print(f"    deck-local assets copied: {report['local']}")
     if report["missing"]:
         print(f"    ⚠ assets MISSING in source (broken refs after paste): {report['missing']}")
     return 0, deck
@@ -712,7 +782,8 @@ def main(argv=None) -> int:
     sp = sub.add_parser("get", help="get value at dotted path"); sp.add_argument("path")
     sp = sub.add_parser("show", help="pretty-print one slide"); sp.add_argument("key")
     sp = sub.add_parser("lint", help="validate against schema")
-    sp.add_argument("--strict", action="store_true", default=True)
+    sp.add_argument("--strict", action="store_true",
+                    help="promote warnings to errors (default: lenient)")
 
     sp = sub.add_parser("set", help="set value at dotted path")
     sp.add_argument("path"); sp.add_argument("value")

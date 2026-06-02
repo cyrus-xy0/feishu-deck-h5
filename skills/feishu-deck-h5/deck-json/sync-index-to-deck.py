@@ -69,7 +69,7 @@ def extract_slide_inner(html: str, slide_key: str) -> str | None:
 
     Returns None if the slide isn't found in html.
     """
-    pat = rf'<div class="slide"[^>]*data-slide-key="{re.escape(slide_key)}"[^>]*>'
+    pat = rf'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="{re.escape(slide_key)}"[^>]*>'
     m = re.search(pat, html)
     if not m:
         return None
@@ -172,6 +172,22 @@ def main() -> int:
                 # purge structured data fields; keep only html
                 slide["data"] = {"html": inner}
             synced.append((f"{cur_layout}→raw", key, 0, len(inner)))
+
+    # Reorder deck.json slides to match index.html DOM order. The visual editor's
+    # drag-reorder only rewrites index.html DOM order; without syncing it back,
+    # re-render restores the OLD deck.json order and the reorder is lost. Only
+    # when syncing the WHOLE deck (no --slide-key) and the key SETS match (a pure
+    # permutation — not an add/remove, which is other drift handled elsewhere).
+    if not args.slide_key:
+        dom_order = re.findall(
+            r'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="([^"]+)"', index_html)
+        deck_keys = [s.get("key") for s in deck.get("slides", []) if s.get("key")]
+        if dom_order and set(dom_order) == set(deck_keys) and dom_order != deck_keys:
+            drift_count += 1
+            synced.append(("reorder", "DOM order != deck.json order", 0, 0))
+            if not args.dry_run:
+                order_idx = {k: i for i, k in enumerate(dom_order)}
+                deck["slides"].sort(key=lambda s: order_idx.get(s.get("key"), 1 << 30))
 
     # Report
     print(f"sync-index-to-deck: scanned {len(deck.get('slides', []))} slides")

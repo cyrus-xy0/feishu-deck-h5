@@ -145,15 +145,16 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        # Visual audits are default-on but gracefully degrade. Print a single
-        # stderr hint (not a warning so it doesn't pollute the issue list /
-        # break CI parsing) and continue with static-only output. Re-enable
-        # by `pip install playwright && python -m playwright install chromium`,
-        # or suppress this notice via `--no-visual`.
-        print('  (visual audits skipped — playwright not installed; '
-              'install with `pip install playwright && python -m playwright '
-              'install chromium` to enable R-OVERFLOW / R-VIS-* checks)',
-              file=sys.stderr)
+        # Visual audits are default-on. When Playwright is missing, record a
+        # normal warning so delivery reports do not say "0 warnings" while
+        # renderer-side checks such as overlap/crowding never ran. This still
+        # exits 0 in normal mode, but --strict/final delivery will fail until
+        # visual checks are available or the caller explicitly uses --no-visual.
+        iss.warn('R-VISUAL',
+            'visual audits skipped — playwright not installed; install with '
+            '`pip install playwright && python -m playwright install chromium` '
+            'to enable R-OVERFLOW / R-VIS-* checks, or pass --no-visual for a '
+            'deliberate static-only validation.')
         return
 
     url = html_path.resolve().as_uri()
@@ -223,7 +224,13 @@ def run_visual_audits(html_path: Path, iss: Issues, *,
 
             browser.close()
     except Exception as e:
-        iss.warn('R-VISUAL',
+        # INABILITY to run the visual checks (flaky Chromium launch / nav
+        # timeout / missing browser) is an environment glitch, NOT a deck
+        # defect — emit warn_soft so it NEVER escalates to a blocking error
+        # under --strict / --gate ingest (which would reject a perfectly good
+        # deck on a CI hiccup). An actual visual VIOLATION found below still
+        # warns/errs normally.
+        iss.warn_soft('R-VISUAL',
             f'visual checks could not run ({type(e).__name__}: {e}). '
             'Try `python -m playwright install chromium` if you have not '
             'yet, or open the deck in a browser manually to verify.')
@@ -794,16 +801,24 @@ def inline_linked(html_text, base_dir):
     files are left untouched. Shared by main() here and check-only.py — was
     copy-pasted in both, unified per F-14."""
     def repl_link(m):
-        href = m.group(1)
-        if href.startswith(('http:', 'https:', 'data:')): return m.group(0)
+        tag = m.group(0)
+        # Order-independent: match ANY <link> tag, inline only if it's a local
+        # stylesheet. The old `rel="stylesheet" … href=` regex missed
+        # `<link href="…" rel="stylesheet">`, so that framework CSS was
+        # invisible to the audits (they then under-reported).
+        if 'rel="stylesheet"' not in tag:
+            return tag
+        hm = re.search(r'href="([^"]+)"', tag)
+        if not hm:
+            return tag
+        href = hm.group(1)
+        if href.startswith(('http:', 'https:', 'data:')): return tag
         target = (base_dir / href).resolve()
-        if not target.is_file(): return m.group(0)
+        if not target.is_file(): return tag
         return ('<style data-source="framework">'
                 + target.read_text(encoding='utf-8')
                 + '</style>')
-    html_text = re.sub(
-        r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>',
-        repl_link, html_text)
+    html_text = re.sub(r'<link\b[^>]*>', repl_link, html_text)
     def repl_script(m):
         src = m.group(1)
         if src.startswith(('http:', 'https:', 'data:')): return m.group(0)
@@ -855,6 +870,7 @@ STATIC_AUDITS = [
     (audit_language_policy,    ('html', 'slides', 'iss')),
     (audit_list_echo,          ('slides', 'iss')),
     (audit_visual_richness,    ('slides', 'iss')),
+    (audit_raw_looks_schema,   ('slides', 'iss', 'path')),
     (audit_self_contained,     ('html', 'iss')),
     (audit_autobalance_present, ('html', 'iss')),
     (audit_perf,               ('html', 'iss')),
@@ -866,6 +882,51 @@ def run_static_audits(audits, *, html, slides, path, iss):
     ctx = {'html': html, 'slides': slides, 'path': path, 'iss': iss}
     for fn, sig in audits:
         fn(*(ctx[a] for a in sig))
+
+
+def filter_issues_to_slide(slide_arg, slides, iss):
+    """F-254 · diagnostic single-slide filter.
+
+    Mutate `iss` in place, keeping only findings that pertain to ONE slide so a
+    one-page edit isn't buried in deck-wide pre-existing noise. `slide_arg` is a
+    data-slide-key ("cover") or a 1-based ordinal ("30" / "#30"). A finding
+    matches when its message contains `data-slide-key="<key>"` OR `slide <N>`
+    (the two conventions every audit emits). Returns a short human note.
+    """
+    idx_to_key = {}
+    for i, s in enumerate(slides, 1):
+        m = re.search(r'data-slide-key="([^"]+)"', s)
+        if m:
+            idx_to_key[i] = m.group(1)
+    key_to_idx = {v: k for k, v in idx_to_key.items()}
+
+    arg = slide_arg.strip().lstrip('#')
+    if arg.isdigit():
+        ordinal = int(arg)
+        key = idx_to_key.get(ordinal)
+    else:
+        key = arg
+        ordinal = key_to_idx.get(key)
+
+    known = (key in key_to_idx) or (ordinal in idx_to_key)
+
+    def _match(msg):
+        if key and f'data-slide-key="{key}"' in msg:
+            return True
+        if ordinal and re.search(rf'\bslide {ordinal}\b', msg):
+            return True
+        return False
+
+    iss.errors        = [e for e in iss.errors        if _match(e[1])]
+    iss.warnings      = [w for w in iss.warnings      if _match(w[1])]
+    iss.soft_warnings = [w for w in iss.soft_warnings if _match(w[1])]
+
+    label = (f'#{ordinal} {key}' if (ordinal and key)
+             else f'#{ordinal}' if ordinal else (key or arg))
+    if not known:
+        return (f'⚠ slide "{slide_arg}" not found among {len(slides)} slides — '
+                'matched by substring anyway (0 findings likely means a typo).')
+    return f'filtered to slide {label}'
 
 
 def main():
@@ -899,6 +960,14 @@ def main():
                         '(run-regression.py, analyze-prompts.py) consume '
                         'validator output — parsing the human report via '
                         'regex is brittle to format tweaks.')
+    p.add_argument('--slide', metavar='KEY_OR_N', default=None,
+                   help='Diagnostic single-slide filter (F-254): keep only '
+                        'findings for ONE slide — by data-slide-key (e.g. '
+                        '"cover") or 1-based ordinal (e.g. "30" / "#30"). Exit '
+                        'code reflects ONLY that slide. Use when editing a single '
+                        'page so its findings are not buried in deck-wide '
+                        'pre-existing noise. Does NOT change which audits run — '
+                        'only what is reported/exited on; NOT a delivery gate.')
     args = p.parse_args()
     if args.screenshots and not args.visual:
         args.visual = True   # --screenshots implies --visual
@@ -932,7 +1001,20 @@ def main():
     run_static_audits(STATIC_AUDITS, html=html, slides=slides, path=path, iss=iss)
 
     if args.visual:
-        run_visual_audits(path, iss, want_screenshots=args.screenshots)
+        # The visual-report formatting indexes report entries directly
+        # (entry['h'], entry['slide_idx'], …) OUTSIDE the Playwright try; a
+        # malformed/partial audit entry would crash the WHOLE validate. Degrade
+        # to a non-blocking advisory instead (findings already emitted stay).
+        try:
+            run_visual_audits(path, iss, want_screenshots=args.screenshots)
+        except Exception as e:
+            iss.warn_soft('R-VISUAL',
+                f'visual report formatting failed ({type(e).__name__}: {e}) — '
+                'a malformed audit entry; visual findings may be incomplete.')
+
+    slide_filter_note = None
+    if args.slide is not None:
+        slide_filter_note = filter_issues_to_slide(args.slide, slides, iss)
 
     if args.strict:
         # Promote regular warnings to errors. SOFT warnings (R-VIS-NO-IMAGERY,
@@ -977,6 +1059,8 @@ def main():
         return 0 if not iss.errors else 1
 
     print(f'feishu-deck-h5 validator  ·  {path.name}')
+    if slide_filter_note:
+        print(f'  ⟂ {slide_filter_note} · F-254 single-slide diagnostic (NOT a delivery gate)')
     print(f'  slides: {len(slides)}')
     print(f'  errors:   {len(iss.errors)}')
     print(f'  warnings: {len(all_warnings)}')

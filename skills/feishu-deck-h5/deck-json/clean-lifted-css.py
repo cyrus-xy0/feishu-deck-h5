@@ -99,7 +99,10 @@ _STYLE_RE = re.compile(r'(<style[^>]*>)(.*?)(</style>)', re.S)
 # lookahead anchors on a real frame keyword/percentage so we don't strip a
 # prefix that legitimately precedes some `.to-foo` class either.
 _INJECTED_FRAME_PREFIX = re.compile(
-    r'\.slide\[data-slide-key="[^"]*"\]\s+(?=(?:to|from|\d+(?:\.\d+)?%)\b)'
+    # `\b` only after the to/from KEYWORDS (so `.to-foo` class isn't matched).
+    # A trailing `\b` after `%` never matched (both sides non-word) → percentage
+    # frame prefixes (`50%`, `0%`) were never stripped; `%` is self-delimiting.
+    r'\.slide\[data-slide-key="[^"]*"\]\s+(?=(?:(?:to|from)\b|\d+(?:\.\d+)?%))'
 )
 
 

@@ -16,15 +16,16 @@ LLM 多做创造性工作(补文案、补内容、为高光页写 bespoke layout
 
 ### 默认执行 = 设计思考 always 跑;确认门按风险触发
 
-- **设计思考永远跑** —— 标 hero、定每页 path、定补全计划、给 hero 页写页级
-  spec。这些 every run 都做,**不因为"用户说直接出"就跳过 thinking**。
-- **确认门是条件触发的**:
-  - 全 deck 都落在默认 Path A schema layouts(15 个之内)→ **宣告方案即可往下走**,
-    不强制停下等批准。
-  - **任何一页走"默认 layout 之外"的设计**(`layout: raw` / bespoke hero /
-    超出用户给定材料的重度内容补全)→ **必须停下,把那几页的设计 spec 逐项
-    摆出来等用户确认**,改了回 Step 1/2,再生成。
+- **设计思考永远跑** —— 逐页判定 raw vs 白名单 schema、定补全计划、给每张 raw 页
+  写页级 spec。这些 every run 都做,**不因为"用户说直接出"就跳过 thinking**。
+- **确认门(raw-first 立场,见 `DECK GENERATION POLICY`)**:
+  - **默认每页 `layout: "raw"`**(主场);只有命中「纯标准形状白名单」的页才回退 schema。
+  - **raw 页 = beyond-default,需确认设计意图** —— 但**批量 deck 一次性过整张 raw
+    方案表**(逐页停会烦死人);改了回 Step 1/2 再生成。
+  - **命中白名单回退 schema 的页 → 宣告即走**,不强制停。
   - 用户明说"直接出 / 别问" → 跳过的是**确认那一下**,不是设计思考。
+  - **想退回 schema-first 安全默认**(求稳 / 非资深 harness):用户显式说"schema-first /
+    安全模式",或 `DESIGN-PLAN.md` 标 `stance: schema-first` → 判定反过来。
 - **退化场景**(设计阶段坍缩成一句话,见 `Converting existing material`):
   Replica PDF 1:1 贴图 / 单页精修(只动这页,标题 verbatim)/ 用户已明确给定 layout。
 
@@ -32,21 +33,20 @@ LLM 多做创造性工作(补文案、补内容、为高光页写 bespoke layout
 
 **Step 1 · Deck 级**
 - 叙事弧 + 页数(转换已有材料默认 1:1,见 `Converting existing material` Step 0)。
-- 标 **hero 页**(通常 2–3 张高光:封面 / 那一个大论点 / 关键案例 / 收尾)。
-  这是"放开 LLM"的**作用域开关** —— hero 页才全开 bespoke,其余页求稳,
-  避免把 floor 在全 deck 搞松。
-- 逐页定 **path**:hero → `layout: raw` + 词汇库 pattern(见 Step 2);
-  其余 → Path A schema(见 `DECK GENERATION POLICY`)。
+- 逐页定 **path(raw-first)**:**默认 `layout: "raw"` + 词汇库 pattern**(见 Step 2);
+  **只有命中「纯标准形状白名单」的页才回退 schema**(白名单 + 例外见 `DECK GENERATION POLICY`
+  / `DESIGN-FIRST POLICY` Decision rule)。判断永远 per-page,默认 raw、回退才举证。
 - **内容/文案补全计划**:默认就**专业补全**(见 `CONTENT-DENSITY POLICY` —
   默认动作是"补",不是"先问")。只标"哪几页补、补什么方向"。唯一硬护栏:
   **不编 attributed facts**(具体公司数字 / 具名引语 / 来源出处 —— 见 ONE-PAGER
   的 no-fabrication 规则)。
 
 **Step 2 · 页级 spec(Q0–Q4 + A 档六维 + density budget)**
-- **hero 页:必填** Q0–Q4 + 六维 spec(见 `DESIGN-FIRST POLICY` 设计前预检)。
-  且**先翻设计词汇库再落 layout** —— `narrative patterns A–N` + `component
+- **每张 raw 页(= 大多数):必填** Q0–Q4 + 六维 spec(见 `DESIGN-FIRST POLICY` 设计前预检)。
+  且**先翻设计词汇库再落 pattern** —— `narrative patterns A–N` + `component
   utility classes`(见文末两节),挑一个 striking pattern,而不是反射性套 3 卡。
-- **支撑页:轻量** —— 角色判断 + `Decision rule` 选个 schema layout 就够,
+  **raw 必须走框架原语**:字号 `var(--fs-*)`(F-59)、组件用 `fs-` 类,别裸写 CSS。
+- **回退 schema 的白名单页:轻量** —— 角色判断 + `Decision rule` 确认它真是纯标准形状即可,
   不必写满六维。
 - **每页必走 density budget** —— Q2 的 A/B/C/D 档分完之后,写一行 page-level
   量盘子:**核心信息块 X 个 + 支撑信息 Y 个(含下沉策略)≤ layout 自然容量 Z**。
@@ -55,11 +55,11 @@ LLM 多做创造性工作(补文案、补内容、为高光页写 bespoke layout
 
 **Step 3 · 输出设计方案**
 - chat 里出 Design pass 表(格式见 `DESIGN-FIRST POLICY` → Design pass output),
-  每行带:角色 / 唯一重点 / path / 是否 hero。
-- hero 页各附一句话 design intent statement。
+  每行带:角色 / 唯一重点 / path(**默认 raw,回退才标 schema + 为什么**)。
+- raw 页(= 大多数)各附一句话 design intent statement;表里要让用户一眼看到「哪几页回退了 schema」。
 
 **Step 4 · 闸门 + 落盘**
-- 有 beyond-default 页 → 等用户确认;全 schema → 宣告即走。
+- raw 页 → 过确认(批量一次性过整张方案);回退 schema 的白名单页 → 宣告即走。
 - 确认/宣告后:PREFLIGHT → new-run → **把锁定的方案写一份
   `runs/<ts>/output/DESIGN-PLAN.md`**(与 PROMPTS.md
   同级),生成严格照它走;中途想偏离先回来改 plan,不静默漂移。
@@ -124,8 +124,9 @@ render 出来后,**实际字数、留白、装饰堆积**还会涨一轮 —— 
 
 new-run 之后立即写 `runs/<ts>/output/DESIGN-PLAN.md`,内容:
 
-1. **方案表** —— Step 3 那张表(逐页:角色 / 唯一重点 / layout 或 path / 是否 hero / 为什么)。
-2. **hero 页 spec** —— 每张 hero 页的 Q0–Q4 + A 档六维 + 选定的 pattern。
+0. **(可选)`stance:`** —— 顶部一行 `stance: raw-first`(默认,可省)或 `schema-first`(求稳模式)。
+1. **方案表** —— Step 3 那张表(逐页:角色 / 唯一重点 / path = **raw 还是回退 schema** / 为什么)。
+2. **raw 页 spec** —— 每张 raw 页的 Q0–Q4 + A 档六维 + 选定的 pattern(回退 schema 的白名单页不需要)。
 3. **补全计划** —— 哪几页补了内容 / 文案,补的方向,并标注来源性质(公开行业知识 / 产品能力 / 类似客户故事),确认没有 attributed facts。
 
 作用:(1) 生成步有据可依,防 LLM 自己跑偏离开方案(冰红茶 slide 9 那类);
@@ -143,14 +144,14 @@ DESIGN PHASE 有两种节奏,**按用户怎么喂内容自动选**:
   1. **第一页就 new-run**:别等方案攒齐。第一页一来就 PREFLIGHT → new-run 建好
      `runs/<ts>-<slug>/`,初始化 `deck.json` + `DESIGN-PLAN.md`。这样 deck 从第一页
      起就在磁盘上、随时能打开。
-  2. **每页:设计 → 立即 render / append → 下一页**。该页是 hero / beyond-default
-     就先过确认门;是 schema / lift 就直接落。`deck.json` 和 `DESIGN-PLAN.md` 逐页增长。
+  2. **每页:设计 → 立即 render / append → 下一页**。该页是 raw(主场)就先过确认门;
+     命中白名单回退 schema / lift 就直接落。`deck.json` 和 `DESIGN-PLAN.md` 逐页增长。
   3. **不要把已设计好的页只留在 chat 里等"全部齐了再生成"** —— 那是拖延,用户会问
      "怎么没在本地目录"。**设计完一页 = 落盘一页。**
 
 判据:看用户喂法。逐页喂 → 增量(边设计边落盘);一次性给全 → 批量。拿不准就增量
-(对用户更可见、可中途调整)。增量模式下确认门不变:schema / lift 页直接落,
-hero / beyond-default 页仍先停下确认那一页再落。
+(对用户更可见、可中途调整)。增量模式下确认门不变:回退 schema / lift 页直接落,
+raw 页先过一下确认那一页再落。
 
 ---
 

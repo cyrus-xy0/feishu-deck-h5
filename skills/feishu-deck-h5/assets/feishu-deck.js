@@ -185,7 +185,20 @@
       if (header && (el === header || header.contains(el))) return;
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
-      if (cs.position === 'absolute' || cs.position === 'fixed') return;        // .stage / header / wordmark
+      if (cs.position === 'absolute' || cs.position === 'fixed') {
+        // Skip structural/chrome (.stage / header / wordmark) and decorative
+        // absolute layers — but INCLUDE an absolutely-positioned CONTENT BAND
+        // (a DIRECT child of .slide, i.e. a sibling of .stage, that bears text),
+        // else the runtime centers the in-flow content right UNDER it
+        // (R-VIS-BAND-COLLIDE root). Deliberately narrow: ONLY that exact band
+        // shape is newly measured — chrome, decorative layers, and deeper
+        // absolute labels stay skipped, so normal decks are unaffected.
+        const isBand = el.parentElement === slide && _abHasText(el)
+          && !el.classList.contains('stage')
+          && !el.classList.contains('header')
+          && !el.classList.contains('wordmark');
+        if (!isBand) return;
+      }
       const tag = el.tagName;
       const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg' || tag === 'CANVAS' || tag === 'VIDEO';
       if (!_abHasText(el) && !isMedia && el.children.length) return;            // empty wrappers don't count
@@ -489,7 +502,9 @@
       if (!raw) return false;
       if (/^\d+$/.test(raw)) {
         const idx = Math.max(0, Math.min(frames.length - 1, parseInt(raw, 10) - 1));
-        goTo(deck, frames, idx, false);
+        // updateHash=true normalizes an out-of-range / `#0` hash to the clamped
+        // slide's canonical #N (was left stale, mismatching the shown slide).
+        goTo(deck, frames, idx, true);
         return true;
       }
       // data-slide-key / id live on the inner .slide, not on .slide-frame
@@ -519,7 +534,7 @@
     // Initial auto-balance pass: balances the current slide (present mode) and
     // every laid-out slide (scroll mode). Non-current present-mode slides are
     // content-visibility-hidden here and get balanced on first enter (below).
-    requestAnimationFrame(() => frames.forEach((f) => maybeBalance(f.querySelector('.slide'))));
+    requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => maybeBalance(f.querySelector('.slide'))); });
     const mediaObserver = new MutationObserver((muts) => {
       for (const m of muts) {
         const i = frames.indexOf(m.target);
@@ -530,7 +545,7 @@
         syncFrameMedia(m.target, now);
         // Balance a present-mode slide the first time it becomes visible
         // (content-visibility makes it measurable only now).
-        if (now) requestAnimationFrame(() => maybeBalance(m.target.querySelector('.slide')));
+        if (now) requestAnimationFrame(() => { if (signal.aborted) return; maybeBalance(m.target.querySelector('.slide')); });
       }
     });
     frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
@@ -917,6 +932,10 @@
       if (mode === 'present' && typeof idx === 'number') {
         frames.forEach((f, i) => f.classList.toggle('is-current', i === idx));
         scaleNow(idx);
+        // Keep the URL hash in sync (#914): the mobile patch toggles is-current
+        // directly instead of going through the main goTo(), so without this a
+        // reload / shared link restored the wrong slide.
+        try { history.replaceState(null, '', '#' + (idx + 1)); } catch (e) {}
       } else if (mode === 'scroll') {
         frames.forEach((_, i) => scaleNow(i));
       }
@@ -929,6 +948,7 @@
         frames.forEach((f, i) => f.classList.toggle('is-current', i === next));
         scaleNow(next);
         updatePageNo();
+        try { history.replaceState(null, '', '#' + (next + 1)); } catch (e) {}
       }
     }
 

@@ -189,9 +189,15 @@ def _probe(index_html: Path) -> dict:
         # (or non-recoverable clip at any px). We treat the non-recoverable clip
         # and any >16 spill as err — the harmful tier.
         px = rec.get("overflow_px", 0)
-        nonrec = (rec.get("direction", "").startswith("vertical")
-                  and rec.get("recoverable") is False)
-        if px > 16 or nonrec:
+        # Mirror validate.py exactly: only a NON-RECOVERABLE CLIPPED overflow
+        # (the 'else' branch — neither horizontal nor vertical-VISIBLE) is err at
+        # ANY px; horizontal / vertical-visible / recoverable are err only when
+        # overflow_px > 16. (The old `direction.startswith("vertical") and not
+        # recoverable` wrongly err'd a small vertical-VISIBLE spill that
+        # validate.py would only warn.)
+        clipped_nonrec = (rec.get("direction", "") not in ("horizontal", "vertical-visible")
+                          and rec.get("recoverable") is False)
+        if px > 16 or clipped_nonrec:
             errset[("R-VIS-CARD-OVERFLOW", rec["slide_idx"])] += 1
     for rec in records["overlap"]:
         errset[("R-OVERLAP", rec["slide_idx"])] += 1

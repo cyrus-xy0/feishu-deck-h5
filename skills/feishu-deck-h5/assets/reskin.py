@@ -32,6 +32,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -40,18 +41,95 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print("✗ pyyaml required: pip install pyyaml", file=sys.stderr)
-    sys.exit(1)
+    yaml = None
 
 try:
     from bs4 import BeautifulSoup, Tag, NavigableString
 except ImportError:
-    print("✗ beautifulsoup4 required: pip install beautifulsoup4", file=sys.stderr)
-    sys.exit(1)
+    BeautifulSoup = None
+    Tag = object
+    NavigableString = str
 
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_RULES = HERE / "reskin-rules.yaml"
+
+
+def builtin_rules() -> dict:
+    """Small built-in fallback for environments without PyYAML.
+
+    The full rules live in reskin-rules.yaml. This fallback mirrors the fields
+    reskin.py actually reads so reskin remains usable in sandbox/cloud harnesses
+    where installing PyYAML is not available.
+    """
+    return {
+        "palette": [
+            {"var": "--fs-blue", "hex": "#3C7FFF", "rgb": [60, 127, 255]},
+            {"var": "--fs-teal", "hex": "#33D6C0", "rgb": [51, 214, 192]},
+            {"var": "--fs-violet", "hex": "#9F6FF1", "rgb": [159, 111, 241]},
+            {"var": "--fs-purple", "hex": "#5C3FFB", "rgb": [92, 63, 251]},
+            {"var": "--fs-orange", "hex": "#FE7F00", "rgb": [254, 127, 0]},
+        ],
+        "palette_match_threshold": 80,
+        "cyan_redirect_to": "--fs-blue",
+        "font_size_ladder": [16, 24, 28, 48],
+        "font_size_snap_table": [
+            {"max": 17, "snap": 16},
+            {"max": 19, "snap": 16},
+            {"max": 26, "snap": 24},
+            {"max": 35, "snap": 28},
+            {"max": 999, "snap": 48},
+        ],
+        "content_label_floor": {
+            "floor_anchor_min": 28,
+            "bump_target": 24,
+            "card_class_hints": [
+                "card", "cell", "wheel", "tile", "node", "panel", "block",
+                "feature", "item", "stat",
+            ],
+        },
+        "foreign_chrome": {
+            "logo_signals": {
+                "class_substring": ["logo", "brand", "mark", "wordmark"],
+                "brand_text": ["飞书", "Lark", "lark", "LARK"],
+            },
+            "title_candidates": [
+                {"tag": "h1", "class_substring": []},
+                {"tag": "h2", "class_substring": ["title"]},
+                {"tag": "div", "class_substring": ["title", "head-title"]},
+            ],
+            "drop_rules_re": [
+                r"html\s*,\s*body\s*\{[^}]*overflow:\s*hidden",
+                r"\.stage\s*\{[^}]*position:\s*fixed",
+            ],
+            "background_neutralize_selectors_substring": [".slide", "body"],
+        },
+        "header_chrome": {
+            "title_top": 62,
+            "title_left": 96,
+            "title_right": 320,
+            "hairline": False,
+            "stage_top": 220,
+            "stage_left": 84,
+            "stage_right": 84,
+            "stage_bottom": 44,
+        },
+        "auto_layout": {
+            "enable_stage_flex": True,
+            "stage_gap": 22,
+            "flex_grow_class_substring": ["core", "main", "diagram", "body"],
+            "scale_wrap": False,
+            "scale_canvas": False,
+        },
+    }
+
+
+def load_rules(path: str) -> dict:
+    if yaml is None:
+        print("  [WARN] PyYAML not installed; using built-in reskin rules fallback.", file=sys.stderr)
+        return builtin_rules()
+    loaded = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return loaded if isinstance(loaded, dict) else builtin_rules()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -121,13 +199,18 @@ def rewrite_palette(css: str, rules: dict, warnings: list[str]) -> str:
         # Grayscale-ish colors (muted text, dim borders) stay as source.
         if _is_grayscale_ish(rgb):
             return None
-        # Cyan redirect: anything close to cyan goes to --fs-blue per R49
-        if _rgb_distance(rgb, cyan_rgb) < 60:
-            return f"var({cyan_redirect})"
+        # Nearest palette color FIRST, then the R49 cyan redirect — so a
+        # legitimate brand color that happens to sit within 60 of cyan but is
+        # AT LEAST AS CLOSE to a real palette token (e.g. --fs-teal) maps to
+        # that token instead of being force-redirected to blue.
         closest_var, closest_rgb = min(
             fs_colors, key=lambda kv: _rgb_distance(rgb, kv[1])
         )
-        if _rgb_distance(rgb, closest_rgb) <= threshold:
+        closest_dist = _rgb_distance(rgb, closest_rgb)
+        cyan_dist = _rgb_distance(rgb, cyan_rgb)
+        if cyan_dist < 60 and not (closest_dist <= threshold and closest_dist <= cyan_dist):
+            return f"var({cyan_redirect})"   # cyan-ish with no closer real match → blue (R49)
+        if closest_dist <= threshold:
             return f"var({closest_var})"
         return None  # too far, keep original
 
@@ -416,16 +499,22 @@ def strip_drop_shadows(css: str, warnings: list[str]) -> str:
     def fix(m):
         nonlocal stripped
         val = m.group(1)
+        term = m.group(2)            # the `;` or `}` that ended the declaration
         parts = _split_csv_respecting_parens(val)
         kept = [p for p in parts if keep_part(p)]
         dropped = len(parts) - len(kept)
         stripped += dropped
         if not kept:
-            return ""  # delete whole declaration
-        return f"box-shadow: {', '.join(kept)};"
+            # Drop the whole declaration, but KEEP a `}` terminator (it closes
+            # the rule). A `;` terminator goes away with the declaration.
+            return "}" if term.strip() == "}" else ""
+        return f"box-shadow: {', '.join(kept)}{term}"
 
     css = re.sub(
-        r"box-shadow\s*:\s*([^;]+);",
+        # Stop at `;` OR `}` and re-emit the terminator — a box-shadow that is
+        # the LAST declaration in its block (no trailing `;`) otherwise lets
+        # `[^;]+` run past `}` into the next rule.
+        r"box-shadow\s*:\s*([^;}]+)(\s*[;}])",
         fix,
         css,
     )
@@ -1124,11 +1213,20 @@ def drop_foreign_chrome_rules(css: str, rules: dict, warnings: list[str]) -> str
         if len(css) != before:
             n_dropped += 1
 
-    # Neutralize background on selectors matching substrings
+    # Match a neutralize-sub as a STANDALONE selector token — a bare substring
+    # `s in sel` wrongly neutralized `.card-body` / `.slide-frame` because
+    # 'body' / '.slide' are substrings of them.
+    def _sel_token_present(sub, sel):
+        if sub[:1] in ('.', '#'):           # class / id — only a right boundary
+            return re.search(re.escape(sub) + r'(?![\w-])', sel) is not None
+        # element selector — standalone token (not a class / word suffix)
+        return re.search(r'(?<![\w.#-])' + re.escape(sub) + r'(?![\w-])', sel) is not None
+
+    # Neutralize background on selectors matching the neutralize-subs
     def neutralize(m):
         nonlocal n_dropped
         sel, body = m.group(1), m.group(2)
-        if any(s in sel for s in bg_neutralize_subs):
+        if any(_sel_token_present(s, sel) for s in bg_neutralize_subs):
             # Drop background:/background-image:/background-color: from body
             new_body = re.sub(
                 r"background(?:-color|-image)?\s*:[^;]+;?",
@@ -1204,8 +1302,80 @@ def preflight_canvas(soup: BeautifulSoup, css: str) -> tuple[int, int]:
     return canvas
 
 
+def reskin_stdlib_fallback(input_html: str, slug: str, rules: dict) -> dict:
+    """Fallback raw reskin when BeautifulSoup is unavailable.
+
+    It intentionally does less than the full engine: no DOM chrome stripping,
+    no script surgery, no title-element removal. It preserves the source body as
+    a raw slide, scopes best-effort CSS, and lets renderer/validator surface any
+    remaining problems. This keeps RESKIN route validation and sandbox usage
+    from hard-failing solely because beautifulsoup4 is absent.
+    """
+    warnings = [
+        "beautifulsoup4 not installed; used stdlib raw-preserve reskin fallback",
+        "fallback does not strip foreign chrome or rewrite DOM structure; run full reskin with beautifulsoup4 for production",
+    ]
+    style_blocks = re.findall(r"<style[^>]*>(.*?)</style>", input_html, re.S | re.I)
+    css = "\n".join(style_blocks)
+    canvas = detect_source_canvas(css)
+    if canvas is None:
+        warnings.append("canvas: could not detect source canvas size in fallback")
+    elif canvas != (1920, 1080):
+        raise CanvasMismatchError(
+            f"✗ reskin preflight failed: source canvas is {canvas[0]}×{canvas[1]}, not 1920×1080."
+        )
+    else:
+        warnings.append("canvas: preflight passed — source is 1920×1080")
+
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", input_html, re.S | re.I)
+    h_m = re.search(r"<h[12][^>]*>(.*?)</h[12]>", input_html, re.S | re.I)
+    raw_title = h_m.group(1) if h_m else (title_m.group(1) if title_m else "Reskinned HTML")
+    title_text = re.sub(r"<[^>]+>", " ", raw_title)
+    title_text = html.unescape(re.sub(r"\s+", " ", title_text)).strip() or "Reskinned HTML"
+
+    body_m = re.search(r"<body[^>]*>(.*?)</body>", input_html, re.S | re.I)
+    inner_html = body_m.group(1) if body_m else input_html
+    inner_html = re.sub(r"<style[^>]*>.*?</style>", "", inner_html, flags=re.S | re.I)
+
+    slide_key = f"reskin-{slug}"
+    css = drop_foreign_chrome_rules(css, rules, warnings)
+    css = strip_drop_shadows(css, warnings)
+    css = rewrite_palette(css, rules, warnings)
+    css = snap_font_sizes(css, rules, warnings)
+    css = label_floor_bump(css, rules, warnings)
+    css = scope_selectors(css, slide_key, warnings)
+
+    data_html = (
+        f'<style data-fs-custom-css>{css}</style>\n'
+        '<div class="stage" data-reskin-fallback="stdlib">\n'
+        f'{inner_html}\n'
+        '</div>'
+    )
+    deck = {
+        "version": "1.0",
+        "deck": {
+            "title": title_text,
+            "author": "reskin",
+        },
+        "slides": [
+            {
+                "key": slide_key,
+                "layout": "raw",
+                "screen_label": f"01 {title_text[:30]}",
+                "data": {
+                    "title": title_text,
+                    "html": data_html,
+                },
+            }
+        ],
+    }
+    return {"deck_json": deck, "warnings": warnings}
+
+
 def reskin(input_html: str, slug: str, rules: dict, keep_source_typography: bool = False) -> dict:
     """Run the full reskin pipeline. Returns dict with deck_json, warnings."""
+    if BeautifulSoup is None:
+        return reskin_stdlib_fallback(input_html, slug, rules)
     warnings: list[str] = []
     soup = BeautifulSoup(input_html, "html.parser")
     body = soup.body
@@ -1324,7 +1494,11 @@ def reskin(input_html: str, slug: str, rules: dict, keep_source_typography: bool
     # default font doesn't cascade into source content.
     source_font_family: str | None = None
     m_ff = re.search(
-        r"(?:^|\s)(?:html|body)(?:\s*,\s*(?:html|body))?\s*\{[^}]*?font-family\s*:\s*([^;]+);",
+        # Stop the capture at `;` OR `}` — a font-family that is the LAST
+        # declaration in its block (no trailing `;`) otherwise let `[^;]+` run
+        # past the closing `}` into the next rule until some later `;`, capturing
+        # garbage markup as the "font stack".
+        r"(?:^|\s)(?:html|body)(?:\s*,\s*(?:html|body))?\s*\{[^}]*?font-family\s*:\s*([^;}]+)\s*[;}]",
         css,
         re.IGNORECASE | re.DOTALL,
     )
@@ -1470,7 +1644,7 @@ def main():
         print(f"✗ input not found: {input_path}", file=sys.stderr)
         sys.exit(1)
     try:
-        rules = yaml.safe_load(Path(args.rules).read_text(encoding="utf-8"))
+        rules = load_rules(args.rules)
     except Exception as e:
         print(f"✗ failed to load rules YAML: {e}", file=sys.stderr)
         sys.exit(4)

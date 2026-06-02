@@ -144,7 +144,15 @@ def main(argv=None) -> int:
               f"重读后重试, 或 --force 覆盖", file=sys.stderr)
         return 4
 
-    bak = args.deck.with_suffix(".json.bak-pre-textswap")
+    # Timestamped backup (collision-safe) — a FIXED name let a second text-swap
+    # run overwrite the only pre-first-swap backup, losing the original.
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak = args.deck.parent / f"{args.deck.name}.bak-pre-textswap-{ts}"
+    n = 0
+    while bak.exists():
+        n += 1
+        bak = args.deck.parent / f"{args.deck.name}.bak-pre-textswap-{ts}.{n}"
     bak.write_text(args.deck.read_text(encoding="utf-8"), encoding="utf-8")
     args.deck.write_text(
         json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

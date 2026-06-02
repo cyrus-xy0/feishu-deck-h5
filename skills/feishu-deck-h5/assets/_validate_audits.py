@@ -63,7 +63,7 @@ def audit_titles_one_line(slides: list[str], iss: Issues):
             continue   # cover / image-text / end allow multi-line hero titles
         # Match h2 / h1 with class containing "title" or "title-zh"
         title_re = re.compile(
-            r'<h[12][^>]*class="[^"]*\btitle(?:-zh)?\b[^"]*"[^>]*>(.*?)</h[12]>',
+            r'<h[12][^>]*class="[^"]*(?<![\w-])title(?:-zh)?(?![\w-])[^"]*"[^>]*>(.*?)</h[12]>',
             re.S)
         for h in title_re.findall(fr):
             if '<br' in h:
@@ -103,7 +103,7 @@ def audit_copy_rules(html: str, iss: Issues):
         iss.err('R05', "exclamation '!' / '！' detected in slide text")
     if '…' in text or '...' in text:
         iss.err('R05', "ellipsis '…' / '...' detected in slide text")
-    if '???' in text or '???' in text or '？？？' in text:
+    if '???' in text or '？？？' in text:
         iss.err('R05', "'???' detected in slide text")
 
 
@@ -113,7 +113,7 @@ def _lifted_slide_keys(html: str) -> set:
     the slide is verbatim from another deck, so the human CHOOSES whether to
     bump fonts; it's surfaced, not blocking. Geometry/overflow stays error."""
     keys = set()
-    for m in re.finditer(r'<div class="slide"[^>]*>', html):
+    for m in re.finditer(r'<div class="slide(?:\s[^"]*)?"[^>]*>', html):
         tag = m.group(0)
         if 'data-lifted' in tag:
             km = re.search(r'data-slide-key="([^"]+)"', tag)
@@ -182,9 +182,11 @@ def audit_font_sizes(html: str, iss: Issues):
                or '.fullscreen' in selector or '@' in selector:
                 continue
             # Only check rules that target slide content
+            # `.col` / `.cell` matched via token boundary so `.color-box` /
+            # `.cellophane` aren't mistaken for grid / table-cell content.
             if '.slide' not in selector and '.card' not in selector \
-               and '.col' not in selector and '.toc' not in selector \
-               and '.cell' not in selector and 'thead' not in selector \
+               and not re.search(r'\.col(?![\w-])', selector) and '.toc' not in selector \
+               and not re.search(r'\.cell(?![\w-])', selector) and 'thead' not in selector \
                and 'tbody' not in selector:
                 continue
             # Per-rule opt-outs (preserve marker check on raw block before
@@ -377,8 +379,12 @@ def audit_undefined_css_vars(html: str, iss: Issues):
     if not combined:
         return
 
-    # Strip CSS comments to avoid matching commented-out var() / --name:
+    # Strip CSS comments AND string literals so a `--name:` / `var(--x)` inside a
+    # quoted value (e.g. `content: "--foo: bar"`) isn't mistaken for a real
+    # custom-property definition (which would mask a genuinely-undefined var) or
+    # a reference.
     combined_clean = re.sub(r'/\*.*?\*/', '', combined, flags=re.S)
+    combined_clean = re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', '""', combined_clean)
 
     # Definitions: `--name: ...;` (or `--name: ...` at rule end without `;`).
     defined = set(re.findall(r'--([a-zA-Z][\w-]*)\s*:', combined_clean))
@@ -490,16 +496,35 @@ def audit_no_drop_shadows(html: str, iss: Issues):
                 continue
             for sm in re.finditer(r'box-shadow:\s*([^;}]+)', block):
                 value = sm.group(1).strip()
-                if _BOX_SHADOW_INSET_RE.search(value):
-                    continue           # inset shadows OK
-                if _BOX_SHADOW_GLOW_RING_RE.match(value):
-                    continue           # 0 0 0 ... is a glow ring, not a shadow
-                # Anything else with non-zero offset → real drop shadow
-                iss.warn('R12',
-                    f'real drop shadow on `{selector.strip()}` — `box-shadow: {value}` '
-                    '(use hairline + contrast instead, OR add '
-                    '/* allow:drop-shadow */ in the rule if this is a UI-mock '
-                    'window chrome that legitimately needs depth shadow)')
+                # Evaluate EACH comma-separated layer independently (commas inside
+                # rgba()/hsl()/color-mix() must NOT split). A glow-ring or inset
+                # PREFIX layer used to mask a real drop-shadow layer that follows
+                # it (`.match`/`.search` only saw the first/any layer) → R12 was
+                # trivially bypassed by prefixing an allowed layer.
+                layers, depth, buf = [], 0, ''
+                for ch in value:
+                    if ch == '(':
+                        depth += 1; buf += ch
+                    elif ch == ')':
+                        depth = max(0, depth - 1); buf += ch
+                    elif ch == ',' and depth == 0:
+                        layers.append(buf.strip()); buf = ''
+                    else:
+                        buf += ch
+                if buf.strip():
+                    layers.append(buf.strip())
+                for layer in layers:
+                    if not layer or _BOX_SHADOW_INSET_RE.search(layer):
+                        continue           # inset shadow layer OK
+                    if _BOX_SHADOW_GLOW_RING_RE.match(layer):
+                        continue           # 0 0 0 ... glow-ring layer, not a shadow
+                    # A layer with non-zero offset → real drop shadow
+                    iss.warn('R12',
+                        f'real drop shadow on `{selector.strip()}` — `box-shadow: {layer}` '
+                        '(use hairline + contrast instead, OR add '
+                        '/* allow:drop-shadow */ in the rule if this is a UI-mock '
+                        'window chrome that legitimately needs depth shadow)')
+                    break              # one finding per rule is enough
 
 
 def audit_data_decor(slides: list[str], iss: Issues):
@@ -885,15 +910,19 @@ def audit_slide_keys(slides: list[str], iss: Issues):
 
     Rules:
       • Every .slide MUST have data-slide-key set.
-      • Slug must match ^[a-z0-9][a-z0-9-]*$ (kebab-case, starts with
-        alphanumeric, no underscores or uppercase).
+      • Slug must match ^[a-z][a-z0-9-]*$ (kebab-case, starts with a
+        lowercase letter, no underscores or uppercase). MUST match the
+        deck-schema.json / validate-deck.py JSON-gate pattern exactly —
+        a leading-digit key passing here but failing the schema gate (or
+        vice-versa) is a gate divergence that makes a deck pass one path
+        and fail the other.
       • Slugs MUST be unique within the deck (no two slides share a key).
       • Positional slugs are allowed but flagged as warning — the rule
         wants semantic slugs that survive reorder (`slide-NN` /
         `page-N` / `section-N` are positional).
     """
     slug_re = re.compile(r'data-slide-key="([^"]*)"')
-    valid_slug_re = re.compile(r'^[a-z0-9][a-z0-9-]*$')
+    valid_slug_re = re.compile(r'^[a-z][a-z0-9-]*$')  # MUST match deck-schema.json key pattern
     positional_re = re.compile(r'^(slide|page|section|frame)-?\d+$')
 
     seen: dict[str, int] = {}  # slug -> first slide index it appeared in
@@ -1427,7 +1456,11 @@ def audit_empty_header_zone(html: str, iss: Issues):
         # Is .header hidden for this slide?
         hide_pat = (
             rf'\.slide\[data-slide-key="{re.escape(key)}"\]'
-            r'[^{]*\.header(?![\w-])[^{]*\{[^}]*display\s*:\s*none[^}]*\}'
+            # `.header` must be the LAST simple selector (allow same-element
+            # suffixes :pseudo/.class/[attr] but NO combinator), else a hidden
+            # CHILD/SIBLING (`.header .pageno`, `.header + .stage`) falsely reads
+            # as the whole .header being hidden → bogus R-EMPTY-HEADER-ZONE.
+            r'[^{]*\.header(?![\w-])[^{\s>+~]*\s*\{[^}]*display\s*:\s*none[^}]*\}'
         )
         if not re.search(hide_pat, css):
             continue
@@ -1588,7 +1621,7 @@ def audit_ui_mocks_are_html(html, iss: Issues):
                     '用 HTML 重建,别用栅格背景塞 UI。')
         # (c) content <iframe> (exempt the legit iframe-embed layout) → warn
         if not is_iframe_layout and re.search(r'<iframe\b', fr):
-            iss.warn('UI1',
+            _lev('UI1',
                 f'slide {i}: <iframe> 正文嵌入 — 内嵌文字字号检查够不到、不可控。'
                 '把要呈现的内容用 HTML/.ui-* 重建,或只作示意缩略图(非 iframe-embed 版式)。')
 
@@ -1634,7 +1667,7 @@ def audit_lift_style_lost(html: str, iss: Issues):
     frames = re.findall(r'<div class="slide-frame"[^>]*>(.*?)</div>\s*(?=<div class="slide-frame"|<div class="deck-ui"|$)',
                         body, re.DOTALL)
     for frame in frames:
-        m = re.search(r'<div class="slide"([^>]+)>(.*)', frame, re.DOTALL)
+        m = re.search(r'<div class="slide(?:\s[^"]*)?"([^>]+)>(.*)', frame, re.DOTALL)
         if not m: continue
         attrs, inner = m.group(1), m.group(2)
         if 'data-lifted' not in attrs: continue
@@ -1976,6 +2009,96 @@ def audit_visual_richness(slides: list[str], iss: Issues):
             f'Where it fits, consider an icon (ICON_LIB names) / photo / '
             f'illustration / bespoke layout:raw page. Flat: {where}. '
             f'[advisory · richness is a design-phase call · never blocks]')
+
+
+def audit_raw_looks_schema(slides: list, iss: 'Issues', path):
+    """R-RAW-LOOKS-SCHEMA (warn_soft · ADVISORY): the raw-first backstop.
+
+    Under the raw-first stance (DECK GENERATION POLICY) `layout:"raw"` is the
+    default home base; schema layouts are the fall-back for a SHORT whitelist
+    of pure-standard shapes. This nudge catches the INVERSE failure mode —
+    OVER-PROCESSING: a raw slide whose DOM is just a plain N-card parallel
+    list (icon + title + body), with NO diagram-SVG, NO @keyframes animation
+    and NO relationship/flow signal. That shape is `content/3up` /
+    `content/blocks` — schema renders it with strictly less bug surface,
+    faster, and more consistent, so raw there is wasted handcraft.
+
+    SOURCE-OF-TRUTH = sibling deck.json, NOT the rendered data-layout. A
+    `layout:"raw"` slide commonly masks itself with a schema-ish data-layout
+    (e.g. content-3up) in its hand-authored data.html to borrow framework CSS,
+    so the rendered DOM can't tell raw from real schema. We read deck.json next
+    to index.html for the keys whose layout is "raw"; no deck.json (foreign /
+    Path B / lifted standalone) → skip silently (advisory, never false-positive
+    on a genuine schema card grid).
+
+    HIGH-PRECISION by design: skips anything with animation (@keyframes), a
+    non-icon diagram <svg>, or an arrow/connector (flow/relationship). So
+    metaphor pages (iceberg), animated heroes, and comparison/flow pages stay
+    untouched — only the genuinely-flat card list trips it.
+
+    ADVISORY ONLY — never an error, even under --strict (warn_soft). If the
+    page has bespoke / relational / narrative substance the author keeps raw
+    and ignores it; this never blocks delivery. (Replaces the rejected
+    deck-level ratio cap R-TOO-MUCH-RAW — over-raw is a per-page question,
+    not a global ratio: a 90%-raw deck where every page earns it is fine.)"""
+    import json
+    raw_keys = set()
+    try:
+        dj = Path(path).resolve().parent / 'deck.json'
+        if dj.exists():
+            data = json.loads(dj.read_text(encoding='utf-8'))
+            for s in data.get('slides', []):
+                if (s.get('layout') or '').strip() == 'raw' and s.get('key'):
+                    raw_keys.add(s['key'])
+    except Exception:
+        return                                        # can't identify raw → skip
+    if not raw_keys:
+        return
+    # Structural flow/relationship signals ONLY — a bare arrow GLYPH (→ ➜ …) in
+    # body copy must NOT short-circuit (a flat card list whose text reads
+    # "投入 → 产出" is still a flat card list). Keep markup-level connectors.
+    _FLOW_SIGNALS = ('connector', 'data-arrow', 'class="arrow')
+
+    def _is_icon_vb(vb):
+        # Any small SQUARE viewBox is an icon (24/20/16 — but also 32/48, and
+        # whitespace-tolerant). An exact 3-value whitelist mis-read common icon
+        # sizes as a "diagram svg" and suppressed the nudge.
+        p = vb.split()
+        if len(p) != 4:
+            return False
+        try:
+            w, h = float(p[2]), float(p[3])
+        except ValueError:
+            return False
+        return w == h and 0 < w <= 64
+
+    for i, fr in enumerate(slides, 1):
+        key = slide_attr(fr, 'slide-key')
+        if key not in raw_keys:
+            continue
+        if '@keyframes' in fr:                        # animated → genuinely bespoke
+            continue
+        all_svg = len(re.findall(r'<svg\b', fr))
+        icon_svg = sum(1 for vb in re.findall(r'<svg\b[^>]*viewBox="([^"]*)"', fr)
+                       if _is_icon_vb(vb))
+        if all_svg > icon_svg:                        # a non-icon diagram svg → bespoke
+            continue
+        if any(sig in fr for sig in _FLOW_SIGNALS):   # arrow/connector → flow/relationship
+            continue
+        # Count card ELEMENTS — `card` as a standalone class TOKEN, not every
+        # class CONTAINING "card". `\bcard\b` matched card-title/card-body/
+        # card-icon/card-grid too, inflating a real 3-card list to ~12 → outside
+        # 3..6 → silently skipped (the exact over-processing shape this targets).
+        cards = len(re.findall(r'class="(?:[^"]*\s)?card(?:\s[^"]*)?"', fr))
+        if 3 <= cards <= 6:
+            iss.warn_soft(
+                'R-RAW-LOOKS-SCHEMA',
+                f'raw slide "{key}" looks like a plain {cards}-card parallel '
+                f'list (icon+title+body · no diagram-svg · no animation · no '
+                f'arrow/connector) — that is a standard shape. Consider falling '
+                f'back to content/3up or content/blocks (less bug surface, '
+                f'faster, consistent). [advisory · if the page has bespoke / '
+                f'relational / narrative substance, keep raw & ignore · never blocks]')
 
 
 # R-SELF-CONTAINED — per-slide CSS must live INSIDE the slide it styles.

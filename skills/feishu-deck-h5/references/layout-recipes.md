@@ -6,6 +6,23 @@
 Each recipe below is the exact markup the agent should drop into a `.slide-frame`.
 The markup uses only tokens defined in `assets/feishu-deck.css`.
 
+## Raw Grid Authoring Rules
+
+When writing `layout: raw` grid pages, make grid tracks shrinkable from the first
+draft:
+
+- Use `repeat(N, minmax(0, 1fr))` for fixed rows and columns. CSS Grid's default
+  `1fr` behaves like `minmax(auto, 1fr)`, so logos, square cells, or long images
+  can force tracks wider/taller than the available frame and clip the row.
+- Add `min-width: 0; min-height: 0; overflow: hidden` to grid children that hold
+  logos, images, or long labels.
+- For an absolutely positioned grid container with fixed `top`/`bottom`, a
+  single-row grid still sizes to content unless told otherwise. Set
+  `grid-template-rows: minmax(0, 1fr)` when the row should fill the container.
+
+This avoids the common render-measure-fix loop where the last logo row disappears
+or the page keeps an obvious bottom blank.
+
 ### 1. Cover (`data-layout="cover"`) — matches 飞书 母版 slideLayout1
 
 The cover uses the master flower background (`lark-cover-bg.jpg`) with content positioned on the **left half** (the dark negative space). The color logo sits **top-left** at master coordinates. Title is **100 px / 700** (smaller than you'd expect — that's the master's spec). No eyebrow, no subtitle, no keyline bar, no footer chrome.
@@ -760,4 +777,3 @@ If you write a custom layout, follow these patterns. If a slide overflows in
 practice, run through this list before tweaking pixel values.
 
 ---
-

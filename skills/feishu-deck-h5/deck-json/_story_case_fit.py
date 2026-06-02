@@ -30,7 +30,7 @@ PLACEHOLDER_PATTERNS = (
     r"(待补|具体待补|占位|稍后补充|有待补充|待定|暂无|未填|None)",
     r"^[\s\.\-…—_]+$",
     r"^(\?+|？+)$",
-    r"\.\.\.{2,}|…{2,}",
+    r"\.{3,}|…{2,}",
 )
 
 _MIN_LEN_FULL = 10        # arc.pain / arc.conflict / arc.solution

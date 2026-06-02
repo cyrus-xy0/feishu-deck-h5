@@ -182,6 +182,16 @@ def collect(html: str):
     orphans: list[str] = []
     skipped_at: list[str] = []
 
+    # Pass 1: harvest @keyframes from EVERY head block, regardless of per-slide
+    # selector. Authors routinely put @keyframes in their OWN selector-less
+    # <style> block; gating keyframe collection on a per-slide selector (the
+    # main loop below) dropped those → a moved rule's `animation: X` lost its
+    # keyframe definition after migration → silent dead animation. (#13)
+    for block in _head_blocks(html, spans):
+        for kind, a, b in _walk_top(block):
+            if kind == 'keyframes':
+                keyframes[a] = b
+
     for block in _head_blocks(html, spans):
         # Only blocks that actually target a slide are leaks. A generic/shell
         # <style> (e.g. the R48 re-assertions, present-mode scaling) has no
@@ -243,6 +253,12 @@ def main(argv=None) -> int:
         slide = by_key.get(key)
         if slide is None:
             missing.append(key)
+            continue
+        # Idempotency: if this slide's custom_css already carries a migration
+        # marker, the head blocks were migrated on a PRIOR run but index.html
+        # wasn't re-rendered (so they still appear in head) — re-appending would
+        # DUPLICATE the rules. Skip; re-render first to clear the head blocks.
+        if "migrated from head <style> by L7 codemod" in (slide.get("custom_css") or ""):
             continue
         n_rules = sum(1 for _ in _walk_top(css))   # top-level rules + keyframes
         applied.append((key, n_rules, len(css)))

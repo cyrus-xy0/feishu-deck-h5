@@ -1129,12 +1129,10 @@ body {
   /* 2026-05-16: 18 → 22 — process-step body per SKILL.md typography floor. */
   font: 500 var(--fs-body)/1.55 var(--fs-font-cjk); color: var(--fs-text-65);
 }
-.slide[data-layout="process"] .step:not(:last-child)::after {
-  content: ""; position: absolute; right: -22px; top: 50%;
-  width: 16px; height: 16px;
-  border-top: 2px solid var(--fs-accent); border-right: 2px solid var(--fs-accent);
-  transform: translateY(-50%) rotate(45deg); opacity: 0.6;
-}
+/* (#84) Old 16px chevron arrow REMOVED — it merged with the canonical
+   `.step::after` clip-path arrow (defined further below) on every non-last
+   step, producing a garbled double glyph. That clip-path rule is now the
+   single source of the process step arrow. */
 
 /* 规范 L4: process layout's output panel (right-side ~400 px wide) attribute
    list MUST be a single column — 2-col grid in a 400 px container yields
@@ -2322,10 +2320,10 @@ body {
   justify-content: stretch;                          /* same */
   gap: 18px;                                         /* tighter for vertical */
 }
-/* hide the right-pointing arrow; vertical variant gets no arrow */
-.slide[data-layout="process"][data-variant="vertical"] .step:not(:last-child)::after {
-  display: none;
-}
+/* (#84) vertical-variant chevron-hide REMOVED — it only suppressed the old
+   16px chevron (now deleted). The canonical `.step::after` arrow is already
+   hidden in vertical mode by the broader
+   `[data-variant="vertical"] .step::after { display:none }` rule. */
 
 /* ============================================================================
    UI MOCK PRIMITIVES (规范: re-render screenshots as HTML, not raster images)

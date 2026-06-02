@@ -207,7 +207,9 @@ _FONT_SIZE_RE = re.compile(r'(font-size:\s*)(\d+)(px)')
 # `font:` shorthand — capture up to (and incl.) the FIRST \d+px; the checker
 # (R06:208, R20:318) reads exactly that first px. The trailing token (line-
 # height / family / etc.) is preserved by the (?=...) lookahead structure.
-_FONT_SHORTHAND_RE = re.compile(r'(\bfont:\s*[^;{}]*?)(\d+)(px)')
+# `(?<![\w-])` so a hyphenated/custom prop ending in `font` (e.g. `--my-font:`)
+# isn't mistaken for the `font:` shorthand (`\bfont:` matched the `-font:` tail).
+_FONT_SHORTHAND_RE = re.compile(r'((?<![\w-])font:\s*[^;{}]*?)(\d+)(px)')
 
 
 def _snap_declarations(body: str, selector: str, allow_typescale: bool,

@@ -20,7 +20,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COPY_ASSETS="$SCRIPT_DIR/copy-assets.py"
 [[ -f "$COPY_ASSETS" ]] || { echo "copy-assets.py not found at $COPY_ASSETS" >&2; exit 1; }
 
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# Match new-run.sh: runs/ lives at the git toplevel; fall back to the fixed
+# 3-up only for a non-git tree (the hardcoded depth broke when the skill was
+# mounted / symlinked at a different depth).
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n "$REPO_ROOT" ]] || REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 RUNS="$REPO_ROOT/runs"
 [[ -d "$RUNS" ]] || { echo "no runs/ at $RUNS — nothing to migrate"; exit 0; }
 
@@ -42,7 +46,7 @@ for shared in "$RUNS"/*/output/assets/shared; do
         continue
     fi
 
-    size_kb=$(du -sk "$shared" | awk '{print $1}')
+    size_kb=$(du -sk "$shared" 2>/dev/null | awk '{print $1}'); [[ -n "$size_kb" ]] || size_kb=0
     echo "→ $output_dir (was ${size_kb} KB)"
     if [[ $DRY_RUN -eq 1 ]]; then
         echo "    (dry-run: would invoke copy-assets.py --shared=link)"

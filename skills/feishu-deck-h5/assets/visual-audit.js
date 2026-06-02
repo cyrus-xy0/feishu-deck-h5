@@ -113,14 +113,6 @@
     const cls = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase();
     return keys.some(k => cls.includes(k));
   };
-  const firstAncestor = (el, keys) => {
-    let n = el.parentElement;
-    while (n) {
-      if (hasAnyClass(n, keys)) return n;
-      n = n.parentElement;
-    }
-    return null;
-  };
   const shortSel = el => {
     const tag = el.tagName.toLowerCase();
     const raw = el.className;
@@ -582,7 +574,11 @@
       // there is no visible title to position-check, so skip it.
       const headerRendered = !!header && header.getClientRects().length > 0;
       if (header && titleEl && headerRendered) {
-        const headerTop = Math.round(header.getBoundingClientRect().top - slide.getBoundingClientRect().top);
+        // Divide the (scaled) bbox delta back to DESIGN px before comparing to
+        // the design-px constant 61 — at a non-1 scale (small viewport) the raw
+        // scaled delta would false-trigger.
+        const scale = (slide.getBoundingClientRect().height / 1080) || 1;
+        const headerTop = Math.round((header.getBoundingClientRect().top - slide.getBoundingClientRect().top) / scale);
         const expectedTop = 61;
         const tolerance = 8;
         if (Math.abs(headerTop - expectedTop) > tolerance) {
@@ -1981,10 +1977,28 @@
         } catch (e) { /* exotic decl access — ignore */ }
         return false;
       };
+      // Depth/string-aware comma split — commas inside :is()/:not()/:has()/
+      // [attr="a,b"] must NOT shatter a valid selector (the shards would throw
+      // in querySelectorAll → false 'parse-error' on a HEALTHY animation,
+      // failing the gate). Mirrors the DEAD-RULE pass's _splitSelectorList.
+      const _splitSelList = (sel) => {
+        const parts = []; let depth = 0, inStr = 0, buf = '';
+        for (let i = 0; i < sel.length; i++) {
+          const ch = sel[i];
+          if (inStr) { buf += ch; if (ch === inStr && sel[i - 1] !== '\\') inStr = 0; continue; }
+          if (ch === '"' || ch === "'") { inStr = ch; buf += ch; continue; }
+          if (ch === '(' || ch === '[') depth++;
+          else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+          if (ch === ',' && depth === 0) { parts.push(buf.trim()); buf = ''; continue; }
+          buf += ch;
+        }
+        if (buf.trim()) parts.push(buf.trim());
+        return parts;
+      };
       const _checkSel = (selectorText) => {
         // A rule's selectorText may be a comma list; test each part — any dead
         // part is reported (one dead branch = that target never animates).
-        const parts = (selectorText || '').split(',').map(s => s.trim()).filter(Boolean);
+        const parts = _splitSelList(selectorText || '').filter(Boolean);
         for (const sel of parts) {
           const key = slide_idx + '::' + sel;
           if (seenDead.has(key)) continue;

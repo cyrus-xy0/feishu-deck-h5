@@ -45,7 +45,7 @@ while [ $# -gt 0 ]; do
             exit 1
             ;;
         --strict) STRICT="--strict"; shift ;;
-        --name) NAME="$2"; shift 2 ;;
+        --name) NAME="${2:?--name requires a value}"; shift 2 ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -81,13 +81,15 @@ echo "==> finalize  ·  $OUT_DIR  ($MODE)"
 # "run manually for diagnosis" prompt.
 run_step() {
     local desc="$1"; shift
-    local log
+    local log rc
     log=$(mktemp -t feishu-finalize-step.XXXXXX)
-    if "$@" >"$log" 2>&1; then
+    "$@" >"$log" 2>&1
+    rc=$?                                     # capture BEFORE the `if`/`fi` resets $? to 0
+    if [ "$rc" -eq 0 ]; then
         rm -f "$log"
         return 0
     fi
-    echo "✗ $desc failed (exit $?):" >&2
+    echo "✗ $desc failed (exit $rc):" >&2
     sed 's/^/    /' "$log" >&2
     rm -f "$log"
     return 1

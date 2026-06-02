@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feishu-deck-h5 ingestion manifest",
+  "type": "object",
+  "required": ["task_id", "source", "publication", "library_ingest", "skipped"],
+  "properties": {
+    "task_id": { "type": "string" },
+    "source": { "type": "string" },
+    "publication": { "type": "object" },
+    "library_ingest": { "type": "object" },
+    "slide_records": { "type": "array" },
+    "skipped": { "type": "array" }
+  },
+  "additionalProperties": true
+}

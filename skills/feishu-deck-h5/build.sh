@@ -60,9 +60,9 @@ HEAD
 
 # ---- Build the inlined version (opt-in single-file) ----
 if [ "$INLINE" = "1" ] || [ "$VALIDATE" = "1" ]; then
-  ASSET_OVERRIDE=$(python3 -c "
+  ASSET_OVERRIDE=$(FS_BUILD_ASSETS="$ROOT/assets" python3 -c "
 import base64, os
-ROOT = '$ROOT/assets'
+ROOT = os.environ['FS_BUILD_ASSETS']  # via env, not shell-interpolation (a ' in the repo path would break the string literal)
 assets = [('logo','lark-logo.png','image/png'),('logo-mono','lark-logo-mono-white.png','image/png'),
           ('cover-bg','lark-cover-bg.jpg','image/jpeg'),('section-bg','lark-section-bg.jpg','image/jpeg'),
           ('content-bg','lark-content-bg.jpg','image/jpeg'),('slogan','lark-slogan.png','image/png')]

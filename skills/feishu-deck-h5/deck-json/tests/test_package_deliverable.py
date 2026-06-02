@@ -34,9 +34,30 @@ class PackageDeliverableTest(unittest.TestCase):
             "deck_local:\n  - assets/local.png\n",
             encoding="utf-8",
         )
+        (self.output / "slide-index.json").write_text(
+            json.dumps({"slides": [{"key": "cover", "assets": ["prototypes/demo/index.html"]}]}),
+            encoding="utf-8",
+        )
+        (self.output / "making-of.html").write_text(
+            "<!doctype html><html><body>making of</body></html>",
+            encoding="utf-8",
+        )
+        (self.output / "deck.xml").write_text("<deck />\n", encoding="utf-8")
         assets = self.output / "assets"
         assets.mkdir()
         (assets / "local.png").write_bytes(b"fake-png")
+        prototypes = self.output / "prototypes" / "demo"
+        prototypes.mkdir(parents=True)
+        (prototypes / "index.html").write_text(
+            "<!doctype html><html><body>prototype</body></html>",
+            encoding="utf-8",
+        )
+        inputs = self.output / "input"
+        inputs.mkdir()
+        (inputs / "photo.png").write_bytes(b"fake-photo")
+        deck_log = self.output / "deck-log"
+        deck_log.mkdir()
+        (deck_log / "events.jsonl").write_text("{}\n", encoding="utf-8")
 
         proc = subprocess.run(
             ["bash", str(PACKAGE_DELIVERABLE), str(self.output), "--name", "deckjson-package"],
@@ -54,7 +75,13 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertIn("README.txt", names)
         self.assertIn("deck.json", names)
         self.assertIn("assets-manifest.yaml", names)
+        self.assertIn("slide-index.json", names)
+        self.assertIn("making-of.html", names)
+        self.assertIn("deck.xml", names)
         self.assertIn("assets/local.png", names)
+        self.assertIn("prototypes/demo/index.html", names)
+        self.assertIn("input/photo.png", names)
+        self.assertIn("deck-log/events.jsonl", names)
         # texts.md / apply-texts.py no longer bundled — editing is in-browser
         self.assertNotIn("texts.md", names)
         self.assertNotIn("apply-texts.py", names)

@@ -61,12 +61,18 @@ def main():
     if link_m:
         rel = link_m.group(1)
         target = (deck.parent / rel)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        old = target.read_text(encoding="utf-8") if target.exists() else ""
-        had_ab = "data-fs-autobalanced" in old or "balanceSlide" in old
-        shutil.copy2(CUR_JS, target)
-        notes.append(f"linked runtime → 拷当前 feishu-deck.js 到 {target.name}"
-                     f"（原版{'已含' if had_ab else '不含'} auto-balance）")
+        if not target.resolve().is_relative_to(deck.parent.resolve()):
+            # src points OUTSIDE the deck dir (e.g. ../../../skills/.../feishu-deck.js
+            # — the SHARED skill runtime). Don't shutil.copy2 over the skill /
+            # external file (path traversal / clobber).
+            notes.append(f"linked runtime 指向 deck 目录外({rel})—— 跳过(不覆盖技能/外部文件)")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            old = target.read_text(encoding="utf-8") if target.exists() else ""
+            had_ab = "data-fs-autobalanced" in old or "balanceSlide" in old
+            shutil.copy2(CUR_JS, target)
+            notes.append(f"linked runtime → 拷当前 feishu-deck.js 到 {target.name}"
+                         f"（原版{'已含' if had_ab else '不含'} auto-balance）")
     else:
         cur_js = CUR_JS.read_text(encoding="utf-8")
         replaced = [0]
