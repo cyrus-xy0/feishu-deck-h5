@@ -233,8 +233,8 @@ def _relevant_transcripts(log_dir: Path, sess: dict) -> list[Path]:
 
     解决"换了会话(新 sid.jsonl)→ 今天的回合全丢":render 时按内容自动发现并跨 session 合并。
     file-level 相关性(整文件出现 run-slug 或标题)挡掉用户并行在做别的 deck 的会话。
-    注:若某会话同时聊了本 deck 和别的 deck,会把它整段都收进来——与旧版只读单 transcript
-    时的粒度一致,粗但稳;真要精确到 turn 级再说。"""
+    注:file-level 只挡掉整段没提本 deck 的会话;同会话里"既做本 deck 又 commit+push /
+    做别的 deck"的混合情况,由 extract_turns 的 turn 级 tokens 过滤再筛一道。"""
     found: list[Path] = []
     seen: set[Path] = set()
 
@@ -297,10 +297,36 @@ def _text_from_content(content) -> str:
     return ""
 
 
-def extract_turns(transcript: str, since_ts: str | None) -> list[dict]:
+def _evidence_from_content(content) -> str:
+    """抽 tool_use 的 input + tool_result 的内容(命令 / 文件路径 / 输出),
+    只用来判断"这个回合是否在操作本 deck",不进 making-of 展示。"""
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for b in content:
+        if not isinstance(b, dict):
+            continue
+        t = b.get("type")
+        if t == "tool_use":
+            parts.append(json.dumps(b.get("input", ""), ensure_ascii=False))
+        elif t == "tool_result":
+            c = b.get("content")
+            if isinstance(c, str):
+                parts.append(c)
+            elif isinstance(c, list):
+                parts.append(" ".join(x.get("text", "") for x in c
+                                      if isinstance(x, dict)))
+    return " ".join(parts)
+
+
+def extract_turns(transcript: str, since_ts: str | None,
+                  tokens: list[str] | None = None) -> list[dict]:
     """从 transcript 抽成 turn 列表:把每条真·人类输入配上紧随其后的 assistant 文本。
 
     since_ts:只取这个时间(init 的起点)之后的记录,把日志 scope 到"做这个 deck"那段。
+    tokens:本 deck 的特征串(run 目录名 / 标题)。给了就做 *turn 级* 相关性过滤——
+            只保留"输入 / 回复 / 该回合工具调用的命令·路径"提到本 deck 的回合,
+            滤掉同会话里 commit+push、做别的 deck 等无关回合(file-level 过滤的补充)。
     """
     p = Path(transcript)
     if not p.exists():
@@ -327,23 +353,41 @@ def extract_turns(transcript: str, since_ts: str | None) -> list[dict]:
             txt = _text_from_content(content)
             if txt and _is_real_prompt(txt):
                 rows.append(("in", ts, txt))
+            ev = _evidence_from_content(content)        # tool_result(命令输出 / 路径)
+            if ev:
+                rows.append(("ev", ts, ev))
         elif typ == "assistant":
             txt = _text_from_content(content)
             if txt:
                 rows.append(("out", ts, txt))
+            ev = _evidence_from_content(content)        # tool_use(bash 命令 / 文件路径)
+            if ev:
+                rows.append(("ev", ts, ev))
 
-    # 配对:一条 in 收集它之后、下一条 in 之前的所有 out 文本
+    # 配对:一条 in 收集它之后、下一条 in 之前的所有 out 文本 + 工具证据(_ev)
     turns, cur, n = [], None, 0
     for kind, ts, text in rows:
         if kind == "in":
             if cur:
                 turns.append(cur)
             n += 1
-            cur = {"t": "turn", "n": n, "ts": ts, "input": text, "output_raw": ""}
+            cur = {"t": "turn", "n": n, "ts": ts, "input": text,
+                   "output_raw": "", "_ev": ""}
         elif kind == "out" and cur is not None:
             cur["output_raw"] = (cur["output_raw"] + "\n\n" + text).strip() if cur["output_raw"] else text
+        elif kind == "ev" and cur is not None:
+            cur["_ev"] += " " + text
     if cur:
         turns.append(cur)
+
+    # turn 级相关性过滤:只留"操作了本 deck"的回合(滤掉同会话的 commit+push / 别的 deck)。
+    # 信号 = 用户指令(input)+ 工具实际触及的命令·路径(_ev);故意不看 assistant 散文
+    # (output_raw)—— 回复里为解释而"提到" slug ≠ 真的操作了这个 deck(本次修 bug 即是例)。
+    if tokens:
+        turns = [t for t in turns
+                 if any(tok in (t["input"] + " " + t["_ev"]) for tok in tokens)]
+    for t in turns:                                     # _ev 仅用于过滤,不外泄
+        t.pop("_ev", None)
     return turns
 
 
@@ -612,8 +656,9 @@ def _merge_events_and_turns(log_dir: Path, allow_transcript: bool = True) -> lis
     turns = []
     if allow_transcript and not OFF_SWITCH.exists():
         start = sess.get("start_ts")
+        tokens = _deck_tokens(log_dir, sess)
         for tp in _relevant_transcripts(log_dir, sess):
-            turns.extend(extract_turns(str(tp), start))
+            turns.extend(extract_turns(str(tp), start, tokens))
         # 跨多个 transcript 合并后按时间重排 + 全局重新编号(各文件内部从 1 起,合并后会撞号)
         turns.sort(key=lambda e: _ts_epoch(e.get("ts")))
         for i, t in enumerate(turns, 1):
@@ -698,7 +743,8 @@ def cmd_status(args) -> int:
         tps = _relevant_transcripts(log_dir, sess) if on else []
         print(f"  记录的主 transcript:{sess.get('transcript') or '(未记录)'}")
         if on:
-            n = sum(len(extract_turns(str(tp), sess.get('start_ts'))) for tp in tps)
+            tk = _deck_tokens(log_dir, sess)
+            n = sum(len(extract_turns(str(tp), sess.get('start_ts'), tk)) for tp in tps)
             print(f"  跨 {len(tps)} 个会话 transcript 现可捞回合数:{n}")
     else:
         print("当前无活跃 deck(还没 `deck-log init`)。")
@@ -710,13 +756,15 @@ def cmd_turns(args) -> int:
     log_dir = _log_dir(Path(args.deck_dir))
     sess = next((e for e in read_events(log_dir) if e.get("t") == "session"), {})
     since = None if args.all else sess.get("start_ts")
+    # --all 看原始全集(不过滤);默认与 render 一致做 turn 级 deck 相关性过滤
+    tk = None if args.all else _deck_tokens(log_dir, sess)
     # --transcript 显式指定 → 只看那一个;否则走和 render 一致的跨 session 自动发现
     tps = [Path(args.transcript)] if args.transcript else _relevant_transcripts(log_dir, sess)
     if not tps:
         print("✗ 找不到 transcript", file=sys.stderr); return 2
     turns = []
     for tp in tps:
-        turns.extend(extract_turns(str(tp), since))
+        turns.extend(extract_turns(str(tp), since, tk))
     turns.sort(key=lambda e: _ts_epoch(e.get("ts")))
     for i, t in enumerate(turns, 1):
         t["n"] = i
