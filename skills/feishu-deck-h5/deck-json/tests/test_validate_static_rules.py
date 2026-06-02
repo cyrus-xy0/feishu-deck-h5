@@ -238,9 +238,9 @@ def test_r10_off_palette_hex_fires():
 
 
 def test_r10_palette_hex_no_fire():
-    # #3c7fff IS a brand token -> clean.
+    # #3c7fff and #080C18 are brand tokens -> clean.
     html = "<html><body>" + _slide(
-        "stats", '<span style="color:#3c7fff">x</span>') + "</body></html>"
+        "stats", '<span style="color:#3c7fff;background:#080C18">x</span>') + "</body></html>"
     assert "R10" not in _all_codes(V.audit_hex_palette, html)
 
 

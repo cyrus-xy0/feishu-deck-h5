@@ -20,6 +20,7 @@ HERE = Path(__file__).resolve().parent
 DECK_JSON = HERE.parent
 RENDER = DECK_JSON / "render-deck.py"
 VALIDATE_DECK = DECK_JSON / "validate-deck.py"
+EXTRA_CSS = DECK_JSON / "templates" / "extra-layouts.css"
 
 
 def _cover():
@@ -87,3 +88,16 @@ def test_schema_rejects_misspelled_slide_field(tmp_path):
     r = subprocess.run([sys.executable, str(VALIDATE_DECK), str(p)],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "varient" in (r.stdout + r.stderr)
+
+
+def test_new_extra_layouts_are_ingest_gate_friendly():
+    css = EXTRA_CSS.read_text(encoding="utf-8")
+
+    assert ".slide[data-layout=\"chart\"] .cbar .cval {\n  font: 700 28px/1 var(--fs-font-latin);" in css
+    assert ".slide[data-layout=\"chart\"] .chart-bar {\n  flex: 0 0 auto; height: 520px;" in css
+    assert ".slide[data-layout=\"content-before-after\"] .side .icon" in css
+    assert "width: 32px; height: 32px;" in css
+    assert "font: 700 var(--fs-body)/1 var(--fs-font-cjk);" in css
+    assert ".slide[data-layout=\"iframe-embed\"] .iframe-hint" in css
+    assert "font: 600 var(--fs-body)/1.2 var(--fs-font-cjk);" in css
+    assert "font: 700 40px/1 var(--fs-font-latin)" not in css

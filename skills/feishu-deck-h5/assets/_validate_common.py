@@ -51,7 +51,7 @@ FLOOR_CHROME_PX = _FS_TOKENS['--fs-foot']   # corner metadata / footnote / pill 
 ALLOWED_HEX = {
     'fff', 'ffffff', '000', '000000',
     '3c7fff', '24c3ff', '33d6c0', '5c3ffb', '9f6ff1', 'fe7f00',
-    '0f1a4a', '060b22', '1a2256', '050817', '04060f', '0a1230', '1b1f3a',
+    '080c18', '0f1a4a', '060b22', '1a2256', '050817', '04060f', '0a1230', '1b1f3a',
 }
 
 # Allowed data-decor tokens
@@ -460,4 +460,3 @@ _LAYOUT_ONLY_PARENT_TAGS = {
     'tr', 'table', 'thead', 'tbody', 'tfoot',
     'ul', 'ol', 'dl', 'figure', 'select', 'fieldset',
 }
-
