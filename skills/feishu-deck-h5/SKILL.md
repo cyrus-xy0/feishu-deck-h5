@@ -958,6 +958,16 @@ BEFORE any delete-slide / insert-slide / reorder-slide / custom-layout edit, run
   python3 assets/lift-slides.py SRC/index.html --key <key> DST/deck.json --shake   # tree-shake → layout:raw
   ```
   **`--shake` 让任何老 deck 直接切干净、无需预先修**:内联该页真实 layout 的框架 CSS + **把源 head 里属于这页的 per-slide 规则(`[data-slide-key]`/`[data-page]` page-anim 老坑)搬进来并把 `[data-page=N]` 改写成 `[data-slide-key]`** + 拉回引用的 `@keyframes`。全局 `.slide .foo` 规则不内联(任何目标 deck 都有)。
+- **目标是无 deck.json 的 legacy index.html(老式手搓 deck,index.html 即源)→ `assets/lift-slides.py … --to-html`**(F-80,2026-06-02;**这正是「把一页 lift 进老 deck」该走的路,别再手搓 div 平衡 8 步**):
+  ```bash
+  # 先判(只读,出 JSON):自包含吗 / CSS 在内联还是 head / @keyframes 闭包 / 资产存不存在 / 撞不撞 key
+  python3 assets/lift-slides.py SRC/index.html --preview --key <key> [--against DST/index.html]
+  # 一条命令 lift 进 legacy 目标(DST 以 .html 结尾即走此路;.json 仍走上面的 deck.json 路径)
+  python3 assets/lift-slides.py SRC/index.html --key <key> DST/index.html [--pos N|end] [--shake]
+  ```
+  DST 以 `.html` 结尾时:抽完整渲染 frame → `transform`(剥 `data-text-id` + 拷资产 + 改写 `assets/shared` 路径,与 deck.json 路径**同一套**)→ 重包成 `.slide-frame>.slide`(`data-layout=`源 layout,框架 CSS 走目标自带 feishu-deck.css)→ div 平衡 splice 进 `.deck` 闭合前 → 自动 `.bak` + **R-DOM/validate 闸门(只判本页:R-DOM 干净 + 无 finding 提到新 key,承 F-63/F-68)**。续号 `screen_label` 用目标真实帧号。`--shake` 仅当 `--preview` 报 `recommend_shake:true`(源页有 head 耦合 CSS)时才加;同框架 lift 不必。
+
+**🔒 铁律(F-82)—— raw 页 `data.html` = `.slide` 的「内层」,不含 `.slide`/`.slide-frame` 包裹**:包裹由 `render-deck` 渲染时注入(`effective_layout = _orig_layout or "raw"`)。所以**要一页的完整可渲染 frame,必须从渲染后的 `index.html` 抽 frame,绝不从 `deck.json` 的 `data.html` 拼**(后者拼出来缺 `.slide` 包裹 + 包裹上的 `data-layout`/`data-accent`,内联 CSS 的 `[data-layout=X]`/框架 layout 规则全失效)。`lift-slides.py --to-html` 已按此实现(从 index.html 抽 + 自动重包);手动操作也照此。
 
 **配套硬规矩 —— 每页的定制 CSS 只放 `slide.custom_css`,绝不放 `<head>` / page-level `<style>`**:渲染器会把 `custom_css` 自动 scope 到 `.slide[data-slide-key=KEY]` 并 co-locate 进该 slide(`<style data-fs-custom-css>`),这样它能随 lift/clone/paste travel 且 round-trip 不丢。写无前缀选择器即可(`.card{…}`),`@keyframes`/`@media` 也放这里。head 里塞每页 CSS = republish 静默蒸发(`fs-deck-page-anim` 旧坑),已被本路径取代。
 

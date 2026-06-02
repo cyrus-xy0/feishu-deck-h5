@@ -340,3 +340,42 @@ deck 还烂着**。编号 **F-67 起**。
 ## F-50 整体进度
 c2 清污染 ✅可信可合;tree-shake 减重达标但渲染回归→**打回**;deck 级 hoist 未启动(render-deck 能力缺口)。**真正减 1.13MB 的能力存在,但需先补齐 heal 残渣清理 + parser-swallow 校验才安全。**
 
+---
+
+# 第六批 · "lift 一页进无-deck.json 老 deck"为何慢 + 加速 (2026-06-02)
+
+来源:用户把 kangshifu #16 lift 进 everbright(老式无 deck.json 老 deck)末尾,主对话手搓 ~15 次工具调用 + 1 次假设错误重跑才完成;用户问"除 bug 外哪里能加速"。后台分析 agent 读 lift-slides/deck-cli/import-html-slide/locate-slide/validate/render-deck 后定根因。
+
+**根因占比**:工具缺口 ~50%(没有一条命令把源 index.html #N → lift 进**无 deck.json** 的 legacy index.html;现成两条路 `deck-cli paste`/`lift-slides`→deck.json **都假设目标有 deck.json**;splice 能力其实埋在 `import-html-slide.py` Mode B 没接上)+ 过度探测 ~30%(自包含/CSS位置/资产/冲突全靠人肉 grep,工具内部函数早会算)+ 假设错误重跑 ~15%(raw data.html=内层这条契约只在代码注释、SKILL.md 没写)+ 输出截断 ~5%(**非 locale**,是超长单行/整页倒 stdout 触发 harness 截断)。
+
+## F-80 · `lift-slides.py --to-html DST/index.html`:lift 进无-deck.json 老 deck 【已落地·parity 测过】
+- **现状痛点**:目标是老式 index.html 即源 deck 时,无任何 turnkey 命令,只能手搓「抽 frame→shake→拷资产→包 frame→续号→div 平衡 splice→备份→validate」8 步。
+- **修法**:`lift-slides.py` 加 `--to-html`:DST 以 `.html` 结尾即走此路(`.json` 仍走 deck.json 路径)。复用 `extract_one`(抽)+ `transform`(剥 data-text-id/拷资产/改写 shared 路径,与 deck.json 路径同一套)+ 新 `_wrap_frame`(内层→完整 `.slide-frame>.slide`,data-layout=源 layout,**承 F-82**)+ 新 `_deck_close_offset`/`_splice_into_html`(div 平衡定位 `.deck` 闭合前,本会话手工验证过的逻辑固化)+ 自动 `.bak` + `_validate_after_lift`(只判本页:R-DOM 干净 + 无 finding 提到新 key,承 F-63/F-68)。续号 screen_label 用目标真实帧号。
+- **复用率**:6 环节 5 个现成函数,新代码仅 wrap/splice/路由。
+- **验证**:用手工 lift 前的 51 帧备份建 scratch,`--to-html` 一条命令 → 52 帧、R-DOM 干净、0 新 finding、截图与手工 8 步**渲染完全一致**(avatar skill-relative 路径改写正常加载)。**8 步 → 1 步。**
+
+## F-81 · `lift-slides.py --preview SRC #N|--key K [--against DST]`:一条命令出全部 lift 判断 【已落地】
+- **现状痛点**:探测 5-6 次人肉 grep(自包含/CSS在哪/@keyframes闭包/资产存不存在/撞key),还是截断重灾区。
+- **修法**:只读 `--preview`,出紧凑 JSON:`{self_contained, css_location(inline/head/both), head_scoped_rules_for_this_key, inline_keyframes, referenced_anim_names, keyframes_only_in_head_need_shake, asset_refs[{url,kind,exists}], recommend_shake, against:{key_collision,target_frames,assets_present}}`。复用 build_manifest/extract_one/scan_asset_refs/_source_author_css/extract_head_slide_rules/_extract_keyframes/_referenced_anim_names。
+- **关键修正**:`_source_author_css()` 返回**所有**非框架 `<style>`(含 frame 内联块),直接喂会把页**自己的内联 CSS** 误判成 head CSS → 假报 not-self-contained。修:扫"外部 head CSS"时**排除本 frame 自身的行**(`non_frame = 前半 + 后半`)。修后 kangshifu#16 正确报 `self_contained:true / recommend_shake:false`。
+- **5 步探测 → 1 步**(且全是截断高风险的 grep)。
+
+## F-82 · 契约固化:raw 页 `data.html` = 内层,`.slide` 包裹由 render 加 【已落地】
+- **现状痛点**:这条只在 `sync-index-to-deck.py`/`render-deck.py`/`import-html-slide` 代码注释里,SKILL.md 主体没写 → 本轮"以为能从 data.html 重建 frame"作废重来一轮。
+- **修法**:SKILL.md LIFTING 节加 🔒 铁律(要完整可渲染 frame 必须从渲染后 index.html 抽,绝不从 data.html 拼);`--to-html` 已按此实现(从 index.html 抽 + `_wrap_frame` 重包)。
+
+## F-83 · 探测/lift 命令不倒正文、默认 `--json` 治截断 【部分·候选】
+- **实测**:截断**与 locale 无关**(LANG/PYTHONUTF8 正常、CJK print 正常);是**超长单行 / 整页 HTML 倒 stdout** 触发 harness 字节上限。本会话多次"只打第一行就截断、命令执行也被打断、scratch 没建成"即此。
+- **已做**:`--preview` 出紧凑 JSON;`--to-html` 输出按页一行、不倒正文。
+- **待做**:SKILL.md 纪律「lift 探测走专用子命令出结论,看正文用 Read 读文件区间,绝不 `cat`/`grep` 整页到 stdout」;lift 大输出建议重定向到文件再 tail。
+
+## F-84 · `--to-html` 内建 lift-DONE 闭环 【部分落地】
+- **已做**:`--to-html` 落地后原子跑 `validate.py`(吃 assembled HTML,无需 deck.json)+ 抽 R-DOM/新 key finding 判定(承 F-63/F-68)。
+- **待做**:可选 `--shot KEY` 落地后单页截图核验(走 `validate.py --slide`/已修好的 `deck-log snapshot --slide`,绕开原 deck-log out/output bug——该 bug 本会话已修)。
+
+## F-85 · `import-html-slide.py` Mode B 被 `lift-slides --to-html` 取代 【并入 F-80】
+- Mode B 的 `insert_into_html`(splice 进无-deck.json index.html)能力是 F-80 的近亲,但只吃预抽 fragment、交互式、不 shake、不拷资产、不 validate。F-80 已用自带 div-平衡 splice 覆盖全链,**不跨模块复用 Mode B**(避免 assets/↔deck-json/ 导入耦合)。建议把 Mode B 标注"legacy,新流程用 `lift-slides --to-html`"。
+
+## 第六批一句话
+**"lift 一页进无-deck.json 老 deck"过去没有 turnkey 命令是这次慢的主因;F-80(`--to-html`)+ F-81(`--preview`)+ F-82(契约固化)已落地并 parity 测过,把 ~15 次调用压到 2-3 次。截断与 locale 无关,是整页倒 stdout 触发 harness 截断(F-83 纪律待固化)。**
+
