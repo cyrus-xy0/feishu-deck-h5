@@ -188,6 +188,85 @@ def get_framework_css():
     return _FRAMEWORK_CSS
 
 
+# --- Target-framework layout coverage (F-83) ------------------------------
+# When lifting INTO a legacy target whose bundled feishu-deck.css is an OLDER
+# snapshot, that sheet may have NO `[data-layout="X"]` rules for the source
+# page's layout. The lifted page renders as `data-layout="X"` (so the target's
+# framework rules are what style it — lift-to-html keeps the orig layout on the
+# wrapper, lift-to-deck.json relies on render-deck doing the same), so a MISSING
+# layout block means the page renders unstyled (e.g. iframe-embed → iframe
+# shrinks to a tiny box) UNLESS --shake inlines the framework rules into the
+# slide itself. The pre-F-83 preview only inspected the SOURCE head for coupled
+# CSS; it never asked whether the TARGET framework actually covers the layout,
+# so `recommend_shake` stayed false and the user hit the breakage. These helpers
+# resolve the target's framework CSS and check coverage for a given layout.
+
+def _resolve_target_framework_css(target_index_html):
+    """Read the FRAMEWORK CSS that a target index.html actually links.
+    Resolves every `<link rel=stylesheet href=...>` relative to the target file
+    (the common bundled case is `assets/feishu-deck.css`). For a single-file deck
+    that has NO linked local stylesheet, falls back to concatenating the inlined
+    `<style>` blocks (the framework is embedded there). Returns the combined CSS
+    text (empty string if the target can't be read / has no resolvable CSS).
+
+    IMPORTANT: when a linked framework sheet exists we deliberately do NOT fold
+    in the page-level inlined `<style>` blocks. Those blocks are exactly the
+    PER-SLIDE / shake-inlined CSS (e.g. `--shake`'s `AUTO-INLINED from framework
+    [data-layout=X]` recovery) — counting them as "framework coverage" would
+    mask the very gap we're detecting (a target that already absorbed one lift's
+    shake-inlined block would look like it has the layout for the NEXT lift).
+    The framework's own [data-layout=X] rules live in the linked sheet."""
+    target = Path(target_index_html)
+    try:
+        html = target.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        return ""
+    base = target.resolve().parent
+    parts = []
+    # Linked stylesheets — resolve href relative to the target file.
+    for m in re.finditer(r'<link\b[^>]*>', html, re.I):
+        tag = m.group(0)
+        if not re.search(r'rel\s*=\s*["\']?[^"\'>]*stylesheet', tag, re.I):
+            continue
+        hm = re.search(r'href\s*=\s*["\']([^"\']+)["\']', tag, re.I)
+        if not hm:
+            continue
+        href = hm.group(1).strip()
+        low = href.lower()
+        if low.startswith(("http://", "https://", "//", "data:")):
+            continue  # external sheet — not resolvable / not the lift's concern
+        css_path = (base / href.split("?", 1)[0].split("#", 1)[0].lstrip("./"))
+        try:
+            if css_path.is_file():
+                parts.append(css_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            pass
+    # Single-file deck (no resolvable linked sheet): the framework is inlined in
+    # <style> blocks — fall back to those. Skip when a linked sheet was found.
+    if not parts:
+        for m in re.finditer(r'<style\b[^>]*>(.*?)</style>', html, re.S | re.I):
+            parts.append(m.group(1))
+    return "\n".join(parts)
+
+
+def target_lacks_layout_css(target_index_html, layout):
+    """True if the target's framework CSS has NO rule selecting
+    `[data-layout="LAYOUT"]`. `raw` (and a missing layout) is never flagged: a
+    lifted raw slide is styled by the target's own `[data-layout="raw"]` rules,
+    not a layout-specific block. Returns False when we can't read the target
+    (don't false-warn on an unreadable target — the existing reasoning still
+    applies)."""
+    if not layout or layout == "raw":
+        return False
+    css = _resolve_target_framework_css(target_index_html)
+    if not css:
+        return False
+    # Match `[data-layout="LAYOUT"]` allowing single OR double quotes (and the
+    # render-deck inline form uses single quotes), tolerant of surrounding space.
+    pat = re.compile(r'\[\s*data-layout\s*=\s*["\']' + re.escape(layout) + r'["\']\s*\]')
+    return not pat.search(css)
+
+
 # --- lift-fidelity helpers (F-250 asset-var deref · F-251 title seed) ------
 _ASSET_VAR_DEF_RE = re.compile(
     r'--fs-asset-([a-z0-9-]+)\s*:\s*url\(\s*["\']?([^"\')]+)["\']?\s*\)', re.I)
@@ -1282,6 +1361,21 @@ def lift_to_html(src_html_path, frame_indices, dst_html, shake=False,
         if report.get("shake_hint"):
             print(f"    ⓘ layout {report['shake_hint']} has framework CSS that may not survive "
                   f"lift-to-raw if the target lacks it — re-run with --shake to inline")
+        # F-83: target-framework layout coverage. The lifted frame keeps its
+        # orig_layout on the wrapper (see _wrap_frame), so the TARGET's bundled
+        # feishu-deck.css is what styles it. If that sheet is an OLDER snapshot
+        # with NO [data-layout=X] block for this page's layout, the page renders
+        # unstyled (e.g. iframe-embed → iframe shrinks to a tiny box) UNLESS
+        # --shake already inlined the framework rules. Warn LOUDLY rather than
+        # auto-shake: --shake is a per-INVOCATION flag (it sets up src_head_css /
+        # page_map at the top of this function); selectively shaking one page
+        # mid-loop would diverge from that contract and the tool's advisory
+        # style. The human re-runs with --shake (consistent, all-pages).
+        if not shake and target_lacks_layout_css(dst_html, info.get("orig_layout")):
+            print(f"    ⚠⚠ TARGET FRAMEWORK LACKS [data-layout=\"{info.get('orig_layout')}\"] CSS — "
+                  f"the target deck's bundled feishu-deck.css is an older snapshot with no rules "
+                  f"for this layout. This page WILL render unstyled/broken (e.g. iframe collapses). "
+                  f"RE-RUN this lift WITH --shake to inline the framework layout CSS into the slide.")
         carried = [r["url"] for r in asset_refs
                    if r["exists"] and r["kind"] in ("input", "prototype")]
         missing = [r["url"] for r in asset_refs
@@ -1372,6 +1466,13 @@ def cmd_preview(src_html_path, sel, against=None):
     }
     if against:
         atext = Path(against).read_text(encoding="utf-8")
+        # F-83: does the TARGET's bundled framework actually have CSS for this
+        # page's [data-layout=X]? An OLDER target snapshot may lack it → the
+        # lifted page (which keeps orig_layout on its wrapper) renders unstyled
+        # unless --shake inlines the framework rules. This is INDEPENDENT of the
+        # source-head coupling the rest of cmd_preview inspects, so OR it into
+        # recommend_shake (raw is never flagged — it's framework-default styled).
+        lacks_layout = target_lacks_layout_css(against, info.get("orig_layout"))
         result["against"] = {
             "target": str(against),
             "target_frames": atext.count('<div class="slide-frame"'),
@@ -1380,7 +1481,16 @@ def cmd_preview(src_html_path, sel, against=None):
                 r["url"] for r in asset_refs if r["kind"] == "input"
                 and (Path(against).parent / r["url"].lstrip("./")).is_file()
             ],
+            "target_lacks_layout_css": lacks_layout,
         }
+        if lacks_layout:
+            result["against"]["note"] = (
+                f"target framework has NO [data-layout=\"{info.get('orig_layout')}\"] "
+                f"CSS — this layout's rules are missing in the target deck, so the "
+                f"lifted page will render unstyled/broken unless you lift with --shake "
+                f"(which inlines the framework layout CSS into the slide itself).")
+            result["target_lacks_layout_css"] = True
+            result["recommend_shake"] = True
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

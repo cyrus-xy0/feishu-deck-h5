@@ -1,6 +1,44 @@
 # CHANGES — feishu-deck-h5 历史/已固化的修复记录
 > 从 SKILL.md 拆出(F-30)。这些防御的可执行部分已固化进 feishu-deck.css / validate.py;此处仅留叙事供追溯。
 
+## F-83 — lift `--preview` / `--to-html` 检测目标框架是否缺少该版式的 CSS(2026-06-02)
+
+把一页 `iframe-embed`(或任何非 `raw` 版式)lift 进一个 **旧快照** 目标 deck
+时,目标 bundle 的 `feishu-deck.css` 可能 **没有** `[data-layout="iframe-embed"]`
+规则。lift 出来的 frame 在 wrapper 上保留 `orig_layout`(`lift_to_html` 的
+`_wrap_frame` / deck.json 路径靠 render-deck 同样保留),于是它由目标框架来出样式
+—— 框架缺这块就渲染塌掉(iframe 缩成小盒子),**除非用 `--shake` 把框架版式 CSS
+内联进这一页**。修复前 `--preview` 只看 **源** head 有没有耦合 CSS,从不问 **目标**
+框架到底覆不覆盖这个版式,所以 `recommend_shake` 误报 `false`,用户踩坑。
+
+修法(只改 `assets/lift-slides.py` 一个文件,+110 行):
+- 新增 `_resolve_target_framework_css(target_index_html)`:把目标 index.html 里
+  `<link rel=stylesheet>` 按相对路径解析读出框架 CSS(常见 `assets/feishu-deck.css`);
+  仅当 **没有** 可解析的本地 link sheet(纯单文件 deck)才回落到内联 `<style>`。
+  **关键**:有 link sheet 时绝不把页面内联 `<style>` 折进来 —— 那些恰是
+  **per-slide / `--shake` 已内联** 的 `AUTO-INLINED from framework [data-layout=X]`
+  块,算进去会把要检测的"框架缺口"自己盖掉(上一次 shake lift 进来的页会让下一次
+  lift 误判目标"已有"该版式)。
+- 新增 `target_lacks_layout_css(target, layout)`:目标框架 CSS 里没有
+  `[data-layout="LAYOUT"]` 规则即 `True`(单/双引号都匹配);`raw`、读不到目标、
+  无 layout 一律不报(不误警)。
+- `--preview --against` 增加 `against.target_lacks_layout_css` + 人类可读 `note`,
+  并把 `recommend_shake` 与既有 head 耦合判断 **OR** 起来(顶层也镜像
+  `target_lacks_layout_css:true`)。
+- `--to-html`(未带 `--shake`)对每页做同样检测,缺则打 **大声警告**(`⚠⚠ TARGET
+  FRAMEWORK LACKS …`)提示重跑加 `--shake`。**选择 warn-only 而非自动 shake**:
+  `--shake` 是 **每次调用级** 开关(在函数顶部就决定 `src_head_css` / `page_map`
+  的搭建),中途只对单页 shake 会偏离这个契约、也不符合工具一贯的"提示不阻断"
+  风格;让人按提示整体重跑 `--shake` 更一致、更可预期。
+
+复现/回归(只读 `runs/`,不写):
+- `zhenjiu-case`(iframe-embed,目标旧快照缺该版式)修复后
+  `recommend_shake:true` / `target_lacks_layout_css:true`;
+- `feiling-product`(content-2col,目标有该版式)不误报;
+- 现代框架(skill 当前 `feishu-deck.css` 含 iframe-embed)目标不误报;
+- `--to-html` 临时副本无 `--shake` 触发大声警告,带 `--shake` 不触发且页字节增大
+  (框架 CSS 已内联);全量 265 测试 / 18 lift 测试 PASS。
+
 ## R-ESC-HTML — 裸 HTML 进转义字段变"乱码" 硬闸(2026-05-31)
 
 裸 `<span class="hl">` / `<br>` 写进 schema 转义文本字段(content/3up 等的
