@@ -947,7 +947,16 @@ def main():
     run_static_audits(STATIC_AUDITS, html=html, slides=slides, path=path, iss=iss)
 
     if args.visual:
-        run_visual_audits(path, iss, want_screenshots=args.screenshots)
+        # The visual-report formatting indexes report entries directly
+        # (entry['h'], entry['slide_idx'], …) OUTSIDE the Playwright try; a
+        # malformed/partial audit entry would crash the WHOLE validate. Degrade
+        # to a non-blocking advisory instead (findings already emitted stay).
+        try:
+            run_visual_audits(path, iss, want_screenshots=args.screenshots)
+        except Exception as e:
+            iss.warn_soft('R-VISUAL',
+                f'visual report formatting failed ({type(e).__name__}: {e}) — '
+                'a malformed audit entry; visual findings may be incomplete.')
 
     if args.strict:
         # Promote regular warnings to errors. SOFT warnings (R-VIS-NO-IMAGERY,

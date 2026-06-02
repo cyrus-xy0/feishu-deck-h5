@@ -126,7 +126,11 @@ class SchemaValidator:
             if "minLength" in schema and len(instance) < schema["minLength"]:
                 result.err(path, f"length {len(instance)} < minLength {schema['minLength']} (value: {instance!r})")
             if "pattern" in schema:
-                if not re.search(schema["pattern"], instance):
+                # fullmatch (not search): every deck-schema pattern is anchored
+                # ^…$, and re.search lets `$` match BEFORE a trailing newline —
+                # so e.g. a key "cover\n" wrongly passed. (Verified all patterns
+                # are anchored, so fullmatch is equivalent + closes that hole.)
+                if not re.fullmatch(schema["pattern"], instance):
                     result.err(path, f"value {instance!r} does not match pattern {schema['pattern']!r}")
 
         # integer/number
