@@ -39,6 +39,42 @@ def parse_scope(spec):
     return sorted(set(out)) or None
 
 
+def _inline_framework_css(page, base_dir):
+    """把页面里 <link rel=stylesheet> 指向的【本地框架 CSS】读盘并注入成
+    <style data-source="framework"> 块,让 R-CSSVAR 能用 textContent 读到框架的
+    `--fs-*` 变量定义(避免把合法 var(--fs-font-latin) 误报为未定义)。
+
+    只处理本地相对/绝对路径(跳过 http(s)/protocol-relative/data:);file:// 下
+    href 形如 `../assets/feishu-deck.css`,相对 HTML 文件目录解析。读不到的安静跳过
+    (该样式表本就不可用,审计自然按缺失处理,不该让 runner 崩)。镜像 validate.py 的
+    inline_linked,但发生在 runner 的 load 层(纯让源可读,不含规则逻辑)。"""
+    try:
+        hrefs = page.evaluate(
+            "() => [...document.querySelectorAll('link[rel=stylesheet]')]"
+            ".map(l => l.getAttribute('href')).filter(Boolean)"
+        )
+    except Exception:  # noqa: BLE001
+        return
+    for href in hrefs:
+        if href.startswith(("http:", "https:", "//", "data:")):
+            continue
+        # 去掉 query/fragment 再解析磁盘路径。
+        clean = href.split("?", 1)[0].split("#", 1)[0]
+        css_path = (base_dir / clean).resolve()
+        if not css_path.is_file():
+            continue
+        try:
+            text = css_path.read_text(encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            continue
+        page.evaluate(
+            "(css) => { const s = document.createElement('style');"
+            " s.setAttribute('data-source','framework'); s.textContent = css;"
+            " document.head.appendChild(s); }",
+            text,
+        )
+
+
 def main():
     ap = argparse.ArgumentParser(description="统一校验引擎 runner(单规则源 audits.js)")
     ap.add_argument("html", type=Path, help="渲染好的 deck index.html")
@@ -78,6 +114,13 @@ def main():
             page = context.new_page()
             page.goto(url, wait_until="load", timeout=30_000)
             page.wait_for_timeout(args.settle_ms)  # 让 scale-to-fit / 布局稳定
+            # ── 把链接的【框架 CSS】源文本注入成 <style data-source="framework"> ──
+            # R-CSSVAR 要读"所有 CSS 源文本"判定 var(--x) 定义/引用,而 file:// 下外链
+            # 样式表的 cssRules 被 CORS 挡、且浏览器会丢掉含未定义 var() 的整条声明(正是
+            # 本规则要抓的东西)→ CSSOM 读不到。validate.py 的 audit_undefined_css_vars 同样
+            # 依赖 inline_linked 先把框架 CSS 拉进 <style data-source=framework>。这里在
+            # runner(load 层)做同一件事:读盘 → 注入文本,纯"让源可读",不含规则逻辑。
+            _inline_framework_css(page, args.html.parent)
             page.evaluate("(s) => { window.__AUDIT_SCOPE__ = s; }", scope)
             result = page.evaluate(audits_src)
             browser.close()

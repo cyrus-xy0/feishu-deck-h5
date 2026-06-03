@@ -161,6 +161,153 @@
     return out;
   };
 
+  // --------------------------------------------------------------------------
+  //  步骤 3 第二批共享常量/工具(R-CSSVAR / R10 / R-KEY / R-LANG / R07 / R13 / R38)
+  // --------------------------------------------------------------------------
+
+  // class 字符串(含 SVG className.baseVal)→ 规整空格串。
+  const classStr = (el) => {
+    if (!el) return '';
+    const raw = el.className;
+    return (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString();
+  };
+
+  // ── lift / import provenance(对应 _validate_audits.py 的 _slide_is_lifted /
+  //    _deck_all_imported / _deck_imported)。渲染后:slide 自身或祖先带 data-lifted
+  //    = lifted;<meta name=fs-deck-origin content=imported> 或 全 .slide 都 lifted
+  //    = whole-deck imported。
+  const slideIsLifted = (slide) => !!(slide && slide.hasAttribute
+    && slide.hasAttribute('data-lifted'));
+
+  const deckOriginImported = () => {
+    if (typeof document === 'undefined') return false;
+    const m = document.querySelector('meta[name="fs-deck-origin"]');
+    return !!(m && (m.getAttribute('content') || '').trim().toLowerCase() === 'imported');
+  };
+
+  const deckAllImported = () => {
+    if (typeof window !== 'undefined' && window.__DECK_ALL_IMPORTED__ !== undefined) {
+      return window.__DECK_ALL_IMPORTED__;
+    }
+    let v;
+    if (deckOriginImported()) {
+      v = true;
+    } else {
+      const slides = (typeof document !== 'undefined' && document.querySelectorAll('.slide')) || [];
+      v = slides.length > 0 && [...slides].every((s) => slideIsLifted(s));
+    }
+    if (typeof window !== 'undefined') window.__DECK_ALL_IMPORTED__ = v;
+    return v;
+  };
+
+  // ── deck 语言模式(对应 audit_language_policy 的 <meta name=fs-language> 解析)。
+  const deckLanguageMode = () => {
+    if (typeof window !== 'undefined' && window.__DECK_LANG_MODE__) {
+      return window.__DECK_LANG_MODE__;
+    }
+    let mode = 'zh-only';
+    if (typeof document !== 'undefined') {
+      const m = document.querySelector('meta[name="fs-language"]');
+      if (m) {
+        const c = (m.getAttribute('content') || '').trim().toLowerCase();
+        if (c) mode = c;
+      }
+    }
+    if (typeof window !== 'undefined') window.__DECK_LANG_MODE__ = mode;
+    return mode;
+  };
+
+  // ── R10 调色板(对应 _validate_common.py ALLOWED_HEX,小写、无 #)。
+  const ALLOWED_HEX = new Set([
+    'fff', 'ffffff', '000', '000000',
+    '3c7fff', '24c3ff', '33d6c0', '5c3ffb', '9f6ff1', 'fe7f00',
+    '080c18', '0f1a4a', '060b22', '1a2256', '050817', '04060f', '0a1230', '1b1f3a',
+  ]);
+
+  // ── R38 data-decor ship list(对应 _validate_common.py ALLOWED_DECOR)。
+  const ALLOWED_DECOR = new Set([
+    'violet-glow', 'blue-glow', 'mix-glow', 'teal-glow', 'orange-spark',
+    'aurora', 'grain', 'topo', 'flower-bg', 'section-bg', 'photo-bg',
+  ]);
+
+  // ── R13 hero-title 版式(对应 _validate_common.py HERO_TITLE_LAYOUTS —— 注意
+  //    这与本文件顶部 HERO_LAYOUTS(visual)不同集,big-stat 不在内,见 F-13 注释)。
+  const HERO_TITLE_LAYOUTS = new Set(['cover', 'image-text', 'end', 'section', 'quote']);
+
+  // ── R-KEY slug 规则(对应 audit_slide_keys 的三个正则)。
+  const KEY_VALID_SLUG_RE = /^[a-z][a-z0-9-]*$/;
+  const KEY_POSITIONAL_RE = /^(slide|page|section|frame)-?\d+$/;
+
+  // ── R-LANG 共享:CJK 探测 / 品牌白名单 / 技术码 / chrome-label / 纯拉丁 UC /
+  //    布局型父标签 / 图表脚手架类(全部对应 audit_language_policy +
+  //    audit_translation_track_pairs + _validate_common 里的同名常量)。
+  const CJK_RE = /[一-鿿㐀-䶿豈-﫿]/;
+  const LATIN_BRAND_WHITELIST = new Set([
+    'AI', 'API', 'HTML', 'CSS', 'JS', 'CLI', 'SDK', 'UI', 'UX',
+    'PDF', 'PNG', 'JPG', 'SVG', 'CTA', 'KPI', 'OKR', 'ROI', 'SOP',
+    'CXO', 'CEO', 'CTO', 'CFO', 'COO', 'CMO', 'CIO', 'VP', 'BD', 'KA',
+    'PR', 'HR', 'IT', 'BG', 'BU',
+    'SaaS', 'PaaS', 'IaaS', 'B2B', 'B2C', 'O2O', 'MVP',
+    'LBP', 'IDC', 'AWS', 'GCP', 'OEM', 'ODM', 'NPS', 'GMV',
+    'Q1', 'Q2', 'Q3', 'Q4', 'H1', 'H2',
+    'Lark', 'Feishu', 'Codex', 'Mira', 'Flow', 'Base', 'Wiki',
+    'OpenAI', 'Anthropic', 'Claude', 'GPT', 'LLM',
+    'ERP', 'CRM', 'WMS', 'PMS', 'MES', 'SCM', 'BI', 'OA', 'POS',
+  ]);
+  const TECHNICAL_CODE_RE = /^[A-Z]{1,4}\d{1,4}[A-Z]?$/;
+  const LATIN_UC_RE = /^[A-Z0-9 ·\-/_&]{2,40}$/;
+  // chrome 类名集(对应 chrome_class_text_re 里枚举 + \w+-suffix 族)。判定见 langClassIsChromeLabel。
+  const LANG_CHROME_EXACT = new Set([
+    'eyebrow', 'kicker', 'pill', 'tag', 'chip', 'badge',
+    'nc-tag', 'db-tag', 'dl-eyebrow', 'mode-tag', 'side-pill', 'focus-pill', 'td-owner',
+  ]);
+  const LANG_CHROME_SUFFIX = ['-tag', '-pill', '-eyebrow', '-chip', '-badge',
+    '-en', '-eng', '-english', '-num', '-index', '-ord'];
+  const LANG_CHROME_TAGS = new Set(['SPAN', 'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+  const LAYOUT_ONLY_PARENT_TAGS = new Set([
+    'TR', 'TABLE', 'THEAD', 'TBODY', 'TFOOT',
+    'UL', 'OL', 'DL', 'FIGURE', 'SELECT', 'FIELDSET',
+  ]);
+  const CHART_SCAFFOLD_CLASSES = new Set([
+    'x-axis', 'y-axis', 'axis', 'sublabel', 'legend', 'scale', 'tick', 'gridline',
+  ]);
+  const isChartScaffoldClass = (cls) => !!cls
+    && cls.split(/\s+/).some((t) => CHART_SCAFFOLD_CLASSES.has(t));
+  // 元素 class 是否命中 chrome-label 类(对应 chrome_class_text_re 的 class 部分)。
+  const langClassIsChromeLabel = (el) => {
+    if (!LANG_CHROME_TAGS.has(el.tagName)) return false;
+    const tokens = classStr(el).split(/\s+/).filter(Boolean);
+    return tokens.some((c) =>
+      LANG_CHROME_EXACT.has(c) || LANG_CHROME_SUFFIX.some((suf) => c.endsWith(suf)));
+  };
+  // 该串是否"应翻译的纯拉丁标签"(对应 _is_offending_latin)。
+  const langIsOffendingLatin = (text) => {
+    const t = (text || '').trim();
+    if (!LATIN_UC_RE.test(t)) return false;
+    const tokens = t.split(/[\s·\-/_&]+/).filter((x) => x && !/^\d+$/.test(x));
+    if (!tokens.length) return false;
+    return !tokens.every((x) => LATIN_BRAND_WHITELIST.has(x) || TECHNICAL_CODE_RE.test(x));
+  };
+  // 元素的"直接文本"(只数直接 text 子节点,排除子元素文本;对应 _walk_text_leaves 的
+  // 叶子定义:有直接文本、无元素子节点)。
+  const directText = (el) => {
+    let s = '';
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3) s += n.textContent;
+    }
+    return s.trim();
+  };
+  const isElementLeaf = (el) => {
+    // 叶子 = 无元素子节点(允许文本/void)。<br> 等 void 也算元素子节点会破坏判定 ——
+    // 但 _walk_text_leaves 忽略 void 标签,所以这里也排除 void 子元素。
+    const VOID = new Set(['BR', 'HR', 'IMG', 'INPUT', 'META', 'LINK', 'SOURCE',
+      'AREA', 'BASE', 'COL', 'EMBED', 'PARAM', 'TRACK', 'WBR']);
+    for (const c of el.children) {
+      if (!VOID.has(c.tagName)) return false;
+    }
+    return true;
+  };
+
   // ==========================================================================
   //  规则注册表 —— 唯一规则源。新增规则 = 往这里加一个 (slide, ctx) => findings。
   // ==========================================================================
@@ -481,6 +628,443 @@
         return findings;
       },
     },
+
+    {
+      // R-CSSVAR · var(--undefined) 引用(浏览器静默丢整条声明,font: 缩写最危险)。
+      // (步骤 3 第二批迁自 _validate_audits.py audit_undefined_css_vars)。
+      // 原版从【所有 CSS 源(作者 + inline_linked 进来的框架)】文本里收 `--name:` 定义
+      // 与 `var(--name[, fallback])` 引用,无 fallback 且未定义 → 报错。
+      // 移植关键:**不能用 CSSOM** —— 浏览器会把含未定义 var() 的整条声明丢掉(正是本规则
+      // 要抓的),CSSOM 里就读不到了;且 file:// 下外链样式表 cssRules 被 CORS 挡。改读
+      // <style> 块的 textContent(原始源字节、不被解析擦除);框架变量定义由 runner 把外链
+      // CSS 注入成 <style data-source="framework"> 提供(见 run-audits.py _inline_framework_css)。
+      // deck 级规则:整 deck 算一次,挂在第一帧上报(用 window 缓存防重复)。
+      id: 'R-CSSVAR',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__CSSVAR_DONE__) return [];
+        // deck 级:整 deck 算一次,挂在本次 scope 的第一帧上(scope 排除首帧也照常报)。
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__CSSVAR_DONE__ = true;
+
+        // 收集所有 <style> 块的源文本(含 runner 注入的框架块)。
+        const styles = (typeof document !== 'undefined' && document.querySelectorAll('style')) || [];
+        let combined = '';
+        for (const s of styles) combined += '\n' + (s.textContent || '');
+        if (!combined.trim()) return [];
+
+        // 去 CSS 注释 + 字符串字面量(免得引号里的 `--foo:` / `var()` 误判)。
+        let clean = combined.replace(/\/\*[\s\S]*?\*\//g, '');
+        clean = clean.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
+
+        // 定义:`--name:`。
+        const defined = new Set();
+        let dm;
+        const defRe = /--([a-zA-Z][\w-]*)\s*:/g;
+        while ((dm = defRe.exec(clean))) defined.add(dm[1]);
+
+        // 引用:`var(--name[, fallback])`;有 fallback 即豁免。
+        const refRe = /var\(\s*--([a-zA-Z][\w-]*)\s*(?:,((?:[^()]|\([^()]*\))*))?\)/g;
+        const undefinedCounts = {};
+        let rm;
+        while ((rm = refRe.exec(clean))) {
+          const name = rm[1];
+          const fallback = (rm[2] || '').trim();
+          if (defined.has(name) || fallback) continue;
+          undefinedCounts[name] = (undefinedCounts[name] || 0) + 1;
+        }
+        const names = Object.keys(undefinedCounts);
+        if (!names.length) return [];
+
+        const suggest = (name) => {
+          const lo = name.toLowerCase();
+          for (const d of defined) if (d.toLowerCase() === lo) return ` Did you mean \`--${d}\`?`;
+          for (const d of defined) {
+            let common = 0;
+            const n = Math.min(name.length, d.length);
+            for (let k = 0; k < n; k++) { if (name[k] === d[k]) common++; else break; }
+            if (common >= 4 && Math.abs(d.length - name.length) <= 5) return ` Did you mean \`--${d}\`?`;
+          }
+          return '';
+        };
+
+        const findings = [];
+        for (const name of names.sort()) {
+          const count = undefinedCounts[name];
+          findings.push({
+            rule: 'R-CSSVAR',
+            severity: 'error',
+            slide_idx,
+            var_name: name,
+            count,
+            message:
+              `\`var(--${name})\` referenced ${count}× but never defined in any ` +
+              'CSS source linked from this deck. Browser silently fails the ' +
+              'surrounding declaration — common consequence: `font:` shorthand ' +
+              'parse fails → font-size falls back to browser default 16px.' +
+              suggest(name),
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R10 · slide markup 里的 hex 必须来自 --fs-* 调色板。(步骤 3 第二批迁自
+      // _validate_audits.py audit_hex_palette)。原版扫 <body> 文本(剥 script/style/svg/
+      // data: URI),正则抓 `#hex`,不在 ALLOWED_HEX 即报。always warn;--strict 全局升 err。
+      // IMPORTED deck(全 lifted / origin=imported)→ 颜色逐字搬运,降 warn_soft(不升 err)。
+      // 移植:渲染后等价 = 扫每个元素的 inline `style` 属性里的 hex(原版抓的就是 markup 里
+      // 写死的 hex,渲染后这些 hex 落在 style 属性 / 不会变);跳过 svg / style / script 子树。
+      // deck 级聚合(原版按整 body 统计,无法归到某帧),整 deck 算一次挂第一帧。
+      id: 'R10',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R10_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次,挂本次 scope 首帧
+        if (typeof window !== 'undefined') window.__R10_DONE__ = true;
+        const slides = (typeof document !== 'undefined' && document.querySelectorAll('.slide')) || [];
+
+        const HEX_RE = /#([0-9A-Fa-f]{3,6})\b/g;
+        const counts = {};
+        // 遍历所有 slide 里元素的 inline style(markup 写死的 hex 都在这);svg 内部 / style /
+        // script 跳过(原版 strip svg/style/script)。保险起见对 style 值剥掉 data: 段
+        // (base64 里的 #xxx 假阳)。
+        for (const sl of slides) {
+          const walker = [sl, ...sl.querySelectorAll('*')];
+          for (const el of walker) {
+            const tag = el.tagName;
+            if (tag === 'STYLE' || tag === 'SCRIPT') continue;
+            if (tag === 'SVG' || tag === 'svg') continue;
+            // svg 内部元素:跳过(祖先含 svg)。
+            let inSvg = false;
+            for (let p = el.parentElement; p && p !== sl.parentElement; p = p.parentElement) {
+              const pt = p.tagName;
+              if (pt === 'SVG' || pt === 'svg') { inSvg = true; break; }
+            }
+            if (inSvg) continue;
+            const styleAttr = el.getAttribute && el.getAttribute('style');
+            if (!styleAttr) continue;
+            const v = styleAttr.replace(/data:[^"'\s)]+/g, '');
+            let m;
+            HEX_RE.lastIndex = 0;
+            while ((m = HEX_RE.exec(v))) {
+              const h = m[1].toLowerCase();
+              if (ALLOWED_HEX.has(h)) continue;
+              counts[h] = (counts[h] || 0) + 1;
+            }
+          }
+        }
+        const extras = Object.keys(counts);
+        if (!extras.length) return [];
+        const msg = extras.sort().map((h) => `#${h}×${counts[h]}`).join(', ');
+        const imported = deckAllImported();
+        if (imported) {
+          return [{
+            rule: 'R10',
+            severity: 'warn_soft',
+            slide_idx,
+            message: `hex values outside palette in slide markup: ${msg}` +
+              ' — IMPORTED deck (verbatim-carried colors); soft advisory.',
+          }];
+        }
+        return [{
+          rule: 'R10',
+          severity: 'warn',
+          slide_idx,
+          message: `hex values outside palette in slide markup: ${msg}`,
+        }];
+      },
+    },
+
+    {
+      // R-KEY · 每个 .slide 都要有唯一、语义化的 data-slide-key。(步骤 3 第二批迁自
+      // _validate_audits.py audit_slide_keys)。规则:必填 / kebab-case
+      // (^[a-z][a-z0-9-]*$)/ deck 内唯一 / 位置型(slide-NN…)只 warn。
+      // 位置型在 lifted 页(data-lifted)降 warn_soft(源排序的忠实搬运);重复 key 即便
+      // lifted 也保 err(撞 key 破坏 round-trip / library 定位)。
+      // deck 级规则(要跨帧查重),整 deck 算一次挂第一帧。
+      id: 'R-KEY',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RKEY_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级查重:整 deck 算一次,挂本次 scope 首帧
+        if (typeof window !== 'undefined') window.__RKEY_DONE__ = true;
+        const slides = (typeof document !== 'undefined' && document.querySelectorAll('.slide')) || [];
+
+        const findings = [];
+        const seen = {};       // slug -> first 1-based slide index
+        const missing = [];
+        slides.forEach((sl, idx) => {
+          const i = idx + 1;
+          const lifted = slideIsLifted(sl);
+          const hasAttr = sl.hasAttribute('data-slide-key');
+          if (!hasAttr) { missing.push(i); return; }
+          const slug = sl.getAttribute('data-slide-key') || '';
+          if (!slug) {
+            findings.push({
+              rule: 'R-KEY', severity: 'error', slide_idx: i,
+              message: `slide ${i}: data-slide-key is empty. ` +
+                'Set a semantic kebab-case slug (e.g. "arr-history", "cover", ' +
+                '"case-meiyijia"). Required by feishu-slide-library locator.',
+            });
+            return;
+          }
+          if (!KEY_VALID_SLUG_RE.test(slug)) {
+            findings.push({
+              rule: 'R-KEY', severity: 'error', slide_idx: i,
+              message: `slide ${i}: data-slide-key="${slug}" is not valid kebab-case. ` +
+                'Use lowercase letters, digits, and `-` only; must start with ' +
+                'an alphanumeric. Example: "arr-history" not "ARR_History".',
+            });
+            return;
+          }
+          if (KEY_POSITIONAL_RE.test(slug)) {
+            if (lifted) {
+              findings.push({
+                rule: 'R-KEY', severity: 'warn_soft', slide_idx: i,
+                message: `slide ${i}: data-slide-key="${slug}" is positional — ` +
+                  'IMPORTED/lifted slide (key carried from source ordering); ' +
+                  'soft advisory, rename to a semantic slug if you keep it.',
+              });
+            } else {
+              findings.push({
+                rule: 'R-KEY', severity: 'warn', slide_idx: i,
+                message: `slide ${i}: data-slide-key="${slug}" is positional — it ` +
+                  'breaks when slides reorder. Use a semantic slug naming ' +
+                  'what the slide is ABOUT (e.g. "arr-history" instead of ' +
+                  '"slide-06").',
+              });
+            }
+          }
+          if (Object.prototype.hasOwnProperty.call(seen, slug)) {
+            findings.push({
+              rule: 'R-KEY', severity: 'error', slide_idx: i,
+              message: `slide ${i}: data-slide-key="${slug}" already used by ` +
+                `slide ${seen[slug]}. Slugs must be deck-internal unique. ` +
+                'Pick a different semantic slug or add a suffix ' +
+                `(e.g. "${slug}-v2").`,
+            });
+          } else {
+            seen[slug] = i;
+          }
+        });
+        if (missing.length) {
+          const head = missing.slice(0, 5).join(', ');
+          findings.push({
+            rule: 'R-KEY', severity: 'error', slide_idx: missing[0],
+            message: `${missing.length} slide(s) missing data-slide-key ` +
+              `(slide indices: ${head}${missing.length > 5 ? ', …' : ''}). ` +
+              'Every .slide must carry a semantic kebab-case slug so the ' +
+              'feishu-slide-library skill can index it. Add ' +
+              '`data-slide-key="<slug>"` next to data-screen-label.',
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R07 · logo 默认彩色,除非显式 is-mono opt-in。(步骤 3 第二批迁自
+      // _validate_audits.py audit_brand_chrome)。原版扫 `class="wordmark is-mono"` /
+      // `class="is-mono wordmark"`;渲染后等价 = .wordmark.is-mono(class 顺序无关,更准)。
+      // 注:audit_structure 里的 R07「缺 .wordmark」未在本批迁移范围内(留后续批次)。
+      id: 'R07',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const hit = (slide.matches && slide.matches('.wordmark.is-mono'))
+          || slide.querySelector('.wordmark.is-mono');
+        if (!hit) return [];
+        return [{
+          rule: 'R07',
+          severity: 'warn',
+          slide_idx,
+          message: `slide ${slide_idx}: mono-white logo used — verify this is an over-imagery edge case`,
+        }];
+      },
+    },
+
+    {
+      // R13 · 非 hero 版式的 page-header 标题必须单行(无 <br>)。(步骤 3 第二批迁自
+      // _validate_audits.py audit_titles_one_line)。原版扫 `<h1|h2 class*="title"|"title-zh">`
+      // 内含 `<br>` 的;hero-title 版式(cover/image-text/end/section/quote)豁免。
+      // 移植:querySelectorAll('h1,h2') 里 class 含 title / title-zh、且含真实 <br> 子节点。
+      // (schema title 字段的字面 <br> 会被 _esc_br 转义成可见文本 → 由 R-ESC-HTML 抓;R13 抓的
+      // 是 raw 页 / 真标签输出里真正渲染成换行的 <br> 元素。)
+      id: 'R13',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        if (HERO_TITLE_LAYOUTS.has(layout)) return [];   // hero 版式允许多行标题
+        const findings = [];
+        slide.querySelectorAll('h1, h2').forEach((h) => {
+          const tokens = classStr(h).split(/\s+/).filter(Boolean);
+          const isTitle = tokens.includes('title') || tokens.includes('title-zh');
+          if (!isTitle) return;
+          if (h.querySelector('br')) {
+            findings.push({
+              rule: 'R13',
+              severity: 'error',
+              slide_idx,
+              message: `slide ${slide_idx} (${layout || '?'}): <br> inside header title — ` +
+                'titles must be one line on non-hero layouts',
+            });
+          }
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R38 · data-decor token 必须来自 ship list。(步骤 3 第二批迁自
+      // _validate_audits.py audit_data_decor)。原版读 slide 的 data-decor 属性、空格拆分,
+      // 任一 token 不在 ALLOWED_DECOR 即报 err。渲染后等价 = 读 .slide[data-decor]。
+      id: 'R38',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const decor = slide.getAttribute('data-decor');
+        if (!decor) return [];
+        const findings = [];
+        // 与 Python `sorted(ALLOWED_DECOR)` 的 repr 完全一致(单引号、', ' 分隔、[] 包裹)。
+        const allowedRepr = '[' + [...ALLOWED_DECOR].sort().map((t) => `'${t}'`).join(', ') + ']';
+        for (const token of decor.split(/\s+/).filter(Boolean)) {
+          if (!ALLOWED_DECOR.has(token)) {
+            findings.push({
+              rule: 'R38',
+              severity: 'error',
+              slide_idx,
+              token,
+              message: `slide ${slide_idx}: unknown data-decor token '${token}' — ` +
+                `must be one of ${allowedRepr}`,
+            });
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-LANG · zh-only 默认语言政策(禁 EN 翻译轨)。(步骤 3 第二批迁自
+      // _validate_audits.py audit_language_policy + audit_translation_track_pairs)。
+      // 三段判定,全部在每帧 DOM 上做:
+      //   (1) 双语 class:.title-en / .subtitle-en / .label-en(框架专为双语模式备)出现 = 漂移。
+      //   (2) chrome-label 拉丁:eyebrow/kicker/pill/tag/...-en/...-num 等小文本叶里的纯拉丁 UC 串
+      //       (品牌白名单 / 技术码豁免)。
+      //   (3) sibling-pair 翻译轨:某语义容器(非 table/ul/figure 等布局型父)直接子叶里同时有
+      //       CJK 叶和"应翻译拉丁"叶 = 翻译轨;图表脚手架(axis/legend/scale…)豁免。
+      // 模式:<meta name=fs-language>;zh-en 整条豁免;未知值发 warn 并按 zh-only 处理。
+      // lifted 页(data-lifted)的 R-LANG 命中降 warn_soft(源文本忠实搬运,不升 err)。
+      id: 'R-LANG',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const mode = deckLanguageMode();
+        if (mode === 'zh-en') return [];   // 显式双语,整规则 no-op
+        const findings = [];
+        const lifted = slideIsLifted(slide);
+        const sev = lifted ? 'warn_soft' : 'warn';
+        const emit = (message, extra) => findings.push(Object.assign(
+          { rule: 'R-LANG', severity: sev, slide_idx, message }, extra || {}));
+
+        // 未知 mode:只在第一帧发一次告知(原版每次跑 audit 发一次 → deck 级,这里挂 scope 首帧)。
+        if (mode !== 'zh-only') {
+          if (ctx.isFirstInScope && !(typeof window !== 'undefined' && window.__RLANG_MODE_WARNED__)) {
+            if (typeof window !== 'undefined') window.__RLANG_MODE_WARNED__ = true;
+            findings.push({
+              rule: 'R-LANG', severity: 'warn', slide_idx,
+              message: `<meta name="fs-language" content="${mode}"> — unknown value. ` +
+                'Use "zh-only" (default, monolingual ZH) or "zh-en" (bilingual). ' +
+                'Treating as zh-only.',
+            });
+          }
+        }
+
+        // (1) 双语 class —— 一帧报一次(原版 break)。
+        const bilingual = slide.querySelector('.title-en, .subtitle-en, .label-en');
+        if (bilingual) {
+          const tok = classStr(bilingual).split(/\s+/)
+            .find((c) => c === 'title-en' || c === 'subtitle-en' || c === 'label-en') || 'title-en';
+          emit(`slide ${slide_idx}: bilingual class \`${tok}…\` rendered in ` +
+            'zh-only mode — drop the EN translation track, or ' +
+            'opt into bilingual via `<meta name="fs-language" ' +
+            'content="zh-en">` in <head>.');
+        }
+
+        // (2) chrome-label 拉丁标签。元素 class 命中 chrome 族、且为文本叶(无元素子节点)、
+        //     直接文本是"应翻译拉丁串"。
+        slide.querySelectorAll('span, p, div, h1, h2, h3, h4, h5, h6').forEach((el) => {
+          if (!langClassIsChromeLabel(el)) return;
+          if (!isElementLeaf(el)) return;
+          const text = directText(el);
+          if (!langIsOffendingLatin(text)) return;
+          emit(`slide ${slide_idx}: chrome label \`${text}\` looks like a Latin label ` +
+            'in a zh-only deck. If it\'s genuinely a brand / product / ' +
+            'acronym, add it to LATIN_BRAND_WHITELIST in validate.py; ' +
+            'otherwise translate to CJK (e.g. "MODE 01" → "方式 01", ' +
+            '"DEADLINE" → "截止时间", "PREDIT"-style typos → fix).');
+        });
+
+        // (3) sibling-pair 翻译轨。收集本帧所有"文本叶"(有直接文本、无元素子节点、在叶标签集),
+        //     按直接父元素分组;父非布局型 / 非脚手架,且直接子叶里同时含 CJK 叶 + 应翻译拉丁叶 → 报。
+        const LEAF_TAGS = new Set(['SPAN', 'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+          'LI', 'A', 'B', 'EM', 'STRONG', 'I', 'U', 'SMALL', 'MARK',
+          'BLOCKQUOTE', 'DT', 'DD', 'FIGCAPTION', 'CAPTION', 'TH', 'TD']);
+        const byParent = new Map();
+        const allEls = slide.querySelectorAll('*');
+        for (const el of allEls) {
+          const tag = el.tagName;
+          if (tag === 'STYLE' || tag === 'SCRIPT' || tag === 'SVG' || tag === 'svg') continue;
+          // svg 子树跳过。
+          let inSvg = false;
+          for (let p = el.parentElement; p && p !== slide.parentElement; p = p.parentElement) {
+            const pt = p.tagName; if (pt === 'SVG' || pt === 'svg') { inSvg = true; break; }
+          }
+          if (inSvg) continue;
+          if (!LEAF_TAGS.has(tag)) continue;
+          if (!isElementLeaf(el)) continue;        // 必须是叶(无元素子节点)
+          const text = directText(el);
+          if (!text) continue;
+          const parent = el.parentElement;
+          if (!parent) continue;
+          if (!byParent.has(parent)) byParent.set(parent, []);
+          byParent.get(parent).push({ el, text, cls: classStr(el), tag: tag.toLowerCase() });
+        }
+        const seenPairs = new Set();
+        for (const [parent, sibs] of byParent) {
+          if (sibs.length < 2) continue;
+          if (LAYOUT_ONLY_PARENT_TAGS.has(parent.tagName)) continue;
+          const parentClass = classStr(parent);
+          if (isChartScaffoldClass(parentClass)) continue;
+          const cjkLvs = sibs.filter((s) => CJK_RE.test(s.text));
+          let latLvs = sibs.filter((s) => langIsOffendingLatin(s.text));
+          latLvs = latLvs.filter((s) => !isChartScaffoldClass(s.cls));
+          if (!(cjkLvs.length && latLvs.length)) continue;
+          const parentRef = parentClass
+            ? `class="${parentClass.slice(0, 60)}"`
+            : `<${parent.tagName.toLowerCase()}>`;
+          for (const l of latLvs) {
+            const key = l.cls + ' ' + l.text;
+            if (seenPairs.has(key)) continue;
+            seenPairs.add(key);
+            emit(`slide ${slide_idx}: \`<${l.tag} class="${l.cls.slice(0, 60)}">` +
+              `${l.text.slice(0, 60)}\` — Latin-only leaf paired with CJK ` +
+              `sibling inside \`<… ${parentRef}>\` looks like an EN ` +
+              'translation track. Drop the Latin leaf, translate to ' +
+              'CJK, opt into bilingual via `<meta name="fs-language" ' +
+              'content="zh-en">`, or add the term to ' +
+              'LATIN_BRAND_WHITELIST in validate.py if it is ' +
+              'genuinely a brand / acronym.');
+          }
+        }
+
+        return findings;
+      },
+    },
   ];
 
   // ==========================================================================
@@ -490,6 +1074,14 @@
     const scopeSet = (Array.isArray(scope) && scope.length)
       ? new Set(scope.map(Number)) : null;
     const slides = document.querySelectorAll('.slide');
+    // deck 级规则(R-CSSVAR / R10 / R-KEY,跨帧/整 deck 求值,只报一次)需要一个稳定的
+    // "唯一锚帧",哪怕 scope 把第一帧排除了也得有个帧来承载结果 —— 取本次实际处理(scope 内)
+    // 的第一帧。这些规则内部仍对【整 deck】求值(查重/调色板/var),只是输出挂在 firstInScope 上。
+    let firstInScopeIdx = -1;
+    slides.forEach((slide, idx) => {
+      const i = idx + 1;
+      if (firstInScopeIdx === -1 && (!scopeSet || scopeSet.has(i))) firstInScopeIdx = i;
+    });
     const findings = [];
     slides.forEach((slide, idx) => {
       const slide_idx = idx + 1;
@@ -500,6 +1092,7 @@
         label: slide.getAttribute('data-screen-label') || `slide-${slide_idx}`,
         layout,
         isHeroLayout: HERO_LAYOUTS.has(layout),
+        isFirstInScope: slide_idx === firstInScopeIdx,
         scale: parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1,
         shortSel,
         hasOwnText,
