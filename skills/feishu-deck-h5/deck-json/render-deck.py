@@ -1516,6 +1516,105 @@ def _enrich_raw(ctx, slide):
     ctx["effective_layout"] = slide.get("_orig_layout") or "raw"
 
 
+# ---------------------------------------------------------------------------
+# canvas — structured absolutely-positioned elements → positioned HTML.
+# This is the PPTX → structured-JSON intermediate (SPEC §3/§4). The render +
+# by-id round-trip logic was prototyped & validated in /tmp/struct-proto
+# (8/8: text/geometry/add/delete/reorder lossless by data-el-id; only lossy
+# case = multi-run inline formatting flattened on edit). Productionized here.
+# Geometry is px-on-canvas; emitted as cqw/cqh so the slide scales with its
+# container query. sync-index-to-deck.py reverses this back into elements[].
+# ---------------------------------------------------------------------------
+
+def _px2cq(v, base):
+    """px-on-canvas → cq% (3 decimals). cqw for x/w (base=canvas_w),
+    cqh for y/h (base=canvas_h)."""
+    try:
+        return round(float(v) / float(base) * 100, 3)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def _canvas_el_style(el, W, H):
+    """Absolute geometry for one element as cqw/cqh (no px in the HTML)."""
+    parts = ["position:absolute"]
+    if "x" in el: parts.append(f'left:{_px2cq(el["x"], W)}cqw')
+    if "y" in el: parts.append(f'top:{_px2cq(el["y"], H)}cqh')
+    if "w" in el: parts.append(f'width:{_px2cq(el["w"], W)}cqw')
+    if "h" in el: parts.append(f'height:{_px2cq(el["h"], H)}cqh')
+    return ";".join(parts)
+
+
+# anchor → flex vertical alignment for a text box
+_CANVAS_ANCHOR = {"top": "flex-start", "middle": "center", "bottom": "flex-end"}
+
+
+def _enrich_canvas(ctx, slide):
+    data = slide.get("data") or {}
+    W = data.get("canvas_w") or 1920
+    H = data.get("canvas_h") or 1080
+
+    # Unreconstructable page → a centered "待重做" notice (SPEC §10.1).
+    if data.get("placeholder"):
+        src = data.get("source_page")
+        src_txt = f" · 源第 {src} 页" if src is not None else ""
+        ctx["elements_html"] = (
+            '          <div class="canvas-placeholder" '
+            'style="position:absolute;inset:0;display:flex;align-items:center;'
+            'justify-content:center;text-align:center">'
+            f'本页待重做{src_txt}</div>'
+        )
+        return
+
+    parts = []
+    for el in data.get("elements") or []:
+        eid = el.get("id", "")
+        etype = el.get("type")
+        style = _canvas_el_style(el, W, H)
+        if etype == "text":
+            # vertical anchoring + per-run spans (font-weight from bold, color)
+            anchor = _CANVAS_ANCHOR.get(el.get("anchor"))
+            box_style = style
+            if anchor:
+                box_style += f";display:flex;flex-direction:column;justify-content:{anchor}"
+            insets = el.get("insets")
+            if isinstance(insets, list) and len(insets) == 4:
+                l, r, t, b = insets
+                box_style += f";padding:{t}px {r}px {b}px {l}px"
+            spans = []
+            for run in el.get("runs") or []:
+                weight = "700" if run.get("bold") else "400"
+                color = run.get("color", "#000")
+                rs = f"font-weight:{weight};color:{color}"
+                if run.get("size") is not None:
+                    rs += f";font-size:{_px2cq(run['size'], W)}cqw"
+                spans.append(
+                    f'<span style="{rs}">{_esc_br(run.get("text", ""))}</span>'
+                )
+            parts.append(
+                f'          <div class="el tb" data-el-id="{eid}" '
+                f'style="{box_style}">{"".join(spans)}</div>'
+            )
+        elif etype == "image":
+            # src kept verbatim so copy-assets / lift scan it.
+            src = el.get("src", "")
+            parts.append(
+                f'          <img class="el" data-el-id="{eid}" '
+                f'src="{src}" style="{style}">'
+            )
+        elif etype == "shape":
+            shape_style = style
+            if el.get("fill"):
+                shape_style += f";background:{el['fill']}"
+            if el.get("radius") is not None:
+                shape_style += f";border-radius:{el['radius']}px"
+            parts.append(
+                f'          <div class="el shape" data-el-id="{eid}" '
+                f'style="{shape_style}"></div>'
+            )
+    ctx["elements_html"] = "\n".join(parts)
+
+
 ENRICHERS = {
     ("cover",   None):           _enrich_cover,
     ("agenda",  None):           _enrich_agenda,
@@ -1543,6 +1642,7 @@ ENRICHERS = {
     ("end",     None):           _enrich_end,
     ("replica", None):           _enrich_replica,
     ("raw",     None):           _enrich_raw,
+    ("canvas",  None):           _enrich_canvas,
     ("iframe-embed", None):      _enrich_iframe_embed,
 }
 

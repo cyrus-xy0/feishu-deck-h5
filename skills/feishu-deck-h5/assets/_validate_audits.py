@@ -1595,8 +1595,14 @@ def audit_ui_mocks_are_html(html, iss: Issues):
     for i, fr in enumerate(slides, 1):
         replica = ('page-replica' in fr or 'data-layout="replica"' in fr)
         is_iframe_layout = 'data-layout="iframe-embed"' in fr
+        # canvas = structured PPTX intermediate: its <img> elements are ORIGINAL
+        # embedded content (photos/logos from the source deck), not hand-authored
+        # screenshots to re-render. Downgrade err→warn like replica/imported so
+        # legit imported raster doesn't block delivery; the round-trip needs the
+        # real src to stay scannable (SPEC §3).
+        is_canvas = 'data-layout="canvas"' in fr
         vouched = ('data-ui-screenshot' in fr or 'allow:ui-screenshot' in fr)
-        _lev = iss.warn if (replica or imported) else iss.err
+        _lev = iss.warn if (replica or imported or is_canvas) else iss.err
         # author vouched → never block; keep a soft advisory trace instead.
         if vouched:
             _lev = lambda code, msg: iss.warn_soft(code, msg + ' 〔作者已 data-ui-screenshot 声明保留〕')

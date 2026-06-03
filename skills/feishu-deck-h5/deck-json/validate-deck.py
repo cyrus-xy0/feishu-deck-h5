@@ -267,6 +267,32 @@ def check_business_rules(deck: dict, result: Result, strict: bool) -> None:
                 result.err(f"{sp}.data.items",
                            f"agenda has {len(actives)} items marked active; max 1 allowed (recap variant)")
 
+        # R-CANVAS: structured positioned elements — ids unique, geometry
+        # numeric, images carry a src. A placeholder page may legitimately
+        # have no elements (it renders a '待重做' notice instead).
+        if layout == "canvas":
+            elements = data.get("elements") or []
+            if not data.get("placeholder") and not elements:
+                result.err(f"{sp}.data.elements",
+                           "canvas slide has no elements and is not a placeholder (R-CANVAS)")
+            seen_el_ids: dict[str, int] = {}
+            for e, el in enumerate(elements):
+                if not isinstance(el, dict):
+                    continue
+                eid = el.get("id")
+                if eid in seen_el_ids:
+                    result.err(f"{sp}.data.elements[{e}].id",
+                               f"duplicate element id {eid!r} (also at elements[{seen_el_ids[eid]}]) (R-CANVAS)")
+                elif eid is not None:
+                    seen_el_ids[eid] = e
+                for geo in ("x", "y", "w", "h"):
+                    if geo in el and not isinstance(el[geo], (int, float)):
+                        result.err(f"{sp}.data.elements[{e}].{geo}",
+                                   f"geometry {geo!r} must be numeric, got {el[geo]!r} (R-CANVAS)")
+                if el.get("type") == "image" and not el.get("src"):
+                    result.err(f"{sp}.data.elements[{e}].src",
+                               "image element has no src (R-CANVAS)")
+
         # Only warn when `cols` is EXPLICITLY present and mismatched. `cols` is
         # optional; the renderer DERIVES the column count from the node/step
         # count when omitted. Synthesizing a default 4 and comparing it against

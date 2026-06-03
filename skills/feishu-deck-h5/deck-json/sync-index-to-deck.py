@@ -106,6 +106,128 @@ def extract_slide_inner(html: str, slide_key: str) -> str | None:
     return inner_full.rstrip()
 
 
+# ---------------------------------------------------------------------------
+# canvas layout — by-id round-trip back into data.elements[].
+#
+# Mirrors render-deck.py _enrich_canvas. The render + by-id reverse-map logic
+# was prototyped & validated in /tmp/struct-proto (8/8: text/geometry/add/
+# delete/reorder lossless by data-el-id; only lossy case = multi-run inline
+# formatting flattened on edit). Productionized here.
+#
+# - text from <span>s → runs (no span structure left → single run);
+# - geometry cqw/cqh → px on canvas_w × canvas_h;
+# - a JSON element whose id is gone from the HTML = delete;
+# - an HTML data-el-id with no matching JSON element = add;
+# - DOM order of data-el-id = element order (reorder).
+# ---------------------------------------------------------------------------
+
+_STYLE_RE = re.compile(r'style="([^"]*)"')
+_SPAN_RE = re.compile(r'<span\b[^>]*style="([^"]*)"[^>]*>(.*?)</span>', re.S)
+_COLOR_RE = re.compile(r'color:\s*([^;]+)')
+
+
+def _canvas_geom_from_style(style: str, W: int, H: int) -> dict:
+    """cqw/cqh in an element's inline style → px geometry (1 decimal)."""
+    g = {}
+    for css_key, base, json_key in (("left", W, "x"), ("top", H, "y"),
+                                    ("width", W, "w"), ("height", H, "h")):
+        m = re.search(rf'{css_key}:\s*([\d.]+)cq[wh]', style)
+        if m:
+            g[json_key] = round(float(m.group(1)) / 100 * base, 1)
+    return g
+
+
+def _runs_from_inner(inner: str) -> list:
+    """span inner → runs (per-run bold/color). No spans but text present →
+    single flattened run (documented lossy boundary on multi-run edit)."""
+    runs = []
+    for style, text in _SPAN_RE.findall(inner):
+        cm = _COLOR_RE.search(style)
+        run = {"text": _html_unescape(re.sub(r"<[^>]+>", "", text))}
+        if "700" in style:
+            run["bold"] = True
+        if cm:
+            run["color"] = cm.group(1).strip()
+        runs.append(run)
+    if runs:
+        return runs
+    flat = _html_unescape(re.sub(r"<[^>]+>", "", inner)).strip()
+    if flat:
+        return [{"text": flat}]
+    return []
+
+
+def _collect_canvas_els(inner: str) -> "list[tuple[str, dict]]":
+    """Parse the slide's rendered .canvas inner for every [data-el-id] element.
+    Returns [(id, {tag, style, inner})] in DOM order. div uses depth-counted
+    inner; img is void."""
+    out = []
+    for tm in re.finditer(r'<(div|img)\b[^>]*\bdata-el-id="([^"]+)"[^>]*>',
+                          inner):
+        tag, eid = tm.group(1), tm.group(2)
+        open_tag = inner[tm.start():tm.end()]
+        sm = _STYLE_RE.search(open_tag)
+        style = sm.group(1) if sm else ""
+        el_inner = ""
+        if tag == "div":
+            depth = 1
+            i = tm.end()
+            for mm in re.finditer(r"<(/?)div\b", inner[i:]):
+                depth += -1 if mm.group(1) else 1
+                if depth == 0:
+                    el_inner = inner[i:i + mm.start()]
+                    break
+        out.append((eid, {"tag": tag, "style": style, "inner": el_inner}))
+    return out
+
+
+def sync_canvas_data(inner: str, data: dict) -> dict:
+    """Reverse-map rendered canvas inner → a new data dict (elements[] updated
+    by id). Returns a fresh dict; caller decides whether it differs."""
+    import copy as _copy
+    W = data.get("canvas_w") or 1920
+    H = data.get("canvas_h") or 1080
+    new = _copy.deepcopy(data)
+
+    found = _collect_canvas_els(inner)
+    by_id = {eid: h for eid, h in found}
+    order = {eid: i for i, (eid, _) in enumerate(found)}
+
+    elements = new.get("elements") or []
+    # 1) delete: JSON had it, HTML dropped it
+    elements = [e for e in elements if e.get("id") in by_id]
+    jmap = {e["id"]: e for e in elements}
+
+    for eid, h in found:
+        if eid not in jmap:
+            # 3) add: HTML has a new data-el-id
+            new_el = {"id": eid,
+                      "type": "text" if h["tag"] == "div" else "image"}
+            new_el.update(_canvas_geom_from_style(h["style"], W, H))
+            if new_el["type"] == "text":
+                new_el["runs"] = _runs_from_inner(h["inner"])
+            jmap[eid] = new_el
+            elements.append(new_el)
+            continue
+        el = jmap[eid]
+        # 2) geometry write-back
+        el.update(_canvas_geom_from_style(h["style"], W, H))
+        if el.get("type") == "text":
+            runs = _runs_from_inner(h["inner"])
+            if runs:
+                el["runs"] = runs
+
+    # 4) reorder by DOM order
+    elements.sort(key=lambda e: order.get(e.get("id"), 1 << 30))
+    new["elements"] = elements
+    return new
+
+
+def _html_unescape(s: str) -> str:
+    import html as _h
+    return _h.unescape(s)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("index_html", type=Path, help="path to rendered index.html")
@@ -148,6 +270,23 @@ def main() -> int:
         cur_html = slide.get("data", {}).get("html", "") if cur_layout == "raw" else None
 
         # Decide what action is needed
+        if cur_layout == "canvas":
+            # Structured by-id round-trip: reverse the rendered positioned HTML
+            # back into data.elements[]. No raw-string capture and no layout
+            # switch — canvas stays canvas (deck.json is the source of truth).
+            cur_data = slide.get("data") or {}
+            new_data = sync_canvas_data(inner, cur_data)
+            if json.dumps(new_data, ensure_ascii=False, sort_keys=True) == \
+               json.dumps(cur_data, ensure_ascii=False, sort_keys=True):
+                continue  # no real drift
+            drift_count += 1
+            if not args.dry_run:
+                slide["data"] = new_data
+            old_n = len(cur_data.get("elements") or [])
+            new_n = len(new_data.get("elements") or [])
+            synced.append(("canvas", key, old_n, new_n))
+            continue
+
         if cur_layout == "raw":
             # Compare with normalization: asset-path rewrites from copy-assets.py
             # AND leading/trailing whitespace differences (some builder scripts
@@ -196,7 +335,12 @@ def main() -> int:
     if synced:
         print(f"  {'WOULD UPDATE' if args.dry_run else 'UPDATED'}: {len(synced)} slide(s)")
         for kind, key, old_size, new_size in synced:
-            delta = f"{old_size}→{new_size} chars" if kind == "raw" else f"new {new_size} chars"
+            if kind == "raw":
+                delta = f"{old_size}→{new_size} chars"
+            elif kind == "canvas":
+                delta = f"{old_size}→{new_size} elements"
+            else:
+                delta = f"new {new_size} chars"
             print(f"    [{kind:14s}] {key}  ({delta})")
     if skipped_template:
         print(f"  SKIPPED (template layout — use --force to convert): {len(skipped_template)}")
