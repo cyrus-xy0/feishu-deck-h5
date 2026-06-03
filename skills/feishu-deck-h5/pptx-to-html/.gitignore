@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.DS_Store
+
+# Generated decks go to the MAIN skill's outer runs/ (../../runs/), not here.
+out/
+
+# Kept example deck: track the lightweight evidence (deck.json, montage_*.png,
+# RESTORATION-REPORT.md, index.html) but NOT the heavy regenerable image assets.
+example/**/assets/
+example/**/sweep/
