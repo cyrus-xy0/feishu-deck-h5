@@ -526,6 +526,65 @@
     return leaves;
   };
 
+  // --------------------------------------------------------------------------
+  //  步骤 3 第四批共享常量/工具
+  //  (R36 / R48 / R-EMPTY-HEADER-ZONE / R47 / R29-32 / R-VIS-NO-IMAGERY)
+  // --------------------------------------------------------------------------
+
+  // ── 收集整 deck 的"全部 CSS 源文本"(含框架,DOM 序;框架块由 runner 注入)。
+  //    R36 / R48 等 deck 级 CSS 文本规则用它(原版扫整份 HTML 的 <style> / inline_linked
+  //    进来的框架表)。注:与 R06/R20 的 iterStyleBlocks 同源,这里直接拼接整文本。
+  const allStyleText = () => {
+    let combined = '';
+    for (const { css } of iterStyleBlocks(true)) combined += '\n' + css;
+    return combined;
+  };
+
+  // ── R48 check_default_centering(逐字对应 _validate_audits.py check_default_centering)。
+  //    centerable 版式的容器(stage/grid/toc/flow/nodes/stack 任一)须含某条 *-center 居中声明;
+  //    任一别名命中即该版式 OK;全 deck CSS 聚合后判定(原版 audit_default_centering 聚合所有
+  //    <style> 块、剥注释、_strip_nested_at_rules 后整体跑 check)。返回违规版式名数组。
+  const R48_CENTERABLE = ['content-3up', 'content-2col', 'agenda', 'stats', 'big-stat', 'quote'];
+  const R48_CONTAINER_ALIASES = ['stage', 'grid', 'toc', 'flow', 'nodes', 'stack'];
+  const checkDefaultCentering = (css) => {
+    const missing = [];
+    for (const layout of R48_CENTERABLE) {
+      let ok = false;
+      for (const alias of R48_CONTAINER_ALIASES) {
+        // 逐字镜像 Python 正则:.slide[data-layout="L"]\s+.alias\s*\{([^}]*)\}
+        const re = new RegExp(
+          '\\.slide\\[data-layout="' + layout + '"\\]\\s+\\.' + alias + '\\s*\\{([^}]*)\\}',
+          'g');
+        let m;
+        while ((m = re.exec(css))) {
+          const block = m[1];
+          if (block.indexOf('justify-content: center') >= 0
+            || block.indexOf('align-content: center') >= 0
+            || block.indexOf('place-content: center') >= 0
+            || block.indexOf('align-items: center') >= 0) { ok = true; break; }
+        }
+        if (ok) break;
+      }
+      if (!ok) missing.push(layout);
+    }
+    return missing;
+  };
+
+  // ── R47 variant-discipline 触发集(逐字对应 audit_variant_discipline)。
+  const R47_LAYOUT_DISPLAY = new Set(['flex', 'grid', 'block', 'inline-block',
+    'inline-flex', 'inline-grid', 'inline', 'table', 'table-row', 'table-cell']);
+  const R47_STRUCTURAL_TRIGGERS = [
+    'flex-direction:', 'flex-wrap:', 'flex-flow:',
+    'grid-template-columns:', 'grid-template-rows:', 'grid-template-areas:',
+    'grid-auto-flow:', 'grid-auto-columns:', 'grid-auto-rows:'];
+  const R47_ALIGN_PROPS = ['align-items:', 'place-items:'];
+  const R47_JUSTIFY_PROPS = ['justify-content:', 'place-content:'];
+
+  // ── R-VIS-NO-IMAGERY sparse-by-design 版式集(对应 _SPARSE_BY_DESIGN =
+  //    HERO_TITLE_LAYOUTS | {agenda, table, replica, iframe-embed, raw})。
+  const SPARSE_BY_DESIGN = new Set([...HERO_TITLE_LAYOUTS,
+    'agenda', 'table', 'replica', 'iframe-embed', 'raw']);
+
   // ==========================================================================
   //  规则注册表 —— 唯一规则源。新增规则 = 往这里加一个 (slide, ctx) => findings。
   // ==========================================================================
@@ -1710,6 +1769,358 @@
           }
         }
         return findings;
+      },
+    },
+
+    {
+      // R36 · present-mode 居中用 absolute + 负 margin(不用 grid place-items)。(步骤 3
+      // 第四批迁自 _validate_audits.py audit_centering_pattern)。原版扫整份 HTML 文本:
+      //   ① 缺 `margin:-540px 0 0 -960px`(空白容忍)→ err
+      //   ② present-mode .slide-frame 仍 `display:grid` → err
+      // 移植:对整 deck 全部 CSS 源文本(含框架,runner 注入)做同套正则。这两条都是
+      // 框架 chrome 约定(feishu-deck.css 提供 absolute+负 margin 居中),deck 级、整 deck
+      // 算一次挂第一帧。无 opt-out / lifted 降级(原版无)。
+      id: 'R36',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R36_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__R36_DONE__ = true;
+
+        const css = allStyleText();
+        const findings = [];
+        // 原版:re.compile(r'margin:\s*-540px\s+0\s+0\s+-960px')(空白容忍)。
+        const MARGIN_RE = /margin:\s*-540px\s+0\s+0\s+-960px/;
+        if (!MARGIN_RE.test(css)) {
+          findings.push({
+            rule: 'R36', severity: 'error', slide_idx,
+            message: 'present-mode slide centering is not the absolute + '
+              + 'negative-margin pattern (margin: -540px 0 0 -960px) — grid '
+              + 'place-items can cause transform clipping',
+          });
+        }
+        // 原版:r'data-mode="present"\]\s+\.slide-frame\s*\{[^}]*display:\s*grid'(DOTALL)。
+        const GRID_RE = /data-mode="present"\]\s+\.slide-frame\s*\{[^}]*display:\s*grid/;
+        if (GRID_RE.test(css)) {
+          findings.push({
+            rule: 'R36', severity: 'error', slide_idx,
+            message: 'present-mode .slide-frame still uses display:grid — switch '
+              + 'to absolute positioning for the slide so transform/overflow '
+              + 'clipping is deterministic',
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R48 · 每个 fixed-shape 容器版式默认垂直居中。(步骤 3 第四批迁自
+      // _validate_audits.py audit_default_centering + check_default_centering)。
+      // 原版聚合【所有 <style> 块】(剥注释 + _strip_nested_at_rules)成整份 CSS 后,对
+      // centerable 版式(content-3up/content-2col/agenda/stats/big-stat/quote)检查其容器
+      // (stage/grid/toc/flow/nodes/stack 任一)是否含某条 *-center 居中声明;缺 → err。
+      // 移植:对整 deck CSS 源文本(含框架,runner 注入)逐块剥注释 + stripNestedAtRules 后
+      // 聚合,跑 checkDefaultCentering(逐字镜像)。deck 级,整 deck 算一次挂第一帧。无 opt-out。
+      id: 'R48',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R48_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__R48_DONE__ = true;
+
+        // 聚合:逐块剥注释 + 解 active @media(对应原版 per-block 处理后 join)。
+        const parts = [];
+        for (const { css } of iterStyleBlocks(true)) {
+          parts.push(stripNestedAtRules(stripCssComments(css)));
+        }
+        const fullCss = parts.join('\n');
+        const findings = [];
+        for (const missing of checkDefaultCentering(fullCss)) {
+          findings.push({
+            rule: 'R48', severity: 'error', slide_idx,
+            message: `data-layout="${missing}" container has no vertical-centering `
+              + 'rule (justify-content / align-content / align-items: center) '
+              + 'anywhere in the deck\'s CSS. Fixed-shape layouts must '
+              + 'default-center so short content doesn\'t strand at the top '
+              + 'with empty bottom. pipeline / timeline / process are explicit '
+              + 'exceptions that fill.',
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-EMPTY-HEADER-ZONE · 隐藏框架 .header 时 .stage 不得在页顶留空黑带。(步骤 3
+      // 第四批迁自 _validate_audits.py audit_empty_header_zone)。原版逐个 <style> 块:
+      // 找该块首个 `.slide[data-slide-key="K"]` 作用域 → 若该 key 的 .header 被 display:none
+      // (.header 须是同元素最后一个 simple selector,排除 `.header .x` / `.header + .x`)→
+      // 再找该 key 的 .stage top 值;top>32 且 top!=61 → warn(留空黑带)。
+      // 移植:对每个【渲染后 <style> 节点 textContent】(剥注释)做与原版逐字相同的正则扫描
+      // ——本规则的判定全在 per-page CSS 源文本里(scoped slide-key + display:none + top:Npx),
+      // 与渲染计算无关,扫源文本即与原版完全对齐(注释在 textContent 里原样保留)。deck 级
+      // (扫所有 <style>),整 deck 算一次挂第一帧。
+      id: 'R-EMPTY-HEADER-ZONE',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__REHZ_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__REHZ_DONE__ = true;
+
+        const findings = [];
+        const styles = (typeof document !== 'undefined' && document.querySelectorAll('style')) || [];
+        const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        for (const styleEl of styles) {
+          const css = stripCssComments(styleEl.textContent || '');
+          // 该块首个 scoped slide-key(per-page 样式以 .slide[data-slide-key="K"] 前缀;首个为准)。
+          const keyM = /\.slide\[data-slide-key="([^"]+)"\]/.exec(css);
+          if (!keyM) continue;
+          const key = keyM[1];
+          const k = reEscape(key);
+          // .header 被隐藏?(.header 须为同元素最后一个 simple selector:允许 :pseudo/.class/[attr]
+          // 后缀但不许 combinator,否则隐藏的 CHILD/SIBLING 会被误读成整 .header 隐藏。)
+          const hideRe = new RegExp(
+            '\\.slide\\[data-slide-key="' + k + '"\\]'
+            + '[^{]*\\.header(?![\\w-])[^{\\s>+~]*\\s*\\{[^}]*display\\s*:\\s*none[^}]*\\}');
+          if (!hideRe.test(css)) continue;
+          // 该 key 的 .stage top 值。
+          const stageRe = new RegExp(
+            '\\.slide\\[data-slide-key="' + k + '"\\]'
+            + '[^{]*\\.stage(?![\\w-])[^{]*\\{([^}]*)\\}');
+          const sm2 = stageRe.exec(css);
+          if (!sm2) continue;
+          const topM = /(?<![\w-])top\s*:\s*(\d+)\s*px/.exec(sm2[1]);
+          if (!topM) continue;
+          const topVal = parseInt(topM[1], 10);
+          if (topVal <= 32 || topVal === 61) continue;   // 允许区:≤32 贴顶 / ==61 框架锚点
+          findings.push({
+            rule: 'R-EMPTY-HEADER-ZONE', severity: 'warn', slide_idx,
+            message: `slide-key="${key}": hides framework .header but .stage starts `
+              + `at top:${topVal}px — leaves empty dark zone at slide y=0..${topVal}, `
+              + 'reads as "missing bg / black band" on dark theme (especially '
+              + 'with diagonal-glow decor that doesn\'t tint top corners). '
+              + 'Pick one: (a) restore .header (drop the `display:none` rule), '
+              + '(b) snap top ≤32 (content at slide edge), (c) align top:61 '
+              + '(matches framework anchor — visually consistent with sibling '
+              + 'slides), or (d) add a visible top decoration as .stage\'s '
+              + 'first child.',
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R47 · variant 覆盖纪律。(步骤 3 第四批迁自 _validate_audits.py
+      // audit_variant_discipline)。原版只查【作者 CSS】(include_framework=False)里 selector
+      // 含 [data-variant 的规则:若声明触碰结构(display:布局值 / flex-* / grid-template-* /
+      // grid-auto-*),必须同时重声明 align(align-items|place-items)+ justify(justify-content|
+      // place-content),缺则 warn。::before/::after/::placeholder/::marker 伪元素 selector 豁免;
+      // display:none/contents 不算结构变更。
+      // 移植:对【作者】<style> textContent(剥注释 + stripNestedAtRules)做与原版逐字相同的
+      // 规则文本扫描(selector + 声明 substring 判定全在源文本里,与渲染无关)。deck 级,整 deck
+      // 算一次挂第一帧。无 opt-out / lifted 降级(原版无)。
+      id: 'R47',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R47_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__R47_DONE__ = true;
+
+        const findings = [];
+        for (const { css } of iterStyleBlocks(false)) {   // 仅作者 CSS
+          const cleaned = stripNestedAtRules(stripCssComments(css));
+          // 原版:re.finditer(r'([^{}]+)\{([^}]+)\}', css)。
+          const ruleRe = /([^{}]+)\{([^}]+)\}/g;
+          let rm;
+          while ((rm = ruleRe.exec(cleaned))) {
+            const selector = rm[1].trim();
+            const block = rm[2];
+            if (selector.indexOf('[data-variant') < 0) continue;
+            if (selector.indexOf('::before') >= 0 || selector.indexOf('::after') >= 0
+              || selector.indexOf('::placeholder') >= 0 || selector.indexOf('::marker') >= 0) continue;
+            let touchesStructure = R47_STRUCTURAL_TRIGGERS.some((t) => block.indexOf(t) >= 0);
+            if (!touchesStructure) {
+              const dRe = /display:\s*([a-z-]+)/g;
+              let dm;
+              while ((dm = dRe.exec(block))) {
+                if (R47_LAYOUT_DISPLAY.has(dm[1])) { touchesStructure = true; break; }
+              }
+            }
+            if (!touchesStructure) continue;   // cosmetic-only variant — exempt
+            const hasAlign = R47_ALIGN_PROPS.some((p) => block.indexOf(p) >= 0);
+            const hasJustify = R47_JUSTIFY_PROPS.some((p) => block.indexOf(p) >= 0);
+            if (hasAlign && hasJustify) continue;
+            const missing = [];
+            if (!hasAlign) missing.push('align-items / place-items');
+            if (!hasJustify) missing.push('justify-content / place-content');
+            findings.push({
+              rule: 'R47', severity: 'warn', slide_idx, container_sel: selector,
+              message: `variant \`${selector}\` changes structure (display/flex/grid) `
+                + `but does not redeclare ${missing.join(', ')}. `
+                + 'Variants that change layout direction must redeclare every '
+                + 'directional property explicitly — cascade does not auto-reset them.',
+            });
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R29-32 · present-mode runtime chrome 已发货。(步骤 3 第四批迁自
+      // _validate_audits.py audit_runtime_chrome)。原版在 inline_linked 把外链 JS 注入成
+      // <script data-source=framework> 后,在 `html + script_blocks` 全文里查 DOM needle、
+      // 在 script_blocks 里查 JS needle;缺则 R29-32 err。还检查 <script src> 是否未被 inline
+      // (文件缺失 / inline 失败)→ 报具体失因并 return(短路 needle 检查,免下游噪声)。
+      //
+      // 移植(渲染基底 + 源可读双轨,见 run-audits.py _inline_framework_js):
+      //   · 外链脚本在 page.goto 时已执行 → DOM needle(.deck-progress/.deck-controls/
+      //     .ctl prev|next|fs)作为真 DOM 元素/class 存在 → 渲染基底更准。
+      //   · runner 又把外链 JS 源以 <script data-source=framework type=text/plain> 注入(不二次
+      //     执行)→ JS needle(requestFullscreen/fullscreenchange)与 innerHTML 串可在 script
+      //     textContent 里读到,与 Python script_blocks 等价。
+      //   · `--fs-grad-keyline` 在框架 CSS,runner 已注入 <style data-source=framework> → CSS
+      //     textContent 可读。`is-idle`(2.5s idle 后才挂)在 JS 源里有该串 → 由 JS needle 兜底。
+      //   · <script src> 缺失/未注入:runner 注入失败 = 磁盘无文件 → 这里复刻"文件找不到"失因
+      //     并短路(对应原版 js_link_failures → return)。
+      // 全文搜索 = DOM outerHTML + 所有 script textContent + 所有 style textContent(含框架)。
+      // deck 级,整 deck 算一次挂第一帧。
+      id: 'R29-32',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R2932_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__R2932_DONE__ = true;
+
+        const findings = [];
+        // 所有 script 源文本(runner 已把外链 JS 注入成 <script data-source=framework
+        // type=text/plain>;含页内 inline <script>)。对应 Python script_blocks。
+        let scriptBlocks = '';
+        const scripts = (typeof document !== 'undefined' && document.querySelectorAll('script')) || [];
+        for (const s of scripts) scriptBlocks += ' ' + (s.textContent || '');
+
+        // <script src> 未被 runner 注入框架副本 = 本地文件读不到(对应原版 js_link_failures)。
+        // 判定:存在本地 <script src>,但 DOM 里没有任何对应的 <script data-source=framework>。
+        const hasFwScript = !!document.querySelector('script[data-source="framework"]');
+        const localSrcScripts = [];
+        for (const s of scripts) {
+          const src = s.getAttribute && s.getAttribute('src');
+          if (!src) continue;
+          if (/^(?:http:|https:|\/\/|data:)/.test(src)) continue;
+          localSrcScripts.push(src);
+        }
+        if (localSrcScripts.length && !hasFwScript) {
+          for (const src of localSrcScripts) {
+            findings.push({
+              rule: 'R29-32', severity: 'error', slide_idx,
+              message: `JS file not found / not readable: ${src}. `
+                + 'Did the deck folder move without `copy-assets.py`? '
+                + 'Subsequent R29-R32 needle errors are downstream of this.',
+            });
+          }
+          return findings;   // 短路:linked JS 断了,needle 检查会全是下游噪声(对应原版 return)
+        }
+
+        // 全文搜索基底:DOM 标记 + script 源 + style 源(含框架 CSS,--fs-grad-keyline 在这)。
+        let styleText = '';
+        for (const { css } of iterStyleBlocks(true)) styleText += ' ' + css;
+        const domText = (typeof document !== 'undefined' && document.documentElement
+          && document.documentElement.outerHTML) || '';
+        const fullText = domText + ' ' + scriptBlocks + ' ' + styleText;
+
+        const domNeedles = [
+          ['deck-progress', 'top progress bar element / class',
+            'feishu-deck.js builds this — make sure <script src="assets/feishu-deck.js"> is loading.'],
+          ['deck-controls', 'bottom control pill element / class',
+            'feishu-deck.js builds this — verify the JS is loading from a reachable path.'],
+          ['class="ctl prev"', 'prev button', 'should appear in feishu-deck.js innerHTML.'],
+          ['class="ctl next"', 'next button', 'should appear in feishu-deck.js innerHTML.'],
+          ['class="ctl fs"', 'fullscreen button', 'should appear in feishu-deck.js innerHTML.'],
+          ['--fs-grad-keyline', 'progress bar uses brand gradient',
+            'this token must be defined in feishu-deck.css and used by .deck-progress.'],
+          ['is-idle', 'auto-idle fade',
+            'feishu-deck.js toggles this class after 2.5s of no input.'],
+        ];
+        const jsNeedles = [
+          ['requestFullscreen', 'fullscreen API call',
+            'feishu-deck.js calls element.requestFullscreen() on the deck root.'],
+          ['fullscreenchange', 'fullscreenchange listener',
+            'feishu-deck.js listens to detect Esc-to-exit-fullscreen.'],
+        ];
+        for (const [needle, desc, hint] of domNeedles) {
+          if (fullText.indexOf(needle) < 0) {
+            findings.push({
+              rule: 'R29-32', severity: 'error', slide_idx,
+              message: `present-mode chrome missing: ${desc} ('${needle}'). ${hint}`,
+            });
+          }
+        }
+        for (const [needle, desc, hint] of jsNeedles) {
+          if (scriptBlocks.indexOf(needle) < 0) {
+            findings.push({
+              rule: 'R29-32', severity: 'error', slide_idx,
+              message: `present-mode chrome missing in JS: ${desc} ('${needle}'). ${hint}`,
+            });
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-NO-IMAGERY · 整 deck 视觉发平(多数内容页零图像)。(步骤 3 第四批迁自
+      // _validate_audits.py audit_visual_richness)。warn_soft·ADVISORY,永不 err。
+      // 原版:遍历 slides,排除 sparse-by-design 版式(hero-title ∪ {agenda,table,replica,
+      // iframe-embed,raw}),其余记为 content;某 content 帧无 <svg>/<img>/background-image →
+      // flat;content≥3 且 flat/content≥0.6 → warn_soft,列前 8 个 flat 帧。
+      // 移植:逐帧判 layout 是否 sparse-by-design;非 sparse 帧用渲染后 DOM 查图像信号
+      //   (querySelector svg/img/canvas/video + 任一元素 computed backgroundImage!=none) ——
+      //   比原版"扫帧 HTML 子串 background-image"更准(命中真渲染出的背景图,含 CSS 类带来的)。
+      // deck 级(跨帧统计比例),整 deck 算一次挂第一帧。
+      id: 'R-VIS-NO-IMAGERY',
+      severity: 'warn_soft',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RVNI_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__RVNI_DONE__ = true;
+
+        const slides = (typeof document !== 'undefined' && document.querySelectorAll('.slide')) || [];
+        const content = [];
+        const flat = [];
+        slides.forEach((sl, idx) => {
+          const i = idx + 1;
+          const layout = (sl.getAttribute('data-layout') || '').trim();
+          if (SPARSE_BY_DESIGN.has(layout)) return;
+          content.push(i);
+          // 图像信号:有 svg/img/canvas/video,或任一后代有非 none 的 background-image。
+          let hasImg = !!sl.querySelector('svg, img, canvas, video');
+          if (!hasImg) {
+            for (const el of [sl, ...sl.querySelectorAll('*')]) {
+              const bg = getComputedStyle(el).backgroundImage;
+              if (bg && bg !== 'none') { hasImg = true; break; }
+            }
+          }
+          if (!hasImg) flat.push([i, layout]);
+        });
+        if (content.length >= 3 && (flat.length / content.length) >= 0.6) {
+          const where = flat.slice(0, 8).map(([i, l]) => `#${i}(${l})`).join(', ');
+          return [{
+            rule: 'R-VIS-NO-IMAGERY', severity: 'warn_soft', slide_idx,
+            message: `${flat.length}/${content.length} content slides have zero imagery `
+              + '(no icon/svg/image/background) — deck reads visually flat & samey. '
+              + 'Where it fits, consider an icon (ICON_LIB names) / photo / '
+              + `illustration / bespoke layout:raw page. Flat: ${where}. `
+              + '[advisory · richness is a design-phase call · never blocks]',
+          }];
+        }
+        return [];
       },
     },
   ];

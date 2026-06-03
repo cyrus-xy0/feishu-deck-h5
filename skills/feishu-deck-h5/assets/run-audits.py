@@ -75,6 +75,45 @@ def _inline_framework_css(page, base_dir):
         )
 
 
+def _inline_framework_js(page, base_dir):
+    """把页面里 <script src> 指向的【本地框架 JS】读盘并注入成
+    <script data-source="framework" type="text/plain"> 块,让 R29-32(runtime
+    chrome)能用 script textContent 读到框架 JS 源(requestFullscreen /
+    fullscreenchange 等 JS-API needle、innerHTML 里的 .deck-controls 串)。
+
+    镜像 validate.py 的 inline_linked repl_script,但发生在 runner 的 load 层:
+    外链脚本在 page.goto 时已被浏览器加载执行(R29-32 的 DOM needle —— .deck-progress
+    /.deck-controls/.ctl 按钮 —— 因此作为真 DOM 元素存在,渲染基底更准);这里再把源
+    文本以 **type=text/plain**(不二次执行)注入,只为让源字节可被 textContent 读到,
+    与 Python `script_blocks` 读源等价。只处理本地相对/绝对路径(跳过 http(s)/
+    protocol-relative/data:),读不到的安静跳过。"""
+    try:
+        srcs = page.evaluate(
+            "() => [...document.querySelectorAll('script[src]')]"
+            ".map(s => s.getAttribute('src')).filter(Boolean)"
+        )
+    except Exception:  # noqa: BLE001
+        return
+    for src in srcs:
+        if src.startswith(("http:", "https:", "//", "data:")):
+            continue
+        clean = src.split("?", 1)[0].split("#", 1)[0]
+        js_path = (base_dir / clean).resolve()
+        if not js_path.is_file():
+            continue
+        try:
+            text = js_path.read_text(encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            continue
+        page.evaluate(
+            "(js) => { const s = document.createElement('script');"
+            " s.setAttribute('data-source','framework');"
+            " s.setAttribute('type','text/plain'); s.textContent = js;"
+            " document.body.appendChild(s); }",
+            text,
+        )
+
+
 def main():
     ap = argparse.ArgumentParser(description="统一校验引擎 runner(单规则源 audits.js)")
     ap.add_argument("html", type=Path, help="渲染好的 deck index.html")
@@ -121,6 +160,10 @@ def main():
             # 依赖 inline_linked 先把框架 CSS 拉进 <style data-source=framework>。这里在
             # runner(load 层)做同一件事:读盘 → 注入文本,纯"让源可读",不含规则逻辑。
             _inline_framework_css(page, args.html.parent)
+            # ── 把链接的【框架 JS】源文本注入成 <script data-source="framework"
+            #    type="text/plain"> ── R29-32 要读 JS 源判 requestFullscreen 等
+            #    needle;外链脚本已执行(DOM needle 是真元素),这里只补源可读(不二次执行)。
+            _inline_framework_js(page, args.html.parent)
             page.evaluate("(s) => { window.__AUDIT_SCOPE__ = s; }", scope)
             result = page.evaluate(audits_src)
             browser.close()
