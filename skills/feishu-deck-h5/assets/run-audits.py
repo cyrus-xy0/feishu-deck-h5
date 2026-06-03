@@ -114,6 +114,24 @@ def _inline_framework_js(page, base_dir):
         )
 
 
+def _load_deck_json(base_dir):
+    """Read the sibling deck.json next to index.html (SOURCE-OF-TRUTH for
+    R-RAW-LOOKS-SCHEMA's raw-layout keys). Mirrors validate.py's
+    audit_raw_looks_schema, which reads `Path(path).parent / 'deck.json'`:
+    a raw slide commonly masks itself with a schema-ish data-layout in its
+    rendered DOM, so the rendered data-layout can't distinguish raw from real
+    schema — the deck.json is authoritative. Returns the parsed dict (injected
+    to window.__DECK_JSON__) or None (no sidecar → rule falls back / skips,
+    advisory never false-positives). Pure file read, no rule logic."""
+    dj = (base_dir / "deck.json").resolve()
+    if not dj.is_file():
+        return None
+    try:
+        return json.loads(dj.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — unreadable sidecar → treat as absent
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description="统一校验引擎 runner(单规则源 audits.js)")
     ap.add_argument("html", type=Path, help="渲染好的 deck index.html")
@@ -164,6 +182,12 @@ def main():
             #    type="text/plain"> ── R29-32 要读 JS 源判 requestFullscreen 等
             #    needle;外链脚本已执行(DOM needle 是真元素),这里只补源可读(不二次执行)。
             _inline_framework_js(page, args.html.parent)
+            # ── 把旁边的 deck.json(若存在)注入 window.__DECK_JSON__ ──
+            # R-RAW-LOOKS-SCHEMA 的 SOURCE-OF-TRUTH 是 deck.json 的 layout:"raw" key
+            # (渲染后 data-layout 会伪装借框架 CSS,不可信);与 validate.py
+            # audit_raw_looks_schema 读 index.html 旁 deck.json 等价。纯文件读,不含规则逻辑。
+            deck_json = _load_deck_json(args.html.parent)
+            page.evaluate("(dj) => { window.__DECK_JSON__ = dj; }", deck_json)
             page.evaluate("(s) => { window.__AUDIT_SCOPE__ = s; }", scope)
             result = page.evaluate(audits_src)
             browser.close()

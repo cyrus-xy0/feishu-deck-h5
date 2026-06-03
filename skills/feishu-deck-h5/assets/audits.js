@@ -585,6 +585,95 @@
   const SPARSE_BY_DESIGN = new Set([...HERO_TITLE_LAYOUTS,
     'agenda', 'table', 'replica', 'iframe-embed', 'raw']);
 
+  // --------------------------------------------------------------------------
+  //  步骤 3 第五批共享常量/工具
+  //  (UI1 / R-VIS-LIFT-STYLE-LOST / R-AUTOBALANCE-PRESENT / R-RAW-LOOKS-SCHEMA /
+  //   audit_structure: R02/R07)
+  // --------------------------------------------------------------------------
+
+  // ── UI1(audit_ui_mocks_are_html)brand / raster / ui-hint 判定(逐字对应
+  //    _validate_audits.py 的 _UI1_BRAND / _UI1_UI_HINTS / _UI1_RASTER / _ui1_brand)。
+  const UI1_BRAND = ['lark-logo', 'lark-slogan', 'lark-cover', 'lark-section',
+    'lark-content', 'wordmark'];
+  const UI1_UI_HINTS = new RegExp(
+    '(screen|screenshot|\\bui\\b|dashboard|console|panel|chat|window|mock|'
+    + 'prototype|figma|wireframe|interface)', 'i');
+  const UI1_RASTER = /\.(png|jpe?g|webp|gif|bmp)(\?|#|$)/i;
+  const ui1Brand = (s) => UI1_BRAND.some((h) => (s || '').indexOf(h) >= 0);
+
+  // ── 整 deck 的源 HTML(documentElement.outerHTML)—— 渲染后的文档序列化。
+  //    UI1 background-image 子串扫(原版扫 frame 源)、autobalance / 结构类需要"源样子",
+  //    渲染后用序列化 DOM 当源。slide 级用 slide.outerHTML。
+  const slideOuterHTML = (slide) => (slide && slide.outerHTML) || '';
+
+  // ── deck 整文档源(含 head/script);autobalance 指纹、deck-origin 判定用。
+  const deckOuterHTML = () => (typeof document !== 'undefined' && document.documentElement
+    && document.documentElement.outerHTML) || '';
+
+  // ── 所有 <script> 源文本拼接(runner 已把外链框架 JS 注入成 <script
+  //    data-source=framework type=text/plain>;含页内 inline)。R-AUTOBALANCE-PRESENT
+  //    / R-DOC 类的 JS 指纹检查用 —— 与 Python 在 inline_linked 之后扫整 HTML 等价。
+  const allScriptText = () => {
+    let s = '';
+    const scripts = (typeof document !== 'undefined' && document.querySelectorAll('script')) || [];
+    for (const el of scripts) s += ' ' + (el.textContent || '');
+    return s;
+  };
+
+  // ── R-AUTOBALANCE-PRESENT 指纹(逐字对应 _AUTOBALANCE_SIG)。
+  const AUTOBALANCE_SIG = 'function balanceSlide(slide)';
+
+  // ── R-RAW-LOOKS-SCHEMA:icon 方形 viewBox 判定(逐字对应 _is_icon_vb)。
+  const isIconViewBox = (vb) => {
+    const p = (vb || '').trim().split(/\s+/);
+    if (p.length !== 4) return false;
+    const w = parseFloat(p[2]);
+    const h = parseFloat(p[3]);
+    if (!isFinite(w) || !isFinite(h)) return false;
+    return w === h && w > 0 && w <= 64;
+  };
+  // 结构级 flow/relationship 信号(逐字对应 _FLOW_SIGNALS)—— markup 级连接器,
+  // 不含正文里的箭头字形(那种"投入 → 产出"的扁平卡片仍算扁平)。在 slide 源 HTML 上判。
+  const RLS_FLOW_SIGNALS = ['connector', 'data-arrow', 'class="arrow'];
+
+  // ── R-RAW-LOOKS-SCHEMA 的 raw_keys 来源:Python 读 index.html 旁的 deck.json。
+  //    渲染后没有磁盘 deck.json,改从【渲染后 DOM 的真 data-layout】判 raw —— 但原版
+  //    特意说明 raw 页常伪装成 schema-ish data-layout 借框架 CSS,所以 data-layout 不可靠,
+  //    SOURCE-OF-TRUTH = deck.json。运行期 deck.json 由 runner 通过 window.__DECK_JSON__
+  //    注入(若存在);缺则 fall back 到 data-layout="raw"。两者皆缺 → 该帧不参与(安静跳过,
+  //    与原版"无 deck.json 则 skip"同向:advisory 永不误报)。返回 raw slide-key 集合 or null。
+  const rawKeysFromDeckJson = () => {
+    if (typeof window !== 'undefined' && window.__RLS_RAW_KEYS__ !== undefined) {
+      return window.__RLS_RAW_KEYS__;
+    }
+    let out = null;
+    const dj = (typeof window !== 'undefined' && window.__DECK_JSON__) || null;
+    if (dj && Array.isArray(dj.slides)) {
+      out = new Set();
+      for (const s of dj.slides) {
+        if (((s.layout || '').trim() === 'raw') && s.key) out.add(s.key);
+      }
+    }
+    if (typeof window !== 'undefined') window.__RLS_RAW_KEYS__ = out;
+    return out;
+  };
+
+  // ── audit_structure (R02/R07) 之 .wordmark 判定:渲染后 slide 子树是否含 .wordmark
+  //    (逐字对应 `'class="wordmark' not in fr` —— 渲染后 querySelector 等价、更准:class
+  //    顺序无关)。data-layout / data-screen-label 直接读属性。
+  const slideHasWordmark = (slide) => !!(slide && (
+    (slide.matches && slide.matches('.wordmark')) || slide.querySelector('.wordmark')));
+
+  // ── R-VIS-LIFT-STYLE-LOST 重版式签名(逐字对应 HEAVY_SIGNATURES)。在 slide 源 HTML
+  //    子串上判(与原版同 —— class 字面/标签字面),保留原版精确度。
+  const LIFT_HEAVY_SIGNATURES = {
+    quote: ['<blockquote', '<div class="attrib"', '<div class="stack"'],
+    cover: ['<div class="author"'],
+    section: ['<div class="chapter-num"', '<div class="pills"'],
+    'big-stat': ['<div class="num"', '<div class="copy"'],
+    end: ['<div class="slogan"'],
+  };
+
   // ==========================================================================
   //  规则注册表 —— 唯一规则源。新增规则 = 往这里加一个 (slide, ctx) => findings。
   // ==========================================================================
@@ -2118,6 +2207,288 @@
               + 'Where it fits, consider an icon (ICON_LIB names) / photo / '
               + `illustration / bespoke layout:raw page. Flat: ${where}. `
               + '[advisory · richness is a design-phase call · never blocks]',
+          }];
+        }
+        return [];
+      },
+    },
+
+    {
+      // R02/R07 · 每帧必有 data-layout / data-screen-label / .wordmark。(步骤 3 第五批
+      // 迁自 _validate_audits.py audit_structure 里可逐帧移植的部分)。原版逐帧:
+      //   缺 layout → R02 err;缺 screen-label → R02 err;缺 .wordmark → R07 err。
+      // 渲染后等价 = 读 slide 的 data-layout / data-screen-label 属性、querySelector('.wordmark')
+      // (class 顺序无关、继承/渲染解析后更准)。.footer chrome 2026-05 已退役,原版无此检查。
+      //
+      // ⚠️ 未迁(留最终结构批):audit_structure 之外的 R-DOM(audit_dom_integrity:
+      // slide-frame 嵌套/平衡)/ R-DOC-INTEGRITY(整文档 .deck 闭合/截断)—— 那些要对
+      // 整文档源做 HTML 解析(不是逐帧/isFirstInScope 模型),归"最终结构批"。
+      id: 'R02-R07-STRUCTURE',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        const findings = [];
+        const label = slide.getAttribute('data-screen-label');
+        if (!layout) {
+          findings.push({
+            rule: 'R02', severity: 'error', slide_idx,
+            message: `slide ${slide_idx}: missing data-layout`,
+          });
+        }
+        if (!label) {
+          findings.push({
+            rule: 'R02', severity: 'error', slide_idx,
+            message: `slide ${slide_idx}: missing data-screen-label`,
+          });
+        }
+        if (!slideHasWordmark(slide)) {
+          // 文案与 Python 逐字对齐:layout 为空 → 原版 f-string 渲染 `None`(slide_attr 返回 None)。
+          const layoutRepr = layout ? layout : 'None';
+          findings.push({
+            rule: 'R07', severity: 'error', slide_idx,
+            message: `slide ${slide_idx} (${layoutRepr}): missing .wordmark`,
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // UI1(R-UI1)· 系统 UI / 截图必须 HTML 重建,不许贴栅格。(步骤 3 第五批迁自
+      // _validate_audits.py audit_ui_mocks_are_html)。原版扫每帧源:
+      //   (a) 内容 <img src> 非 data:/非 brand → 命中;
+      //   (b) raster background-image 且 url 同时命中 _UI1_RASTER & _UI1_UI_HINTS → 命中;
+      //   (c) 非 iframe-embed 版式里出现 <iframe> → 命中(warn 性质)。
+      // 降级(err→warn):replica(page-replica / data-layout="replica")、imported(deck 级
+      //   <meta fs-deck-origin=imported>)、is_canvas(data-layout="canvas")。
+      // opt-out:vouched = slide 含 data-ui-screenshot 或 style 里 allow:ui-screenshot →
+      //   warn_soft(永不阻断,--strict 也不升级),消息尾加〔作者已声明保留〕。
+      // data:URI / brand(_UI1_BRAND)资产豁免。data-decor="photo-bg" 仅在消息里建议(原版
+      //   亦非代码级 opt-out:真照片走 data: / brand 即豁免)—— 逐字保留。
+      //
+      // 移植(渲染基底):内容 <img> 用 querySelectorAll('img')(原版正则只取带 src 的);
+      //   background-image 改读 computed backgroundImage 取 url();<iframe> 用 querySelector。
+      //   slide / style 源用渲染后序列化判 replica/canvas/vouched 字符串(与原版子串等价)。
+      id: 'UI1',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        const fr = slideOuterHTML(slide);
+        const replica = (fr.indexOf('page-replica') >= 0 || layout === 'replica');
+        const isIframeLayout = (layout === 'iframe-embed');
+        const isCanvas = (layout === 'canvas');
+        const imported = deckOriginImported();   // deck 级 <meta fs-deck-origin=imported>
+        // vouched: data-ui-screenshot 属性(slide 或后代) OR style 里 allow:ui-screenshot。
+        const vouched = (fr.indexOf('data-ui-screenshot') >= 0
+          || fr.indexOf('allow:ui-screenshot') >= 0);
+        const findings = [];
+        // _lev:严重度选择 —— 逐字对应原版的三态。
+        const push = (msg) => {
+          let severity;
+          let suffix = '';
+          if (vouched) {
+            severity = 'warn_soft';
+            suffix = ' 〔作者已 data-ui-screenshot 声明保留〕';
+          } else if (replica || imported || isCanvas) {
+            severity = 'warn';
+          } else {
+            severity = 'error';
+          }
+          findings.push({ rule: 'UI1', severity, slide_idx, message: msg + suffix });
+        };
+        // (a) 内容 <img> 栅格截图(原版扫 `<img ... src="...">`)。
+        slide.querySelectorAll('img').forEach((img) => {
+          const src = img.getAttribute('src');
+          if (!src) return;
+          if (src.startsWith('data:') || ui1Brand(src)) return;
+          push(`slide ${slide_idx}: <img src="${src}"> 当正文 — 系统 UI / 截图请用 .ui-* `
+            + '原语重建成 HTML(window/sidebar/toolbar/list/cell…),别贴栅格:'
+            + '图里的字号检查够不到、投影会糊。纯照片用 data-decor="photo-bg" 声明,'
+            + '刻意保留截图用 data-ui-screenshot 声明。');
+        });
+        // (b) raster background-image 带 UI smell(原版扫源里 url(...) 子串;这里读
+        //     computed backgroundImage —— 渲染基底,继承/覆盖后真正生效的背景图)。
+        const bgSeen = new Set();
+        for (const el of [slide, ...slide.querySelectorAll('*')]) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          const bg = getComputedStyle(el).backgroundImage;
+          if (!bg || bg === 'none') continue;
+          let mm;
+          const re = /url\(\s*(?:'|")?([^'")]+)/gi;
+          while ((mm = re.exec(bg))) {
+            const url = mm[1];
+            if (url.startsWith('data:') || ui1Brand(url)) continue;
+            if (UI1_RASTER.test(url) && UI1_UI_HINTS.test(url)) {
+              if (bgSeen.has(url)) continue;
+              bgSeen.add(url);
+              push(`slide ${slide_idx}: background-image url(${url}) 像 UI 截图当正文 — `
+                + '用 HTML 重建,别用栅格背景塞 UI。');
+            }
+          }
+        }
+        // (c) 内容 <iframe>(豁免 iframe-embed 版式)→ warn 性质(走 _lev 同三态)。
+        if (!isIframeLayout && slide.querySelector('iframe')) {
+          push(`slide ${slide_idx}: <iframe> 正文嵌入 — 内嵌文字字号检查够不到、不可控。`
+            + '把要呈现的内容用 HTML/.ui-* 重建,或只作示意缩略图(非 iframe-embed 版式)。');
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-LIFT-STYLE-LOST · lifted raw 帧丢了框架 CSS。(步骤 3 第五批迁自
+      // _validate_audits.py audit_lift_style_lost)。原版:对每个同时带 data-lifted +
+      // data-layout="raw" 的 .slide,累加其 inline <style> 字节;<300 字节 且内容含某重版式
+      // 签名(quote/cover/section/big-stat/end)→ err。lift 把原 schema 版式改成 raw 后,
+      // 框架 `.slide[data-layout=...]` 规则不再匹配 → 退回浏览器默认(quote 92px→16px)。
+      // 本规则不吃 data-lifted 降级(这不是源自身的尺寸选择,是 lift 引入的 STYLE-LOSS bug)。
+      //
+      // 移植(渲染基底 + 源可读):lifted 用 slideIsLifted(data-lifted 属性);layout 读
+      //   data-layout;inline <style> 字节 = slide 子树内 <style>(排除 runner 注入的框架块)
+      //   textContent 长度和;重版式签名在 slide 源 HTML 子串上判(与原版字面 class 子串等价)。
+      //   key/label 读 data-slide-key / data-screen-label 属性。
+      id: 'R-VIS-LIFT-STYLE-LOST',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (!slideIsLifted(slide)) return [];
+        if ((slide.getAttribute('data-layout') || '') !== 'raw') return [];
+        // inline <style> 字节(排除 runner 注入的 data-source=framework 块 —— 那是 deck 级
+        // 框架 CSS,不是本帧自带的 inline 样式;原版扫的是 slide inner 里的 <style>)。
+        let styleTotal = 0;
+        slide.querySelectorAll('style').forEach((s) => {
+          if (s.getAttribute && s.getAttribute('data-source') === 'framework') return;
+          styleTotal += (s.textContent || '').length;
+        });
+        if (styleTotal >= 300) return [];   // 有实质 inline CSS → 假定 OK
+        const fr = slideOuterHTML(slide);
+        for (const origLayout of Object.keys(LIFT_HEAVY_SIGNATURES)) {
+          const sigs = LIFT_HEAVY_SIGNATURES[origLayout];
+          if (sigs.every((sig) => fr.indexOf(sig) >= 0)) {
+            const key = slide.getAttribute('data-slide-key') || '?';
+            const label = slide.getAttribute('data-screen-label') || '?';
+            const sigsRepr = '[' + sigs.map((s) => `'${s}'`).join(', ') + ']';
+            // Python f-string `{key!r}` → repr(): single-quoted (e.g. 'quote-lost').
+            const keyRepr = `'${key}'`;
+            return [{
+              rule: 'R-VIS-LIFT-STYLE-LOST',
+              severity: 'error',
+              slide_idx,
+              message:
+                `slide \`${label}\` (data-slide-key=${keyRepr}) is lifted `
+                + `(data-lifted) + data-layout="raw" + inline \`<style>\` `
+                + `${styleTotal} bytes (<300) + content uses `
+                + `\`${origLayout}\` layout signatures (${sigsRepr}). The source `
+                + `slide's visual depended on framework \`.slide[data-layout="`
+                + `${origLayout}"]\` rules, which no longer match after lifting `
+                + `to "raw" → slide renders at browser defaults (e.g. quote `
+                + `blockquote falls 92px → 16px). Fix: (1) re-lift with `
+                + `\`assets/lift-slides.py\` (auto-inlines framework CSS for `
+                + `quote/cover/section/big-stat/end since 2026-05-29), OR `
+                + `(2) switch the slide's layout field to \`"${origLayout}"\` `
+                + `(schema layout, not raw), OR (3) manually inline the `
+                + `framework rules scoped to this slide-key. `
+                + `Per \`data-lifted\` lift-aware downgrade does NOT apply `
+                + `to this rule — this isn't the source's own size choices, `
+                + `it's a STYLE-LOSS bug introduced by the lift itself.`,
+            }];
+          }
+        }
+        return [];
+      },
+    },
+
+    {
+      // R-AUTOBALANCE-PRESENT · deck 必须带当前 feishu-deck.js 的 auto-balance runtime。
+      // (步骤 3 第五批迁自 _validate_audits.py audit_autobalance_present)。原版在
+      // inline_linked 之后查整 HTML 是否含指纹 `function balanceSlide(slide)`;缺 → err。
+      // 豁免:非 deck(无 .deck 容器);.deck 标 data-no-autobalance。deck 级,整 deck 算一次。
+      //
+      // 移植(渲染基底 + 源可读):runner 的 _inline_framework_js 已把链接的 feishu-deck.js
+      //   源以 <script data-source=framework type=text/plain> 注入 → 指纹可在 script
+      //   textContent 里读到(与 Python inline_linked 后扫整 HTML 等价;linked / inlined 两模式
+      //   都命中)。.deck / data-no-autobalance 用渲染后 DOM 判。
+      id: 'R-AUTOBALANCE-PRESENT',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RAB_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次,挂本次 scope 首帧
+        if (typeof window !== 'undefined') window.__RAB_DONE__ = true;
+
+        const deck = (typeof document !== 'undefined') && document.querySelector('.deck');
+        if (!deck) return [];   // 非 deck(replica/片段)→ 豁免
+        if (deck.hasAttribute('data-no-autobalance')) return [];   // 作者显式关
+        // 指纹:script 源(含框架注入)+ 整文档源 —— 与原版扫 inline_linked 后整 HTML 等价。
+        const haystack = allScriptText() + ' ' + deckOuterHTML();
+        if (haystack.indexOf(AUTOBALANCE_SIG) >= 0) return [];
+        return [{
+          rule: 'R-AUTOBALANCE-PRESENT',
+          severity: 'error',
+          slide_idx,
+          message:
+            'deck 未内联当前 feishu-deck.js 的 auto-balance runtime'
+            + `(找不到指纹 \`${AUTOBALANCE_SIG}\`)。raw/legacy deck 没 re-bundle → `
+            + '运行时 auto-balance 0 行没跑,"文字贴底"等 box-crowd 加载时不会被自动修。'
+            + '正道:`python3 assets/rebundle-import.py <deck.html> --inplace` 重新内联'
+            + '当前框架 runtime(字号/chrome/内容零改动)。若该 deck 刻意不要 auto-balance,'
+            + '在 .deck 上加 data-no-autobalance 显式声明即可豁免本闸。',
+        }];
+      },
+    },
+
+    {
+      // R-RAW-LOOKS-SCHEMA · raw-first 反向闸:过度处理的扁平 N 卡片并列。(步骤 3 第五批
+      // 迁自 _validate_audits.py audit_raw_looks_schema)。SOURCE-OF-TRUTH = deck.json 的
+      // layout:"raw" key(渲染后 data-layout 会伪装,不可信);无 deck.json → 安静跳过(advisory
+      // 永不误报)。命中条件:该 key 是 raw、无 @keyframes、无 非 icon diagram svg、无
+      // arrow/connector flow 信号、card token 数 ∈ [3,6] → warn_soft(ADVISORY,--strict 也不升级)。
+      //
+      // 移植:raw_keys 由 runner 经 window.__DECK_JSON__ 注入(无则 fall back data-layout="raw");
+      //   @keyframes / svg viewBox / flow 信号 / card token 计数全在 slide 源 HTML 上判(与原版
+      //   逐字正则等价,保留高精度)。key 用 data-slide-key 属性。
+      id: 'R-RAW-LOOKS-SCHEMA',
+      severity: 'warn_soft',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        const rawKeys = rawKeysFromDeckJson();
+        const key = slide.getAttribute('data-slide-key') || '';
+        // SOURCE-OF-TRUTH: deck.json 注入了 → 严格按其 raw key 集判(缺 key 不算 raw)。
+        // 没注入 deck.json → fall back 渲染后 data-layout="raw"(尽力而为;原版无 deck.json
+        // 时直接 skip,这里 fall back 是更宽的"尽量也查",仍只对 raw 帧、advisory)。
+        let isRaw;
+        if (rawKeys === null) {
+          isRaw = (layout === 'raw');
+        } else {
+          isRaw = rawKeys.has(key);
+        }
+        if (!isRaw) return [];
+        const fr = slideOuterHTML(slide);
+        if (fr.indexOf('@keyframes') >= 0) return [];   // animated → 真 bespoke
+        // svg 计数:全部 svg vs icon svg(方形小 viewBox);有非 icon diagram svg → bespoke。
+        const allSvg = slide.querySelectorAll('svg').length;
+        let iconSvg = 0;
+        slide.querySelectorAll('svg').forEach((svg) => {
+          const vb = svg.getAttribute('viewBox');
+          if (vb && isIconViewBox(vb)) iconSvg += 1;
+        });
+        if (allSvg > iconSvg) return [];                // 非 icon diagram svg → bespoke
+        if (RLS_FLOW_SIGNALS.some((sig) => fr.indexOf(sig) >= 0)) return [];  // flow/relationship
+        // card 元素数:`card` 作为独立 class TOKEN(不是含 "card" 的每个 class)。
+        const cardRe = /class="(?:[^"]*\s)?card(?:\s[^"]*)?"/g;
+        const cards = (fr.match(cardRe) || []).length;
+        if (cards >= 3 && cards <= 6) {
+          return [{
+            rule: 'R-RAW-LOOKS-SCHEMA',
+            severity: 'warn_soft',
+            slide_idx,
+            message:
+              `raw slide "${key}" looks like a plain ${cards}-card parallel `
+              + `list (icon+title+body · no diagram-svg · no animation · no `
+              + `arrow/connector) — that is a standard shape. Consider falling `
+              + `back to content/3up or content/blocks (less bug surface, `
+              + `faster, consistent). [advisory · if the page has bespoke / `
+              + `relational / narrative substance, keep raw & ignore · never blocks]`,
           }];
         }
         return [];
