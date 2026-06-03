@@ -674,6 +674,17 @@
     end: ['<div class="slogan"'],
   };
 
+  // ── R-DOM(audit_dom_integrity)class-token + 祖先判定(渲染基底)。
+  //    `name in class_str.split()` 的 DOM 等价 = classList.contains(name)。
+  const elHasClass = (el, name) => !!(el && el.classList && el.classList.contains(name));
+  // 任一祖先(到 documentElement)是否也带 class name(R-DOM "嵌在另一 frame 内"判定)。
+  const ancestorHasClass = (el, name) => {
+    for (let p = el && el.parentElement; p; p = p.parentElement) {
+      if (elHasClass(p, name)) return true;
+    }
+    return false;
+  };
+
   // ==========================================================================
   //  规则注册表 —— 唯一规则源。新增规则 = 往这里加一个 (slide, ctx) => findings。
   // ==========================================================================
@@ -2492,6 +2503,99 @@
           }];
         }
         return [];
+      },
+    },
+
+    {
+      // R-DOM · 整文档 .deck 结构不变量。(步骤 3 最终结构批迁自 _validate_audits.py
+      // audit_dom_integrity)。原版用 stdlib html.parser 扫 <body> 源,逐 <div> 维护栈,
+      // 查三条不变量:
+      //   ① 每个 .slide-frame 必须是 .deck 的【直接子】(没被嵌进另一 frame);
+      //   ② 每个 .slide-frame 内须恰好一个 .slide 直接子;
+      //   ③ <body> 内 <div> 开/闭计数须平衡(剥 comment/script/style 后)。
+      // opt-out:<body> 内含 `allow:dom-integrity`。
+      //
+      // 移植抉择(渲染基底 = 唯一基底,见 UNIFY-VALIDATE-ARCH §0/§1):①② 是结构关系,
+      //   渲染后 DOM 直接、且更准地暴露(parentElement / :scope>.slide,不受 class 顺序/
+      //   属性影响)→ document-level audits.js 规则,逐字保留 err 文案。
+      //   ⚠️ ③(<div> 开/闭平衡)是【源字节截断】信号:浏览器会自动补全/闭合标签,渲染后
+      //   DOM 的 div 永远平衡,DOM 里【做不到】忠实判定截断 —— 这条按规范归 RUNNER 层的
+      //   R-DOC-INTEGRITY(run-audits.py 读 index.html 原始字节,对整文档 div 计数 + </body>
+      //   /</html> 截断检查)。故本规则不含原版 invariant ③;截断仍被 R-DOC-INTEGRITY 抓到
+      //   (归一条规则而非两条 —— 这是规范要求的、有意的归属差异,见迁移报告)。
+      //
+      // document-level:整 deck 算一次,挂本次 scope 首帧(__RDOM_DONE__ 防重复);scope 把
+      //   首帧排除也照常报(isFirstInScope 取 scope 内首帧)。
+      id: 'R-DOM',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RDOM_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__RDOM_DONE__ = true;
+
+        if (typeof document === 'undefined' || !document.body) return [];
+        // opt-out:<body> 源含 allow:dom-integrity(与原版 `'allow:dom-integrity' in body` 等价)。
+        if ((document.body.outerHTML || '').indexOf('allow:dom-integrity') >= 0) return [];
+
+        const findings = [];
+        const frames = [...document.querySelectorAll('.slide-frame')];
+        const framesSeen = frames.length;
+        // Invariant 1a: 每个 slide-frame 的【直接父】须是 .deck(对应原版 div_stack[-1]==deck)。
+        let framesUnderDeck = 0;
+        // Invariant 1b: 任一祖先也是 slide-frame → 嵌套(对应原版 frames_nested_in_frame,
+        //   记录该 frame 的 1-based 出现序号,文档序与原版栈遍历序一致)。
+        const framesNestedInFrame = [];
+        frames.forEach((fr, i) => {
+          if (elHasClass(fr.parentElement, 'deck')) framesUnderDeck += 1;
+          if (ancestorHasClass(fr, 'slide-frame')) framesNestedInFrame.push(i + 1);
+        });
+        // Invariant 2: 每个 frame 恰好一个 .slide 直接子(对应原版 frame_inner_slide_count;
+        //   原版只数"栈顶是 slide-frame 时压入的 .slide"= 直接子,这里用 :scope>.slide 等价)。
+        const frameInnerSlideCount = frames.map(
+          (fr) => fr.querySelectorAll(':scope > .slide').length);
+
+        // Invariant 1: 每个 slide-frame 是 .deck 直接子。
+        const orphanFrames = framesSeen - framesUnderDeck;
+        if (orphanFrames) {
+          findings.push({
+            rule: 'R-DOM', severity: 'error', slide_idx,
+            message:
+              `${orphanFrames} of ${framesSeen} <div class="slide-frame"> `
+              + 'are NOT a direct child of <div class="deck">. The most likely '
+              + 'cause is a missing </div> earlier in the document (regex-based '
+              + 'insertion / deletion ate a closing tag), nesting later frames '
+              + 'inside an unclosed frame. Present mode will hide every nested '
+              + 'frame because it never becomes the current slide. '
+              + 'Re-inspect recent edits; do not use regex to splice slide-frames.',
+          });
+        }
+        if (framesNestedInFrame.length) {
+          const idxs = framesNestedInFrame.slice(0, 5).join(', ');
+          const more = framesNestedInFrame.length <= 5 ? ''
+            : ` (+${framesNestedInFrame.length - 5} more)`;
+          findings.push({
+            rule: 'R-DOM', severity: 'error', slide_idx,
+            message:
+              `slide-frame nesting: frames at positions ${idxs}${more} `
+              + 'are inside ANOTHER slide-frame. This breaks present mode — '
+              + 'only the outer frame becomes the current slide; the inner '
+              + 'frames are perma-hidden. Fix the unclosed div above.',
+          });
+        }
+        // Invariant 2: 每个 frame 恰好一个 .slide 直接子。
+        frameInnerSlideCount.forEach((n, i0) => {
+          if (n !== 1) {
+            findings.push({
+              rule: 'R-DOM', severity: 'error', slide_idx,
+              message:
+                `slide-frame #${i0 + 1} contains ${n} direct .slide children `
+                + '(expected exactly 1). Either the markup template is broken '
+                + 'or two slides got concatenated into one frame.',
+            });
+          }
+        });
+        return findings;
       },
     },
   ];
