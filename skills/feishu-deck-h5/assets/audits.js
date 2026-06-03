@@ -308,6 +308,224 @@
     return true;
   };
 
+  // --------------------------------------------------------------------------
+  //  步骤 3 第三批共享常量/工具(R06 / R20 / R-HIERARCHY / R05 / R56 / R-ECHO)
+  // --------------------------------------------------------------------------
+
+  // ── 4-tier 字号台阶 + 两道地板(对应 _validate_common.py 的 _FS_TOKENS 派生量)。
+  //    台阶/地板从【框架 CSS :root --fs-* 真值】读,而非硬编 16/24/28/48 —— 与 Python
+  //    _load_fs_tokens 同源。读不到则退回 fallback(与 _FS_TOKEN_FALLBACK 同值)。
+  //    runner 注入了 <style data-source=framework> 的框架 CSS,这里能从中读到 :root 定义。
+  const _FS_TOKEN_FALLBACK = { '--fs-foot': 16, '--fs-body': 24, '--fs-sub': 28, '--fs-title': 48 };
+  const loadFsTokens = () => {
+    if (typeof window !== 'undefined' && window.__FS_TOKENS__) return window.__FS_TOKENS__;
+    let tokens = Object.assign({}, _FS_TOKEN_FALLBACK);
+    const styles = (typeof document !== 'undefined' && document.querySelectorAll('style')) || [];
+    let combined = '';
+    for (const s of styles) combined += '\n' + (s.textContent || '');
+    const found = {};
+    let m;
+    const re = /--fs-(title|sub|body|foot)\s*:\s*(\d+)px/g;
+    while ((m = re.exec(combined))) found['--fs-' + m[1]] = parseInt(m[2], 10);
+    // require all four; else fall back(防未来重命名)。
+    if (['--fs-title', '--fs-sub', '--fs-body', '--fs-foot'].every((k) => k in found)) {
+      tokens = found;
+    }
+    if (typeof window !== 'undefined') window.__FS_TOKENS__ = tokens;
+    return tokens;
+  };
+  const FS_TOKENS = loadFsTokens();
+  const FLOOR_BODY_PX = FS_TOKENS['--fs-body'];     // 内容正文地板(rung 3)
+  const FLOOR_CHROME_PX = FS_TOKENS['--fs-foot'];   // 角标/脚注/pill/tag 地板(rung 4)
+  const TYPE_LADDER_PX = new Set(Object.values(FS_TOKENS));  // 4-tier strict {16,24,28,48}
+
+  // ── R06 body-class / chrome-class 选择器判定(逐字对应 _validate_common.py 的
+  //    _BODY_CLASS_RE / _CHROME_CLASS_RE)。作用在 selector 文本上(与 Python 同)。
+  const BODY_CLASS_RE = new RegExp(
+    '\\.(?:'
+    + 'cbody|body|desc|sub|lede|paragraph|para|caption|cap|note|'
+    + 'feat-body|brand-desc|dir-desc|dir-sub|sc-obj|sc-lever|'
+    + 'arch-item|arch-base|arch-hand-title|story-hook|story-arc|'
+    + 'principle|voice-card|voice-q|cta-box|the-who|content-body|'
+    + 'who|name|preview-text|hook|takeaway|callout-body|'
+    + 'sec ?ul|sec ?ol|item-body|row-body|cell-body|col-body|col-text|'
+    + 'page-sub|subtitle(?!-en)|lead|timeline-desc'
+    + ')\\b'
+    + '|\\b(?:ts-tasks|ts-time)\\b');
+  const CHROME_CLASS_RE = new RegExp(
+    '\\.(?:'
+    + 'eyebrow|footnote|pageno|deck-pageno|attrib|source(?:-footer)?|'
+    + 'pill|chip|tag(?:-chip)?|badge|label-small|chrome|kicker|overline|'
+    + 'meta|trend|axis(?:-cap)?|hint|tip|legend|nav-hint|mode-toggle|'
+    + 'phase-pill|status|status-dot|fmt|fix|disclaim|fineprint|'
+    + 'sc-cap|cfoot|stnum|chapter-num|stat-unit|kpi-unit|unit|'
+    + 'iframe-hint|count|'
+    + 'n'
+    + ')\\b|'
+    + '\\.ui-[a-z][\\w-]*');
+
+  // ── R-HIERARCHY meta-class / column-label 选择器判定(逐字对应 audit_hierarchy 的
+  //    META_CLASS_RE / COLUMN_LABEL_RE,用 `(?![-_\w])` 而非 \b)。
+  const META_CLASS_RE = new RegExp(
+    '\\.(?:'
+    + 'owner|attrib|source(?:-footer)?|who|byline|author-meta|'
+    + 'timestamp|date|status|kicker|'
+    + 'td-owner|nc-author|case-attrib|quote-attrib|voice-who|'
+    + 'eyebrow'
+    + ')(?![-_\\w])');
+  const COLUMN_LABEL_RE = new RegExp(
+    '\\.(?:column-pill|side-pill|focus-pill|'
+    + 'agenda-label|story-label|case-label)(?![-_\\w])');
+
+  // ── @media 解析(对应 _media_query_matches,固定 1920×1080 画布)。
+  const _DECK_VW = 1920, _DECK_VH = 1080;
+  const MQ_FEATURE_RE = /\(\s*(min|max)-(width|height)\s*:\s*(\d+)\s*px\s*\)/;
+  const mediaQueryMatches = (query) => {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) return true;
+    for (const branch of q.split(',')) {     // 逗号 = OR
+      const b = branch.trim();
+      if (!b) return true;
+      let active = true;
+      for (const part of b.split(/\band\b/)) {  // and = AND
+        const p = part.trim();
+        if (!p || p === 'all' || p === 'screen' || p === 'only screen' || p === 'only all') continue;
+        if (p === 'print' || p === 'speech' || p.indexOf('only print') === 0) { active = false; break; }
+        if (p.indexOf('not ') === 0) { active = (p.indexOf('print') >= 0 || p.indexOf('speech') >= 0); break; }
+        const mm = MQ_FEATURE_RE.exec(p);
+        if (mm) {
+          const kind = mm[1], dim = mm[2], val = parseInt(mm[3], 10);
+          const cur = dim === 'width' ? _DECK_VW : _DECK_VH;
+          if ((kind === 'min' && cur < val) || (kind === 'max' && cur > val)) { active = false; break; }
+        }
+      }
+      if (active) return true;
+    }
+    return false;
+  };
+
+  // ── @-rule 解析(对应 _strip_nested_at_rules):active @media 展开、其余 @-rule 丢弃。
+  //    平衡花括号、递归处理嵌套 @media。
+  const stripNestedAtRules = (css) => {
+    const out = [];
+    const n = css.length;
+    let i = 0;
+    for (;;) {
+      const at = css.indexOf('@', i);
+      if (at === -1) { out.push(css.slice(i)); break; }
+      out.push(css.slice(i, at));
+      const brace = css.indexOf('{', at);
+      if (brace === -1) { out.push(css.slice(at)); break; }
+      const prelude = css.slice(at, brace);
+      let depth = 0, j = brace;
+      for (; j < n; j++) {
+        const c = css[j];
+        if (c === '{') depth++;
+        else if (c === '}') { depth--; if (depth === 0) break; }
+      }
+      const body = css.slice(brace + 1, j);
+      const mk = /@([a-zA-Z-]+)\s*([\s\S]*)/.exec(prelude);
+      const kind = mk ? mk[1].toLowerCase() : '';
+      const cond = mk ? mk[2] : '';
+      if (kind === 'media' && mediaQueryMatches(cond)) {
+        out.push(stripNestedAtRules(body));    // 展开 + 递归
+      }
+      // else: 丢弃(inactive @media / @keyframes / @font-face / @supports / @page …)
+      i = j + 1;
+    }
+    return out.join('');
+  };
+
+  // ── 遍历所有 <style> 块的 (rawCss, isFramework)(对应 _iter_style_blocks)。
+  //    框架块 = runner 注入的 <style data-source="framework">。
+  //    顺序保真:Python `inline_linked` 把框架 `<link>`(惯例为 <head> 首个样式表,层叠上
+  //    必在作者覆盖之前)就地替换成 <style data-source=framework>,故框架块在源序里最前;
+  //    runner 却把框架块 append 到 <head> 末尾 → DOM querySelectorAll 序里框架靠后。R06 混扫
+  //    框架+作者并 [:10] 截断,顺序影响"取哪 10 条"。这里把框架块提到最前以与 Python 源序对齐
+  //    (作者块之间仍保 DOM 序 = 源序)。R20(gate 排框架)/R-HIERARCHY(不含框架)不受影响。
+  const iterStyleBlocks = (includeFramework) => {
+    const fw = [];
+    const author = [];
+    const styles = (typeof document !== 'undefined' && document.querySelectorAll('style')) || [];
+    for (const s of styles) {
+      const isFw = s.getAttribute && s.getAttribute('data-source') === 'framework';
+      if (isFw && !includeFramework) continue;
+      (isFw ? fw : author).push({ css: s.textContent || '', isFramework: isFw });
+    }
+    return fw.concat(author);
+  };
+
+  // ── 注释容忍的 `selector { body }` 拆分(对应 _RULE_WITH_COMMENTS_RE)。
+  //    返回 [{selector, body}](body 仍含注释,供 allow:* marker 判定)。先经 stripNestedAtRules。
+  const RULE_WITH_COMMENTS_RE = /([^{}]+?)\{((?:\/\*[\s\S]*?\*\/|[^{}])*)\}/g;
+  const iterCssRules = (rawCss) => {
+    const css = stripNestedAtRules(rawCss);
+    const out = [];
+    let m;
+    RULE_WITH_COMMENTS_RE.lastIndex = 0;
+    while ((m = RULE_WITH_COMMENTS_RE.exec(css))) {
+      out.push({ selector: m[1], body: m[2] });
+    }
+    return out;
+  };
+
+  // ── 从一个规则 body 抓所有 font-size px(对应 Python 的两条 finditer:
+  //    `font-size: Npx` + `font: ... Npx` 缩写)。body 须先剥注释。
+  const stripCssComments = (s) => (s || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const collectFontSizes = (block) => {
+    const sizes = [];
+    let m;
+    const re1 = /font-size:\s*(\d+)px/g;
+    while ((m = re1.exec(block))) sizes.push(parseInt(m[1], 10));
+    const re2 = /\bfont:\s*[^;{}]*?(\d+)px/g;
+    while ((m = re2.exec(block))) sizes.push(parseInt(m[1], 10));
+    return sizes;
+  };
+
+  // ── allow:* marker 解析。CSSOM cssText 不含注释 → 无法读 `/* allow:typescale */`
+  //    等 opt-out;但渲染后 <style> textContent 原样保留注释(实测 56× typescale 在 rendered
+  //    deck 里可读)。R06/R20/R-HIERARCHY 直接在规则 body 文本里 indexOf('allow:...') 判 opt-out
+  //    (与 Python 同 —— marker 与 selector / 字号同处一份源,自洽,无需 CSSOM 反查归一化)。
+
+  // ── 渲染后 DOM 上的文本叶遍历(对应 _walk_text_leaves)。返回叶 {tag, cls, text,
+  //    parents:[class…closest-last], parentClass, parentEl, parentTag, el}。
+  //    叶 = 有非空直接文本、无元素子节点(void 除外)、tag ∈ LEAF_TAGS;skip svg/style/script 子树。
+  const LEAF_TAGS_ECHO = new Set(['SPAN', 'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+    'LI', 'A', 'B', 'EM', 'STRONG', 'I', 'U', 'SMALL', 'MARK',
+    'BLOCKQUOTE', 'DT', 'DD', 'FIGCAPTION', 'CAPTION', 'TH', 'TD']);
+  const walkTextLeaves = (root) => {
+    const leaves = [];
+    // 递归走,维护 parents(class 链, closest-last)。
+    const walk = (el, parents) => {
+      const tag = el.tagName;
+      if (tag === 'STYLE' || tag === 'SCRIPT' || tag === 'SVG' || tag === 'svg') return;
+      const childEls = [];
+      for (const c of el.children) {
+        const ct = c.tagName;
+        if (ct === 'STYLE' || ct === 'SCRIPT' || ct === 'SVG' || ct === 'svg') continue;
+        childEls.push(c);
+      }
+      const txt = directText(el);
+      if (txt && isElementLeaf(el) && LEAF_TAGS_ECHO.has(tag)) {
+        const parentEl = el.parentElement;
+        leaves.push({
+          tag: tag.toLowerCase(),
+          cls: classStr(el),
+          text: txt,
+          parents: parents.slice(),
+          parentClass: parents.length ? parents[parents.length - 1] : '',
+          parentEl,
+          parentTag: parentEl ? parentEl.tagName.toLowerCase() : '',
+          el,
+        });
+      }
+      const nextParents = parents.concat([classStr(el)]);
+      for (const c of childEls) walk(c, nextParents);
+    };
+    for (const c of root.children) walk(c, [classStr(root)]);
+    return leaves;
+  };
+
   // ==========================================================================
   //  规则注册表 —— 唯一规则源。新增规则 = 往这里加一个 (slide, ctx) => findings。
   // ==========================================================================
@@ -1062,6 +1280,435 @@
           }
         }
 
+        return findings;
+      },
+    },
+
+    {
+      // R06 · slide 内容字号下限(chrome 14 / body 22)。(步骤 3 第三批迁自
+      // _validate_audits.py audit_font_sizes)。原版扫【所有 <style> 块(含框架)】的 CSS
+      // 规则文本,按 selector 分 chrome / body floor,声明字号 < floor 即报;另扫 inline style 的
+      // font-size(仅 chrome floor)。两道地板 honor `/* allow:typescale */`(整豁免)与
+      // `/* allow:body-floor */`(仅免 body 地板)。lifted 页(selector 命中 lifted slide-key)err→warn。
+      //
+      // 移植方式(与原版【规则文本】扫描逐字对齐 —— 见本批迁移说明):本规则对【渲染后 DOM 里
+      // 的 <style> 节点 textContent】做与 Python 同套正则扫描(selector + 声明字号 + allow 注释
+      // marker 全在一处、自洽),而非"CSSOM 规则 → 匹配元素 computed"。原因:
+      //   ① CSSOM cssText 不含注释 → 读不到 allow:* marker;按 selectorText 反查原文又会因
+      //      CSSOM 归一化空白/属性引号而错配(实测漏报)。
+      //   ② "声明 100px、var() 失败实渲 16px"的冰山由 R-CSSVAR(已迁)直接抓未定义 var,R06 不必重做。
+      //   ③ 原版即"未被任何元素使用的 CSS 规则也照报"——CSSOM+querySelectorAll 会因 0 匹配漏掉
+      //      这些规则(实测 .fs-claim-row__label / .arch-top 等成片漏);扫规则文本则与原版一致。
+      // 渲染后 <style> textContent 原样保留注释(实测 allow:typescale 56× 可读),故 marker 直读。
+      // deck 级(原版扫整份 HTML),整 deck 算一次挂第一帧。
+      id: 'R06',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R06_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__R06_DONE__ = true;
+
+        // R06 的内容 gate:selector 命中 slide 内容类(token 边界与原版一致)。
+        const passesContentGate = (selector) => {
+          if (selector.indexOf('.deck-ui') >= 0 || selector.indexOf('.deck-controls') >= 0
+            || selector.indexOf('.deck-progress') >= 0 || selector.indexOf('.mode-toggle') >= 0
+            || selector.indexOf('.nav-hint') >= 0 || selector.indexOf('.pager') >= 0
+            || selector.indexOf('.hint') >= 0 || selector.indexOf('.fs-mobile') >= 0
+            || selector.indexOf('.fullscreen') >= 0 || selector.indexOf('@') >= 0) return false;
+          if (selector.indexOf('.slide') < 0 && selector.indexOf('.card') < 0
+            && !/\.col(?![\w-])/.test(selector) && selector.indexOf('.toc') < 0
+            && !/\.cell(?![\w-])/.test(selector) && selector.indexOf('thead') < 0
+            && selector.indexOf('tbody') < 0) return false;
+          return true;
+        };
+
+        // lifted slide-keys(对应 _lifted_slide_keys):data-lifted 帧的 data-slide-key。
+        const liftedKeys = new Set();
+        const allSlides = (typeof document !== 'undefined' && document.querySelectorAll('.slide')) || [];
+        for (const sl of allSlides) {
+          if (slideIsLifted(sl)) {
+            const k = sl.getAttribute('data-slide-key');
+            if (k) liftedKeys.add(k);
+          }
+        }
+        const selectorIsLifted = (selector) =>
+          [...liftedKeys].some((k) => selector.indexOf(`data-slide-key="${k}"`) >= 0);
+
+        const bodyViolations = [];     // {size, sel}
+        const chromeViolations = [];
+
+        // 扫所有 <style> 块(含框架),按规则文本判定(对应 _iter_style_blocks(html) 默认 include_framework=True)。
+        for (const { css } of iterStyleBlocks(true)) {
+          for (const { selector: rawSel, body } of iterCssRules(css)) {
+            const selector = rawSel.trim();
+            if (!passesContentGate(selector)) continue;
+            // opt-out marker(body 仍含注释)。
+            if (body.indexOf('allow:typescale') >= 0) continue;   // 整豁免
+            const allowBodyFloor = body.indexOf('allow:body-floor') >= 0;
+            const isChrome = CHROME_CLASS_RE.test(selector);
+            const isBody = BODY_CLASS_RE.test(selector) && !isChrome;
+            const block = stripCssComments(body);
+            for (const size of collectFontSizes(block)) {
+              if (isBody && !allowBodyFloor) {
+                if (size < FLOOR_BODY_PX) bodyViolations.push({ size, sel: selector });
+              } else if (size < FLOOR_CHROME_PX) {
+                chromeViolations.push({ size, sel: selector });
+              }
+            }
+          }
+        }
+
+        const findings = [];
+        const levNote = (sel) => selectorIsLifted(sel)
+          ? { sev: 'warn', note: ' — LIFTED slide (verbatim from another deck); '
+              + 'downgraded to WARNING, you choose whether to bump the font' }
+          : { sev: 'error', note: '' };
+
+        for (const { size, sel } of chromeViolations.slice(0, 10)) {
+          const { sev, note } = levNote(sel);
+          findings.push({
+            rule: 'R06', severity: sev, slide_idx, container_sel: sel,
+            message: `font-size ${size}px on \`${sel}\` below `
+              + `${FLOOR_CHROME_PX}px chrome floor${note}`,
+          });
+        }
+        for (const { size, sel } of bodyViolations.slice(0, 10)) {
+          const { sev, note } = levNote(sel);
+          findings.push({
+            rule: 'R06', severity: sev, slide_idx, container_sel: sel,
+            message: `font-size ${size}px on \`${sel}\` below `
+              + `${FLOOR_BODY_PX}px BODY floor — selector looks like body content `
+              + '(card body / description / caption / list / cell / arch-* / etc.) '
+              + 'and projector readability requires ≥ 22 px. Bump to 22, OR if '
+              + 'this is genuinely chrome, rename to a chrome class '
+              + '(.eyebrow / .footnote / .source / .pill / .tag / etc.), OR '
+              + `add /* allow:body-floor */ in the rule for a documented exception.${note}`,
+          });
+        }
+
+        // inline style 的 font-size(仅 chrome floor)。原版扫 <body> markup 里
+        // `style="...font-size:Npx"`(剥 comment / script)。渲染后等价 = 遍历元素 style 属性。
+        for (const sl of allSlides) {
+          for (const el of [sl, ...sl.querySelectorAll('*')]) {
+            const tag = el.tagName;
+            if (tag === 'STYLE' || tag === 'SCRIPT') continue;
+            const styleAttr = el.getAttribute && el.getAttribute('style');
+            if (!styleAttr) continue;
+            const mm = /font-size:\s*(\d+)px/.exec(styleAttr);
+            if (!mm) continue;
+            const size = parseInt(mm[1], 10);
+            if (size >= FLOOR_CHROME_PX) continue;
+            // inline 无 selector 上下文 → 原版 _lev('') 永不命中 lifted-key → 恒 err。
+            findings.push({
+              rule: 'R06', severity: 'error', slide_idx, container_sel: shortSel(el),
+              message: `inline font-size ${size}px below ${FLOOR_CHROME_PX}px floor`,
+            });
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R20 · 每个 per-page 字号必须落在 4-tier 台阶(16/24/28/48)。(步骤 3 第三批迁自
+      // _validate_audits.py audit_type_ladder)。原版只审 selector 含 `[data-page="NN"]` 或
+      // `[data-slide-key="..."]` 的规则(框架 master-spec 豁免);off-ladder 即报,给最近台阶;
+      // `/* allow:typescale */` 整豁免(hero 例外 + mockup-internal 10-13);lifted 页 err→warn。
+      //
+      // 移植方式(同 R06 ── 对渲染后 <style> textContent 做与 Python 同套规则文本扫描):
+      //   · 只取 selector 含 [data-page= / [data-slide-key= 的规则(框架 master-spec 用 class
+      //     选择器,自然被 gate 排除);跳 selector 含 @ 者。
+      //   · 字号读规则声明值(font-size + font 缩写);allow:typescale 注释 marker 直读 body。
+      //   · (size, selector[:80]) 去重;nearest tier 取最近(等距时按 ladder 集合迭代序,
+      //     与 Python `min(set, key=abs)` 同 —— 见下 nearestTier)。lifted 页 err→warn。
+      // 沿用原版"规则声明即报(不要求元素真用到)"的语义。冰山(var 失败实渲 16px)由 R-CSSVAR 抓。
+      // deck 级,整 deck 算一次挂第一帧。
+      id: 'R20',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R20_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__R20_DONE__ = true;
+
+        const liftedKeys = new Set();
+        const allSlides = (typeof document !== 'undefined' && document.querySelectorAll('.slide')) || [];
+        for (const sl of allSlides) {
+          if (slideIsLifted(sl)) {
+            const k = sl.getAttribute('data-slide-key');
+            if (k) liftedKeys.add(k);
+          }
+        }
+        const selectorIsLifted = (selector) =>
+          [...liftedKeys].some((k) => selector.indexOf(`data-slide-key="${k}"`) >= 0);
+
+        // nearest tier:与 Python `min(TYPE_LADDER_PX, key=lambda r: abs(r-size))` 完全一致 ——
+        // 含等距 tie-break。Python set 迭代序对 {48,28,24,16}(由 _FS_TOKENS.values() 插入序经
+        // CPython set-hash 得到)实测为 [48, 24, 28, 16];min 保留首个达到最小 key 者。等距时这给出:
+        // 20→24 / 26→24 / 38→48(并非升序的 16/24/28)。须照搬该迭代序才能逐字对齐。
+        // 若框架 CSS 改了台阶值(集合不再是这四个),退回升序遍历(此时 4-tier 已变,对齐基准也变)。
+        const PY_LADDER_ORDER = [48, 24, 28, 16];
+        const ladderIter = PY_LADDER_ORDER.every((v) => TYPE_LADDER_PX.has(v))
+          && TYPE_LADDER_PX.size === PY_LADDER_ORDER.length
+          ? PY_LADDER_ORDER
+          : [...TYPE_LADDER_PX].sort((a, b) => a - b);
+        const nearestTier = (size) => {
+          let best = Infinity, nearest = null;
+          for (const t of ladderIter) {
+            const d = Math.abs(t - size);
+            if (d < best) { best = d; nearest = t; }   // 严格 < → 等距保留首个(与 Python min 一致)
+          }
+          return nearest;
+        };
+
+        const findings = [];
+        const seen = new Set();
+        for (const { css } of iterStyleBlocks(true)) {
+          for (const { selector: rawSel, body } of iterCssRules(css)) {
+            const selector = rawSel.trim();
+            if (selector.indexOf('[data-page=') < 0 && selector.indexOf('[data-slide-key=') < 0) continue;
+            if (selector.indexOf('@') >= 0) continue;
+            if (body.indexOf('allow:typescale') >= 0) continue;
+            const block = stripCssComments(body);
+            for (const size of collectFontSizes(block)) {
+              if (TYPE_LADDER_PX.has(size)) continue;
+              const sel80 = selector.slice(0, 80);
+              const dedup = `${size}|${sel80}`;
+              if (seen.has(dedup)) continue;
+              seen.add(dedup);
+              const nearest = nearestTier(size);
+              const lifted = selectorIsLifted(selector);
+              const sev = lifted ? 'warn' : 'error';
+              const note = lifted
+                ? ' — LIFTED slide (verbatim from another deck); '
+                  + 'downgraded to WARNING, you choose whether to snap '
+                  + 'to the type ladder'
+                : '';
+              findings.push({
+                rule: 'R20', severity: sev, slide_idx, container_sel: sel80,
+                message: `font-size ${size}px on \`${sel80}\` is off-tier; `
+                  + `nearest tier = ${nearest}px `
+                  + '(allowed: 16 Foot / 24 Body / 28 Sub / 48 Title — '
+                  + '4-tier strict per the canonical PPT→Web mapping). '
+                  + 'Add /* allow:typescale */ in the rule to override '
+                  + '(only for hero exceptions: cover 100, section 88/160, '
+                  + `big-stat 132+, quote 88+, or mockup-internal 10-13).${note}`,
+              });
+            }
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-HIERARCHY · card/panel 内 meta 类字号不得超过 body 地板。(步骤 3 第三批迁自
+      // _validate_audits.py audit_hierarchy)。原版只审【作者 CSS】里 selector 命中 META_CLASS_RE
+      // (owner/attrib/source/who/byline/timestamp/date/status/kicker/eyebrow…)、非 column-label、
+      // 无 `/* allow:meta-larger */`、font-size > body floor(24)的规则 → warn。
+      // 移植方式(同 R06/R20 ── 对渲染后【作者】<style> textContent 做规则文本扫描):
+      //   · 仅作者 CSS(iterStyleBlocks(false),框架表 data-source=framework 排除)。
+      //   · selector 先剥注释再判 META_CLASS_RE / COLUMN_LABEL_RE;body 含 allow:meta-larger 整跳。
+      //   · 声明字号 > FLOOR_BODY_PX 即报,一规则一报(对应原版 break);无跨规则去重(同原版)。
+      // deck 级,整 deck 算一次挂第一帧。
+      id: 'R-HIERARCHY',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RHIER_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__RHIER_DONE__ = true;
+
+        const findings = [];
+        for (const { css } of iterStyleBlocks(false)) {   // 仅作者 CSS
+          for (const { selector: rawSel, body } of iterCssRules(css)) {
+            const selector = stripCssComments(rawSel).trim();
+            if (!selector) continue;
+            if (body.indexOf('allow:meta-larger') >= 0) continue;
+            if (!META_CLASS_RE.test(selector)) continue;
+            if (COLUMN_LABEL_RE.test(selector)) continue;
+            const block = stripCssComments(body);
+            const sizes = collectFontSizes(block);
+            for (const size of sizes) {
+              if (size > FLOOR_BODY_PX) {
+                const sel80 = selector.slice(0, 80);
+                findings.push({
+                  rule: 'R-HIERARCHY', severity: 'warn', slide_idx, container_sel: sel80,
+                  message: `meta-class selector \`${sel80}\` at `
+                    + `${size}px (> body floor ${FLOOR_BODY_PX}px). Meta `
+                    + '(owner / attrib / source / timestamp / kicker / '
+                    + 'eyebrow) must NOT exceed body — otherwise visual '
+                    + 'hierarchy reads inverted: the reader\'s eye '
+                    + 'lands on "who" before "what". Drop to ≤ 24, OR '
+                    + 'add `/* allow:meta-larger */` if this is a '
+                    + 'deliberate hero exception (very rare). If this '
+                    + 'is actually a column-LABEL (e.g. column-pill, '
+                    + 'side-pill), rename the class — column labels '
+                    + 'belong to a different name bucket.',
+                });
+                break;   // 一规则一报(对应原版 break)
+              }
+            }
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R05 · slide 文本里禁 emoji / '!' / '…' / '???'。(步骤 3 第三批迁自
+      // _validate_audits.py audit_copy_rules)。原版扫 <body> 文本(剥 script/style/svg/标签),
+      // 命中即报;IMPORTED deck(全 lifted / origin=imported)降 warn_soft(忠实搬运的外来内容,
+      // 人来决定是否清洗),否则 err。每类标点一条 finding。
+      // 移植:渲染后扫【整个 <body> 的可见文本】(textContent,剥 script/style/svg 子树),按同四类
+      // 判定 —— 与原版"扫 <body> 文本(剥 script/style/svg/标签)"对齐(含 deck chrome,不止 .slide)。
+      // 原版按整 body 一次扫(无法归帧)→ 这里挂第一帧、对整 deck 文本判定(deck 级,等价)。
+      id: 'R05',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__R05_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__R05_DONE__ = true;
+
+        let text = '';
+        if (typeof document !== 'undefined' && document.body) {
+          const clone = document.body.cloneNode(true);
+          clone.querySelectorAll('style, script, svg').forEach((n) => n.remove());
+          text = clone.textContent || '';
+        }
+
+        const imported = deckAllImported();
+        const note = imported
+          ? ' — IMPORTED deck (verbatim-carried content); downgraded to '
+            + 'WARNING, you choose whether to clean up the source text'
+          : '';
+        const sev = imported ? 'warn_soft' : 'error';
+        const findings = [];
+        const emit = (msg) => findings.push({
+          rule: 'R05', severity: sev, slide_idx, message: msg + note,
+        });
+
+        // emoji(与原版三段 surrogate 区段同义,JS 用 Unicode 属性 escapes / 显式区段)。
+        const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}]/u;
+        if (EMOJI_RE.test(text)) emit('emoji detected in slide text');
+        if (text.indexOf('!') >= 0 || text.indexOf('！') >= 0) {
+          emit("exclamation '!' / '！' detected in slide text");
+        }
+        if (text.indexOf('…') >= 0 || text.indexOf('...') >= 0) {
+          emit("ellipsis '…' / '...' detected in slide text");
+        }
+        if (text.indexOf('???') >= 0 || text.indexOf('？？？') >= 0) {
+          emit("'???' detected in slide text");
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R56 · 内容页 .header 只许放单个标题,不许 .eyebrow。(步骤 3 第三批迁自
+      // _validate_audits.py audit_header_minimal)。原版遍历非 hero-title 版式的 slide,
+      // 用 _walk_text_leaves 找"叶自身或祖先链含 eyebrow、且祖先链含 header"的文本叶 → warn,
+      // 一帧一条。移植:渲染后等价 = slide 内 .header 后代里有 .eyebrow 元素。
+      id: 'R56',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        if (HERO_TITLE_LAYOUTS.has(layout)) return [];
+        // querySelectorAll 直接命中 .header 内的 .eyebrow(等价于"叶/祖先含 eyebrow 且祖先含 header")。
+        const hit = slide.querySelector('.header .eyebrow');
+        if (!hit) return [];
+        return [{
+          rule: 'R56', severity: 'warn', slide_idx,
+          message: `slide ${slide_idx} (${layout || '?'}): .header still contains an .eyebrow. `
+            + 'CSS hides it visually but the markup should be removed too '
+            + '— the content-page header is title-only.',
+        }];
+      },
+    },
+
+    {
+      // R-ECHO · 某叶文本回声了同帧 3+ 个其它叶的前缀(冗余 summary)。(步骤 3 第三批迁自
+      // _validate_audits.py audit_list_echo)。逐帧:用 walkTextLeaves 收叶;target 叶须 ≥12 字、
+      // 非 h1-h6、parent 链非 agenda/toc/.../story-arc、CJK≥4、且"像 summary"(tag=p 或 class/parent
+      // 命中 _TARGET_INTENT);对每个其它叶取 4/3/2 字 CJK 前缀(非 stopword)在 target 里出现 →
+      // 命中;distinct 命中 ≥3 → warn。agenda/section/cover/end 版式整帧跳过。
+      id: 'R-ECHO',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        // 跳过 echo-by-design 版式。原版 `_SKIP_LAYOUT_RE.search(fr)` 在【整帧 HTML 文本】
+        // 上做子串匹配 —— 不仅本帧自身 data-layout,连嵌入 <style> 里的
+        // `:not([data-layout="cover"])` / `.slide[data-layout="agenda"]` 等 CSS 选择器也会命中
+        // 而整帧跳过(原版的副作用,严格保真须照搬,否则会多报)。等价:对 slide.outerHTML 同正则。
+        const SKIP_LAYOUT_RE = /data-layout="(agenda|section|cover|end)"/;
+        if (SKIP_LAYOUT_RE.test(slide.outerHTML || '')) return [];
+        const leaves = walkTextLeaves(slide);
+        if (leaves.length < 4) return [];
+
+        const SKIP_PARENT_CLS = ['agenda', 'toc', 'outline', 'chapter-list',
+          'section-list', 'pills', 'tabs', 'story-arc'];
+        const MIN_TARGET_LEN = 12;
+        const PREFIX_LENS = [4, 3, 2];
+        const STOPWORDS = new Set(['的', '是', '在', '了', '和', '或', '与', '及',
+          '我们', '你们', '他们', '这是', '那是',
+          '一个', '一些', '一种', '本次', '本周', '本月']);
+        const TARGET_INTENT = ['legend', 'note', 'footnote', 'caption', 'summary',
+          'footer', 'disclaimer', 'callout', 'lede', 'subline',
+          'subtitle', 'recap', 'echo', 'desc-foot', 'page-sub',
+          'tagline', 'kicker'];
+        const HEADINGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+        const isCjk = (c) => c >= '一' && c <= '鿿';
+
+        const findings = [];
+        for (let ti = 0; ti < leaves.length; ti++) {
+          const target = leaves[ti];
+          if (HEADINGS.has(target.tag)) continue;
+          const text = target.text;
+          if (text.length < MIN_TARGET_LEN) continue;
+          // parent 链含 echo-intentional class → 跳过(子串匹配,与原版同)。
+          if (target.parents.some((p) => SKIP_PARENT_CLS.some((s) => (p || '').indexOf(s) >= 0))) continue;
+          let cjkChars = 0;
+          for (const c of text) if (isCjk(c)) cjkChars++;
+          if (cjkChars < 4) continue;
+          const tgtCls = (target.cls || '').toLowerCase();
+          const parentCls = target.parents.join(' ').toLowerCase();
+          const looksLikeSummary = target.tag === 'p'
+            || TARGET_INTENT.some((kw) => tgtCls.indexOf(kw) >= 0)
+            || TARGET_INTENT.some((kw) => parentCls.indexOf(kw) >= 0);
+          if (!looksLikeSummary) continue;
+
+          const matches = new Set();
+          for (let oi = 0; oi < leaves.length; oi++) {
+            if (oi === ti) continue;
+            const otext = leaves[oi].text;
+            if (!otext || otext === text) continue;
+            for (const nlen of PREFIX_LENS) {
+              if (otext.length < nlen) continue;
+              const prefix = otext.slice(0, nlen);
+              if (STOPWORDS.has(prefix)) continue;
+              let hasCjk = false;
+              for (const c of prefix) if (isCjk(c)) { hasCjk = true; break; }
+              if (!hasCjk) continue;
+              if (text.indexOf(prefix) >= 0) { matches.add(prefix); break; }
+            }
+          }
+          if (matches.size >= 3) {
+            const preview = text.length <= 60 ? text : text.slice(0, 57) + '…';
+            const hit = [...matches].sort().join(' / ');
+            findings.push({
+              rule: 'R-ECHO', severity: 'warn', slide_idx,
+              message: `slide ${slide_idx}: leaf text \`${preview}\` echoes `
+                + `${matches.size} other-leaf prefixes on the same slide `
+                + `(${hit}). Likely redundant summary — consider dropping `
+                + 'the echoed list and keeping only the new information '
+                + '(numbers / verbs / next-step). If the echo is '
+                + 'intentional (e.g. closing recap of an earlier list), '
+                + 'this warn is editorial — leave as-is.',
+            });
+          }
+        }
         return findings;
       },
     },
