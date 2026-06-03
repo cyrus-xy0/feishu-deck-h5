@@ -74,6 +74,27 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
   but too-small raw text, prefer `assets/grow-box-fit.py` after rebundling rather
   than blind font-size snapping.
 
+### Batch lift & lift-done gates (F-62 / F-63)
+
+- **F-62 — batch lift discipline.** Never "lift every page first, then fix in bulk".
+  Lift in batches of **3–5 pages**; after each batch **immediately** reconcile font
+  sizes (4-tier) and run `validate.py` — a batch is NOT done while any ✗ remains, and
+  stacking the next batch with ✗ still open is wrong. Complex pages (phone mock /
+  chat UI / KPI bars — F-40 known to collapse) get rendered + screenshot-checked
+  **one page at a time**, not deferred. (A 24→46 bulk lift of 22 pages at once =
+  18✗ / 185 findings dumped at the end — exactly this rule's absence.)
+- **F-63 — lift done = 4 greens** (any non-green = lift not finished; do NOT say
+  "done"):
+  - [ ] **DOM balance** — `R-DOM` (`audit_dom_integrity`) no ✗; every `.slide-frame`
+    is a direct child of `.deck` and contains exactly one `.slide`.
+  - [ ] **Complex component pages screenshot-verified** — phone mock / chat UI / KPI
+    bars (F-40) checked by image, not collapsed.
+  - [ ] **Font sizes reconciled to the 4 tiers, validator off-ladder clean** — `R20`
+    / `R06` / `R-VIS-TIER` clean, no off-ladder sizes.
+  - [ ] **No silent cropping** — `R-VIS-CARD-OVERFLOW` / `R-OVERFLOW` no ✗.
+  - Scope: the F-63 four-green check targets **foreign / hand-authored /
+    possibly-broken** decks, NOT your own already-published pages.
+
 ## Hard Rules
 
 - Never use regex/sed to mutate slide DOM structure.

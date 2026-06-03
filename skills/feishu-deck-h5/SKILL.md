@@ -1,1293 +1,291 @@
 ---
 name: feishu-deck-h5
 description: |
-  Use this skill when the user asks for a Feishu / Lark-style slide deck rendered as a
-  single HTML file (NOT a real .pptx). Common triggers: "飞书风格 PPT", "Lark deck",
-  "汇报材料", "客户提案", "h5 deck", "16:9 网页演示", "用 html 模仿 ppt", or the user
-  attaching the 飞书 .thmx master. Produces a dark, cinematic deck at 1920×1080 with
-  auto scale-to-fit + a mobile vertical browse mode in one file. Default language is
-  CHINESE-ONLY; bilingual ZH+EN is opt-in (external bilingual pitch). Do NOT use for a
-  real PowerPoint .pptx — that's the pptx skill. GENERATION default (never skip): first
-  run the design phase (per-page, default-on), then default every page to layout:raw —
-  fall back to a schema layout only for plain standard shapes. Also runs in CHECK-ONLY
-  mode when the user hands over a finished HTML and asks for review / validation (e.g.
-  "帮我检查这份 HTML", "validate this", "审一下这个 deck") — see MODE SELECTION in
-  SKILL.md body for the full trigger list and what each mode does.
+  总控 skill for Feishu / Lark-style HTML decks. Use when the user asks for
+  飞书风格 PPT, Lark deck, 汇报材料, 客户提案, h5 deck, 16:9 网页演示, HTML deck
+  generation/editing/validation/publishing, or material parsing for this deck
+  pipeline. This controller does not do worker implementation itself: it routes
+  workflow steps to subskills under subskills/. Default output is a dark,
+  cinematic 1920x1080 HTML deck with validated local delivery and optional
+  Feishu publishing / Base ingestion. Generation is DeckJSON/render-deck first:
+  run design before render, default slides to raw-first unless they are pure
+  standard schema shapes, and always validate before handoff. Do not use for
+  producing a real `.pptx`; route that to an appropriate PowerPoint/keynote
+  workflow if available.
 ---
 
 # feishu-deck-h5
 
-> **🛑 STOP — read this preflight before doing anything else.**
+This is the **controller**. It owns workflow, scope control, and dispatch. It does
+not author slides, render HTML, validate visuals, publish, or parse source
+materials directly.
 
-> **🚦 三道硬闸 · 任何 GENERATION 都不许跳过(2026-06-01 · Mira "case-b" 事故后加;2026-06-02 补第 3 道):**
-> 1. **产出 deck 只能靠 `render-deck.py`(写 `deck.json` 再渲染),绝不用 `Write`/`Edit` 手搓 `index.html`。** Path B(整页手写)是极少数逃生口 —— 用前必须显式声明「走 Path B,原因=X」且事后仍跑 `validate.py`;默认一律 Path A。手搓 index.html = 把渲染器自带的 validate / 官方 assets / 四档字号 / 品牌色板**全部绕过** → logo·字体·母版色必错(这正是事故根因)。
-> 2. **没过 `validate.py` 不算完成、不许交付。** Path A 渲染器每次自动跑;任何手搓 / post-render 编辑后必须显式 `python3 assets/validate.py <html> --no-visual`,exit≠0 改到 0 为止。
-> 3. **GENERATION 必先走设计、且每页默认 raw —— 绝不直接出 deck。** 任何「做 / 改 deck」先在 chat 跑 **DESIGN PHASE**(逐页判定、默认开,见下 `## DESIGN PHASE`);然后每页**默认 `layout:"raw"`**(走框架原语:字号 `var(--fs-*)` + `fs-` 组件类 + 词汇库 pattern,不裸写 CSS),**只有**命中「纯标准形状白名单」(封面 / 收尾 / 单 quote / 纯目录 / 单排 KPI / 纯并列卡 / 纯对比表 / replica)才回退 schema layout(见下 `## DECK GENERATION POLICY`)。跳过设计、或无脑套 schema / 手搓,都是违闸。**这两个默认本来埋在正文 11–28% 处;无 hook 的 harness(Mira)会静默跳过中段 prose,所以提到顶部当硬闸。**
-> Claude Code 侧已有 PostToolUse hook 自动拦截手搓的 deck index.html(挂了就打回);Mira 等无 hook 的 harness **靠你自觉守这三条**。
+## Mandatory Router
 
-## REQUEST ROUTER (step 0 · mandatory) — 收到任何请求,先锁定「模式 / 范围 / 哪一页」再动手
+Before doing anything, lock three things:
 
-任何请求进来,**动手前先答完这三问并锁定**。这是防止「用户改一页、我却整了
-很多页」的硬契约。纯流程纪律,不需要任何脚本。
+1. **Mode**: parse / design / render / validate / simulate / edit / publish /
+   full pipeline / generation-from-source-html / edit-imported-html.
+2. **Scope**: one slide, named slides, whole deck, or one run folder. Default to the
+   smallest scope the user asked for.
+3. **Target**: run directory, `outline.json`, `deck.json`, `index.html`, slide key,
+   uploaded file set, or publish destination.
 
-- **Q1 · 模式?** CHECK-ONLY / GENERATION / RESKIN / LIFT+SWAP —— 走下面 `MODE SELECTION` 表判。
-- **Q2 · 范围?** 单页 / 指名的某几页 / 整 deck。**默认收紧到最小**:除非用户明说
-  「整份 / 每一页 / 全 deck / 通改」,否则一律按**单页 或 用户点名的那几页**处理。
-  **举证责任在「多动」一侧:多动需要用户授权,不是我自行判断要不要多动。**
-- **Q3 · 哪一页?**(范围含具体页时)锁定 slide 的 `key` + 序号。**一次查定,别铺开**:
-  - **🔒 唯一权威口径:`page N = frame_index N = slides[N-1]`。** 用户「发链接 `#N`」和
-    「嘴说第 N 页」指**同一个东西** —— feishu-deck.js 同时用 frame_index 写 URL hash
-    (`#${idx+1}`)和屏幕翻页器(`pad(cur+1)`),二者永远相等。**绝不**回 `feishu-deck.js`
-    重新「考据」hash 逻辑(那是已知不变量),也**绝不**把 `screen_label` 的数字前缀
-    (如 frame 46 上写「50 飞书生态」)当页码 —— 那是作者/slide-library 的旧标签、会漂移,
-    **按它定位必错**(已踩)。
-  - **一条命令定位(新老 deck 通用)**:`python3 deck-json/locate-slide.py <deck-dir|slide-index.json|deck.json|index.html> <query>`。
-    query 自动识别:`46` / `#46` / `…/index.html#46` / 区间 `46-48` / 列表 `46,2` / slide `key` /
-    标题·label 子串。输出 `#N key= layout= "label" link=index.html#N`,直接拿去 `deck-cli show/set`。
-    `-v` 看 title+assets,`--json` 给机器读。优先级:`slide-index.json`(render 每次自动产出)→ `deck.json`
-    → `index.html`。**老/外来 deck(无 deck.json)直接喂它的 `index.html`,locate 解析 slide-frame 的
-    DOM 顺序 = `#N` 本义** —— 这正是「我要从老 deck lift」时定位源页的入口。
-  - **renumber 只对目标 deck.json,不对老源 deck**:老 deck 无 deck.json → `--renumber` 套不上,也不需要。
-    lift 时按 frame_index 定位源页(别看 label 数字),`--shake` 会把源的旧 `screen_label`(如「57 收尾 hero」)
-    带进**目标** deck.json;lift 完在**目标**上跑一次 `render-deck.py --renumber`,旧号即重写成目标的真实页码。
-  - **探针与不变量打架先怀疑探针**:若临时数 frame 得到荒谬结果(如「886 页」),那是自己正则/方法错,
-    **重查工具**,别升级成更多轮验证。
-  - **label 漂了想从源头修齐**:`render-deck.py --renumber` 把每页 `screen_label` 的数字前缀重写成
-    其真实 frame_index(回写 deck.json + 自动备份),让 library 标签号与页码/hash 对齐。
+For a single-slide small edit, state the lock and proceed. If scope expands beyond
+what the user named, stop and ask.
 
-### 确认策略 —— 单页直接做,>1 页或越界才停
-- **单页小改**:出一句锁定陈述「理解 = 改【第 N 页 · 标题(key=xxx)】的 X,只动这一页」,
-  **直接做,不等点头**(配合 `SMALL-EDIT DISCIPLINE`:改 deck.json → render → 1 张该页图)。
-- **范围 >1 页,或 中途发现要动到没锁定的页** → **停下,把要动的页列出来等用户确认**再继续。
-- 用户明说「直接出 / 别问」→ 跳过的是「确认那一下」,不是 ROUTER 的锁定思考。
+## Controller Hard Gates
 
-### 🔒 锁定的是「全部工作」的边界,不止「产出/修改几页」(2026-06-01 用户明确)
-**用户说干 N 页 = 全程只在这 N 页里活动。** 范围一旦锁定,`render` / 截图 / `validate` /
-审计 / 新旧比对 **全都算"干活",一律圈死在这 N 页内** —— 不只是"改与产出"。范围之上
-**绝不自行拓展**,**能精简的必须精简**:
+These gates apply before dispatching to any subskill:
 
-- **别越界核验**:不截范围外的页、不对源 deck 做法证级逐页比对、不为"证明没问题"把工作面铺开。
-  同一个量字号/截图脚本只跑一次;为一个小范围跑全 deck 视觉审计 = 错(见 `SMALL-EDIT DISCIPLINE`)。
-- **现成 / 已发布的页 = 可信存量**:抽某 deck 已发布的页拼新 deck(抽页 / LIFT)时,那些页
-  本就在用 → 信任它。**一次 render + 抽查 1 张图**确认渲染成功即可;别截全套逐张看、别逐页
-  `diff` validate 去"证"已知假阳、别擅自造额外交付物(单文件 / zip / inline **先问用户要哪种**)。
-  F-63「四项全绿核验」只针对**外来 / 手搓 / 可能坏**的 deck,**不针对自家已发布页**。
-- **反面教材**:用户要抽 8 页拼新 deck,Agent 正确锁定了 8 页,却去截了 17 页(新 9 + 源 8)+
-  逐页 diff 证假阳 + 自造 16MB 单文件(用户根本没用上)→ 把几分钟的活做成了半小时。
-- ⚠️ 这条**压过 ultracode 的"穷尽验证"默认**:当"穷尽核验"与"快速拿现成/只干这几页"冲突时,
-  **以用户锁定的范围与诉求为准**,切回轻量,别让 ultracode 顶掉常识。
+1. **Deck output must go through DeckJSON and `render-deck.py`.** Do not hand-write
+   or patch a final `index.html` for generation. Full HTML fallback is rare; if
+   accepted, state the fallback reason and still run validator before handoff.
+2. **Generation must run design first.** Do not jump directly from brief/materials
+   to `deck.json`. Designer output (`DESIGN-PLAN.md` + `outline.json`) is the
+   contract the renderer follows.
+3. **Default stance is raw-first inside Path A.** Renderer should make slides
+   `layout: "raw"` by default, using framework tokens/components/patterns. Fall
+   back to schema layouts only for pure standard shapes covered by
+   `references/deck-generation-policy.md`.
+4. **Validate before delivery or publish.** Any rendered or edited HTML must pass
+   the validator path appropriate to the locked scope before local handoff,
+   simulator use, or publisher confirmation.
 
-### 🚫 「加一页 / 加个章节」= 做那一页,绝不甩多页设计菜单去"引导"(2026-06-01 用户明确)
-用户说「加一页 / 加个第 N 章」,默认 = **只加用户点的那一页**(章节请求 = 先加那张**章节分隔页**),
-**然后逐页跟用户走**。「加个章节」**不等于**授权我一次性建完整章。
+## Scope Discipline
 
-- **需要规模信息 → 问一个朴素直接的问题**(「这章你计划一共几页?」),用普通对话句。**绝不**用
-  AskUserQuestion 甩「精简 2 页 / 标准 3 页 / 深化 4-5 页」这种**枚举"多做几页"的设计选项菜单**
-  —— 那菜单本身就是 ROUTER 禁止的「多动引导」:它把"做更多页"摆成默认选项,变相推用户扩大范围。
-- **只按用户指令逐页操作**;**唯一**主动给建议的场景 = **某页内容确实放不下**(「这页塞不下,
-  要不要拆两页」)。除此之外不提议加页、不预先铺设计方案。
-- 设计闸(下节)要的确认 = **朴素问清这一页的意图 / 焦点**,**不是**列一堆"还能多做哪些页"。
-  **确认设计 ≠ 把范围撑大。**
-- **反例(2026-06-01 本轮踩)**:用户「这页之后加个第五章」,我没去加章节分隔页,反而甩了个
-  「精简 2 页 / 标准 3 页 / 深化 4-5 页」的 AskUserQuestion 设计菜单让用户选规模 → 用户:
-  「我让你加一页,你怎么又引导我干很多页…你问我未来有多少页就行」。正解:**先加章节分隔页**
-  (或先用一句话问「这章几页」),再逐页跟着做。
+- If the user says "add one slide", "add a section", "add chapter N", or names a
+  specific page, treat the request as that single requested artifact. For a
+  chapter request, add the chapter divider first; ask only for the future chapter
+  page count or title if needed.
+- Do not respond to a one-slide request with a multi-page design menu or expanded
+  deck roadmap. If a broader plan seems useful, mention it after completing the
+  requested page-level action.
+- For page references, `page N`, URL `#N`, and frame index N are canonical. Old
+  `screen_label` numeric prefixes are labels, not source-of-truth page numbers.
 
-### ⚠️ 两套闸门正交 —— 「单页」只豁免范围闸,绝不豁免设计闸
-范围确认(Q2,管「动几页」)和**设计确认**(`DESIGN-FIRST POLICY` / DESIGN PHASE,
-管「做什么设计」)是**两件独立的事**,后者不因「就一页」而跳过:
+## Multi-Agent Dispatch
 
-- **范围闸**:单页 → 不必为「动几页」征求同意(直接做)。
-- **设计闸**:只要这一页是 **hero / 超出默认 schema layout 的 bespoke / 大幅补内容**,
-  **不管是不是单页,都必须先出 Q0–Q4 + 六维 spec 等用户确认**(见 `DESIGN-FIRST POLICY`)。
-- 例:「把第 7 页改成双手架构 hero 设计」= 单页(范围闸放行)**但**是 beyond-default
-  bespoke(设计闸必须停下确认)。**别因为「就一页」就省掉设计确认。**
-- 反例:「第 7 页标题字号 28→32」「换个客户名」= 单页 + 默认 layout 内小改 → 两闸都放行,直接做。
+Before reading or executing a subskill, verify whether the current harness
+supports spawning subagents:
 
-> 一句话:**范围越小越好、默认最小;但设计上该确认的,一页也要确认。**
+1. Check whether a subagent/spawn tool is already available in the active tool
+   list.
+2. If tool discovery is available, search for `spawn subagent multi-agent`.
+3. Treat the environment as multi-agent capable only when a concrete spawn tool
+   is callable. Do not assume support from prose, model name, or prior runs.
+4. Announce the result once per task: either `multi-agent: available` or
+   `multi-agent: unavailable, running inline`.
 
----
+When multi-agent support is available, each routed subskill step defaults to a
+fresh worker subagent. The controller remains responsible for the router lock,
+scope boundaries, sequencing, conflict avoidance, final integration, and user
+communication. The worker owns the actual subskill execution.
 
-## MODE SELECTION (Q1 of the router — pick CHECK-ONLY vs GENERATION vs RESKIN vs LIFT+SWAP)
+For every spawned worker:
 
-Before reading anything else in this file, decide which mode the user is in:
+- Pass the exact subskill path it must read, the locked mode/scope/target, the
+  run directory, and the expected artifacts.
+- Give it a disjoint responsibility. Do not let two workers write the same file
+  or slide range concurrently.
+- Tell it that other workers may be active and that it must not revert unrelated
+  edits.
+- Require a concise final report listing files changed, commands run, validation
+  status, and blockers.
+- If the step writes files, require the worker to re-read the latest on-disk
+  file immediately before editing.
 
-| Mode | Trigger phrases / signals | What to do |
-|---|---|---|
-| **CHECK-ONLY** | "帮我检查这份 HTML/deck" · "看看这个 deck 合不合规" · "审一下这个 HTML" · "validate this" · "check the deck" · "扫一遍合规问题" · "这个 HTML 哪里不对" · user hands over a path to an existing `.html` and asks for review WITHOUT asking to generate / modify content | **Jump to "CHECK-ONLY MODE" section below.** SKIP PREFLIGHT, SKIP `new-run.sh`, SKIP `copy-assets`, SKIP everything else in this file. |
-| **RESKIN** | user hands you a foreign / non-feishu HTML and asks to "换皮 / feishu 化 / 套个飞书模版 / reskin / 改成飞书风格 / 把颜色字体换成飞书 / 用飞书 deck 重做这个" — they want feishu CHROME (palette / font / 4-tier ladder / real lark logo / lark-content-bg / .header / .stage) applied to the SAME visual design, **without redesigning content** | **Jump to "RESKIN MODE" section below.** Run `bash assets/reskin.sh <input.html>` — mechanical chrome rewrite. SKIP DESIGN PHASE (no design judgment is made), SKIP redesigning to a Pattern H+ / N-up / etc. — that's a different ask. |
-| **LIFT+SWAP** | user hands you **another deck / 既有 deck** and asks to "把这些页换成我的客户 / 保留版式只换文字 / lift 这几页过来换成 X / 用这份的版式换我的内容 / reuse these slides for a different client" — they want the SOURCE deck's **layout + design kept**, only the **copy / client name swapped** | **先确认「保留原版式(lift)vs 重做版式(schema 重设计)」,默认偏保留(lift)** —— 与 RESKIN 同侧。走 **LIFTING section**:`assets/lift-slides.py`(外来/老 deck `--shake`)或 `deck-json/deck-cli.py paste`(源是本技能 deck.json)把页拎进来,**然后换文字用 `deck-json/apply-text-pairs.py`**(F-44 text-swap:只换字串、不动 markup/CSS/SVG;agent 只产出 `[{key, replacements:[{find,replace}]}]`,工具确定性套用 + 报未命中)。**别按"重画"做整轮 schema 重设计** —— 那是 GENERATION,只有用户明说"重画版式 / 换 layout / 重新设计"才走。 |
-| **GENERATION** *(default)* | "做一份飞书 deck" · "把这个 PDF 转成 HTML" · "客户提案" · "周会汇报材料" · "改一下第 N 页" · anything where output is a new or edited HTML deck | **Run the DESIGN PHASE first (default-on, chat-only)** — **默认立场 = raw-first**(见 `DECK GENERATION POLICY`):逐页判断内容形状,**命中「纯标准形状白名单」才回退 schema,否则一律 `layout: "raw"`**(主场,仍是 Path A deck.json)。定补全计划、给每张 raw 页写 Q0–Q4 + 六维 spec + **density budget**。设计 pass 表标的是「哪几页**回退 schema**、为什么」;raw 页 = beyond-default → 列 design intent 过确认(批量则一次性过)。然后 PREFLIGHT → new-run(落 `DESIGN-PLAN.md`)→ 生成(**raw 页必须走框架原语**:`var(--fs-*)` 字号 + `fs-` 组件类 + narrative patterns A–N,不裸写 CSS;白名单页走 schema)→ **render 后过 Step 5 密度闸门**,通不过改回再 render。 |
+Use parallel workers only for independent steps, such as parsing separate source
+bundles, reviewing different slide ranges, or running validation while the main
+thread prepares a non-overlapping handoff. Keep dependent chains sequential:
+Parser output gates Designer, Designer output gates Renderer, Renderer output
+gates Validator. Simulator may run only after Validator/local delivery, and
+Publisher only runs after explicit user confirmation.
 
-If a request is genuinely ambiguous ("can you look at this HTML and improve it?"
-— check or rewrite?), ask the user once to clarify before branching.
+Run a step inline instead of spawning when any of these are true:
 
-**LIFT+SWAP vs GENERATION confusion (F-43 · 曾被判成"重画"返工整轮)**: "把另一份 deck
-的这些页换成我的客户、保留版式" 是 LIFT+SWAP,**不是**重画。它在 RESKIN(换皮、同 deck
-换 chrome)和 GENERATION(重画内容)之间是真歧义 —— 默认**偏保留版式(lift)**,和 RESKIN
-默认同侧。**动手前先一句确认**「保留原版式(lift+换文字)vs 重做版式(schema 重设计)」,
-别默认重画。注意与 `references/converting-existing-material.md` 的 Replica vs Rewrite 区分:
-那条只在**转 PDF/PPT/外部文件**时触发;"把另一份 **deck** 的页 lift 进来"走这里的 LIFT+SWAP。
+- The environment lacks a callable spawn mechanism.
+- The user asked to avoid delegation or wants a single-threaded run.
+- The task is a known small edit with no useful parallelism, especially a
+  single-slide or <=10-step mechanical change.
+- The next action is immediately blocked on the result and delegating would only
+  add coordination latency.
 
-**RESKIN vs GENERATION confusion (this took 6 turns to learn)**: "用飞书模版" /
-"套飞书皮" / "feishu 化" — these mean **chrome only**, NOT "redesign the content
-using Pattern H+ / N-up / arch-stack." If the user gives you an existing HTML and
-asks to "use the feishu template", default to RESKIN. Only ask before redesigning
-content if they say "重新设计 / 重画 / 改 layout / 套个新的 pattern".
+When a routed step runs inline, treat prior chat context as non-authoritative.
+Before executing that subskill, reread the current on-disk upstream artifacts it
+depends on, such as `source-dossier.json`, `outline.json`, `DESIGN-PLAN.md`,
+`deck.json`, `index.html`, validator reports, or publish manifests. Do not rely
+on cached summaries, earlier reads, or remembered file contents.
 
----
+If a spawned worker fails, times out, or reports uncertainty, the controller must
+either retry with a narrower prompt or take over inline. Never leave the user
+with only a worker transcript; integrate the result into the controller's final
+answer.
 
-## REFERENCES INDEX — 按需加载
+## Subskill Map
 
-下面是按需加载的参考文件;遇到对应模式/特性时用 Read 打开对应文件。
+Read exactly the subskill needed for the next step:
 
-所有路径前缀:`~/.claude/skills/feishu-deck-h5/references/`
+| Need                                                                                                                                          | Subskill                       |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Turn user requirements + local/cloud knowledge into scenario, `design_plan`, and `outline.json`                                               | `subskills/designer/SKILL.md`  |
+| Turn `outline.json` into `deck.json`, render `index.html`, package assets                                                                     | `subskills/renderer/SKILL.md`  |
+| Check finished or in-progress deck for text, visual, structural, language, and delivery compliance                                            | `subskills/validator/SKILL.md` |
+| Operate existing artifacts: edit existing decks, reskin foreign HTML, lift/swap slides, convert/import existing material, round-trip recovery | `subskills/editor/SKILL.md`    |
+| Publish confirmed HTML to Feishu hosting and write publish metadata back to Base                                                              | `subskills/publisher/SKILL.md` |
+| Parse uploaded materials into local `input/runtime-library/source-dossier.json` and normalize assets into `input/runtime-library/assets/`     | `subskills/parser/SKILL.md`    |
+| Rehearse how a validated deck may land with target customer or stakeholder roles                                                              | `subskills/simulator/SKILL.md` |
 
-- `assets-and-files.md` — 品牌资产/产品icon/persona/phone-mock + 文件树
-- `check-only.md` — CHECK-ONLY 模式:用户给成品 HTML 要审/校验 · **默认=逐页业务报告(业务语言/🔴错误🟡提醒/全页列出),所有人一致;别按规则家族抖术语;--by-rule 才出工程师视图** · **规则只有一套源(_validate_audits.py+STATIC_AUDITS),三路(生成/校验/check-only)都 import validate 取它;改规则后跑 `check-rule-coverage.py` 防 FAMILIES/yaml 漂移**
-- `content-density.md` — 判断输入是否过薄 / STOP-and-ask 模板
-- `converting-existing-material.md` — 把 PDF/PPT/HTML/docs 转成合规 deck(1:1 页数 / Replica vs Rewrite)
-- `delivery.md` — 交付/hand-off 时(Mode 1/2/3 走查、copy-assets --shared、package-deliverable 内部、命名规范、交付话术);硬闸门仍在 CORE
-- `design-first.md` — 拿到文案要先出设计方案 + 组件类表(Q0-Q4/六维/squint)
-- `design-phase.md` — GENERATION 设计阶段细节(Step5 密度闸门/DESIGN-PLAN 规格/增量vs批量)
-- `editing-discipline.md` — 删/插/重排/自定义 layout 编辑(E1-E5 细节)
-- `extra-layouts-and-raw.md` — 加新 layout 的 parity 契约 / 手写 raw 稠密版式
-- `layout-recipes.md` — 手写/换皮 slide markup · variant 纪律 · 居中 · CSS 陷阱
-- `narrative-patterns.md` — 按字母取叙事 pattern A-N + helper 配方
-- `one-pager-case.md` — 一页纸客户案例 story-case(skip cover / 禁造 STORY id)
-- `operational-notes.md` — 拷 shell / 嵌入 / 相对路径 edge · **单点小改秒级3步 · 渲染器路径写死别裸find(symlink空指针)· render后验证真渲染 · 别发echo探针催输出**(主体见「SMALL-EDIT DISCIPLINE」节)
-- `prototype-embed.md` — 嵌入已有 HTML/原型/别的 slide(别默认 iframe)
-- `reskin.md` — RESKIN 换皮 / 重渲 UI mock / 保留氛围背景
-- `richness-primitives.md` — 手写 richness primitive 的逐字配方
-- `round-trip-integrity.md` — fork / 回灌 deck.json 的细节 + sync-index-to-deck.py
-- `run-artifacts.md` — 写每轮 PROMPTS.md
-- `slide-deletion.md` — net-delete 触发判定细节 + 备份命名
-- `troubleshooting.md` — 渲染坏了但 validator 没指出时:症状→修
-- `validator-rules.md` — validator 规则全表 R02..P55 含义 / 严重度
+## Canonical Workflow
 
-固化修复记录见 `CHANGES.md`(按需 Read,定位锚点):
+For an uploaded HTML file, first classify its role:
 
-- `#layer-1-retired` — Layer-1 patterns 已退役(quote / big-stat / multi-case-bundle)
-- `#BF1-BF9` — 生产 deck 版式修复 BF1–BF9 + R57(金句无句末标点)
-- `#BF10-BF15` — 对齐防御 BF10–BF12、present-mode 首帧 BF13、abs chrome 复位 BF14、隐藏 .header 重平衡 BF15(含 BF15.1 letterbox 边缘)
-- `#media-autorestart` — slide media 进场自动重播 + 自动开声(框架行为)
-- `#cjk-orphan` — CJK 换行平衡 / 末行孤字防治(预防 text-wrap:balance、检测 R-VIS-ORPHAN、修复阶梯、iframe 内手动处理)
+- **Source HTML**: the user says to reference, imitate, learn from, remake, or use
+  the HTML as material. Treat it as input only. Run Parser to create
+  `source-dossier.json`, then Designer, Renderer, and Validator to produce a new
+  `index.html`.
+- **Target HTML**: the user says to edit, modify, adjust, optimize, fix, replace
+  copy/style/layout, or continue from the uploaded HTML. Treat the HTML as the
+  current deck state, not just a source material. First import/analyze it into
+  the pipeline's existing-state artifacts, then route the change to Editor.
 
-## DESIGN PHASE (mandatory · default-on) — 设计先行,生成前的第一步
+For target HTML, bootstrap the existing state before editing:
 
-GENERATION mode 的**第一步,默认执行**。只在 chat 里发生(不建文件,不与 PREFLIGHT 冲突)。运行顺序:
+1. Copy the submitted file to `runs/<...>/input/source.html` and
+   `runs/<...>/output/index.html`.
+2. Analyze the current HTML into `input/runtime-library/source-dossier.json`.
+3. Generate lightweight current-state `DESIGN-PLAN.md`, `outline.json`, and
+   `deck.json` that describe what already exists. Mark these artifacts as
+   `imported_existing_state` / `source_role: target-html`.
+4. If the HTML is already a feishu-deck-h5 or recognizable slide deck, preserve
+   slide order and `data-slide-key` values. If it is ordinary or complex HTML,
+   wrap pages/sections as raw DeckJSON slides rather than redesigning them.
+5. Run Editor against that imported state, rerender when `deck.json` changed, and
+   run Validator before handoff.
 
-> **DESIGN PHASE(chat)→ [按风险确认] → PREFLIGHT → new-run(落 DESIGN-PLAN.md)→ 按 path 生成**
+For a new deck:
 
-把默认值钉在「**用好 LLM 做设计**」一侧:下限有 validator 兜底,上限只能靠 LLM 多做创造(补文案、补内容、为 hero 页写 bespoke layout)。(CHECK-ONLY readers skip this section.)
+1. **Parser** if the user uploaded files or raw materials. Spawn a Parser worker
+   when multi-agent dispatch is available.
+2. **Designer** to produce scenario, `design_plan`, and `outline.json`. Spawn a
+   Designer worker when multi-agent dispatch is available.
+3. **Renderer** to produce `deck.json`, render HTML, and prepare handoff files.
+   Spawn a Renderer worker when multi-agent dispatch is available.
+4. **Validator** before any HTML handoff. Whether the HTML came from Renderer or
+   a later Editor pass, run Validator and fix non-zero findings before local
+   delivery or publish confirmation. Spawn a Validator worker when multi-agent
+   dispatch is available.
+5. **Simulator** only if the user asks for pitch rehearsal, customer reaction
+   simulation, stakeholder objections, or improvement advice after local HTML
+   delivery. Spawn a Simulator worker when multi-agent dispatch is available.
+6. **Publisher** only after the user confirms the HTML can be published. Spawn a
+   Publisher worker when multi-agent dispatch is available.
 
-### 默认执行 + 确认门按风险触发
-- **设计思考永远跑** —— 逐页判定 raw vs 白名单 schema、定补全计划、给每张 raw 页写页级 spec。every run 都做,**不因「用户说直接出」就跳过 thinking**。
-- **确认门(raw-first 立场下)**:raw 页 = beyond-default,需确认设计意图——但**批量 deck 一次性过整张 raw 方案表**(逐页停会烦死人);**命中白名单回退 schema 的页 → 宣告即走**。逐页增量喂时,每张 raw 页设计完单独过一下确认再落。用户明说「直接出 / 别问」→ 跳过的是确认那一下,不是设计思考。
-- **转换已有材料(PDF/PPT/HTML)→ 默认 1:1 页数**,先看 `references/converting-existing-material.md`(Replica vs Rewrite 路由)再开工。
-- **退化场景**(设计阶段坍缩成一句话):Replica PDF 1:1 贴图 / 单页精修(只动这页,标题 verbatim)/ 用户已明确给定 layout。
+For an existing deck:
 
-### 四步骨架
-- **Step 1 · Deck 级**:叙事弧 + 页数(转换默认 1:1)· **逐页判定 path:命中「纯标准形状白名单」→ 该 schema;否则 → `layout: raw` + 词汇库 pattern(主场)**(白名单见 `DECK GENERATION POLICY`;判断永远 per-page,默认 raw,回退 schema 才要举证)· 内容/文案补全计划(默认就补,见 CONTENT-DENSITY;唯一硬护栏:**不编 attributed facts** —— 具体公司数字/具名引语/来源出处)。
-- **Step 2 · 页级 spec**:**每张 raw 页**必填 Q0–Q4 + 六维 + 先翻设计词汇库再落 pattern · 回退 schema 的白名单页轻量(角色判断 + Decision rule 确认它真是标准形状)· **每页必走 density budget**:写一行「核心块 X + 支撑 Y(含下沉) ≤ layout 容量 Z」,装不下回 Q1 砍内容,不回头压字号。
-- **每页判断视觉丰富度(别让整 deck 全是「彩边文字卡」)**:逐页想这页要不要视觉元素 —— 纯文字页考虑配**图标**(deck.json 的 `icon` 字段,名字见 render-deck.py `ICON_LIB` ~43 个 Lucide;`content/3up`、`stats/row` 原生支持)/ 配图 / 插画 / 用 `layout: raw` 做更丰富的 hero 页。**有数据要呈现 → 优先 `layout: chart`(`bar` 跨类比较 / `line` 时间趋势,1-3 线 / `donut` 占比构成),给数字 renderer 出确定性真图表,比堆 KPI 文字卡信息密度更高、更图表化**(增减归因仍用 `stats/waterfall` 桥图)。按内容判断、不强制每页都加;光靠默认 schema 文字卡会显得平。validator `R-VIS-NO-IMAGERY` 仅在整 deck 大部分页都零图像时**建议性**提醒(不阻塞,richness 是你的设计判断)。
-- **Step 3 · 输出设计方案**:chat 出 Design pass 表(角色/唯一重点/path = **raw 还是回退 schema**),**raw 页**各附一句 design intent;表里要让用户一眼看到「**哪几页回退了 schema、为什么**」(默认 raw,回退是少数、要给理由)。
-- **Step 4 · 闸门 + 落盘**:raw 页 → 过确认(批量一次性过整张方案);回退 schema 的页 → 宣告即走。确认后:PREFLIGHT → new-run → **把锁定方案写 `runs/<ts>/output/DESIGN-PLAN.md`**(顶部可标 `stance: raw-first|schema-first`;与 PROMPTS.md 同级),生成严格照它走;偏离先回来改 plan,不静默漂移。
+1. Use **Validator** for check-only review. Spawn a Validator worker when
+   multi-agent dispatch is available.
+2. Use **Editor** for edits, reskin, lift/swap, import/conversion, or round-trip
+   recovery. Spawn an Editor worker when multi-agent dispatch is available unless
+   the task is a known small edit.
+3. Use **Renderer** only when a changed `deck.json` or `outline.json` must be
+   re-rendered. Spawn a Renderer worker when multi-agent dispatch is available.
+4. Run **Validator** before any HTML handoff after Editor or Renderer changes,
+   and fix non-zero findings before local delivery or publish confirmation.
+5. Use **Simulator** only after the deck has passed Validator and the local HTML
+   artifact has been delivered, when the user asks for rehearsal or improvement
+   advice.
+6. Use **Publisher** only after explicit publish confirmation. Spawn a Publisher
+   worker when multi-agent dispatch is available.
 
-### Step 5 · 密度闸门(每次 render 后过一遍,通过再交付)
-**EXISTS-and-runs:每次 render 出来后必跑**。只查密度,不质疑焦点(focal 由 Q1 + R-FOCAL-CHECK 接管)。过密信号命中 ≥1 即过密:单条非点题正文 >30 字 / 单块 ≥5 内联元素 / 块间距 < 块高 1/4 或核心块距画框 <60px / 主副标题同事或三层重复 / 支撑每项 >1 行带强装饰 / 顶部长句占大色块。降密 4 方向都做:块内压实(长句→名词短语,内联 ≤3)· 块间松气(核心块四周 ≥80px,禁贴边)· 冗余清理 · 支撑下沉(底部窄带/cfoot,每条「名称+一行+色点」)。**眯眼测试**:缩 1/3,主结论可识别 AND 装饰糊成一片 → 通过。与 validator 分工:R-VIS-BALANCE / R-VIS-BODY-FLOOR 查几何信号,字数/冗余/装饰堆积由本 Step 人工兜底。
+## Shared Contracts
 
-### 批量 vs 增量
-按用户喂法自动选:一次性给全 → 批量(方案表→确认→一次 new-run+落 plan+生成全 deck);逐页喂 → 增量,**设计一页就执行一页,别攒**(第一页就 new-run,逐页 render/append,deck.json 与 DESIGN-PLAN.md 逐页增长)。拿不准就增量。
+- `deck.json` is the source of truth. `index.html` is derived.
+- Work happens inside `runs/<timestamp>-<slug>/`. After preflight and before any
+  new generation, create a run with `assets/new-run.sh <slug>` and announce the
+  absolute run path. Use a short ASCII slug derived from the topic/customer; do
+  not use a bare timestamp unless there is no usable topic.
+- Inputs live in `runs/<...>/input/`; parser output lives in
+  `input/runtime-library/`, with `source-dossier.json`, `assets/`,
+  `source-library/raw/`, and `source-library/fetched/`.
+- Designer writes `runs/<...>/output/outline.json` and `DESIGN-PLAN.md`.
+- Renderer writes `runs/<...>/output/deck.json` and `index.html`.
+- Validator reports must be scoped to the locked pages/run unless the user asked
+  for whole-deck review.
+- Simulator writes `runs/<...>/output/pitch-rehearsal.json` and
+  `PITCH_REHEARSAL.md`; it does not publish, ingest, or automatically modify the
+  deck.
+- Publisher must not publish until the user has confirmed the exact HTML artifact.
+- Every `.slide` must have a stable semantic `data-slide-key`. Schema rendering
+  adds it automatically; hand-authored/lifted HTML must preserve or add it before
+  delivery.
+- Chinese-only is the default language unless the user explicitly asks for
+  bilingual or external English-facing output.
+- For each generation run, record the user's asks in `PROMPTS.md`; for production
+  deck work, keep the making-of log under `runs/<deck>/log/` via
+  `log-tool/deck-log.py` when practical.
+- Do not hand back a single linked HTML file as final delivery. Run the delivery
+  workflow so framework assets/shared assets are portable or the output is truly
+  self-contained.
+- `screen_label` numbers may drift after lift/insert/reorder. The canonical page
+  identity is `page N = frame_index N = slides[N-1]`; use
+  `deck-json/locate-slide.py` for source/target lookup and
+  `render-deck.py --renumber` on target DeckJSON when labels need to match true
+  frame order.
 
-> 📎 细节见 `references/design-phase.md`
+## Cloud Knowledge / Asset Base
 
-## CHECK-ONLY MODE
+Use this Feishu Base as the shared cloud knowledge and asset library when designer,
+renderer, parser, or publisher need cloud context:
 
-用户给成品 HTML 要审/校验时,跑 `bash assets/check-only.sh <html>`。**标准输出 =
-逐页业务报告**(默认):逐页列出(干净页标 ✅)· 业务语言(不抖 R06/R-VIS-TIER
-术语)· 区分 🔴 错误 / 🟡 提醒 · 同页同类问题合并计数 · 末尾给「最该先看哪几页」
-小结。**所有人调用得到同一格式**(由 `validate.py` 生成,业务文案在
-`assets/business-rules.yaml`,非工程师可直接改)。**直接把这份报告给用户,别自己
-按规则代码重新归类**。逃生口:`--by-rule`(工程师家族视图)· `--gate ingest`(库准入)。
+`https://bytedance.larkoffice.com/base/DBtybdvHYaovVwsWLatcipJBnrg?table=tblRIgS1rgDpUPW0&view=vewaY9hqu7`
 
-> 📎 详见 `references/check-only.md`(标准报告格式 / flags / ingest 门禁)
+When operating the Base, load the `lark-base` skill and use `lark-cli base +...`
+commands with `--as user`. Extract:
 
-## RESKIN MODE — foreign HTML → feishu chrome (mechanical, one-shot)
+- `base_token`: `DBtybdvHYaovVwsWLatcipJBnrg`
+- `table_id`: `tblRIgS1rgDpUPW0`
+- `view_id`: `vewaY9hqu7`
 
-> 📎 RESKIN 换皮:**先 grep 源 canvas — 必须 1920×1080,否则 reskin 拒跑(exit 3);任何非机械权衡先问用户(META-RULE)**。详见 `references/reskin.md`
+Do not pull entire Base contents into chat context. Query only the records needed
+for the current scenario, asset lookup, or publish record.
 
-## PREFLIGHT (mandatory, blocks all work) — local mount required
+## Preflight
 
-This skill is **ONLY valid in local-mount mode**. If the user has not
-mounted a writable local folder, the skill MUST refuse to proceed and
-must NOT write anything to ephemeral session storage.
-
-### Why this is mandatory
-
-Decks generated in temporary session storage (`/sessions/.../mnt/outputs/`)
-are **wiped between conversations**. Without a local mount:
-
-- The user loses the deck the moment the conversation ends.
-- Brand assets (`lark-*.png/jpg`) can't be reused across decks.
-- Multiple people on the same team can't collaborate or version-control.
-- The user can't `git commit` what they generated.
-- The generated HTML can't be opened in the user's own browser via
-  `file://` because the session is sandboxed.
-
-The skill is designed for persistent, team-shareable, version-controlled
-decks. Running without a mount defeats every reason this skill exists.
-
-### Required preflight steps (run IN ORDER)
-
-**Step P-1.** Check `<env>` in your system context for the line
-`User selected a folder: yes/no`.
-- If `yes` → continue to Step P-2.
-- If `no` → go to Step P-3 (request mount).
-
-**Step P-2.** Verify the mount is writable by running:
-
-```bash
-bash assets/preflight.sh
-```
-
-The script exits 0 on success and prints one of two stdout markers:
-
-- `PREFLIGHT OK` — skill root is writable; proceed normally from
-  the current directory.
-- `PREFLIGHT BOOTSTRAPPED` — skill root was read-only (e.g. Mira-style
-  harness mounting the skill RO). The script auto-mirrored the skill
-  into a writable workspace and printed its path. **You MUST `cd` into
-  that workspace before any further skill commands.** See Step P-2.4.
-
-Exit codes 1 / 2 / 3 mean: missing files or no mount / read-only AND
-no writable bootstrap area / running from ephemeral output. Any
-non-zero exit blocks all subsequent work.
-
-**Step P-2.4.** If preflight printed `PREFLIGHT BOOTSTRAPPED`, the
-skill is mounted read-only and a writable mirror was just created.
-Parse the `workspace (RW) : <path>` line from the output and `cd`
-into it before doing anything else:
+Before any generation/render/edit that writes files, ensure the repository or skill
+workspace is writable:
 
 ```bash
-cd "<workspace path from preflight stdout>"
+bash skills/feishu-deck-h5/assets/preflight.sh
 ```
 
-Once inside the workspace, EVERY subsequent skill command —
-`assets/new-run.sh`, `deck-json/render-deck.py`, `assets/validate.py`,
-`build.sh`, `assets/package-deliverable.sh` — runs from this
-workspace, NOT from the original RO mount. The `runs/<ts>/output/`
-artifact will land here; that's the path you hand back to the user
-per the Hand-back rule (see DELIVERY MODES below).
-
-If the harness can pre-set `FS_DECK_WORKSPACE` to a known location,
-honor it — preflight uses that value when present. Otherwise the
-default is `$PWD/.feishu-deck-h5-workspace/`.
-
-Why this exists: harnesses like Mira mount the whole skill RO. We
-can't write `runs/<ts>/{input,output}/` next to `assets/` in that
-case, so preflight rsyncs the skill into a writable area and chmods
-the mirror back to writable. All relative paths inside the skill
-keep working because the workspace IS a complete copy.
-
-**Step P-2.5.** If the script's stdout contains the line
-`WARNING · another clone of this repo lives on disk:`, the user has
-TWO checkouts of `feishu-deck-h5` on the machine (e.g. one in
-`~/Documents/Github/feishu-deck-h5/` and one in the Claude Code
-session-mount path). Outputs you create here will NOT appear in the
-other one — same GitHub remote, different filesystem directories.
-
-**STOP. Do NOT call `new-run.sh` yet.** Surface the conflict to the
-user and ask which clone they want this run's deck to land in:
-
-> "我看到你机器上有两份 feishu-deck-h5 的 clone：
-> · 我现在挂载的：`<current skill root>`
-> · 另一份：`<other clone path>`
->
-> 这次生成的 `runs/<ts>/` 只会出现在我挂载的这份里。如果你平时
-> 在另一份编辑/commit，我建议切到那份再继续。要切吗？"
-
-If the user says "切到 X" / "use the other one", abort this run and
-ask them to re-invoke the skill with Claude Code mounted at the
-other path. If the user says "use this one" / explicitly picks the
-current root, proceed to Step W-1.
-
-**Step P-3.** Call `mcp__cowork__request_cowork_directory` and ask the
-user to select their project folder. Phrase the request like:
-
-> "I need to mount your local working directory before generating a
-> deck — outputs need to persist beyond this session and be available
-> in your editor / browser. Please select the folder where you want
-> the deck files to live (e.g. `~/Projects/2026-customer-deck/`)."
-
-**Step P-4.** If the user declines or the mount call fails or P-2 still
-fails after P-3, STOP and reply with this exact message:
-
-> "feishu-deck-h5 requires a local mounted folder so generated decks
-> persist beyond this conversation, can be opened in your browser, and
-> can be version-controlled. I can't proceed without one. Please select
-> a working directory and ask me again, or use a different tool that
-> doesn't require local persistence."
-
-**Do NOT** generate any HTML in `/sessions/*/mnt/outputs/`. **Do NOT**
-hand-wave with "I'll generate it temporarily". **Do NOT** offer to
-inline everything into a single message. The skill is gated; honor the
-gate.
-
-### What "local mount" looks like in practice
-
-| State | Filesystem indicator | Action |
-|---|---|---|
-| User cloned the repo + mounted | `~/Projects/feishu-deck-h5/` mounted; SKILL.md visible | OK, proceed |
-| User mounted a parent project folder | `~/Projects/q1-pitch/` mounted; cloned skill in subfolder OR via plugin install | OK, proceed |
-| User mounted a fresh empty folder | Mounted but no skill files yet | Copy skill files into the mount first (`git clone` or copy from `~/.claude/skills/`), then proceed |
-| Harness mounts skill read-only (Mira / sandbox) | `preflight.sh` prints `PREFLIGHT BOOTSTRAPPED` and exit 0 | `cd` into the workspace path it printed, then run all skill commands from there (Step P-2.4) |
-| User has not mounted anything | `User selected a folder: no` in env | Request mount, refuse if declined |
-| Working in `/sessions/*/mnt/outputs/` only | `preflight.sh` returns exit 3 | Treat as no-mount, refuse |
-| Skill RO AND no writable area for bootstrap | `preflight.sh` returns exit 2 | Tell the user to set `FS_DECK_WORKSPACE` to any writable directory, or mount the skill RW |
-
-The skill treats "ephemeral outputs only" the same as "no mount" — both
-are non-persistent and equally broken for this skill's purpose.
-
----
-
-## DECK GENERATION POLICY (mandatory) — raw-first 立场,schema 给「标准形状白名单」
-
-> **🎯 默认立场 = raw-first(2026-06-01 翻向)。** 这技能服务设计驱动的客户 pitch,
-> 主场是 `layout: "raw"` 的 bespoke 设计。schema 不再是"95% 默认",而是**只在内容
-> 命中「纯标准形状白名单」时回退的省力路径**。判断永远 **per-page**(不是 deck 级);
-> 举证责任在 **schema** 一侧:**默认 raw,只有命中白名单才落 schema**。
->
-> **raw-first 仍是 Path A**:`layout: "raw"` 是 deck.json 内的一等 layout,写 deck.json、
-> 走 `render-deck.py` + `validate.py` 全套闸门。Path B(整页手写 `index.html`)依旧是
-> 极少用的逃生口,**raw-first ≠ Path B**。
->
-> **纯标准形状白名单(命中才回退 schema;raw 碰了纯属过度处理 = 多花手工 / 更大 bug 面 / 更难编辑 / 零设计增益):**
->
-> | 形状 | 用 |
-> |---|---|
-> | 封面(标题 + 发起人 + 日期) | `cover` |
-> | 收尾(slogan + 联系方式) | `end` |
-> | 单句原话 + 署名 | `quote` |
-> | 纯目录 3–8 项,无视觉 | `agenda` |
-> | 单排 3–4 个 KPI 数字,无示意图 | `stats/row` |
-> | **纯并列 N 卡 = 图标 + 标题 + 正文,无示意 SVG · 无动画 · 无关系/层级/隐喻结构** | `content/3up` 或 `content/blocks` |
-> | 纯文本对比矩阵(行 × 列) | `table` |
-> | PDF 保真页 | `replica` |
->
-> **除此之外一律 raw。** 有对位 / 关系 / 叙事 / 隐喻 / 空间 / 动画实质的页 = 不命中 = raw。
-> `R-RAW-LOOKS-SCHEMA`(advisory)是唯一机械兜底:一张 raw 页若命中白名单形状 → 提醒改 schema。
-> (作废:早期讨论过的 `R-NO-ELEVATION` / 比例 cap `R-TOO-MUCH-RAW` 都不要——固定比例假设"raw 多 = 偷懒",
-> 对设计驱动的 deck 相关性是反的,89% raw 的好 deck 常态。)
->
-> **🔒 raw 安全的硬前提 = raw 必须是「框架原语组合」,不是裸写 CSS**:字号一律
-> `var(--fs-title|--fs-sub|--fs-body|--fs-foot)`(F-59,见「`layout: raw` for hero pages」),
-> 组件优先 `fs-` 类 / `narrative patterns A–N`(见 `DESIGN-FIRST POLICY`),别 ad-hoc 起类名。
-> 原语替你扛 R20 / R06 / floor;**没有这条,raw-first 会把兜底拆掉、坑到非资深用户**。
->
-> **退回旧的 schema-first 安全默认**(非资深用户 / 求稳 / 像 Mira 那种从零 harness):用户显式说
-> "schema-first / 安全模式 / 多用标准 layout",或在 `DESIGN-PLAN.md` 顶部标 `stance: schema-first` →
-> 逐页判断反过来(默认 schema,只有 schema 装不下 / 服务不足才升 raw)。
-
-**After PREFLIGHT passes, decide HOW you'll author the deck. Two paths:**
-
-| Path | When | What you write | What renders |
-|---|---|---|---|
-| **A · DeckJSON-first** *(渲染管线 · raw 与 schema 都走这里)* | 所有 deck 都走 deck.json。**`layout: "raw"` 是主场**(默认);schema layout(12 base + `replica` / `iframe-embed`)只给命中上面白名单的页 | `runs/<ts>/output/deck.json`(raw 页填 `data.html`,白名单页填 schema 字段) | `python3 deck-json/render-deck.py deck.json runs/<ts>/output/` → produces `index.html + assets/` automatically |
-| **B · Raw HTML authoring** *(escape hatch · 整页手写 `index.html`,极少用)* | A pattern genuinely doesn't fit any schema layout AND can't be expressed as a `layout: "raw"` slide | Hand-author `index.html` per the R02 / R06 / R20 / L1-L4 / BF1-BF12 rules below | Skill's existing `validate.py` HARD GATE before delivery |
-
-> **注意区分 `layout: "raw"`(Path A 内)与 Path B(整页手写)**:hero 高光页用
-> `layout: "raw"` 单页 bespoke —— 它仍在 deck.json / render-deck.py 管线内、仍过
-> validate.py,是**一等设计工具**(见下「`layout: raw` for hero pages」)。Path B
-> 是连 `layout:"raw"` 都表达不了时才整页手写的最后手段。
-
-**Why 命中白名单的页要用 schema、别用 raw**(这些正是 schema *严格优于* raw 的地方;对**非**标准形状,raw 的设计自由度才值得放弃下面这些好处):
-- **Stability**: HTML/CSS bugs raw 页会踩的(R20 off-tier font, R06 floors, R12 drop shadows, BF1-BF12 layout traps, R-CSSVAR undefined tokens),标准形状走 schema 全免——你写 data,不写 CSS。Renderer + framework CSS 替你扛。
-- **Editability**: copy edits are `deck-cli set slides.N.data.<field>` on `deck.json` (structure-preserving), or in-browser via the built-in visual editor (press E) for downstream reviewers — no separate sidecar to keep in sync.
-- **Versionability**: deck.json diffs cleanly in git. Compare two pitch versions by JSON diff, not 1500-line HTML diff.
-- **Composability**: Reorder / insert / delete slides = JSON array mutation. No more regex-eating-`</div>` (R-DOM defense exists for a reason).
-- **Future**: Phase 3 CLI editor + Phase 4 visual editor edit the SAME deck.json. Path A future-proofs the work.
-
-**Quick start**:
-
-```bash
-# 1. After PREFLIGHT + WORKSPACE creation, write deck.json (see inline
-#    minimal example below — copy it verbatim and edit fields)
-$EDITOR runs/<ts>/output/deck.json    # full templates in deck-json/examples/
-
-# 2. Render — produces index.html + (optionally) assets/
-python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
-
-# 3. (optional) single-file delivery for email attachment / Slack drop
-python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/ --inline
-```
-
-The renderer does triple-gate: DeckJSON schema → HTML render → existing `validate.py` (R02/R06/R20/L1-L4/BF1-12/R-CSSVAR/R-WHITE-TEXT/all). Any error = render fails. **Same bar as Path B's manual gate, but enforced for you**.
-
-**After the initial render, iterating on the deck — 3 options ordered by ergonomics**:
-
-```bash
-# Option A · Direct JSON edit (best for batch / structural rewrites)
-$EDITOR runs/<ts>/output/deck.json
-python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
-
-# Option B · Atomic CLI ops (best for one-shot changes; auto-backup + validate + rollback)
-python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title "新标题"
-python3 deck-json/deck-cli.py runs/<ts>/output/deck.json clone three-pillars three-pillars-v2
-python3 deck-json/deck-cli.py runs/<ts>/output/deck.json reorder 5 2
-python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set-variant kpi-4up hero
-# lift a page FROM another deck (deck.json-native, +assets, auto de-collide key):
-python3 deck-json/deck-cli.py DST/deck.json paste --from SRC/deck.json --key five-judgments
-# 15 subcommands total — see deck-json/DECK-CLI-README.md
-
-# Option C · WYSIWYG · edit the rendered HTML directly in your browser
-# (default-on since 2026-05-21: every rendered deck auto-loads
-# assets/edit-mode/deck-edit-mode.{css,js}. Press E to enter edit mode,
-# Esc to exit, Cmd/Ctrl+S to save. Zero deps, runs from file:// or
-# https://.)
-```
-
-**Inline minimal example** (4 slides, every required field). Copy this verbatim, then iterate:
-
-```jsonc
-{
-  "version": "1.0",
-  "deck":  { "title": "Q2 OKR 复盘", "author": "团队 A", "date": "2026-05" },
-  "slides": [
-    { "key": "cover",  "layout": "cover",   "accent": "blue",
-      "data": { "title":  "Q2 OKR 复盘\n5 个关键判断",
-                "author": "团队 A",
-                "date":   "2026-05" } },
-    { "key": "agenda", "layout": "agenda",  "accent": "blue",
-      "data": { "items": [
-        { "title_zh": "目标回顾" },
-        { "title_zh": "完成度评估" },
-        { "title_zh": "关键经验" },
-        { "title_zh": "Q3 重点" } ] } },
-    { "key": "outcomes", "layout": "content", "variant": "3up", "accent": "teal",
-      "data": { "title": "三个关键结论",
-        "cards": [
-          { "num": "01", "title_zh": "结论一", "body": "..." },
-          { "num": "02", "title_zh": "结论二", "body": "..." },
-          { "num": "03", "title_zh": "结论三", "body": "..." } ] } },
-    { "key": "end",    "layout": "end",     "accent": "blue",
-      "data": { "title": "下一步", "contact": "team-a@example.com" } }
-  ]
-}
-```
-
-Then `python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/`. The renderer fills in everything else — wordmark, page numbers, present-mode UI, all typography ladders. You only describe **what**, not **how**.
-
-### When Path A is the right choice
-
-Use DeckJSON whenever the deck consists of slides matching any of:
-
-| Layout | Variants | Use for |
-|---|---|---|
-| `cover` | — | Title page |
-| `agenda` | — | TOC, pill stack |
-| `section` | — | Chapter divider with big numeral (optional `parent_label` for subsection) |
-| `content` | `3up` / `2col` / `story-case` / `blocks` / `matrix` / `before-after` | 3 cards / 左文右图 / 一页纸案例 / 全宽 body / 2×2 矩阵 / 痛点→解决方案对比 |
-| `stats` | `row` / `hero` / `waterfall` | 3-4 KPI row / 1 hero number / 桥图 |
-| `chart` | `bar` / `line` / `donut` | 跨类比较柱图 / 时间趋势折线(1-3 线) / 占比构成环图 — 给数字,renderer 算几何出确定性 SVG/CSS(无 JS),比文字 KPI 卡更图表化 |
-| `quote` | — | Single customer quote |
-| `image-text` | — | Full-bleed photo + overlay text |
-| `table` | — | Comparison matrix |
-| `flow` | `timeline` / `process` / `tree` / `swim` | Timeline / process steps / MECE tree / multi-lane roadmap |
-| `logo-wall` | — | N industries × M client-logo grid |
-| `arch-stack` | — | 2-5 layer architecture diagram (apps / platform / AI / data) |
-| `end` | — | Closing slide (optional `slogan` for branded sign-off) |
-| `replica` | — | PDF page-as-image (for PDF→HTML conversion) |
-| `iframe-embed` | — | Embed a live HTML prototype with a deck title bar + 飞书 wordmark (Prototype embed Mode B) |
-| `raw` | — | Escape hatch for one-off custom slides |
-
-Plus 10 embeddable blocks (pullquote / cta-box / kpi-strip / data-panel / principle-band / verdict-grid / phone-iframe / testimonial-card / mockup-card / persona-card) that compose inside `content/3up` / `content/2col` / `content/blocks`.
-
-Deck-level theme: `deck.title_style` (4 styles · center-single/center-double/left-double/left) × `deck.logo_position` (front/back) = 8 master-variant combinations. Per-slide override via `slide.title_style` / `slide.logo_position`.
-
-**Full schema + field reference**: `deck-json/deck-schema.json`
-**Worked examples**: `deck-json/examples/sample-deck.json` (14 slides — the 10 core layouts: cover/agenda/section/content/stats/flow/quote/image-text/table/end) · `deck-json/examples/phase-1c-extras.json` (the extras: content-blocks/matrix/before-after, flow-tree/swim, stats-waterfall, logo-wall, arch-stack, replica). `iframe-embed` + `raw` have no example deck yet.
-**Migration notes**: `deck-json/MIGRATION-REPORT.md`
-
-### `layout: raw` for hero pages — 一等工具,不是兜底
-
-raw-first 立场下,**`layout: "raw"` 是大多数页的默认主场**(只有命中「纯标准形状
-白名单」的页才回退 schema,见 `DECK GENERATION POLICY`)—— 它是"用好 LLM 做设计"
-的主战场,不是失败兜底。三件事记牢:
-
-- **raw ≠ 失控**:`layout: "raw"` 仍走 `render-deck.py` + `validate.py` 全套
-  HARD GATE(R10 brand hex / R12 no-drop-shadow / R13 / 4-tier ladder /
-  R-WHITE-TEXT / UI1 … 全在)。floor 由 validator 兜,你只管把 ceiling 做高。
-- **字号一律引用框架变量,不写裸 `px`(F-59,硬要求)**:schema 页字号 100%
-  来自模板(作者无处写 px → 不可能 off-ladder);raw 页你自己写 CSS,只要写
-  `font: ... 30px` 就脱梯。正解 = 引用 `:root` 已定义的四档语义变量
-  `var(--fs-title|--fs-sub|--fs-body|--fs-foot)`,把 correct-by-construction
-  搬回 raw 路径。四档速查表(梯子 = 飞书母版定,别造第五档):
-
-  | 变量 | 值 | 用途 |
-  |---|---|---|
-  | `var(--fs-title)` | 48px | content 页 Action Title |
-  | `var(--fs-sub)` | 28px | 副标题 / 栏标题 / 强调 / 导语 |
-  | `var(--fs-body)` | 24px | 正文 / 列表项 / 表格单元格 / 图注 |
-  | `var(--fs-foot)` | 16px | 脚注 / eyebrow / pill / tag / 出处 |
-
-  唯一例外 = **hero 大字**(cover / section / big-stat / end / quote 的母版级
-  巨号字,如 92/100px),那是 hero 专属、不受四档梯子约束;**content 区一律走变量**。
-- **门槛 = Q2 六维 spec**:写 raw 前必须先在 chat 出该 raw 页的 Q0–Q4 + A 档
-  六维(见 `DESIGN-FIRST POLICY` 设计前预检)。六维写不出来 = 还没想清楚 =
-  先别写 raw。
-- **先翻词汇库再硬写**:`narrative patterns A–N`(双手架构 / 铁四角 /
-  scene-grid / 北极星地图 / 5-up 大号数字 …)+ `component utility classes`
-  多半已有现成 pattern,优先复用。
-
-命中白名单的**纯标准形状页**(封面 / 收尾 / 单 quote / 纯目录 / 单排 KPI / 纯并列卡 /
-纯对比表 / replica)回退 schema 求稳;其余页放开做 raw。**不是"省着用 raw",而是
-"标准形状省着用、其余都该 raw"** —— 唯一约束 = raw 必须走框架原语(上面 F-59 四档变量
-+ 词汇库 pattern),别裸写 CSS;`R-RAW-LOOKS-SCHEMA` 会抓"长得像标准形状却用了 raw"的过度处理页。
-
-### When to escape to Path B (整页手写 HTML)
-
-连 `layout: "raw"` 单页都表达不了时,才整页手写。**only** when:
-
-1. **No schema layout fits the structural shape** — e.g. the "two-hand-architecture" with crown/SVG-arches/base requires highly specific 4-tier vertical DOM that doesn't map cleanly to any layout. Use `layout: "raw"` first; only fall back to full Path B if even `raw` won't suffice.
-2. **One-off design experiment** — you're prototyping a brand-new visual pattern that may or may not become a recurring layout. Path B lets you iterate freely. **If the pattern recurs ≥ 2 decks, propose a schema extension** (see deck-json/MIGRATION-REPORT.md Phase 0.2 process) instead of building 5 raw slides.
-3. **Replica mode (PDF→HTML conversion)** — actually use `layout: "replica"` per-slide (still Path A); only escape to Path B if the page-image approach isn't acceptable to the user.
-
-**Anti-patterns** (do NOT escape to Path B for these):
-- "I want this title 18 px instead of 24" → that's R20 drift, not a schema gap. Fix the content or accept the tier.
-- "The schema has `content/3up` but I want 4 cards" → ask: is this `content/3up` with denser cards, or `content/blocks` with a custom 4-card grid? Either fits.
-- "I'm not sure which layout matches" → read `deck-json/MIGRATION-REPORT.md` Phase 0.2 — the 4-proposal evaluation shows the decision process.
-
-### How Path A turns existing R-rules into "no-ops you don't think about"
-
-Most of the rules later in this file (R02 missing data-layout, R06 font floor, R20 type ladder, R10 hex palette, R12 drop shadows, R-CSSVAR undefined tokens, L1 logo default, L2 stage balance, L4 attrs density, BF1-12 layout defenses, R47 variant discipline, R48 default centering, R49 cyan accent, R56 header minimal, UI1 ui-mocks-as-HTML, P50-55 perf budget) **are about correct HTML/CSS output**. The renderer enforces all of them automatically because:
-
-- Templates are hand-tuned (4-tier ladder, brand tokens, correct alignment defaults)
-- Enrichers fill optional fields safely (no missing-attr crashes)
-- HTML validator runs as a HARD GATE on every render
-
-**If you're going Path A, you don't read those rules unless you're modifying a template** — the framework already implements them. The rules below are critical for Path B authors and for skill maintainers extending the templates.
-
-### Troubleshooting Path A (when render fails)
-
-The renderer's triple-gate is loud about failures — read the error message before trying to "fix" anything. Common failure modes:
-
-| Symptom | What it means | What to do |
-|---|---|---|
-| `validate-deck: ...` (Step 1) | DeckJSON schema violation (missing required field, wrong enum value, wrong shape) | Read the path the error reports; fix in `deck.json`; re-run |
-| `render-deck: missing field {{{ X }}}` (Step 3) | Template references a data field that's missing or null | Some optional fields' templates expect them when present — check the `optional` annotation in `deck-schema.json`; either fill the field or use a different layout |
-| `validate.py: ✗ Rxx ...` (Step 6, HARD GATE) | Generated HTML failed framework rule. **Almost never your fault** if you went Path A — it's a renderer / framework bug | Capture full error; report at `https://github.com/<repo>/issues` with the deck.json and the validate.py output. Workaround: comment out the offending slide with `_disabled: true` (renderer skips), keep going, fix it offline |
-| Render OK but visual looks wrong | Renderer succeeded but the slide design has a problem (overflow, text too small, wrong color) | Run `bash skills/feishu-deck-h5/assets/check-only.sh runs/<ts>/output/index.html --visual` for visual audits (R-OVERFLOW / R-VIS-TIER / etc.) — they catch what static validate.py can't |
-
-**When you must escape mid-deck**:
-
-If 1-2 specific slides won't fit the schema but everything else does:
-
-```json
-{ "key": "weird-layout", "layout": "raw", "data": {
-    "html": "<div class=\"slide\" data-layout=\"raw\" ...>...</div>" } }
-```
-
-`layout: raw` lets you hand-author one slide while keeping all OTHER slides on Path A. The HTML you write is escape-hatched into the deck shell as-is. **Don't** abandon Path A wholesale for one weird slide.
-
-### Editor / CLI quick reference (cross-link)
-
-| Tool | Use case | Doc |
-|---|---|---|
-| `deck-json/render-deck.py` | Render deck.json → HTML (always runs first) | inline help: `--help` |
-| `deck-json/deck-cli.py` | 15 atomic ops on deck.json (set / set-accent / set-decor / set-variant / reorder / move-key / insert / delete / clone / **paste** / render / list / get / show / lint) — auto-backup + revalidate + rollback. **`paste --from SRC --key K` is the deck.json-native lift** (copy a slide from another deck + its assets) | `deck-json/DECK-CLI-README.md` |
-| `deck-json/validate-deck.py` | Standalone schema lint of deck.json (called by render-deck.py + deck-cli.py automatically) | inline help |
-| `deck-json/sync-index-to-deck.py` | **Detect + recover post-render drift** — port edits made directly to index.html back into deck.json so re-render is byte-identical. Run before any fork / library ingest / delivery. | see ROUND-TRIP INTEGRITY section |
-| `assets/lift-slides.py` | Lift a slide from a FOREIGN / legacy deck (no `custom_css`) — `--index` lists slides, `--key K` selects, tree-shakes framework CSS + copies assets into a `layout:raw` entry | see LIFTING section |
-| `assets/check-only.sh` | Audit an EXISTING `.html` deck (Path A or B output) against all framework rules | see CHECK-ONLY MODE section above |
-
-> *Visual editing — default on since 2026-05-21*. Every rendered deck
-> ships with a zero-dep client-side editor (`assets/edit-mode/deck-edit-
-> mode.{css,js}`, ~663 LoC). The shell templates (`_shell.html`,
-> `_bundle-shell.html`, `big-stat.html`, `one-pager-case.html`,
-> `quote.html`) inject the `<link>` + `<script>` + `<body class="deck-
-> edit-mode">` by default, and copy-assets.py automatically copies the
-> editor into `output/assets/edit-mode/` because the HTML references
-> it. Press **E** to enter edit mode, **Esc** to exit, **Cmd/Ctrl+S**
-> to save. On Chromium-based browsers, the first save shows an
-> authorization dialog, then the native picker; choose the current HTML
-> file once (macOS may label the system button "Open") and later saves
-> overwrite silently via the File System Access API. Other browsers use a
-> download fallback. Drag a slide-frame to reorder; click any text leaf to edit it directly. Runs from file://
-> or https:// — works for `feishusolution`-style GitHub Pages
-> deployments. To opt out for a specific deck (e.g. delivery zip
-> destined for read-only viewers), strip the two edit-mode lines + the
-> body class — the deck still renders normally without them.
->
-> The pre-2026-05-21 server-side editor (`deck-editor.py` + Python
-> server + browser UI) was retired in favor of this client-side
-> approach (no server to run; works on static hosts; one file flip
-> to enable/disable).
-
----
-
-## DESIGN-FIRST POLICY (mandatory) — 给文案就先出设计方案,别直接动手
-
-> 📎 详见 `references/design-first.md`
-
-## WORKSPACE LAYOUT (mandatory) — per-run `runs/<timestamp>/` folder
-
-PREFLIGHT 通过后、**生成任何 HTML 之前**,必须建一个新的 per-run 工作目录并向用户宣告。非协商约定(多次尝试不互相覆盖、素材与产物分离、每 run 带时间戳易归档)。
-
-### 结构
-`runs/` 在**仓库根**,NOT 在 `skills/<skill-name>/`(`new-run.sh` 用 `git rev-parse --show-toplevel` 解析根,非 git 树才退回 skill 根)。
-
-```
-<repo-root>/
-├── runs/
-│   └── YYYYMMDD-HHMMSS-<slug>/
-│       ├── input/    ← 用户放源文件
-│       └── output/   ← agent 写 deck + 报告
-└── skills/feishu-deck-h5/   ← skill 源(不在此写产物)
-```
-CSS/JS 用相对路径 `../../../skills/feishu-deck-h5/assets/feishu-deck.{css,js}`(三个 `../` 从 output/ 爬到根再进 skill)。
-
-### 步骤(PREFLIGHT 后按序)
-- **W-1.** 先问用户 **topic / 客户名** 再建目录,作为 `new-run.sh` 第二参:`bash assets/new-run.sh <slug>` → 产 `runs/<YYYYMMDD-HHMMSS>-<slug>/`。Slug 由用户自然回答派生(别让用户敲 kebab-case):客户/portfolio→拼音或英文短名 kebab-case;内部主题→短英文/拼音 tag;多客户→按识别度最长在前;≤~25 字符。**NEVER 用中文字符**(URL/scp/IM/git log 会坏)。**NEVER 跳过 slug** —— 用户拒绝命名则退到内容形状 slug(`one-pager`/`customer-pitch`),不用裸时间戳。捕获脚本打印的绝对路径作为工作目录。
-- **W-2.** 同一回复里**向用户宣告路径**(译成用户语言):「已为本次任务创建工作目录 `runs/<ts>-<slug>/`;素材放 `input/`;生成的 HTML + 验证报告写到 `output/`。」
-- **W-3.** 等用户把文件放进 `input/`(或确认无源文件 —— 纯文本 brief 也行)。
-- **W-4.** 本次调用**所有后续文件写入必须在** `runs/<ts>-<slug>/output/` 下。绝不写到 `examples/`、仓库根或别处。
-
-### 何时 NOT 建新 run 文件夹
-用户明说「编辑现有 deck `runs/.../output/X.html`」→ 复用该 run · 维护者跑 `build.sh` 重建 `examples/sample-deck.html`(硬编码 examples/,出本规则范围)。
-
-## SLIDE DELETION POLICY (mandatory) — double-confirm + backup before any net delete
-
-Deleting a slide is **irreversible without a backup** — same risk tier as `git push --force` / `rm -rf`. Confirmation costs one IM line; rebuilding a slide does not. Before ANY operation that **net-removes** a slide:
-
-1. **STOP.** Don't run the deletion yet.
-2. **List what's being removed** — count + each slide's `data-screen-label` + `data-slide-key` + a 1-line "why".
-3. **Ask for explicit confirmation.** Wait for "yes delete" / "ok" / "go ahead". **Implicit consent does NOT count** — an earlier "trim the deck" is not approval to delete a specific slide; surface the list and ask again.
-4. **Once confirmed, offer a backup** — default copy file to a `.bak-pre-delete-<YYYYMMDD-HHMMSS>` sibling; user may decline or pick another option.
-5. **Only THEN proceed.**
-
-**What counts as net-removing:** deleting a `.slide-frame`; `rm` of `output/`; re-rendering a `deck.json` with FEWER slides than current; replacing N with M<N; a 1:1 slide swap (previous content IS deleted). **Not** net-removing: pure inserts, reorders (but announce new order first), or content edits.
-
-Use the shipped helper (backs up + logs CHANGES.md + prunes to 3 most-recent per tag):
-
-```bash
-bash skills/feishu-deck-h5/assets/bak-and-log.sh <file> <short-tag> "<one-line description>"
-```
-
-> 编辑机制见 EDITING DISCIPLINE kernel(E1 重编 data-page + 同步 scoped CSS · E2 禁 sed/regex 改 DOM · E5 动过的页欠一次 squint/再平衡)。
-> 📎 细节见 `references/slide-deletion.md`(net-delete 触发判定表、pre-authorize 边界、备份命名约定)
-
-## EDITING COPY — deck.json 是改文案的正道(texts.md 已废弃)
-
-改文案的唯一正道是**改 `deck.json` 再 re-render**,不要 post-render-edit `index.html`(见 ROUND-TRIP INTEGRITY)。`deck.json` 是源,改它结构不丢、以后还能随便改:
-
-```bash
-python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title "新标题"
-python3 deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.cards.0.body "新正文"
-python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
-```
-
-交付给下游改文案 → 靠 deck 内置的**客户端可视化编辑器**(default-on:浏览器里按 `E` 进编辑、点文字直接改、`⌘/Ctrl+S` 存盘)。注意它改的是 `index.html`(post-render drift),若要把改动沉淀回源,改后用 `deck-json/sync-index-to-deck.py` 回灌(会把该页降级成 `layout: raw`,有损结构),所以**首选还是直接改 `deck.json`**。
-
-> **历史**:旧的 `texts.md` + `apply-texts.py` 文案外挂方案已于 2026-05-31 移除——它和可视化编辑器一样改的是 `index.html`、同样制造 drift,却不比 `deck-cli set` 干净,处境最尴尬。`data-text-id` 属性可能仍残留在历史 deck 里,惰性无害。
-
-### data-slide-key 硬前提 — 每个 `.slide` 都打(保留)
-每个 `<div class="slide">` **必须**带 `data-slide-key`:deck-内唯一、语义 kebab-case slug(`cover` / `arr-history` / `case-meiyijia-display`,**不是** `slide-01`/`page-7` 这类位置名)、**跨 reorder 保持稳定**、内容实质变化时才可改(`arr-history`→`arr-history-v3`)。消费者是 `feishu-slide-library`:其 locator `canonical_source.slide_key` 指向 `[data-slide-key]`,**无 key → 无 locator → 切片不可索引**,入库会 halt;可视化编辑器的拖拽重排也靠它。bundle 片段默认 `cover`/`agenda`/`closing`。**不带齐 key 不发货。**(schema 渲染的 deck 自动带 key,无需手标。)
-
-## DELIVERY MODES — pick by harness
-
-The skill writes to `runs/<ts>/output/`. In **interactive/chat** mode, every reply (every edit pass, not just first gen) MUST end by surfacing the artifact path under `runs/<ts>/output/` — "已修复" alone is a bug. In **non-interactive/CLI/cron** mode, writing the file is the whole deliverable. Output dir is always the skill's own `runs/<ts>/output/`, never `~/Downloads/` or `/tmp/` unless the user explicitly asks.
-
-### 🔒 Delivery contract — NEVER hand back a single linked HTML file
-
-**Hard rule, no exceptions.** A bare `*.html` that points at sibling `assets/` / `input/` / `prototypes/` dirs works in the skill folder but **breaks the moment it crosses any transport boundary** (remote-codex auto-download, IM attach, scp/airdrop of one file) — user sees a naked unstyled DOM and calls it "乱码". Linked mode is for in-skill iteration ONLY. At the delivery boundary, convert to exactly **one** of three valid shapes:
-
-| Shape | When | What goes back |
-|---|---|---|
-| **A · inline single-file HTML** *(default)* | user just wants to OPEN and SEE ("发我"/"给客户看"/"传飞书"/链接预览) — 90% | `build.sh --inline` → one self-contained file, double-click anywhere, offline |
-| **B · zipped output folder** | user/downstream needs to edit text | `assets/package-deliverable.sh runs/<ts>/output/` → `deck-editable.zip` (index.html + assets + deck.json + README); recipient edits text in-browser via the built-in visual editor (press E) |
-| **C · hosted URL** | deck already deploys to Pages/CDN | ship the URL string, no attachment |
-
-Default to **A** unless they say "客户要改文字"/"我要自己改" → **B**. When surfacing, **name the shape** not just the path (`…-inline.html (inline, 任意位置可开)`).
-
-### Run copy-assets / finalize before send (mandatory · every hand-back)
-
-Output HTML references assets via skill-relative paths that break once moved/zipped/shared. **Before any hand-back, run:**
-
-```bash
-python3 skills/feishu-deck-h5/assets/copy-assets.py runs/<ts>/output/        # default --shared=link
-python3 skills/feishu-deck-h5/assets/copy-assets.py runs/<ts>/output/ --shared=copy  # non-symlink dests
-```
-
-The user's "把所有引用 assets 的文件复制到 output 下" is a baseline, not a special request — run it for every delivery/hand-off/demo/"请给我看看".
-
-### File-naming convention (mandatory) — `lark-<customer>-<YYYY-MM-DD>.html`
-
-Working file stays `runs/<ts>/output/index.html`. **Every artifact that LEAVES the working folder MUST be renamed** to `lark-<customer-slug>-<YYYY-MM-DD>.html`. Date = presentation date (not gen timestamp). Slug = lowercase kebab pinyin/English, NEVER CJK (breaks URLs/IM previews/scp). `finalize.sh --name <slug>` emits the named copy alongside `index.html` — pass it whenever delivering.
-
-> 📎 细节见 `references/delivery.md`(Mode 1/2/3 走查、`--shared` 模式、package-deliverable 内部、命名示例、caveats 话术)
-
-### 🔬 发布/部署后验真实目标 + 图片必须为网络瘦身(2026-06-01 教训 · 让用户跑了第二趟)
-**发布到 Pages / CDN / 任何 host 后,验收必须打"真实线上目标",不是本地副本。**
-- **加载线上 URL 本身**(走网络)、确认**图片真的渲染出来** + 至少 hard-refresh 一次,再说"上线了"。
-  HTTP 200 / 截**本地部署副本** **都不算验过** —— 本机磁盘大图秒载,会掩盖线上的慢载 / 404 /
-  大小写坑(GitHub Pages 是**大小写敏感的 Linux**;本机 macOS 大小写不敏感,本地能渲染 ≠ 线上能)。
-  截图工具卡在 `networkidle` / 等资源超时 = **资源太重**的信号,别忽略。
-- **图片发布前必须为网络瘦身**:幻灯片配图 / 背景按**显示尺寸** resize + 压缩,**照片一律转 JPEG(q≈82)**——
-  全屏背景 ≤ ~1920w、几百 KB;小卡缩略图 ≤ 640w、几十 KB。**多 MB 一张的图,线上会"先出页、图后到",
-  看着就是"这页没有图"**(2026-06-01:冰山 6.3MB→193KB、整 deck input 12MB→544KB 后修好)。
-  工具 PIL / `sips` 都行;**改了扩展名(.png→.jpg)记得同步 deck.json 里 data.html 的 `src`/`url()` 引用再 re-render**。
-  这条对单文件交付(base64 内联)同样救命——重图会让单文件膨胀到十几 MB。
-
-## LANGUAGE POLICY — declared by `<meta>`, enforced by validator R-LANG
-
-**默认 = ZH-only。** 每个可见文本叶子一条语言,CN 文案下面不带 EN 翻译轨。模式在 `<head>` 声明,由 `validate.py` 强制:
-
-```html
-<meta name="fs-language" content="zh-only">   <!-- default -->
-<meta name="fs-language" content="zh-en">     <!-- bilingual opt-in -->
-```
-
-`templates/_shell.html` 已含 zh-only meta。**只在用户显式要求时切 `zh-en`**(如「面向英文客户」「bilingual deck」);切换后 agenda `.title-en` / content-3up 双语卡标题 / two-hand-arch EN motto 等 CSS recipe 自动点亮,无需改 token。
-
-zh-only 下 R-LANG 审三类信号:slide markup 出现 `title-en`/`subtitle-en`/`label-en`(双语专用类)· chrome-label 类(`eyebrow`/`kicker`/`pill`/`tag`/`chip`/`badge` 及 `-en`/`-num`/`-index` 等后缀)文本是纯 Latin 大写+数字+标点且不在白名单 · sibling-pair signature(同父 ≥2 文本叶子,一 CJK 一纯 Latin = EN 翻译轨结构)。不碰约定为英文的 token:品牌名(Lark/Base/Wiki)、产品码、单位(px/pt/%)、缩写(KPI/ROI/OKR)、混合大小写 Latin(`Context and challenges`)。禁的是**翻译轨**,不是每个 Latin 词。
-
-> 📎 细节见 `references/validator-rules.md`(R-LANG 打印细节)
-
-## CONTENT-DENSITY POLICY (mandatory) — augment thin input by default · no-fabrication guardrail
-
-A 飞书 deck slide is **information-dense by design** — 3 lines of body in empty space reads as half-finished. **Professional augmentation IS the design work, not an增补 needing approval** (默认动作翻转 2026-05-26). So:
-
-1. **默认就专业补全** — treat the user's input as a SEED and design the page at the information density of a real consulting/strategy deck. Default action, **no confirmation needed**. (Augmentation plan is already in DESIGN-PLAN.md from DESIGN PHASE Step 1; hero pages still pass their confirm gate.)
-2. **唯一硬护栏:NEVER fabricate attributed facts** — specific company numbers / named-person quotes / source citations ("客户访谈"/"内部口径") / future-roadmap claims are NEVER invented (sibling of the NEVER-fabricate-STORY-ids rule). What you CAN add: public industry knowledge, product-capability descriptions, adjacent customer stories, typical KPIs — always tagged as such (e.g. "行业基准 · 公开数据"). The line: **augmentation is general industry/product knowledge tagged as such; NEVER specific facts attributed to specific entities the user didn't give.**
-3. **沙化版式兜底** — when there's genuinely nothing to add, switch to a sparser-by-design layout (`quote` / `big-stat` / `cover` / `end` / `image-text`) where 2 lines hold up.
-
-**Only STOP-and-ask in two cases:**
-- **(a)** thin to the point that NO layout holds up even with augmentation (one word, no role, no content).
-- **(b)** the intent itself is ambiguous — the page's role / single focus is unclear (Q0/Q1 unanswerable); what to augment depends on what the user wants to emphasize.
-
-Note the distinction: **asking about intent = do ask; asking "要不要让我补文案" = don't ask, just augment.**
-
-North star: **the deck must not silently invent material the user couldn't defend in front of the audience** — but "补到信息密度够" and "编造具名事实" are different things: the former is the default, the latter never.
-
-> 📎 细节见 `references/content-density.md`(thin heuristic 表、ALLOWED/NOT-ALLOWED 清单、Asking-prompt template)
-
-## ONE-PAGER CASE POLICY (mandatory) — 一页纸案例 layout
-
-> 📎 一页纸客户案例:**skip cover · 用 content/story-case · 绝不编造 STORY id/来源**。详见 `references/one-pager-case.md`
-
-## RUN-PROMPTS LOG (Phase 1) — `PROMPTS.md` per run
-
-> 📎 详见 `references/run-artifacts.md`
-
-## MAKING-OF LOG (default-on) — `log/` per run · 制作全过程纪录片
-
-记录一份 deck 是怎么一步步做出来的(给同学还原过程 + 给自己诊断 skill bug),
-平行存放在 `runs/<deck>/log/`,**绝不进 `out/`**。工具:`log-tool/deck-log.py`
-(schema/细节见 `log-tool/README.md`)。**默认开**;`deck-log off` 全局停录。
-**`init` 已焊进 `assets/new-run.sh`(2026-06-02)——建工作区即自动初始化 `log/`,不靠 agent 记得;
-`cmd_init` 也已幂等(二次 init 保留原 start_ts),所以下面步骤 1 不再需要手动跑。** 这是补
-"Mira case 之外的另一个无-hook 静默漏录"漏洞:deck-log 没有 hook,唯一的 chokepoint 就是 new-run。
-
-固定动作(做 GENERATION 类 deck 时按部就班执行,无需用户提醒):
-
-1. **开工 = 自动(别再手动 init)**:`assets/new-run.sh` 建工作区时**已自动跑 `deck-log init`**
-   (搭 `log/` 骨架、记当前会话 transcript、设活跃 deck),它会打印 `deck-log : making-of log started`。
-   **不要再手动 `deck-log init`** —— init 现已幂等(二次跑只保留原 start_ts 并跳过,不会丢最早几轮),
-   但手动重跑是多余动作。只有两种情况才手动碰:① new-run 打印 `deck-log : auto-init skipped`(全局 OFF
-   或异常)→ 按它给的命令补;② 自动探测找错 transcript → `deck-log init <run-dir> --transcript <path>`
-   重指(这是唯一会刷新 start_ts 的逃生口)。**每个回合的输入+我的原始回复无需手动记**:它们本就在
-   会话 transcript 里,`render` 时自动捞 `start_ts` 之后那段(0 token,纯文件读;**不挂任何常驻 hook**)。
-2. **每出一版**:`deck-log snapshot <run-dir> --label "<这版做了啥>"`
-   → 冻结副本 + Playwright 截全套图(每页 1920×1080)+ 跑 check-distribution 校验。
-3. **用户吐槽某页 / 我发现问题**:`deck-log event <run-dir> --type problem --slide N
-   --msg "<问题>" --said "<用户原话>"`;修好后 `--type fix --resolves "<那个问题>"`。
-   (这条 problem→fix 因果链是后面 `diagnose` 判断"哪些是框架 bug"的关键。)
-4. **可选**给关键回合补一行摘要:`deck-log event <run-dir> --type summary
-   --json '{"n":<回合号>,"msg":"<一句话>"}'`。
-5. **收尾**:`deck-log render <run-dir>` → 生成 `log/making-of.html`(双击即看;
-   `--inline` 出可分享单文件)。告诉用户路径。
-6. **诊断**(用户问"哪些是 skill 该修的 bug"时):`deck-log diagnose <run-dir>` 出
-   digest,**丢给 subagent 分析**,按 `AUDIT-*.md` 的 F-NN 工单格式产出候选工单。
-
-Generate a dark, cinematic Lark / 飞书 brand-aligned **HTML deck** at 1920×1080 in a single
-self-contained file that:
-
-- looks identical on PC at 16:9 fullscreen,
-- gracefully reflows to a vertical browse on mobile,
-- never invents tokens — pulls every color, font size, gradient, radius, and spacing
-  from `assets/feishu-deck.css`,
-- ships with a built-in present mode (←/→/space, click-to-go), a scroll mode (mobile),
-  a mode toggle, page indicator, and URL hash sync.
-
-This skill is the **canonical interpretation** of the 飞书母版 2025 (深色通用) PowerPoint
-master, expressed as design tokens and layout recipes.
-
----
-
-## When to use this skill
-
-Use it when the user wants:
-- a slide deck delivered as an HTML file (not a `.pptx`)
-- something that *looks like* a Lark / 飞书 / ByteDance enterprise pitch
-- a dark, bilingual ZH+EN sales / quarterly / customer-pitch presentation
-- both PC fullscreen and mobile-viewable in one artifact
-
-If the user explicitly asks to PRODUCE a real `.pptx` file, route to the **pptx**
-skill instead.
-
-If the user hands over an EXISTING `.pptx` and wants it restored/imported as an
-HTML deck ("把这份 PPT 还原成 HTML / H5", "import pptx", ".pptx 转 deck"), use the
-**`pptx-to-html` sub-skill** in this skill's `pptx-to-html/` folder — it parses
-the .pptx with python-pptx and emits a `layout:"raw"` deck.json that this skill's
-`deck-json/render-deck.py` renders. Output goes to this skill's own `runs/` like
-any other deck. Entry point:
-`bash pptx-to-html/assets/run.sh <in.pptx> runs/<deck-name>`. See
-`pptx-to-html/SKILL.md` (and `pptx-to-html/example/` for a hardened 60-page sample).
-
-If the user asks for a generic non-Feishu deck (e.g. white background, Apple style),
-this skill is the wrong choice — its design tokens are brand-locked.
-
----
-
-## Files in this skill
-
-`assets/` has two layers: **framework** (top-level: `feishu-deck.css`, `feishu-deck.js`, lark master brand kit `lark-logo*` / `lark-*-bg.*` / `lark-slogan.png` — ship with every deck, never deduped) + **shared content pool** (`assets/shared/`: cross-deck reusable PNGs, dedupe-able). `validate.py` / `copy-assets.py` / `new-run.sh` / `preflight.sh` / `bak-and-log.sh` also live in `assets/`.
-
-### Brand-asset hard rules (mandatory)
-
-1. **Client / portfolio / PE-VC logos** come ONLY from `assets/shared/clientlogo/<name>.{png|jpg}` (Chinese name first, then English short name; `_N` / `_paired` variants). If missing → ask the user to drop it in; do NOT save to `input/`, do NOT save to `assets/` root, do NOT auto-generate a text-fallback PNG.
-2. **飞书 product icons** come ONLY from `assets/shared/feishu-products/飞书标识_{产品}_{变体}.png` (`_Color` default on dark). **NEVER redraw / hand-write SVG approximations / use emoji / fetch from web** — brand guidelines require the official PNG; the licensed files are right here. No matching product icon → fall back to `lark-logo.png`, never self-design.
-3. **Digital-employee portraits** come from TWO folders: **named persona** (睿睿/参参/探探/呆呆/图图 + task personas) → `assets/shared/mydigitalemployee/<name>.png`; **anonymous/generic AI slot** → `assets/shared/digital_employee_avatars_50/NN_<traits>.png`. Never a gray-gradient placeholder, never crop from `input/`.
-4. **Embed via `background-image` on a `<div>` (NOT `<img>`)** so the UI1 validator stays quiet and CSS controls sizing. (`<img>` only when explicit dimensions / max-width matter.)
-5. **Phone-mockup bezel = R12 ring shadows** (`box-shadow: 0 0 0 Npx <color>` concentric rings), NEVER a real offset `box-shadow: 0 20px 56px …` drop shadow (R12 fails it).
-6. **Never write per-asset PNGs to `assets/` root or `runs/<ts>/input/`** — `assets/` root is framework + lark master brand only; `input/` is ephemeral per-run. Shared assets are single-source-of-truth in `assets/shared/…`.
-
-> 📎 细节见 `references/assets-and-files.md`(完整文件树、clientlogo/feishu-products/persona 查找流程与 embed pattern、phone-mockup demo 规格与动画时序)
-
-## Phase 1.c extras — parity contract + regression smoke test (mandatory)
-
-> 📎 详见 `references/extra-layouts-and-raw.md`
-
-## Converting existing material (PDF / HTML / PPT export / docs) into a compliant deck
-
-> 📎 转换 PDF/PPT/HTML/docs:**默认 1:1 页数不压缩(博裕&星巴克教训);先判 Replica vs Rewrite**。详见 `references/converting-existing-material.md`
-
-> **PPTX 资源 · EMF 矢量 logo 还原(2026-06-02 实战)**:PPTX 里的矢量 logo 常是 `.emf`,macOS `qlmanage`/`sips`/PIL 都渲染成**空白**(整页缩略图里这些格子是空白卡)。但这类 EMF 多是 **EMF+PDF 混合体**——`strings <f>.emf | grep -a %PDF` 命中即说明内嵌 PDF;切出来渲染即得无损清晰图:`d=open(f,'rb').read(); open('x.pdf','wb').write(d[d.find(b'%PDF'):d.rfind(b'%%EOF')+5])` 再 `sips -s format png -Z 1200 x.pdf --out x.png`。**铁律:拿到不认识的二进制资源先 `file`/`strings` 验格式,别先 `qlmanage` 渲染了凭糊图猜**——否则白走一圈 render→裁切→拼图才发现空白。
-
-## SMALL-EDIT DISCIPLINE (mandatory) — 单点小改要秒级,别把简单事做成重活
-
-用户说「改这一页 / 这页字号不对 / 把 X 改成 Y / 这几个字」时,这是**单点编辑**,
-不是全 deck 体检。把它做成十几分钟是 bug。三条铁律(每条都已有人踩坑):
-
-1. **小改 = 3 步,收工**:① Edit `deck.json` 那一页(schema 字段或 `custom_css`)→
-   ② `render-deck.py` → ③ 最多对**那一页**截 1 张图确认。**禁止**为一个小改对整
-   deck 跑 `check-only.sh --visual` / Playwright 全审计(那是「审整份 deck」才用的,
-   N 页全量十几秒起)。同一个量字号 / 截图脚本**只跑一次**,别边改边反复跑。
-
-2. **渲染器路径写死,绝不用裸 `find`**:skill 常以 **symlink** 挂载
-   (`~/.claude/skills/feishu-deck-h5 → <repo>/skills/...`)。`find <symlink-dir> -name
-   render-deck.py` **不加 `-L` 返回空** → `python3 ""` **静默不渲染** → 你会拿
-   **上一次的旧产物 / 旧截图**当「改完了」,彻底错判(空指针坑,已踩)。技能调用时
-   header 给了 `Base directory for this skill: <DIR>`,直接
-   `python3 "<base>/deck-json/render-deck.py" deck.json .`(python3 走 symlink 没问题,
-   坏的只有裸 `find`;必须搜就 `find -L`)。**render 后必须确认真的渲染了再下结论**:
-   看 stdout 有 `OK → …index.html` + `errors: 0`,或比 `index.html` 的 mtime / 目标
-   字符串是否真变了——**绝不靠「我跑了命令」或一张可能是旧图就宣布修好**。
-
-3. **别发探针 / 轮询催工具输出**:结果偶尔批量延迟到达是正常 harness 行为,**不是
-   卡住**。绝不连发 `echo PROBE` / `echo FLUSH` / sleep 去「确认通道还活着」——浪费
-   往返、更慢、刷满噪音。耐心等;真要等外部状态用 Monitor/until-loop。
-
-4. **已知步骤的单页操作 = 主对话线性自做,别甩 subagent**(F-47,2026-06-01 踩,本轮最大时间黑洞)。换 demo 文件 / 改 `src` / 改 `title` / 套 `custom_css` / 单页字号这类**步骤已知、≤~10 步**的活,主对话自己一步步做约 6 次工具调用就完;**委托 general-purpose subagent 会让它在隔离环境从零摸索、反复截图核验(实测 42 分钟 / 291 次调用)**。判据:**步骤已知且 ≤~10 步 → 自做**;只有真正需要并行 fan-out 或大范围摸索(多文件审计 / 全 deck 搜索 / 未知规模发现)才委托。呼应 memory `feedback_deck_background_worker`(默认内联,只对重型 hero/raw 慢页才甩后台)。
-
-5. **依赖链命令串行,别塞进一个并行 block**(F-47 同轮踩):`cp → 渲染测 → 改 deck.json → render → 截图` 是依赖链,一条失败(如路径猜错)整个 block 会被 cancel、全部返工。并行 block 只放**真正独立**的命令;有先后依赖的一步一确认。动手前先 `ls` 确认路径,1 秒省 1 轮。
-
-6. **多 session 同改一份 deck:写前重读 + 断言关键不变**(F-48,2026-06-01 踩,另一 session 全程把 24页→44页、覆盖过改动)。`deck.json` 是单文件 SSOT、last-writer-wins。`deck-cli.py` 现已内建**乐观锁**(读时记 mtime,写回前比对,被改则拒写并提示重读;`--force` 绕过)——**直接 Edit / python 改 deck.json 时没有这层保护**,所以:写前一刻重读 deck.json + 断言页数/关键页 key 不变(像本轮 `add_value_page.py` 的 assert 那样,正确拦下两次并发改动);拿不准就先后台 watch deck.json「连续 ~150s 不变」再批量改。
-
-7. **单页编辑 = 只验证那一页;渲染器的「全 deck 一起校验」≠「你该去看全 deck 的报错」**(F-68,2026-06-01 踩)。`render-deck.py`(内含 `validate.py`)是三道闸门绑死的——**天生整份 deck 一起校验、整份一起 render**,你**没法只渲染/只校验单独一页**,这是躲不掉的副产物。但单页编辑后,判断「我的改动有没有引入问题」**只需两条**:① `index.html` mtime 真的更新了(确实重渲,见铁律 2);② **只 grep 自己这页的 key**(`grep <data-slide-key> render.log`)为空(零新增 finding)。**别的页的 `✗`/`!` 一律不读、不逐条归类、不写进汇报、不主动提议「要不要顺手修」**——它们绝大多数是存量问题、与本次改动无关;读它+报它+问它 = 把工作面铺开 = 越界(违反 ROUTER「🔒 锁定的是『全部工作』的边界」:`render`/`validate`/审计全圈死在锁定的 N 页内)。render 退出码非 0 **不等于**你这页坏了——先 grep 自己的 key,空就是干净,退出码是别页存量造成的,**与你无关、当没看见**。**用户想修别的页会自己说**,没说就别替他发现。反例(本轮踩):用户让改第 6 页,render 后我逐条读了 6 个别页 `✗`、写了一整段「范围外提醒」+ 问要不要顺手修 = 纯越界噪音。
-
-> 📎 同款细节(含命令示例)也在 `references/operational-notes.md`。
-
-## EDITING DISCIPLINE (mandatory) — high-cost bugs to avoid
-
-BEFORE any delete-slide / insert-slide / reorder-slide / custom-layout edit, run this breadcrumb:
-
-- **E0 · 编辑前先刷最新版本(并发安全 · mandatory)** —— 这个仓库常有**多个 session
-  并行改同一份文件**,你手里那份可能已经过时,直接改 = 覆盖别人的改动。任何文件
-  (skill 源 / `deck.json` / `index.html`)**动手前一刻必须做**:
-  1. **重读磁盘最新内容**(`Read` 一次紧贴 `Edit`,别用几轮前的旧读)—— 抓并行
-     session 已落盘但未提交的改动(`git status` 里显示 ` M` 的就是)。harness 若提示
-     「file modified externally / 被 linter 改过」,**先重读再改,别无视**。
-  2. **git 仓库且有 remote** → 编辑前 `git fetch` 看 `git status -sb`;若 behind 先
-     `git pull --rebase`(有冲突先报给用户,**绝不** `git checkout`/`reset`/`force-push`
-     盖掉别人的提交 —— 见 [[feedback-destructive-double-confirm]] 红线)。
-  3. 改完**立即写盘**、尽快交付,缩短「读→改→写」窗口,减少与并行 session 撞车。
-  - 反例(刚踩过):基于几轮前的旧内容直接 `Edit`,或对一个**不是本 session 改的**
-    文件跑 `git checkout` 还原 —— 都会静默吞掉别人的工作。先读、再改、不盖。
-- **删/插/重排任何 slide → E1** 重编 `data-screen-label`(始终)、`data-page`(仅当该 frame 带 per-page scoped CSS)并同步 deck 内 `[data-page="NN"]` 的 scoped CSS 选择器。**只更新该 slide 上确实存在的标识符**(没有「每页都必须有 data-page」这条规则)。改完跑 `python3 assets/validate.py runs/<ts>/output/index.html`(R-DOM / R20)。
-- **E2** 绝不用 `sed` / regex / 纯文本替换改 slide DOM 结构——会吃掉相邻 frame 的 `</div>` → 嵌套塌陷 → R-DOM。结构改动靠「读文件、人工定位 slide 块、整段写回」;文本编辑改 `deck.json`(schema 字段或 `layout: raw` 的 `data.html`)再 re-render,或用 `deck-cli set` 改字段。安全网:每次结构改动后跑 R-DOM(`audit_dom_integrity`)——每个 `.slide-frame` 必须是 `.deck` 直接子节点、恰好含一个 `.slide`。
-- **E5** 动过任何页都欠一次 squint/再平衡:删/改/继承/交付任一原因看一页,都要 1/3 缩放眯眼检查有没有空白带,有就在 stage/grid/card 上补 `justify-content: center` / 降 `repeat(N,1fr)` / 去 `margin-top:auto` 等再平衡。**validator PASS ≠ 视觉平衡**;加内容则反向查溢出。
-- **E6 多 session 并发协作协议**(F-64)——**检测信号**:`deck.json` mtime 比你上次读时新 / `git status` 显 `M` / 工具拒写报 `concurrent modification`(deck-cli 的 F-48 / lift-slides 的 F-53 乐观锁会这样报)。命中任一 = 别人也在写。**退避动作**:重读最新 `deck.json` → 把你的改动 rebase 到新版 → 重试;连撞多次 → 转后台 `watch` 直到「连续 ~150s 不变」(对方停手)再批量改回。**`--force` 唯一合法场景**:仅当你确认自己是唯一写者(没有并发 session);并发时用 `--force` = 故意覆盖别人 = 红线,绝不可。
-
-> 📎 细节见 `references/editing-discipline.md`
-
-## ROUND-TRIP INTEGRITY (mandatory) — `deck.json` is the source of truth, never post-render-edit `index.html`
-
-`deck.json` 是 deck 视觉状态的唯一规范;`index.html` 是 `render-deck.py` 的派生产物。只存在于 `index.html` 而不在 `deck.json` 的状态 = silent drift,下次 render/fork/下游工具读 `deck.json` 时会被毁掉。两半契约:
-
-- **A 半(创作侧)**:不要 post-render-edit `index.html`。所有视觉状态(CSS / HTML 结构 / 动画 / 脚本 / dev-tools 试出来的改动)必须回写进 `deck.json`(`layout: raw` 进 `data.html`,schema layout 进对应字段)。浏览器里快速试验可以,但**交付 / fork / 入库前必须 port 回 `deck.json`**。
-- **B 半(fork / clone / download 侧)**:从既有 deck 派生时,**拷整个 output 文件夹**(同时带 `deck.json` 和 `index.html`),不要只拷 `deck.json`(那样会静默丢掉原作者的所有 post-render 编辑)。fork 后先跑 `python3 deck-json/sync-index-to-deck.py <new>/output/index.html <new>/output/deck.json --dry-run` 查 drift,有就去掉 `--dry-run` 回灌,再 re-render 验证,然后才开始编辑。
-
-> 📎 细节见 `references/round-trip-integrity.md`
-
-## LIFTING A SLIDE FROM ANOTHER DECK (mandatory route) — deck.json-native first, never read the monolith
-
-把别的 deck 的一页拎进当前 deck。**默认走 deck.json,绝不为了找/拆一页去读源 `index.html` 或 3491 行 `feishu-deck.css`**(那是被弃用的老路,慢且费 token)。按源 deck 形态二选一:
-
-- **源是本技能产出的 deck.json(常态)→ `deck-cli.py paste`**:
-  ```bash
-  python3 deck-json/deck-cli.py SRC/deck.json show <key>                          # 可选:先看这一页(~2-4KB 对象)
-  python3 deck-json/deck-cli.py DST/deck.json paste --from SRC/deck.json --key <key> [POS]
-  python3 deck-json/render-deck.py DST/deck.json DST/                              # custom_css 随对象 travel,自动 scope
-  ```
-  纯 JSON 对象复制 —— 自动拷 `input/`、`prototypes/` 资源、key 冲突自动改名、剥离源绑定的 `data-text-id`、写 `lifted` 溯源、自动备份 + 复校。要按 key 浏览源 deck 看 `SRC/slide-index.json`(render 自动产出的清单)。
-- **源是外来 / 老 deck(没有 `custom_css` 的页)→ `assets/lift-slides.py … --shake`**:
-  ```bash
-  python3 assets/lift-slides.py SRC/index.html --index                            # 列清单挑 key(不读正文)
-  python3 assets/lift-slides.py SRC/index.html --key <key> DST/deck.json --shake   # tree-shake → layout:raw
-  ```
-  **`--shake` 让任何老 deck 直接切干净、无需预先修**:内联该页真实 layout 的框架 CSS + **把源 head 里属于这页的 per-slide 规则(`[data-slide-key]`/`[data-page]` page-anim 老坑)搬进来并把 `[data-page=N]` 改写成 `[data-slide-key]`** + 拉回引用的 `@keyframes`。全局 `.slide .foo` 规则不内联(任何目标 deck 都有)。
-- **目标是无 deck.json 的 legacy index.html(老式手搓 deck,index.html 即源)→ `assets/lift-slides.py … --to-html`**(F-80,2026-06-02;**这正是「把一页 lift 进老 deck」该走的路,别再手搓 div 平衡 8 步**):
-  ```bash
-  # 先判(只读,出 JSON):自包含吗 / CSS 在内联还是 head / @keyframes 闭包 / 资产存不存在 / 撞不撞 key
-  python3 assets/lift-slides.py SRC/index.html --preview --key <key> [--against DST/index.html]
-  # 一条命令 lift 进 legacy 目标(DST 以 .html 结尾即走此路;.json 仍走上面的 deck.json 路径)
-  python3 assets/lift-slides.py SRC/index.html --key <key> DST/index.html [--pos N|end] [--shake]
-  ```
-  DST 以 `.html` 结尾时:抽完整渲染 frame → `transform`(剥 `data-text-id` + 拷资产 + 改写 `assets/shared` 路径,与 deck.json 路径**同一套**)→ 重包成 `.slide-frame>.slide`(`data-layout=`源 layout,框架 CSS 走目标自带 feishu-deck.css)→ div 平衡 splice 进 `.deck` 闭合前 → 自动 `.bak` + **R-DOM/validate 闸门(只判本页:R-DOM 干净 + 无 finding 提到新 key,承 F-63/F-68)**。续号 `screen_label` 用目标真实帧号。`--shake` 仅当 `--preview` 报 `recommend_shake:true`(源页有 head 耦合 CSS)时才加;同框架 lift 不必。
-
-**🔒 铁律(F-82)—— raw 页 `data.html` = `.slide` 的「内层」,不含 `.slide`/`.slide-frame` 包裹**:包裹由 `render-deck` 渲染时注入(`effective_layout = _orig_layout or "raw"`)。所以**要一页的完整可渲染 frame,必须从渲染后的 `index.html` 抽 frame,绝不从 `deck.json` 的 `data.html` 拼**(后者拼出来缺 `.slide` 包裹 + 包裹上的 `data-layout`/`data-accent`,内联 CSS 的 `[data-layout=X]`/框架 layout 规则全失效)。`lift-slides.py --to-html` 已按此实现(从 index.html 抽 + 自动重包);手动操作也照此。
-
-**配套硬规矩 —— 每页的定制 CSS 只放 `slide.custom_css`,绝不放 `<head>` / page-level `<style>`**:渲染器会把 `custom_css` 自动 scope 到 `.slide[data-slide-key=KEY]` 并 co-locate 进该 slide(`<style data-fs-custom-css>`),这样它能随 lift/clone/paste travel 且 round-trip 不丢。写无前缀选择器即可(`.card{…}`),`@keyframes`/`@media` 也放这里。head 里塞每页 CSS = republish 静默蒸发(`fs-deck-page-anim` 旧坑),已被本路径取代。
-
-**切老 deck 不用预先修**(`--shake` 会在切的时候就地恢复 head per-slide CSS)。`migrate-head-css-to-custom-css.py` codemod 是**可选**的、用来**把源 deck 自己修 durable**(让它自己 re-render/republish 不再丢动画,且之后可走 native `paste`):`python3 deck-json/migrate-head-css-to-custom-css.py <out>/index.html <out>/deck.json --dry-run`(先体检,`nothing to migrate`=干净)→ 去掉 `--dry-run` 加 `--render`(自带 `.bak`、幂等;`[data-page=N]` 按渲染 DOM 实际对应映射;不可归属的规则只报告不动)。`R-SELF-CONTAINED`(advisory)标出还在 head 的泄漏。
-
-**F-62 BATCH LIFT DISCIPLINE(批量 lift 多页的铁律)**:① 绝不「先把页全 lift 完再统一修」—— 每 **3–5 页一批**;② 每批 lift 完**立刻** reconcile 字号(四档)+ 跑 `validate.py`,**✗ 未清零不算这批完成**,带着 ✗ 继续堆下一批 = 错;③ 复杂页(手机 mock / 对话 UI / KPI 条 —— F-40 已知会塌)**lift 一页立刻 render 截图核验**,不攒着。本轮 24→46 一次性堆 22 页 = 18✗ / 185 finding 一次砸脸,根因就是缺这条。
-
-**F-63 LIFT DONE = 4 项全绿才算完成**(任一不绿 = lift 未完成,不许说"切好了"):
-- [ ] **DOM 平衡** —— `R-DOM`(`audit_dom_integrity`)无 ✗,每个 `.slide-frame` 是 `.deck` 直接子节点、恰含一个 `.slide`;
-- [ ] **复杂组件页逐页截图未塌** —— 手机 mock / 对话 UI / KPI 条等(F-40)按页看图确认没塌;
-- [ ] **字号已 reconcile 四档、validate 无 off-ladder ✗** —— `R20` / `R06` / `R-VIS-TIER` 干净,没有 off-ladder 字号;
-- [ ] **无静默裁切** —— `R-VIS-CARD-OVERFLOW` / `R-OVERFLOW` 无 ✗(内容没被框默默吃掉)。
-
-**F-44 LIFT 完换文字 = 用 `apply-text-pairs.py`,绝不让 LLM 重写 markup**(LIFT+SWAP 模式的换字步骤):lift 一份外来 deck 后要把文案换成新客户时,让 agent **只产出** find/replace 对 `[{key, replacements:[{find,replace}]}]`,交给确定性工具套用 —— 结构 / CSS / SVG / `data-text-id` 100% 不动:
-```bash
-python3 deck-json/apply-text-pairs.py DST/deck.json pairs.json --dry-run   # 先看每页命中/未命中
-python3 deck-json/apply-text-pairs.py DST/deck.json pairs.json             # 写回(自带乐观锁;exit 5 = 有未命中需手查)
-python3 deck-json/render-deck.py DST/deck.json DST/
-```
-未命中常见根因 = 源/产物间 `<br>`/emoji/空白归一化差异,按报告手查那几处。**别用 LLM 整页重写 data.html 来"换个客户名"** —— 那会顺手动坏结构/CSS。
-
-> 📎 架构/根因/路线图(L1–L7)见 `LIFT-ARCHITECTURE-2026-05-30.md`;round-trip 细节见 `references/round-trip-integrity.md`。
-
-## Operational notes (gotchas)
-
-> 📎 详见 `references/operational-notes.md`
-
-## Quick start (recommended workflow)
-
-**DeckJSON 管线 + raw-first 立场。** 所有 deck 都走 deck.json + `render-deck.py` 出 HTML(不要手抄 `_shell.html`、不要从 slide-recipes 复制 markup、不要手标 `data-text-id`)。**默认每页 `layout: "raw"`,只有命中「纯标准形状白名单」的页才回退 schema layout**(见 `DECK GENERATION POLICY`)。
-
-1. **PREFLIGHT** — `bash assets/preflight.sh`(硬闸门,必须 PASS 才动手)。
-2. **DESIGN PHASE(chat-only,默认开)** — **逐页判定 raw vs 白名单 schema**、定补全与密度预算、每张 raw 页写 Q0–Q4 + 六维 spec;raw 页过确认(批量一次性过),回退 schema 的页宣告即走。
-3. **建工作区** — `bash assets/new-run.sh <slug>` → `runs/<ts>-<slug>/{input,output}/`,落 `DESIGN-PLAN.md`,announce 路径。
-4. **写 `deck.json`** — 默认 `layout: "raw"`(填 `data.html`,**字号用 `var(--fs-*)`、组件用 `fs-` 类 / 词汇库 pattern,不裸写 CSS**);白名单页填对应 schema 字段(见 `deck-json/deck-schema.json`)。写到 `runs/<ts>-<slug>/output/deck.json`。
-5. **渲染** — `python3 deck-json/render-deck.py runs/<ts>-<slug>/output/deck.json runs/<ts>-<slug>/output/`,自动产出 `index.html + assets/`。
-6. **闸门** — `bash assets/finalize.sh runs/<ts>-<slug>/output/ local`(跑 copy-assets + validate);validate.py exit≠0 必须改 deck.json 再重跑,通过前不交付。
-7. **交付 A/B/C** — 见 DELIVERY MODES;禁裸 "单 linked HTML";重命名 `lark-<客户>-<YYYY-MM-DD>.html`,每轮 surface 产物路径。改文案 = `deck-cli set` 改 deck.json 再 re-render(或下游用浏览器内置编辑器按 E 改)。
-
-> Path B(整页手写 `index.html`)是**极少用的逃生口**,仅当某 pattern 既不匹配任何 schema layout、也无法用 `layout: "raw"` 单页表达时才用;见 `DECK GENERATION POLICY`。
-> 📎 细节见 `DECK GENERATION POLICY` · `references/delivery.md`
-
-## Available layouts
-
-Pick by content, not by aesthetic. Each layout corresponds to a `data-layout` attribute
-on `.slide`. Full markup lives in `templates/slide-recipes.html`.
-
-| Layout            | Use when                                     | Accent default |
-|-------------------|----------------------------------------------|---|
-| `cover`           | First slide. Title + EN subtitle + brand + date. | blue |
-| `agenda`          | TOC. 4–8 numbered items in 2 columns.        | blue |
-| `section`         | Chapter divider. Giant `01` numeral + ZH title + EN lede + product pills. | blue |
-| `content-3up`     | Three parallel pillars / capabilities / pillars. | blue |
-| `content-2col`    | One narrative + supporting visual / mock / list. | blue |
-| `quote`           | Single customer / executive quote, centered.  | blue |
-| `stats`           | 4-up KPI row with big numbers as evidence.   | **teal** |
-| `big-stat`        | One hero number (e.g. `30万`) + paragraph.    | blue |
-| `image-text`      | Single full-bleed photo with type bottom-left. | blue |
-| `table`           | Comparison or matrix. Up to 6 rows × 5 cols. | blue |
-| `timeline`        | Chronological 4–6 milestones along an axis.  | blue |
-| `process`         | 3–6 sequential steps with right-pointing arrows. | blue |
-| `end`             | Closing — title + CTA pills + contact grid.  | blue |
-
-**Mix rule.** A 12-slide deck typically uses 7–9 distinct layouts. Repeat `content-3up`
-for parallel concepts; otherwise alternate to keep rhythm.
-
----
-
-## The shell (single-file deck skeleton)
-
-`templates/_shell.html` 是 canonical 结构(从那里拷,不要在此处粘整段 HTML)。
-
-**强制 DOM 顺序:`.deck > .slide-frame > .slide`**——runtime 依赖它,嵌套错了会静默隐藏 slide(frame 必须是 `.deck` 直接子节点,每个 frame 恰好含一个 `.slide`)。
-
-资源路径:per-run deck 在 `<repo>/runs/<ts>/output/index.html`,CSS/JS 需爬三级再进 skill 目录 `../../../skills/feishu-deck-h5/assets/feishu-deck.{css,js}`;单文件交付则把 CSS inline(见「Single-file inlined output」)。
-
-> 📎 模板见 `templates/_shell.html`
-
-## Layout recipes (canonical copy-paste markup)
-
-> 📎 详见 `references/layout-recipes.md`
-
-## Iconography
-
-- Use **Lucide-style inline SVG**, 24 px viewBox, `stroke: currentColor`, `stroke-width: 2`,
-  `stroke-linecap: round`, `stroke-linejoin: round`, `fill: none`. Inherit color via the
-  parent (`.tile` colors children to `--fs-accent` automatically).
-- For production, recommend the user swap to **ByteDance IconPark** for licensing parity.
-- **Never** use emoji or unicode glyphs (`✓ ✗ → 🚀`) as icons. Always real SVG.
-
-A small library of go-to icons is included in the recipes above. When the LLM needs
-a new icon, it should hand-write the SVG path rather than reference a remote URL.
-
----
-
-## Single-file inlined output (recommended for delivery)
-
-For a portable artifact, the agent should produce ONE `.html` file with CSS + JS inlined:
-
-```html
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>...</title>
-  <style>/* paste contents of assets/feishu-deck.css */</style>
-</head>
-<body>
-  <div class="deck">
-    <!-- slide-frame entries -->
-  </div>
-  <script>/* paste contents of assets/feishu-deck.js */</script>
-</body>
-</html>
-```
-
-The `examples/sample-deck.html` file is built this way and is the reference output.
-
----
-
-## Layout default: content sizes itself, the stage centers it
-
-**Default = the inner container centers vertically; content takes its natural height.** Never leave content stranded at the top of an empty canvas.
-
-- **CENTER (fixed-shape layouts):** `content-3up`, `content-2col`, `agenda`, `stats`, `big-stat`, `quote` — their stage gets `justify-content: center` (or `align-content`/`align-items: center`/`place-content: center`). Dense slides (≥80% fill) resolve to top-aligned anyway, so this is safe for both sparse and dense.
-- **FILL (stretched-flow layouts):** `pipeline`, `timeline`, `process` — these `flex: 1` their step/node row to span the canvas. Don't strip that.
-- Container name is per-layout: `.grid` / `.toc` / `.flow` / `.nodes` / `.stack` / `.stage` all count as valid centering targets.
-
-Enforced by `validate.py` rule **R48** (`audit_default_centering`) — blocks delivery if a fixed-shape layout's container lacks centering.
-
-> 📎 细节见 `references/layout-recipes.md`
-
-## 布局正确性 = 一次做对(correct-by-construction)优先,校验是安全网
-
-**目标:deck 生成出来本身布局就对,而不是每次靠校验抓出来再改。** 优先级:
-
-1. **生成即对(主力)** —— 居中、内容尺寸、卡片分布等布局正确性由**框架 CSS / schema 默认**保证(`.stage` 居中;版式 scoped 默认,如 content-3up / process / matrix / before-after / logo-wall 的"内容尺寸 + 共享中线 + 卡内垂直居中")。schema 路径理想是"零 finding":你描述 *what*,框架负责 *layout*,不手调字号/位置去凑。
-2. **校验(R48 / R-VIS-BALANCE / R-VIS-CROWD / L1–L4 …)= 安全网,不是主力** —— 只兜 construction 保证不了的(`layout: raw` 手写页、极端内容、外来 deck)。理想状态它越来越安静;**靠校验反复抓同一类布局问题 = 信号:该把它修进框架默认**。
-3. **反复出现的版式缺陷 → 修框架,别只加检测、更别每个 deck 局部 workaround。** 维护者标准打法:对该版式写 **scoped CSS 默认**(覆盖该 `data-layout`,不动全局 legacy 规则)→ 用 `assets/check-distribution.py`(三层 name-free 几何分布审计:画布/组/框;`--css` 注入测、`--fix` gated 修正)在**不均内容**上验证 findings 下降 **且其它版式零回归** → 再合;能升 schema 默认就别留给人手调。豁免要几何/结构判定(如 stats KPI 列顶基线对齐),**不要按版式名开白名单**。
-
-> **`layout:raw` 网格页一次写对,别等溢出/留白再修(2026-06-02 实战)**:① CSS Grid `repeat(N,1fr)` 默认 = `minmax(auto,1fr)`,子项内容(方/高 logo、长图)会把轨道撑过 1fr → **整行溢出被裁**(典型:logo 墙最后一行不见了)。固定行列**一律 `repeat(N,minmax(0,1fr))`(行、列都要)+ 子项 `min-width:0;min-height:0;overflow:hidden`**。② `position:absolute` 且 top/bottom 定高的 grid 容器(自定义 `.stage`)**单行仍按内容高** → 必须显式 `grid-template-rows:minmax(0,1fr)` 列才拉满高度,否则内容顶不到底、底部留白(`flex:1` 的 flex 列容器无此坑)。第一遍就写上,省掉「渲染→量→改→再渲染」2~3 个重周期。
-
-> 📎 细节见 `references/layout-recipes.md`
-
-## 导入外来 raw HTML deck:字号问题照报,修法二选一,绝不盲 snap
-
-拿到 / 导入一份**外来手搓 HTML deck**(不是本技能 schema 生成的)时:
-
-1. **字号问题照报,imported 不豁免**(2026-05-30 修正,曾错把 imported 的字号降 advisory,等于把问题藏了 —— 已撤回)。小正文(<24)投影看不清、hero 尺寸不对,**谁设计的都是问题,validator 照报 R06/R20/R-VIS-TIER/下限**。`<meta name="fs-deck-origin" content="imported">` 现在只是**来源标记**(不改字号严重度)。
-2. **错在「修法」,不在「报」。snap = 把字号 px 拍到 4 档却不管框** → 撑爆适配 / 把 hero 压小、丢重点(见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`)。正确修法二选一:
-   - **(A) 保留原设计 + 把字号修对** —— ① 换当前框架 JS:`python3 assets/rebundle-import.py <deck.html>`(auto-balance 加载修 box-crowd〔文字贴底〕,零字号/chrome 触碰);② **字号一键修对**:`python3 assets/grow-box-fit.py <deck.html>`(先 dry-run 看计划,`--apply` 落盘+备份+前后截图)—— 浏览器实测几何,**小正文<24 且画布有空间 → 提到 24 并让框自动长高(改大自动拉高),没空间的只标出来让你压内容/删条目;hero/封面 off-ladder 大字 → 向上吸附到最近 hero 档(82→88…);永不缩任何字号,chrome 硬排除**;③ 仍有真伤阅读的溢出再对症(标题换行 / 压字 / 删条目)。
-   - **(B) 重生成走 schema** —— 按 `deck.json`(Path A)重做,字号**按角色**给(重点→hero、正文→24、chrome→框架),内容与字号一起设计、天生适配 = correct-by-construction。
-3. **绝不**「snap 字号 px 完事不管框」—— 这是拍平设计、级联溢出的**类别错误**。修小字靠 **enlarge + grow-box**;修 hero 靠 **layout 尺寸**;chrome(翻页器/全屏提示/wordmark/pageno)永远不是内容,任何变换/检查都排除它。
-
-> 📎 复盘见 `IMPORT-RAW-DECK-LESSONS-2026-05-30.md`(L1 已撤回,见文内修正记)
-
-## Variant override discipline
-
-> 📎 详见 `references/layout-recipes.md`
-
-## Re-render UI mocks as HTML, not screenshots
-
-> 📎 详见 `references/reskin.md`
-
-## Layout integrity rules — execute, don't assume
-
-Four mandatory layout audits (run before sending, never "best practice"). The user should never have to point out a top-stacked layout, an empty middle, or a mono logo on content slides — if they do, you skipped these.
-
-- **L1 — Logo defaults to COLOR.** `.slide .wordmark` background MUST be `var(--fs-asset-logo)`; mono is opt-in via `class="is-mono"` (chapter/section pages only). Mono on every content slide = broken L1.
-- **L2 — No content stranded at the top.** If a slide's content fills <60% of canvas height, either center vertically (`align-content: center`) or grow to fill (`flex: 1`). Never top-stack with an empty bottom.
-- **L3 — `margin-top: auto` on a stretched card = empty-middle bug.** Combine L2 centering with content-sized rows (`grid-template-rows: auto`) so cards are content-tall, not canvas-tall.
-- **L4 — Narrow output-panel attribute lists use a single column.** `process` output panel (~400 px) attrs MUST be `grid-template-columns: 1fr`, never `1fr 1fr` (2-col truncates 22 px body text).
-
-Validator ships L1 / L2 / L4 (L3 not currently shipped).
-
-> 📎 细节见 `references/layout-recipes.md`
-
-## Self-check must be EXECUTED, not just listed
-
-The validator is a hard gate, not a checklist for reading pleasure. Before declaring a deck "done":
-
-1. **Run it.** `python3 assets/validate.py path/to/deck.html` — exit 0 = pass · **exit 1 = delivery BLOCKER** · exit 2 = file not found. Fix every error; don't paper over it by editing the validator.
-2. **Use `--strict` as the pre-delivery gate** — it promotes warnings (mono logos, off-palette hex) into errors. Default mode lets warnings pass for an in-progress deck.
-3. **Re-run after EVERY rebuild** — chain it: `bash build.sh && python3 assets/validate.py examples/sample-deck.html || exit 1`. Makes regression detection automatic.
-4. **Human-eye items the validator can't judge:** visual alignment (title baseline ↔ logo center), ZH > EN sizing balance, atmospheric "feel" (glow vs content density), narrative landing. Open at 1920×1080, 1280×720, 380×680 and look — then ship.
-
-`examples/sample-deck.html` passes in both default and `--strict` mode — that's the bar.
-
-> 📎 细节见 `references/validator-rules.md`
-
-## Preserve atmospheric / decorative backgrounds when re-rendering
-
-> 📎 详见 `references/reskin.md`
-
-## CSS layout pitfalls (defenses already in feishu-deck.css)
-
-> 📎 详见 `references/layout-recipes.md`
-
-## Prototype / standalone-page embed modes (mandatory) — pick BEFORE you write any code
-
-> 📎 嵌入已有 HTML/原型/别的 slide:**别默认 iframe — feishu slide→native lift;外来 demo→iframe A/B;简单内容→re-author C**。详见 `references/prototype-embed.md`
-
-## Embedding prototypes (iframe rules)
-
-> 📎 详见 `references/prototype-embed.md`
-
-## Narrative patterns (DESIGN.md §9 — A through K)
-
-> 📎 详见 `references/narrative-patterns.md`
-
-## Copy / numbering 规范
-
-These are content rules — they affect what to *write*, not how to render it.
-
-1. **Cite numbers inline.** When a slide cites a number, put the
-   citation right next to the number — as a trailing `<span class="caption">`,
-   a small `<p class="caption">` under the heading, or in the body
-   sentence itself ("…根据 12 家中国头部企业 2024 Q3-Q4 实测"). This
-   keeps the deck reading like a board memo. (`.source-footer` was the
-   pre-2026-05 way; retired alongside `.footer` chrome.)
-2. **Eyebrow numbering uses `01 / 02 / 03 / 04-A / 04-B / 04-C / …`** to
-   express chapter+sub-page hierarchy. When a focus area expands across
-   multiple pages, sub-letters are mandatory.
-3. **CN ↔ EN separator:** ZH text + space + `·` + space + EN text.
-   No em-dashes, no slashes, no parens.
-4. **Single ACCENT4 (teal) emphasis per page.** The keyword-jump rule applies
-   to *every* page, not just quote/金句. If two phrases compete for emphasis,
-   pick one or step back to a neutral color.
-5. **Match deck length to actual narrative arc.** A short pitch can stop on
-   the last content slide — don't force a quote slide and a closing slogan if
-   the story doesn't earn them. Use `end` only when there's a real "end".
-
----
-
-## Helper-snippet recipes
-
-Reusable HTML+CSS combos — the CSS already ships the styles; copy the markup. Named helpers (expand to the recipe in the reference when generating):
-
-`north_star_chip` · `verdict_card(go/cond/nogo)` · `boundary_band(no,yes)` · `evolution_chip(now,future)` · `principle_band(items)` · `phone_frame_iframe(src)` · `desktop_iframe(src)` · `aurora_background()` · `fullscreen_button()` · `north_star_map(N,cards)` (Pattern L) · `scene_grid(cards)` (Pattern M).
-
-Roadmap helpers (no CSS yet — write markup by hand): fork visualization, iron-4-corners, 6-step pipeline timeline, two-track structure, 1+1 vs 1+1+N boundary tags.
-
-> 📎 细节见 `references/narrative-patterns.md`
-
-## Richness primitives (v1.3) — promoted from the deck_v3 reference
-
-第二层 helper,专为阻止交付「骨架」deck 而存在。**richness 是默认,不是「有空再加」**——引数字却不上 `.kpi-strip`、收尾不上 `.cta-box`、转化不上 `.ui-wave + .report-item`,就是 under-deliver。没有 `.is-rich` 开关,`.card` 默认就带 hover ring + gradient tile,`.step` 默认带 chevron。
-
-**MANDATORY:用 `.grid` / `.flow` / `.nodes` / `.toc` / `.table-wrap` 等绝对定位 body 容器 + 任何 helper 时,必须把 body 容器和 helper 一起包进 `<div class="stage">`**。否则 helper 落入正常流顶端、压住 header → 视觉破损。`.stage` 成为绝对定位 body 区(top:220/bottom:110/left·right:96),内部容器改为在 stage flex 列里流式排布,helper 自然堆在 body 下方。支持 `.stage` 的 layout:`content-2col` / `content-3up` / `process` / `timeline` / `table` / `agenda` / `stats`(cover/end/image-text/big-stat 有自己的 `.stage` 语义)。无 helper 的纯 body 页可省略 `.stage`。
-
-**底部/顶部内容带必须在 `.stage` 居中流内,绝不 `position:absolute` 挂在 `.slide` 上**(2026-05-31 · `R-VIS-BAND-COLLIDE`)。takeaway / cta-box / principle-band / 收口金句 这类**有文字有底色的「带」**,若做成 `.slide` 的绝对定位兄弟,运行时画布居中(`feishu-deck.js` 的 `centerSlideInCanvas`)在算内容并集时**会跳过所有 `position:absolute` 元素** → 把正文在整块画布里居中、**正好压进带子下面**(视觉重叠);而且旧 `R-OVERLAP` 只查同容器兄弟,**查不出**这种跨容器/绝对浮层重叠。正解:把带子作为 `.stage`(`flex-direction: column`)的**最后一个流式子元素** + `margin-top` 间隔,让正文 + 带子作为**一个整体**被居中。**通用原则(字号放大后的连锁反应)**:字号变大若引发 **框↔框 / 框↔字 重叠或间距过小**,**先参照同页其它间距把容器/对应框拉高**(`.stage--tall`、抬 stage 上沿借高、`grid-template-rows` 给内容行 `1fr` 等),保持与其它框一致的间距,**再整体重新居中**——**绝不靠缩字号、也绝不让内容贴边或重叠**。该几何缺陷由 `R-VIS-BAND-COLLIDE`(err)兜底检测「绝对定位内容带压住正文」。
-
-**禁止默认加 `<div class="grid-bg"></div>`**——飞书母版 content layout 已用 `lark-content-bg.jpg`(`--fs-asset-content-bg`)做 ambient 渐变,叠 dot-grid 会双重噪点、脱离母版;仅 engineered/technical 自定义 layout 显式需要时才 opt-in。
-
-Helper 名单:`.pullquote`(收口论点)· `.voice-card`(证言)· `.cta-box`+`.cta-btn`(行动呼吁)· `.kpi-strip`(指标行,设 `--strip-cols`)· `.calc`/`.calc-row`/`.calc-result`(ROI 计算器,需 ~12 行内联 JS)· `.ui-row` / `.ui-alert` / `.ui-kpi` / `.ui-wave` / `.report-item`(ui-window 内的 dashboard / 波形 / 洞察行)。tone 变体多为 `.is-teal/.is-blue/.is-orange`,`.report-item` 用 `.is-warn` / `.is-info`。
-
-> 📎 细节见 `references/richness-primitives.md`
-
-## Performance budget (hard rules — enforced by `audit_perf`)
-
-A 13-slide deck stays lean. `validate.py audit_perf` enforces (each has a CSS/JS fix, no external deps):
-
-- **P50** — base64 in `<style>` ≤ 100 KB default (250 KB hard error). Use `bash build.sh` (linked). Single-file mode requires `<meta name="fs-deck-mode" content="inline">` to skip P50 — `build.sh --inline` adds it; hand-built single-file decks must add it manually or get flagged.
-- **P51** — `backdrop-filter: blur(N)` ≤ 10 px.
-- **P52** — `new ResizeObserver()` count ≤ 1 (one document-level RO with rAF batching).
-- **P53** — ≥8 `addEventListener` must use `AbortController` + `{signal}` + expose `destroy()`.
-- **P54** — `.slide-frame { contain: layout paint size }`.
-- **P55** — `.slide-frame .slide { will-change: transform }` + `translateZ(0)`.
-
-Linked (default) = ~24 KB + external `assets/*`, 0 base64, passes P50. Inlined (opt-in, email/IM) = ~360 KB, needs the `fs-deck-mode=inline` meta.
-
-## Content-page header — title only, no eyebrow, no sub-line
-
-Content-page header is intentionally minimal — just the title:
-
-```html
-<div class="header">
-  <h2 class="title-zh">懂我的AI,可以代我做方案评审</h2>
-</div>
-```
-
-**No eyebrow above, no subtitle below, no inner wrapper div, no inline page number** (page numbers come from the present-mode pager; per-slide chrome retired 2026-05). A content slide already carries its body (cards/table/flow) — stacking eyebrow+title+sub-line creates hierarchy noise. CSS enforces defensively: `.slide .header .eyebrow { display: none; }`. The `.eyebrow` class still works elsewhere (cards, section dividers, stats columns).
-
-**Hero exception:** `cover` / `image-text` / `end` use their own `.stage` container, not `.header`, so they keep their existing title patterns. (Enforced by validator R56.)
-
-## Self-check — the validator IS the self-check
-
-Run before every delivery:
-
-```bash
-bash assets/finalize.sh runs/<ts>/output local            # in-progress
-bash assets/finalize.sh runs/<ts>/output local --strict   # final delivery
-```
-
-`finalize.sh` orchestrates `copy-assets` → `validate.py` in order. Every validator error prints **what's wrong + how to fix** — read it, fix it. Don't suppress.
-
-**Severity model:** each audit emits `warn` / `err` / `warn_soft` at its inherent severity. `--strict` promotes all regular `warn`s to errors. **Soft warnings** (`warn_soft` — currently `R-VIS-NO-IMAGERY`, `R-SELF-CONTAINED`) are editorial advisories that NEVER escalate under `--strict`.
-
-**What the validator can't catch — needs human eyes before delivery:**
-
-- **Visual alignment** — title baseline ↔ logo center, agenda numerals ↔ titles
-- **Atmospheric feel** — gloom/glow density vs content density (open at 1920×1080 and squint)
-- **ZH-EN sizing balance** on bilingual decks (ZH must read bigger / sit above)
-- **Narrative landing** — does each slide deliver its one point in 3 seconds?
-
-Open at 1920×1080 (PC), 1280×720 (laptop), 380×680 (phone). If any breaks visually, fix the slide.
-
-> 📎 细节见 `references/validator-rules.md`
-
-## Failure modes & fixes
-
-> 📎 详见 `references/troubleshooting.md`
-
-## Caveats to relay to the user when delivering
-
-> 📎 详见 `references/delivery.md`
-
-## Examples
-
-- `examples/sample-deck.html` — 12-slide demo using all 13 layouts (single file, inlined).
-- `preview-dark.html` — token swatches + component gallery for visual self-test.
-- `templates/slide-recipes.html` — every layout in one reference deck (open and copy).
+If the script prints `PREFLIGHT BOOTSTRAPPED`, switch to the printed writable
+workspace before continuing. If preflight fails because no persistent local folder
+is mounted, stop and ask the user to mount/select a writable project folder.
+
+## References
+
+Workers should load only the reference files they need:
+
+- `references/request-router.md`
+- `references/deck-generation-policy.md`
+- `references/design-phase.md`
+- `references/design-first.md`
+- `references/content-density.md`
+- `references/assets-and-files.md`
+- `references/layout-recipes.md`
+- `references/narrative-patterns.md`
+- `references/richness-primitives.md`
+- `references/one-pager-case.md`
+- `references/check-only.md`
+- `references/validator-rules.md`
+- `references/delivery.md`
+- `references/editing-discipline.md`
+- `references/round-trip-integrity.md`
+- `references/reskin.md`
+- `references/converting-existing-material.md`
+- `references/prototype-embed.md`
+- `references/slide-deletion.md`
+- `references/operational-notes.md`
+- `references/run-artifacts.md`
+- `references/troubleshooting.md`
