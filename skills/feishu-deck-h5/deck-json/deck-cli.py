@@ -970,6 +970,25 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
 
+    # 无感自动 backfill (spec §10 decision 3): paste into a LEGACY HTML-only deck
+    # (no deck.json, but a sibling index.html) → reverse-build the deck.json 中间层
+    # from the rendered DOM FIRST (each .slide → raw, lossless, no screenshots),
+    # so the paste then runs against a real deck.json. Only for `paste` — other
+    # commands keep the explicit "deck not found" error.
+    if args.cmd == "paste" and not args.deck.exists():
+        _sib = args.deck.parent / "index.html"
+        if _sib.exists():
+            import subprocess
+            _sync = Path(__file__).resolve().parent / "sync-index-to-deck.py"
+            print(f"deck-cli: dest has no deck.json — auto-backfilling from {_sib} "
+                  "before paste (legacy HTML deck)", file=sys.stderr)
+            _r = subprocess.run([sys.executable, str(_sync), str(_sib), str(args.deck)],
+                                capture_output=True, text=True)
+            if _r.returncode != 0 or not args.deck.exists():
+                print(f"deck-cli: auto-backfill failed:\n{_r.stderr or _r.stdout}",
+                      file=sys.stderr)
+                return 2
+
     # Load deck (capture mtime for the optimistic-lock check on write-back)
     try:
         deck_mtime = args.deck.stat().st_mtime

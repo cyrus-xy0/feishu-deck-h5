@@ -265,17 +265,25 @@ class CrossDeckPasteIntoLegacyHtmlTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_paste_into_legacy_html_only_dest_fails_without_backfill(self):
-        # deck-cli paste does NOT auto-backfill — pasting into a dir whose
-        # deck.json is absent fails with the "deck not found" load error (exit 2).
+    def test_paste_into_legacy_html_only_dest_auto_backfills(self):
+        # 无感自动 backfill (spec §10 decision 3): paste into a legacy HTML-only dest
+        # (no deck.json, but a sibling index.html) AUTO-backfills the deck.json from
+        # the rendered DOM first, then pastes — succeeds (exit 0), no manual step.
         proc = subprocess.run(
             [sys.executable, str(CLI), str(self.dest / "deck.json"), "--yes",
              "paste", "--from", str(self.src / "deck.json"), "--key", "src-slide"],
             capture_output=True, text=True)
-        self.assertEqual(proc.returncode, 2,
-                         "paste into a legacy HTML-only dest should fail at load "
-                         f"(no deck.json to read).\n{proc.stdout}\n{proc.stderr}")
-        self.assertIn("deck not found", proc.stderr)
+        self.assertEqual(proc.returncode, 0,
+                         "paste into a legacy HTML-only dest should auto-backfill "
+                         f"then succeed.\n{proc.stdout}\n{proc.stderr}")
+        self.assertIn("auto-backfill", proc.stderr.lower())
+        self.assertTrue((self.dest / "deck.json").is_file())
+        deck = json.loads((self.dest / "deck.json").read_text(encoding="utf-8"))
+        keys = [s["key"] for s in deck["slides"]]
+        self.assertIn("src-slide", keys)  # the pasted slide
+        self.assertTrue(any(str(s.get("lifted", "")).startswith("backfill:")
+                            for s in deck["slides"]),
+                        "original pages should be backfilled (lifted=backfill:...)")
 
     def test_backfill_then_paste_then_render_end_to_end(self):
         # STEP 1: backfill the legacy dest's deck.json from its index.html.
