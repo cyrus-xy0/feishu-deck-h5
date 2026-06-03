@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feishu Deck H5 Parser"
+  short_description: "Parse source files and URLs into feishu-deck-h5 source dossiers."
+  default_prompt: "Use $feishu-deck-h5-parser to turn the provided materials into source-dossier.json."

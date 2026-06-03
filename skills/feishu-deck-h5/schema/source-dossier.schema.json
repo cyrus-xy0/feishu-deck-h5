@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feishu-deck-h5 source dossier",
+  "type": "object",
+  "required": ["version", "source_inventory", "knowledge_layer", "material_layer", "slide_layer", "handoff"],
+  "properties": {
+    "version": { "type": "string" },
+    "task_id": { "type": "string" },
+    "brief": { "type": "string" },
+    "source_inventory": { "type": "array" },
+    "knowledge_layer": { "type": "array" },
+    "material_layer": { "type": "array" },
+    "slide_layer": { "type": "array" },
+    "handoff": { "type": "object" },
+    "confidence": { "type": "object" }
+  },
+  "additionalProperties": true
+}
