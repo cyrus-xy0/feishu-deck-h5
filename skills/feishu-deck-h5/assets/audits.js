@@ -685,6 +685,147 @@
     return false;
   };
 
+  // --------------------------------------------------------------------------
+  //  步骤 3 第六批共享常量/工具 —— VISUAL 规则(R-OVERFLOW / R-VIS-CARD-OVERFLOW /
+  //  R-VIS-TIER / R-VIS-HIER / R-VIS-BODY-FLOOR / R-VIS-ORPHAN)迁自 visual-audit.js。
+  //  词表常量逐字搬 visual-audit.js 顶部("audit's hardcoded vocabulary");几何/测量
+  //  helper(hasAnyClass / _isFramedBox / _isMediaBox / _contentUnion / _growBox)逐字
+  //  搬 visual-audit.js 同名函数。finding 的 id/severity/文案/opt-out/lifted 降级则来自
+  //  validate.py run_visual_audits 的消费段(见各规则注释)。
+  // --------------------------------------------------------------------------
+
+  // 4-tier 字号台阶(visual 用硬编 {16,24,28,48} — 与 R20/R06 的 TYPE_LADDER_PX 同集,
+  // 但这里保留 visual-audit.js 原样硬编 Set 以零漂移逐字移植)。
+  const VIS_TIER = new Set([16, 24, 28, 48]);
+  // Hero exceptions — element/ancestor class 命中即允许 hero size(逐字搬 HERO_CLASSES)。
+  const VIS_HERO_CLASSES = [
+    'hero-num', 'ov-num', 'chapter-num', 'bigstat-num',
+    'cover-title', 'cover-h1', 'big-num', 'num', 'unit',
+    'slogan', 'idx',
+    'hero', 'kpi-val', 'metric-value', 'kpi-strip',
+    'closing-strip',
+  ];
+  const VIS_HERO_SIZES = new Set([
+    30, 36, 38, 40, 44,
+    52, 56, 64, 72, 88, 92, 96, 100, 132, 160,
+    240, 312,
+  ]);
+  // Meta class hints(逐字搬 META_KEYS)。
+  const VIS_META_KEYS = [
+    'owner', 'attrib', 'source', 'who', 'byline', 'author-meta',
+    'timestamp', 'date', 'status', 'kicker', 'eyebrow',
+    'td-owner', 'quote-attrib', 'voice-who', 'case-attrib',
+  ];
+  // Body class hints(逐字搬 BODY_KEYS)。
+  const VIS_BODY_KEYS = [
+    'body', 'desc', 'paragraph', 'para', 'caption',
+    'cc-body', 'card-body', 'td-body', 'nc-body', 'ov-desc',
+    'dir-desc', 'mode-body', 'rule-text', 'arch-base', 'feat-body',
+  ];
+  // Card / panel container hints(逐字搬 CARD_KEYS)。
+  const VIS_CARD_KEYS = [
+    'canonical-card', 'todo-card', 'news-card', 'overview-card',
+    'mode-card', 'dir-card', 'scene-card', 'ns-card', 'verdict-card',
+    'voice-card', 'cta-box', 'data-panel', 'arch-hand',
+    'story-case', 'pain-card', 'script-card', 'card-num',
+    'ind-row', 'logo-cell',
+  ];
+  const VIS_CARD_SUFFIXES = ['-card', '-tile', '-cell', '-panel', '-box'];
+  // 真页面级 chrome 类(逐字搬 CHROME_WHITELIST,R-VIS-LABEL-FLOOR/HIER 用,本批 HIER 不用,
+  // 留作完整移植 — HIER 只用 META/BODY)。
+  // (CHROME_WHITELIST 迁随 R-VIS-LABEL-FLOOR;本批不含 LABEL-FLOOR，故不引入。)
+  // Mock 容器类(逐字搬 TIER_MOCK — R-VIS-TIER 的 mock-internal 豁免;R-VIS-BODY-FLOOR /
+  // R-VIS-ORPHAN 共用同一集,visual-audit.js 注释 "Shared with R-VIS-BODY-FLOOR")。
+  const VIS_TIER_MOCK = [
+    'ui-window', 'ui-screen', 'ui-chat', 'ui-body', 'ui-toolbar',
+    'ui-sidebar', 'ui-grid', 'ui-cell', 'ui-list-item', 'ui-msg',
+    'phone', 'phone-screen', 'p22-ph', 'p17-phone', 'fs-phone',
+    'chat-body', 'chat-header', 'p22-chat', 'p22-noti', 'p22-know',
+    'p22-task', 'ph-bar', 'ph-status', 'ph-chat', 'msg-ai', 'msg-user',
+    'dash', 'mini-ui', 'browser-mock', 'p17-xhs', 'p17-dy', 'p17-flow-card',
+    'page-replica', 'report-toc', 'report-mock', 'doc-mock',
+    'doc-preview', 'wiki-mock', 'feishu-doc', 'lark-doc-mock',
+    'pd-card',
+    'doc-grid', 'doc-stage', 'doc-card',
+  ];
+  // R-VIS-BODY-FLOOR 的 chrome-class 豁免集(逐字搬 CONTENT_CHROME_CLASSES)。
+  const VIS_CONTENT_CHROME_CLASSES = [
+    'pageno', 'footnote', 'source', 'attrib', 'copyright', 'wordmark',
+    'contact', 'eyebrow', 'pill', 'tag', 'chip', 'badge', 'demo-tag',
+    'demo-label', 'caption-meta', 'cite',
+  ];
+
+  // class 子串包含判定(逐字搬 visual-audit.js hasAnyClass —— 小写化、子串 includes,
+  // 与 audits.js 既有的 classList.contains 不同语义:这是 visual 的"宽松子串"匹配)。
+  const visHasAnyClass = (el, keys) => {
+    const raw = el.className;
+    const cls = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase();
+    return keys.some((k) => cls.includes(k));
+  };
+  // -card / -tile / -cell / -panel / -box 后缀卡片判定(逐字搬 hasCardSuffix)。
+  const visHasCardSuffix = (el) => {
+    const raw = el.className;
+    const cls = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString().toLowerCase();
+    return VIS_CARD_SUFFIXES.some((suf) => cls.split(/\s+/).some((c) => c.endsWith(suf)));
+  };
+  // 可见 text-bearing 叶的并集 bbox(逐字搬 _contentUnion)。
+  const visContentUnion = (root) => {
+    let t = Infinity, b = -Infinity, any = false;
+    for (const el of root.querySelectorAll('*')) {
+      if (el.tagName === 'SVG' || el.tagName === 'svg'
+          || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+      if (!hasOwnText(el)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      any = true; t = Math.min(t, r.top); b = Math.max(b, r.bottom);
+    }
+    return any ? { top: t, bottom: b } : null;
+  };
+  // 有可见"框"(border / bg-color / bg-image)的盒(逐字搬 _isFramedBox)。
+  const visIsFramedBox = (el) => {
+    const cs = getComputedStyle(el);
+    const hb = ['Top', 'Right', 'Bottom', 'Left'].some((s) =>
+      parseFloat(cs['border' + s + 'Width'] || 0) > 0
+      && !/transparent|rgba\(0, 0, 0, 0\)/.test(cs['border' + s + 'Color']));
+    const bg = cs.backgroundColor;
+    const hbg = bg && !/transparent|rgba\(0, 0, 0, 0\)/.test(bg);
+    const hbi = cs.backgroundImage && cs.backgroundImage !== 'none';
+    return hb || hbg || hbi;
+  };
+  // 媒体框(逐字搬 _isMediaBox)。
+  const visIsMediaBox = (el) => {
+    const cs = getComputedStyle(el);
+    if (cs.backgroundImage && cs.backgroundImage !== 'none' && !/gradient/i.test(cs.backgroundImage)) return true;
+    if (el.querySelector('img,iframe,canvas,video,picture')) return true;
+    const raw = el.className;
+    const c = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString();
+    return /\b(photo|image|img|visual|mock|thumb|avatar|portrait|media|phone|screen)\b/i.test(c);
+  };
+  // grow-box verdict(逐字搬 _growBox)——R-VIS-BODY-FLOOR 的"改大自动拉高"判断。
+  const visGrowBox = (el, slide, scale) => {
+    const FLOOR = 24;
+    const px = parseFloat(getComputedStyle(el).fontSize) || FLOOR;
+    if (px >= FLOOR) return null;
+    const elH = el.getBoundingClientRect().height / scale;
+    const growNeeded = Math.round(elH * (FLOOR / px - 1));
+    let node = el.parentElement, framed = null;
+    while (node && node !== slide) {
+      if (visIsFramedBox(node) && !visIsMediaBox(node)) { framed = node; break; }
+      node = node.parentElement;
+    }
+    const target = framed || slide;
+    const br = target.getBoundingClientRect();
+    const cu = visContentUnion(target);
+    const innerSlack = cu ? Math.max(0, (br.bottom - cu.bottom) / scale) : 0;
+    const sr = slide.getBoundingClientRect();
+    const canvasBelow = framed ? Math.max(0, (sr.bottom - br.bottom) / scale) : 0;
+    const room = Math.round(innerSlack + canvasBelow);
+    return { grow_needed_px: growNeeded, room_px: room,
+      can_grow: growNeeded <= room, in_box: !!framed };
+  };
+
   // ==========================================================================
   //  规则注册表 —— 唯一规则源。新增规则 = 往这里加一个 (slide, ctx) => findings。
   // ==========================================================================
@@ -2503,6 +2644,530 @@
           }];
         }
         return [];
+      },
+    },
+
+    {
+      // R-OVERFLOW · 单帧内容溢出 1920×1080 画布。(步骤 3 第六批迁自 visual-audit.js 的
+      // overflow producer + validate.py run_visual_audits 的 overflow 消费段)。
+      // 几何:slide.scrollHeight > 1080 || slide.scrollWidth > 1920(逐字搬 producer)。
+      // 严重度分级(逐字搬 validate.py):_ov = max(Δh, Δw);>60 → error(内容被切),
+      //   ≥24 → warn(约 1-2 行),else → warn_soft(半行内,空间够,不阻断)。文案逐字保留。
+      id: 'R-OVERFLOW',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, label } = ctx;
+        if (!(slide.scrollHeight > 1080 || slide.scrollWidth > 1920)) return [];
+        const h = slide.scrollHeight;
+        const w = slide.scrollWidth;
+        const deltaH = h - 1080;
+        const deltaW = w - 1920;
+        const bits = [];
+        if (deltaH > 0) bits.push(`height +${deltaH} px`);
+        if (deltaW > 0) bits.push(`width +${deltaW} px`);
+        const ov = Math.max(deltaH, deltaW);
+        const severity = ov > 60 ? 'error' : ov >= 24 ? 'warn' : 'warn_soft';
+        const sev = ov > 60 ? '严重 · 内容被切，必修'
+          : ov >= 24 ? '临界 · 约 1-2 行'
+            : '可忽略 · 半行内，空间够，不阻断';
+        return [{
+          rule: 'R-OVERFLOW', severity, slide_idx,
+          idx: slide_idx, label, h, w,
+          message:
+            `slide ${slide_idx} (${label}): content overflows canvas — `
+            + `${bits.join(', ')}（${sev}）. 对症修：标题溢出→换行/加宽容器，`
+            + '正文→压字数，条目过多→删条目/减列。',
+        }];
+      },
+    },
+
+    {
+      // R-VIS-CARD-OVERFLOW · 卡片/容器内容溢出(画布内、R-OVERFLOW 漏过)。(步骤 3 第六批
+      // 迁自 visual-audit.js 的 card_overflow producer + validate.py 的 card_overflow 消费段)。
+      // 四种 direction(逐字搬 producer):
+      //   (a) vertical       — overflow:hidden|clip + scrollHeight-clientHeight>4(裁切),
+      //                        带 recoverable(祖先有 user 滚动视口)。
+      //   (a') vertical-visible — overflow 非 hidden + 某 CHILD 底边超出父 border-box>8。
+      //   (a'') leaf-text-spill — 纯文本叶(无子元素)的 line-box 超出最近 framed 祖先内框>4。
+      //   (b) horizontal     — flex/grid + nowrap + scrollWidth-clientWidth>4。
+      // 严重度(逐字搬 validate.py):_px = overflow_px;
+      //   vertical(裁切):非 recoverable → lifted?warn:err(恒 err 无视 px);recoverable →
+      //     _px>16?err:warn。 其余 direction(visible/leaf/horizontal)→ _px>16?err:warn。
+      // 文案/字段逐字保留(各 direction 不同 message)。
+      id: 'R-VIS-CARD-OVERFLOW',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout, scale } = ctx;
+        const _scale = scale;
+        const findings = [];
+        // overflow 候选集(逐字搬 producer):有 .stage 用 '.stage *';无 .stage 的 raw 用 '*';
+        // 无 .stage 的 schema 仍用 '.stage *'(空集 → 不查,避免装饰数字行盒误报)。
+        const overflowCandidates = slide.querySelector('.stage')
+          ? slide.querySelectorAll('.stage *')
+          : (layout === 'raw' ? slide.querySelectorAll('*') : slide.querySelectorAll('.stage *'));
+        // ⚠️ lifted-downgrade PRESERVE-EXACTLY:visual-audit.js 的 card_overflow producer
+        // 【从不】在 entry 上写 `lifted` 字段(任何 direction 都没有);validate.py 的消费段
+        // `entry.get('lifted')` 因此恒为 falsy —— 即非 recoverable 的 overflow:hidden 裁切
+        // 在 validate.py 里【永远】是 err,lifted 前缀文案也永不出现(这是原版的死分支)。
+        // 逐字对齐:本规则的 entry 同样不带 lifted,severity/message 不走 lift 降级,
+        // 与 validate.py 现行行为零漂移(R-VIS-TIER / R-VIS-BODY-FLOOR 的 producer 才真带
+        // lifted,故那两条照常降级 —— 见各自 rule)。
+        const pushEntry = (entry) => {
+          const direction = entry.direction || 'vertical';
+          const px = entry.overflow_px || 0;
+          if (direction === 'horizontal') {
+            const severity = px > 16 ? 'error' : 'warn';
+            findings.push({
+              rule: 'R-VIS-CARD-OVERFLOW', severity, slide_idx, ...entry,
+              message:
+                `slide ${slide_idx} · \`${entry.selector}\` is a flex/grid `
+                + 'container with nowrap children — total children width '
+                + `(${entry.content_h} px) exceeds container width `
+                + `(${entry.card_h} px) by ${entry.overflow_px} px. `
+                + 'Children are bleeding past the right edge (visible overflow) '
+                + 'or being silently clipped. Fix: shorten child text, move one '
+                + 'child to a separate line (display:block sibling), set '
+                + '`flex-wrap: wrap`, or widen the container.',
+            });
+          } else if (direction === 'vertical-visible') {
+            // 仅 vertical-visible 命中此分支。⚠️ leaf-text-spill 不在这里:validate.py 的消费段
+            // 是 `if horizontal / elif vertical-visible / else`,direction='leaf-text-spill' 落到
+            // 末尾 else(overflow:hidden 文案 + recoverable 检查)。leaf-text-spill entry 无
+            // recoverable 字段 → !!undefined=false → non-recoverable → lifted?warn:err。这是
+            // 逐字对齐 validate.py 现行行为(即便它把 leaf-spill 套了 overflow:hidden 文案)。
+            const severity = px > 16 ? 'error' : 'warn';
+            findings.push({
+              rule: 'R-VIS-CARD-OVERFLOW', severity, slide_idx, ...entry,
+              message:
+                `slide ${slide_idx} · \`${entry.selector}\` content `
+                + `(${entry.content_h} px) is ${entry.overflow_px} px taller `
+                + `than its box (${entry.card_h} px) and overflow is NOT hidden `
+                + '— text is spilling visibly out the bottom past the border / '
+                + 'background. The slide still fits the 1920×1080 canvas, so '
+                + 'R-OVERFLOW misses it; the clip-only check missed it too because '
+                + 'overflow is visible. Fix: shorten body copy, drop a row / item, '
+                + 'tighten padding / gap, or give the box more height. (Geometry — '
+                + 'stays ERROR even on lifted slides; a visible spill is a real defect.)',
+            });
+          } else {
+            // direction === 'vertical'(overflow:hidden|clip 裁切)或 'leaf-text-spill'
+            // (validate.py else 分支 = 二者共用,见上 elif 注释)。recoverable 缺省 false。
+            const recoverable = !!entry.recoverable;
+            if (!recoverable) {
+              // PRESERVE-EXACTLY:producer 不带 lifted → validate.py 此分支恒 err(死的 lift 降级)。
+              const severity = 'error';
+              findings.push({
+                rule: 'R-VIS-CARD-OVERFLOW', severity, slide_idx, ...entry,
+                message:
+                  `slide ${slide_idx} · \`${entry.selector}\` has `
+                  + `\`overflow:hidden\` but content (${entry.content_h} px) is `
+                  + `${entry.overflow_px} px taller than the container `
+                  + `(${entry.card_h} px), AND there is NO user-scrollable `
+                  + 'viewport (该盒 overflow-y 是 hidden/clip,user 不可滚;祖先也没有 '
+                  + 'overflow-y:auto|scroll 的真实滚动视口)→ 被裁内容永久不可见 '
+                  + '(non-recoverable clip),客户永远看不到这部分,内容彻底丢。'
+                  + 'Fix: shorten body copy, drop a row/item, shrink padding/gap, '
+                  + 'increase card height (more stage space), OR drop overflow:hidden '
+                  + 'so the issue is at least visible. (内容丢失是硬伤 — 即便溢出很小'
+                  + '也顶格 ERROR;lifted 页降 warn 由你定夺。)',
+              });
+            } else {
+              const severity = px > 16 ? 'error' : 'warn';
+              findings.push({
+                rule: 'R-VIS-CARD-OVERFLOW', severity, slide_idx, ...entry,
+                message:
+                  `slide ${slide_idx} · \`${entry.selector}\` has `
+                  + `\`overflow:hidden\` but content (${entry.content_h} px) is `
+                  + `${entry.overflow_px} px taller than the container `
+                  + `(${entry.card_h} px) — text is being clipped, but the box `
+                  + 'HAS a usable scroll mechanism (内容能滚出来,危害低)。'
+                  + 'Fix: shorten body copy, drop a row/item, shrink padding/gap, '
+                  + 'increase card height (more stage space), OR drop overflow:hidden '
+                  + 'so the clipped content is visible without scrolling.',
+              });
+            }
+          }
+        };
+
+        overflowCandidates.forEach((el) => {
+          if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return;
+          const cs = getComputedStyle(el);
+          const overflowY = cs.overflowY;
+          const overflow = cs.overflow;
+          const clips = (overflowY === 'hidden' || overflowY === 'clip'
+            || overflow === 'hidden' || overflow === 'clip');
+          if (clips) {
+            const dh = el.scrollHeight - el.clientHeight;
+            if (dh > 4) {
+              let recoverable = false;
+              for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
+                const ncs = getComputedStyle(n);
+                const oy = ncs.overflowY;
+                if ((oy === 'auto' || oy === 'scroll') && (n.scrollHeight - n.clientHeight) > 4) {
+                  recoverable = true; break;
+                }
+              }
+              pushEntry({
+                selector: shortSel(el),
+                content_h: el.scrollHeight,
+                card_h: el.clientHeight,
+                overflow_px: dh,
+                direction: 'vertical',
+                recoverable,
+              });
+            }
+          } else {
+            // (a') visible vertical spill — child bottom past parent border-box.
+            const dh = el.scrollHeight - el.clientHeight;
+            if (dh > 8 && el.clientHeight > 0 && el.children.length > 0) {
+              const elBottom = el.getBoundingClientRect().bottom;
+              let spill = 0;
+              for (const ch of el.children) {
+                if (ch.tagName === 'SCRIPT' || ch.tagName === 'STYLE') continue;
+                spill = Math.max(spill, ch.getBoundingClientRect().bottom - elBottom);
+              }
+              if (spill > 8) {
+                pushEntry({
+                  selector: shortSel(el),
+                  content_h: el.scrollHeight,
+                  card_h: el.clientHeight,
+                  overflow_px: Math.round(spill),
+                  direction: 'vertical-visible',
+                });
+              }
+            } else if (el.clientHeight > 0 && el.children.length === 0
+                       && hasOwnText(el) && !visIsMediaBox(el)) {
+              // (a'') leaf-text-spill — leaf line-box vs nearest framed ancestor inner box.
+              let frame = null;
+              for (let n = el; n && n !== slide; n = n.parentElement) {
+                if (visIsFramedBox(n) && !visIsMediaBox(n)) { frame = n; break; }
+              }
+              if (frame) {
+                const fr = frame.getBoundingClientRect();
+                const fcs = getComputedStyle(frame);
+                const innerBottom = fr.bottom - (parseFloat(fcs.borderBottomWidth) || 0);
+                const innerRight = fr.right - (parseFloat(fcs.borderRightWidth) || 0);
+                const rng = document.createRange(); rng.selectNodeContents(el);
+                let lineBottom = -Infinity, lineRight = -Infinity, anyLine = false;
+                for (const lr of rng.getClientRects()) {
+                  if (lr.width < 1 || lr.height < 1) continue;
+                  anyLine = true;
+                  lineBottom = Math.max(lineBottom, lr.bottom);
+                  lineRight = Math.max(lineRight, lr.right);
+                }
+                if (anyLine) {
+                  const spill = Math.max((lineBottom - innerBottom) / _scale,
+                    (lineRight - innerRight) / _scale);
+                  if (spill > 4) {
+                    pushEntry({
+                      selector: shortSel(el),
+                      content_h: Math.round(lineBottom - fr.top),
+                      card_h: Math.round(innerBottom - fr.top),
+                      overflow_px: Math.round(spill),
+                      direction: 'leaf-text-spill',
+                      frame_sel: shortSel(frame),
+                    });
+                  }
+                }
+              }
+            }
+          }
+          // (b) horizontal overflow on flex/grid nowrap container.
+          const isFlexGrid = ['flex', 'inline-flex', 'grid', 'inline-grid'].includes(cs.display);
+          const noWrap = cs.flexWrap === 'nowrap' || cs.display === 'grid' || cs.display === 'inline-grid';
+          if (isFlexGrid && noWrap) {
+            const dw = el.scrollWidth - el.clientWidth;
+            if (dw > 4) {
+              pushEntry({
+                selector: shortSel(el),
+                content_h: el.scrollWidth,
+                card_h: el.clientWidth,
+                overflow_px: dw,
+                direction: 'horizontal',
+              });
+            }
+          }
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-TIER · 每个文字元素的 computed fontSize 须在 4-tier 台阶 {16,24,28,48} 或
+      // 文档化的 hero 例外上。(步骤 3 第六批迁自 visual-audit.js 的 tier producer +
+      // validate.py 的 tier 消费段)。几何逐字搬 producer:
+      //   skip 无直接文本 / SVG 文本 / px<8;TIER 命中 OK;HERO_SIZES 命中且(isHeroLayout
+      //   或 hero-class 祖先)OK;mock-internal(TIER_MOCK 祖先)skip;[data-allow-typescale]
+      //   opt-out;同 (sel,px) 一页一报。
+      // 严重度(逐字搬 validate.py):lifted → warn(+降级备注),else → err。文案逐字保留。
+      id: 'R-VIS-TIER',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        const findings = [];
+        const textEls = slide.querySelectorAll('*');
+        const seenTierViolations = new Set();
+        textEls.forEach((el) => {
+          if (!hasOwnText(el)) return;
+          if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+          const cs = getComputedStyle(el);
+          const px = Math.round(parseFloat(cs.fontSize));
+          if (!px || px < 8) return;
+          if (VIS_TIER.has(px)) return;
+          if (VIS_HERO_SIZES.has(px)) {
+            if (isHeroLayout) return;
+            let heroAncestor = false;
+            for (let n = el; n && n !== slide; n = n.parentElement) {
+              if (visHasAnyClass(n, VIS_HERO_CLASSES)) { heroAncestor = true; break; }
+            }
+            if (heroAncestor) return;
+          }
+          let inMock = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+          }
+          if (inMock) return;
+          let allowOut = false;
+          for (let n = el; n; n = n.parentElement) {
+            if (n.dataset && n.dataset.allowTypescale != null) { allowOut = true; break; }
+          }
+          if (allowOut) return;
+          const sel = shortSel(el);
+          const key = `${sel}::${px}`;
+          if (seenTierViolations.has(key)) return;
+          seenTierViolations.add(key);
+          const lifted = !!(el.closest && el.closest('[data-lifted]'));
+          const severity = lifted ? 'warn' : 'error';
+          const note = lifted
+            ? ' — LIFTED slide (verbatim from another deck); downgraded '
+              + 'to WARNING, you choose whether to fix.'
+            : '';
+          findings.push({
+            rule: 'R-VIS-TIER', severity, slide_idx,
+            selector: sel, computed_px: px, lifted,
+            message:
+              `slide ${slide_idx} · \`${sel}\` renders at ${px}px (off the `
+              + '4-tier ladder {16, 24, 28, 48} + hero whitelist). Snap to '
+              + 'nearest tier, OR add `/* allow:typescale */` if this is a '
+              + 'documented hero exception (cover hero / section chapter-num / '
+              + `big-stat / etc.).${note}`,
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-HIER · 每个 card/panel 内 meta-class 字号 ≤ body-class 字号。(步骤 3 第六批
+      // 迁自 visual-audit.js 的 hier producer + validate.py 的 hier 消费段)。几何逐字搬:
+      //   card = CARD_KEYS 命中 OR -card/-tile/-cell/-panel/-box 后缀;每 card 一次(WeakSet);
+      //   metaEls = 后代里 META_KEYS 命中且有直接文本;bodyEls 同理 BODY_KEYS;两者皆非空时,
+      //   bodyPx = min(bodyEls 字号),每个 meta.px > bodyPx → push。always err(逐字搬)。
+      id: 'R-VIS-HIER',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        const cards = slide.querySelectorAll('*');
+        const seenCards = new WeakSet();
+        cards.forEach((card) => {
+          if (!visHasAnyClass(card, VIS_CARD_KEYS) && !visHasCardSuffix(card)) return;
+          if (seenCards.has(card)) return;
+          seenCards.add(card);
+          const allTextEls = [...card.querySelectorAll('*')].filter(hasOwnText);
+          const metaEls = allTextEls.filter((e) => visHasAnyClass(e, VIS_META_KEYS));
+          const bodyEls = allTextEls.filter((e) => visHasAnyClass(e, VIS_BODY_KEYS));
+          if (metaEls.length && bodyEls.length) {
+            const bodyPx = Math.min(...bodyEls.map(
+              (b) => Math.round(parseFloat(getComputedStyle(b).fontSize))));
+            metaEls.forEach((m) => {
+              const mpx = Math.round(parseFloat(getComputedStyle(m).fontSize));
+              if (mpx > bodyPx) {
+                findings.push({
+                  rule: 'R-VIS-HIER', severity: 'error', slide_idx,
+                  card_sel: shortSel(card),
+                  meta_sel: shortSel(m),
+                  meta_px: mpx,
+                  body_sel: shortSel(bodyEls[0]),
+                  body_px: bodyPx,
+                  message:
+                    `slide ${slide_idx} · meta \`${shortSel(m)}\` at ${mpx}px `
+                    + `is BIGGER than body \`${shortSel(bodyEls[0])}\` at `
+                    + `${bodyPx}px in the same card (\`${shortSel(card)}\`). `
+                    + 'Visual hierarchy reads inverted — shrink meta to ≤ body, '
+                    + 'or rename to a column-pill class if this element is '
+                    + 'actually a column title (not meta).',
+                });
+              }
+            });
+          }
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-BODY-FLOOR · ≥8 字直接文本在 <24px 且不在 mock / chrome 类内。(步骤 3 第六批
+      // 迁自 visual-audit.js 的 body_floor producer + validate.py 的 body_floor 消费段)。
+      // 几何逐字搬:skip SVG 文本 / <style> / <script> / px>=24;直接文本<8 字 skip;
+      //   CONTENT_CHROME_CLASSES 命中 skip;MOCK_CONTAINERS(=TIER_MOCK)祖先 skip;
+      //   [data-allow-body-floor] 链 opt-out;isHeroLayout skip;同 (sel,px) 一页一报。
+      //   附带 _growBox verdict(grow_needed_px/room_px/can_grow/in_box)。
+      // 严重度(逐字搬 validate.py):lifted → warn(+降级备注),else → err;_fix 由 can_grow 选。
+      id: 'R-VIS-BODY-FLOOR',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout, scale } = ctx;
+        if (isHeroLayout) return [];   // hero 版式整体豁免(producer 在循环内 skip,等价)
+        const _scale = scale;
+        const findings = [];
+        const textEls = slide.querySelectorAll('*');
+        const seenBodyFloor = new Set();
+        textEls.forEach((el) => {
+          if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          const cs = getComputedStyle(el);
+          const px = Math.round(parseFloat(cs.fontSize));
+          if (!px || px >= 24) return;
+          let directTextStr = '';
+          for (const n of el.childNodes) {
+            if (n.nodeType === 3) directTextStr += n.textContent;
+          }
+          directTextStr = directTextStr.trim();
+          if (directTextStr.length < 8) return;
+          if (visHasAnyClass(el, VIS_CONTENT_CHROME_CLASSES)) return;
+          let inMock = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+          }
+          if (inMock) return;
+          let allowOut = false;
+          for (let n = el; n; n = n.parentElement) {
+            if (n.dataset && n.dataset.allowBodyFloor != null) { allowOut = true; break; }
+          }
+          if (allowOut) return;
+          const sel = shortSel(el);
+          const key = `${slide_idx}::${sel}::${px}`;
+          if (seenBodyFloor.has(key)) return;
+          seenBodyFloor.add(key);
+          const lifted = !!(el.closest && el.closest('[data-lifted]'));
+          const grow = visGrowBox(el, slide, _scale) || {};
+          const preview = directTextStr.length > 40
+            ? directTextStr.slice(0, 40) + '…' : directTextStr;
+          const charCount = directTextStr.length;
+          const severity = lifted ? 'warn' : 'error';
+          const cg = grow.can_grow;
+          let fix;
+          if (cg === true) {
+            fix = ` 修法→ 提到 24 + 框自动长高(改大自动拉高):需约 `
+              + `${grow.grow_needed_px != null ? grow.grow_needed_px : '?'}px,框/画布余 `
+              + `${grow.room_px != null ? grow.room_px : '?'}px,装得下。永不缩字号。`;
+          } else if (cg === false) {
+            fix = ` 修法→ 提到 24 后空间不够(需 `
+              + `${grow.grow_needed_px != null ? grow.grow_needed_px : '?'}px,`
+              + `仅余 ${grow.room_px != null ? grow.room_px : '?'}px):压字数/删条目,而非缩字号。`;
+          } else {
+            fix = ' 修法→ 提到 24(优先),内容超框则拉高框 / 压字数,永不缩字号。';
+          }
+          findings.push({
+            rule: 'R-VIS-BODY-FLOOR', severity, slide_idx,
+            selector: sel, rendered_px: px, char_count: charCount,
+            preview, lifted, ...grow,
+            message:
+              (lifted ? 'LIFTED slide (verbatim from another deck) — downgraded to '
+                + 'WARNING, you choose whether to bump. ' : '')
+              + `slide ${slide_idx} · \`${sel}\` renders at ${px}px but its `
+              + `direct text is ${charCount} chars ("${preview}"). `
+              + 'Body content (≥ 8 chars of sentence-like text outside mockup '
+              + 'containers and chrome classes) must be ≥ 24 px on projector.'
+              + fix
+              + ' (Or rename to a chrome class .eyebrow/.footnote/.source/.pill/'
+              + '.tag/.chip/.badge/.pageno/.demo-tag if it really is chrome, OR set '
+              + '`data-allow-body-floor` for a documented exception.)',
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-ORPHAN · CJK 孤字 / 上长下短 失衡换行。(步骤 3 第六批迁自 visual-audit.js 的
+      // orphan producer + validate.py 的 orphan 消费段)。几何逐字搬:每个 CJK 叶元素(无块级
+      // 子元素、非 SVG 文本、CJK≥4、非 mock-internal、非 nowrap/pre),按 line-box 量行宽;
+      //   ≥2 行且 (a) 末行 ≤ fs*1.45(orphan)或 (b) 行数≤3 且末行 < 最宽*0.38 且 CJK≤cap
+      //   (heroFont fs≥72 → cap 25,else 14)(imbalanced)→ push;同 sel 一页一报。
+      // always warn(逐字搬)。文案逐字保留(kind / balance 备注)。
+      id: 'R-VIS-ORPHAN',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        const seenOrphan = new Set();
+        slide.querySelectorAll('*').forEach((el) => {
+          if (!hasOwnText(el)) return;
+          if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+          const hasBlockChild = [...el.children].some((c) => {
+            const d = getComputedStyle(c).display;
+            return d === 'block' || d === 'flex' || d === 'grid' || d === 'list-item' || d === 'table';
+          });
+          if (hasBlockChild) return;
+          const cjk = ((el.textContent || '').match(/[一-鿿]/g) || []).length;
+          if (cjk < 4) return;
+          let inMock = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+          }
+          if (inMock) return;
+          const cs = getComputedStyle(el);
+          if (cs.whiteSpace === 'nowrap' || cs.whiteSpace === 'pre') return;
+          const fs = parseFloat(cs.fontSize) || 16;
+          const rng = document.createRange(); rng.selectNodeContents(el);
+          const byTop = new Map();
+          [...rng.getClientRects()].forEach((r) => {
+            if (r.width < 1 || r.height < 1) return;
+            let key = Math.round(r.top);
+            for (const k of byTop.keys()) { if (Math.abs(k - key) < 4) { key = k; break; } }
+            byTop.set(key, Math.max(byTop.get(key) || 0, r.width));
+          });
+          const widths = [...byTop.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]);
+          if (widths.length < 2) return;
+          const last = widths[widths.length - 1];
+          const maxw = Math.max(...widths);
+          const isOrphan = last <= fs * 1.45;
+          const heroFont = fs >= 72;
+          const cjkCap = heroFont ? 25 : 14;
+          const isImbalanced = widths.length <= 3 && last < maxw * 0.38 && cjk <= cjkCap;
+          if (!isOrphan && !isImbalanced) return;
+          const sel = shortSel(el);
+          if (seenOrphan.has(sel)) return;
+          seenOrphan.add(sel);
+          const kind = isOrphan ? 'orphan' : 'imbalanced';
+          const balance = cs.textWrap || '';
+          const linePx = widths.map((w) => Math.round(w));
+          const lastPx = Math.round(last);
+          const maxPx = Math.round(maxw);
+          const fontPx = Math.round(fs);
+          const preview = (el.textContent || '').trim().slice(0, 16);
+          const kindLabel = kind === 'orphan' ? '末行孤字 orphan' : '上长下短 imbalanced';
+          const noBal = balance === 'balance' ? '' : ' (该元素当前没有 text-wrap:balance)';
+          findings.push({
+            rule: 'R-VIS-ORPHAN', severity: 'warn', slide_idx,
+            selector: sel, lines: widths.length, line_px: linePx,
+            last_px: lastPx, max_px: maxPx, font_px: fontPx,
+            kind, balance, preview,
+            message:
+              `slide ${slide_idx} · \`${sel}\` CJK 换行不平衡 — ${kindLabel}: `
+              + `${widths.length} 行 ${linePx}px,末行仅 ${lastPx}px (最宽行 `
+              + `${maxPx}px / 字号 ${fontPx}px) ("${preview}"). 文字换行后末行只剩一两个字 `
+              + '或上面长下面短,投影上很碎。Fix 优先级: (1) 给元素加 '
+              + '`text-wrap: balance`(框架对常见标题/卡名类已默认开 — 若这里没生效,'
+              + '多半被更具体的选择器/另一条 !important 压住了,提级覆盖即可);'
+              + '(2) 容器固定宽 / 被 flex 夹窄,balance 也救不了 → 加宽容器,或 4 字以内'
+              + '主标签用 `white-space: nowrap` 逼单行,或把尾词(「企划」「部」等)用 '
+              + `\`display:block\` 拆成副标行;(3) 改文案让上下两行字数接近。${noBal}`,
+          });
+        });
+        return findings;
       },
     },
 
