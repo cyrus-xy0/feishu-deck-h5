@@ -81,7 +81,15 @@ def audit_brand_chrome(slides: list[str], iss: Issues):
 
 
 def audit_copy_rules(html: str, iss: Issues):
-    """R05: no emoji / '!' / '…' / '???' anywhere in slide content."""
+    """R05: no emoji / '!' / '…' / '???' anywhere in slide content.
+
+    R05 is a CONTENT-AUTHORING rule (banned editorial punctuation). For an
+    IMPORTED deck (every slide is `data-lifted` — a PPTX→canvas import or bulk
+    lift) the body is FAITHFULLY carried foreign content, not authored to the
+    deck's copy standards: downgrade err→warn_soft so the faithful text is
+    surfaced (a human chooses whether to clean it) but does not BLOCK delivery.
+    Per the task: never mangle source text to satisfy a rule — downgrade
+    severity, keep the content. Authored decks keep R05 at full error."""
     body_m = re.search(r'<body[^>]*>(.*)</body>', html, re.S)
     if not body_m: return
     body = re.sub(r'<script.*?</script>', '', body_m.group(1), flags=re.S)
@@ -93,18 +101,25 @@ def audit_copy_rules(html: str, iss: Issues):
     body = re.sub(r'<svg.*?</svg>', '', body, flags=re.S | re.I)
     text = re.sub(r'<[^>]+>', ' ', body)
 
+    imported = _deck_all_imported(html)
+    _note = (' — IMPORTED deck (verbatim-carried content); downgraded to '
+             'WARNING, you choose whether to clean up the source text'
+             if imported else '')
+    def _lev(code, msg):
+        (iss.warn_soft if imported else iss.err)(code, msg + _note)
+
     # Emoji
     emoji_re = re.compile(r'[\U0001F300-\U0001FAFF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF]')
     if emoji_re.search(text):
-        iss.err('R05', 'emoji detected in slide text')
+        _lev('R05', 'emoji detected in slide text')
 
     # Banned punctuation
     if '!' in text or '！' in text:
-        iss.err('R05', "exclamation '!' / '！' detected in slide text")
+        _lev('R05', "exclamation '!' / '！' detected in slide text")
     if '…' in text or '...' in text:
-        iss.err('R05', "ellipsis '…' / '...' detected in slide text")
+        _lev('R05', "ellipsis '…' / '...' detected in slide text")
     if '???' in text or '？？？' in text:
-        iss.err('R05', "'???' detected in slide text")
+        _lev('R05', "'???' detected in slide text")
 
 
 def _lifted_slide_keys(html: str) -> set:
@@ -120,6 +135,37 @@ def _lifted_slide_keys(html: str) -> set:
             if km:
                 keys.add(km.group(1))
     return keys
+
+
+def _slide_is_lifted(fr: str) -> bool:
+    """True if a single slide-frame HTML chunk carries `data-lifted` (Native
+    slide lift / PPTX-import provenance) — its CONTENT-AUTHORING violations get
+    downgraded err→warn. Geometry / overflow stay full-severity (those are real
+    defects regardless of import). Substring check mirrors the existing canvas /
+    replica per-slide detection in the UI1 audit."""
+    return 'data-lifted' in fr
+
+
+def _deck_all_imported(html: str) -> bool:
+    """True if EVERY non-empty `.slide` in the deck is imported/lifted — i.e.
+    the whole deck is verbatim-carried foreign content (a PPTX→canvas import or
+    a bulk lift), not hand-authored.
+
+    Used to scope DECK-WIDE content-authoring rules (R05 banned punctuation,
+    R10 off-palette hex) to a soft severity: those audits scan the whole body
+    and can't attribute a hit to one slide, so we only downgrade when the
+    deck as a whole is imported. A mixed deck (one lifted slide among authored
+    ones) keeps the deck-wide rules at full severity — an authored slide must
+    still meet the content bar.
+
+    Also honors the explicit `<meta name="fs-deck-origin" content="imported">`
+    stamp (foreign raw-deck import path)."""
+    if _deck_imported(html):
+        return True
+    slides = extract_slides(html)
+    if not slides:
+        return False
+    return all(_slide_is_lifted(fr) for fr in slides)
 
 
 def _deck_imported(html: str) -> bool:
@@ -559,7 +605,16 @@ def audit_hex_palette(html: str, iss: Issues):
     extras = {h: c for h, c in hexes.items() if h not in ALLOWED_HEX}
     if extras:
         msg = ', '.join(f'#{h}×{c}' for h, c in sorted(extras.items()))
-        iss.warn('R10', f'hex values outside palette in slide markup: {msg}')
+        # R10 is CONTENT-AUTHORING (palette discipline). An IMPORTED deck carries
+        # the SOURCE's colors verbatim — they're not authored against the deck
+        # palette, so an imported-everywhere deck downgrades R10 warn→warn_soft
+        # (surfaced, never promoted to error under --strict). Authored decks keep
+        # R10 as a warning (promoted to error under --strict, as before).
+        if _deck_all_imported(html):
+            iss.warn_soft('R10', f'hex values outside palette in slide markup: {msg}'
+                          ' — IMPORTED deck (verbatim-carried colors); soft advisory.')
+        else:
+            iss.warn('R10', f'hex values outside palette in slide markup: {msg}')
 
 
 def audit_runtime_chrome(html: str, iss: Issues, html_path: 'Path'):
@@ -950,11 +1005,26 @@ def audit_slide_keys(slides: list[str], iss: Issues):
             continue
 
         if positional_re.match(slug):
-            iss.warn('R-KEY',
-                f'slide {i}: data-slide-key="{slug}" is positional — it '
-                'breaks when slides reorder. Use a semantic slug naming '
-                'what the slide is ABOUT (e.g. "arr-history" instead of '
-                '"slide-06").')
+            # POSITIONAL key = a CONTENT-AUTHORING nit (a `slide-NN` slug breaks
+            # on reorder; the fix is a semantic rename). For an imported/lifted
+            # slide the positional key is the FAITHFUL carry of the source's
+            # ordering (build_pptx emits `slide-NNN`), not an authoring choice —
+            # downgrade warn→warn_soft so it's surfaced but never promoted to
+            # error under --strict. Authored slides keep the warning.
+            # NOTE: this only downgrades the POSITIONAL nit. A real DUPLICATE
+            # key (below) stays a full error even when lifted — colliding keys
+            # break the round-trip / library locator regardless of provenance.
+            if _slide_is_lifted(fr):
+                iss.warn_soft('R-KEY',
+                    f'slide {i}: data-slide-key="{slug}" is positional — '
+                    'IMPORTED/lifted slide (key carried from source ordering); '
+                    'soft advisory, rename to a semantic slug if you keep it.')
+            else:
+                iss.warn('R-KEY',
+                    f'slide {i}: data-slide-key="{slug}" is positional — it '
+                    'breaks when slides reorder. Use a semantic slug naming '
+                    'what the slide is ABOUT (e.g. "arr-history" instead of '
+                    '"slide-06").')
 
         if slug in seen:
             iss.err('R-KEY',
@@ -1017,6 +1087,14 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues):
             'Use "zh-only" (default, monolingual ZH) or "zh-en" (bilingual). '
             'Treating as zh-only.')
 
+    # R-LANG is CONTENT-AUTHORING (zh-only copy discipline). A Latin leaf /
+    # bilingual class on an IMPORTED/lifted slide is the FAITHFUL carry of the
+    # source's text (the PPTX really contained "PV/QC/CAPA/NP"), not an authoring
+    # drift — downgrade that slide's R-LANG warn→warn_soft so it's surfaced but
+    # never promoted to error under --strict. Authored slides keep the warning.
+    def _rlang(fr, msg):
+        (iss.warn_soft if _slide_is_lifted(fr) else iss.warn)('R-LANG', msg)
+
     en_class_re = re.compile(r'class="[^"]*\b(title|subtitle|label)-en\b')
     for i, fr in enumerate(slides, 1):
         for m in en_class_re.finditer(fr):
@@ -1025,7 +1103,7 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues):
                    'zh-only mode — drop the EN translation track, or '
                    'opt into bilingual via `<meta name="fs-language" '
                    'content="zh-en">` in <head>.')
-            iss.warn('R-LANG', msg)  # main() promotes warn→err in --strict
+            _rlang(fr, msg)  # main() promotes warn→err in --strict (lifted→soft)
             break  # one report per slide is enough
 
     # 2026-05-16 · Additional check: Latin-uppercase chrome tags inside
@@ -1087,7 +1165,7 @@ def audit_language_policy(html: str, slides: list[str], iss: Issues):
             text = m.group(1).strip()
             if not _is_offending_latin(text):
                 continue
-            iss.warn('R-LANG',
+            _rlang(fr,
                 f'slide {i}: chrome label `{text}` looks like a Latin label '
                 'in a zh-only deck. If it\'s genuinely a brand / product / '
                 'acronym, add it to LATIN_BRAND_WHITELIST in validate.py; '
@@ -1130,6 +1208,11 @@ def audit_translation_track_pairs(html: str, slides: list[str], iss,
         leaves = _walk_text_leaves(fr)
         if not leaves:
             continue
+        # IMPORTED/lifted slide → its CJK+Latin pairs are verbatim-carried from
+        # the source (PPTX "PV/QC/CAPA/NP" beside their CJK labels), not an
+        # authoring drift. Downgrade R-LANG warn→warn_soft for this slide:
+        # surfaced, never promoted to error under --strict.
+        _emit = iss.warn_soft if _slide_is_lifted(fr) else iss.warn
         by_parent: dict[int, list[dict]] = {}
         for leaf in leaves:
             by_parent.setdefault(leaf['parent_id'], []).append(leaf)
@@ -1164,7 +1247,7 @@ def audit_translation_track_pairs(html: str, slides: list[str], iss,
                 if key in seen:
                     continue
                 seen.add(key)
-                iss.warn('R-LANG',
+                _emit('R-LANG',
                     f'slide {i}: `<{l["tag"]} class="{l["class"][:60]}">'
                     f'{l["text"][:60]}` — Latin-only leaf paired with CJK '
                     f'sibling inside `<… {parent_ref}>` looks like an EN '

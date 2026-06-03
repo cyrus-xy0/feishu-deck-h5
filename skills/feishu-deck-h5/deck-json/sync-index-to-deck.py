@@ -137,13 +137,21 @@ def _canvas_geom_from_style(style: str, W: int, H: int) -> dict:
     return g
 
 
+def _text_from_html(html_text: str) -> str:
+    """Inner HTML → plain run text. <br> → \\n FIRST (the renderer's _esc_br
+    emits run-internal newlines as <br>; reverse it so paragraph/soft breaks
+    survive the round-trip), then strip remaining tags and unescape entities."""
+    s = re.sub(r"<br\s*/?>", "\n", html_text, flags=re.I)
+    return _html_unescape(re.sub(r"<[^>]+>", "", s))
+
+
 def _runs_from_inner(inner: str) -> list:
     """span inner → runs (per-run bold/color). No spans but text present →
     single flattened run (documented lossy boundary on multi-run edit)."""
     runs = []
     for style, text in _SPAN_RE.findall(inner):
         cm = _COLOR_RE.search(style)
-        run = {"text": _html_unescape(re.sub(r"<[^>]+>", "", text))}
+        run = {"text": _text_from_html(text)}
         if "700" in style:
             run["bold"] = True
         if cm:
@@ -151,7 +159,7 @@ def _runs_from_inner(inner: str) -> list:
         runs.append(run)
     if runs:
         return runs
-    flat = _html_unescape(re.sub(r"<[^>]+>", "", inner)).strip()
+    flat = _text_from_html(inner).strip()
     if flat:
         return [{"text": flat}]
     return []
@@ -159,20 +167,20 @@ def _runs_from_inner(inner: str) -> list:
 
 def _collect_canvas_els(inner: str) -> "list[tuple[str, dict]]":
     """Parse the slide's rendered .canvas inner for every [data-el-id] element.
-    Returns [(id, {tag, style, inner})] in DOM order. div uses depth-counted
-    inner; img is void."""
+    Returns [(id, {tag, style, inner})] in DOM order. div / svg use depth-counted
+    inner; img is void. (svg = a FREEFORM/custGeom/LINE shape element.)"""
     out = []
-    for tm in re.finditer(r'<(div|img)\b[^>]*\bdata-el-id="([^"]+)"[^>]*>',
+    for tm in re.finditer(r'<(div|img|svg)\b[^>]*\bdata-el-id="([^"]+)"[^>]*>',
                           inner):
         tag, eid = tm.group(1), tm.group(2)
         open_tag = inner[tm.start():tm.end()]
         sm = _STYLE_RE.search(open_tag)
         style = sm.group(1) if sm else ""
         el_inner = ""
-        if tag == "div":
+        if tag in ("div", "svg"):
             depth = 1
             i = tm.end()
-            for mm in re.finditer(r"<(/?)div\b", inner[i:]):
+            for mm in re.finditer(rf"<(/?){tag}\b", inner[i:]):
                 depth += -1 if mm.group(1) else 1
                 if depth == 0:
                     el_inner = inner[i:i + mm.start()]
@@ -200,11 +208,17 @@ def sync_canvas_data(inner: str, data: dict) -> dict:
 
     for eid, h in found:
         if eid not in jmap:
-            # 3) add: HTML has a new data-el-id
-            new_el = {"id": eid,
-                      "type": "text" if h["tag"] == "div" else "image"}
+            # 3) add: HTML has a new data-el-id. tag → type:
+            #   img → image, svg → shape (freeform/line), div → text.
+            if h["tag"] == "img":
+                etype = "image"
+            elif h["tag"] == "svg":
+                etype = "shape"
+            else:
+                etype = "text"
+            new_el = {"id": eid, "type": etype}
             new_el.update(_canvas_geom_from_style(h["style"], W, H))
-            if new_el["type"] == "text":
+            if etype == "text":
                 new_el["runs"] = _runs_from_inner(h["inner"])
             jmap[eid] = new_el
             elements.append(new_el)

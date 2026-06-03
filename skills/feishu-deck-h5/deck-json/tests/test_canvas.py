@@ -98,6 +98,60 @@ def test_canvas_renders_positioned_elements(tmp_path):
     assert "font-weight:700" in t2_block and "color:#CC0000" in t2_block
 
 
+def test_canvas_shape_appearance_fields(tmp_path):
+    """Shapes carry optional appearance fields (kind/fill/gradient/border/
+    radius/svg/style) emitted by the PPTX parser — these must render."""
+    slide = {
+        "key": "shapes", "layout": "canvas", "accent": "blue",
+        "data": {"canvas_w": 1920, "canvas_h": 1080, "elements": [
+            {"id": "solid", "type": "shape", "x": 0, "y": 0, "w": 200, "h": 100,
+             "kind": "roundRect", "fill": "#1A73E8", "radius": 12,
+             "border": {"color": "#0B57D0", "width": 2}},
+            {"id": "grad", "type": "shape", "x": 300, "y": 0, "w": 200, "h": 100,
+             "gradient": "linear-gradient(90deg, #3C7FFF 0%, #33D6C0 100%)"},
+            {"id": "rot", "type": "shape", "x": 600, "y": 0, "w": 200, "h": 100,
+             "fill": "#888", "style": "transform:rotate(10deg)"},
+            {"id": "free", "type": "shape", "x": 900, "y": 0, "w": 200, "h": 100,
+             "svg": '<path d="M0,0 L100,0 L50,100 Z" fill="#E91E63"/>'},
+        ]},
+    }
+    html = _render(tmp_path, [slide])
+    # solid: fill + radius + border all present on one div
+    solid = re.search(r'data-el-id="solid"[^>]*style="([^"]*)"', html).group(1)
+    assert "background:#1A73E8" in solid
+    assert "border-radius:12px" in solid
+    assert "border:2px solid #0B57D0" in solid
+    # gradient → background gradient (and no extra fill key conflict)
+    grad = re.search(r'data-el-id="grad"[^>]*style="([^"]*)"', html).group(1)
+    assert "background:linear-gradient(90deg, #3C7FFF 0%, #33D6C0 100%)" in grad
+    # style escape-hatch appended
+    rot = re.search(r'data-el-id="rot"[^>]*style="([^"]*)"', html).group(1)
+    assert "transform:rotate(10deg)" in rot
+    # svg shape → an <svg> with the path inline
+    assert '<svg class="el shape" data-el-id="free"' in html
+    assert '<path d="M0,0 L100,0 L50,100 Z" fill="#E91E63"/>' in html
+
+
+def test_roundtrip_svg_shape_geometry(tmp_path):
+    """An svg shape element survives sync (geometry write-back; appearance
+    fields stay in JSON) and is not dropped as 'deleted'."""
+    slide = {
+        "key": "canvas-page", "layout": "canvas", "accent": "blue",
+        "data": {"canvas_w": 1920, "canvas_h": 1080, "elements": [
+            {"id": "free", "type": "shape", "x": 100, "y": 100, "w": 200, "h": 100,
+             "svg": '<path d="M0,0 L100,100 Z" fill="#E91E63"/>'},
+        ]},
+    }
+    html = _render(tmp_path, [slide])
+    new = _sync.sync_canvas_data(_inner(html), slide["data"])
+    free = next((e for e in new["elements"] if e["id"] == "free"), None)
+    assert free is not None, "svg shape was dropped on sync"
+    assert free["type"] == "shape"
+    # appearance preserved (sync only rewrites geometry + text)
+    assert "M0,0 L100,100 Z" in free["svg"]
+    assert abs(free["x"] - 100) < 2 and abs(free["w"] - 200) < 2
+
+
 def test_canvas_placeholder_renders_notice(tmp_path):
     slide = {"key": "ph", "layout": "canvas", "accent": "blue",
              "data": {"placeholder": True, "source_page": 7, "elements": []}}

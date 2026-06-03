@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # pptx-to-html · run.sh — convert a .pptx into a feishu-deck-h5 HTML deck.
 #
+# Emits a structured `layout:"canvas"` deck.json (data.elements[]) — no
+# screenshots. (--raster/--full-raster are retired no-ops.)
+#
 # Usage:
-#   bash run.sh <in.pptx> <out-dir> [--limit N] [--raster] [--full-raster] [--inline]
+#   bash run.sh <in.pptx> <out-dir> [--limit N] [--no-render] [--inline]
 #
 # Renderer defaults to the sibling feishu-deck-h5 skill (../feishu-deck-h5),
 # else ~/.claude/skills/feishu-deck-h5. Override with --renderer DIR.
 #
-# Python deps (python-pptx, Pillow, PyMuPDF): a venv at the skill root
+# Python deps (python-pptx, lxml): a venv at the skill root
 # (skills/pptx-to-html/.venv) is used if present, else `python3` on PATH.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # assets/

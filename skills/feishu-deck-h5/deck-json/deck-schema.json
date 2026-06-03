@@ -1199,8 +1199,21 @@
                 }
               },
               "src":    { "type": "string", "description": "type=image only: real asset path (e.g. 'input/p1.jpg'). Kept verbatim so copy-assets / lift scan + copy it." },
-              "fill":   { "type": "string", "description": "type=shape only: background CSS color." },
-              "radius": { "type": "number", "description": "type=shape only: border-radius px." }
+              "fill":   { "type": "string", "description": "type=shape only: solid background CSS color (e.g. '#1A73E8')." },
+              "radius": { "type": "number", "description": "type=shape only: border-radius px." },
+              "kind":   { "type": "string", "description": "type=shape only: OOXML preset geometry name (e.g. 'rect','roundRect','ellipse'). Hint for the renderer; informational." },
+              "gradient": { "type": "string", "description": "type=shape only: a full CSS gradient value (e.g. 'linear-gradient(135deg, #A 0%, #B 100%)') applied as background. Used when the fill is a gradient (16% of real shapes)." },
+              "border": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "type=shape only: outline. color is a CSS color, width is px.",
+                "properties": {
+                  "color": { "type": "string" },
+                  "width": { "type": "number" }
+                }
+              },
+              "svg":    { "type": "string", "description": "type=shape only: an inline SVG body (path/line markup) for FREEFORM/custGeom and LINE shapes the box CSS can't express. Rendered inside an <svg> sized to the element box (viewBox 0 0 100 100, preserveAspectRatio=none)." },
+              "style":  { "type": "string", "description": "type=shape only: a raw CSS string escape-hatch appended to the element style for appearance that doesn't map to fill/gradient/border/radius (e.g. rotation, opacity)." }
             }
           }
         }

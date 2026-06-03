@@ -5,42 +5,51 @@ description: |
   independently-registered skill). It is the .pptx import path into the deck
   system — invoked from feishu-deck-h5 when the user hands over a PowerPoint.
 
-  Convert an existing PowerPoint (.pptx) presentation into a deck.json + HTML
-  deck rendered by the parent feishu-deck-h5 skill — natively, with no
-  PowerPoint app, no Keynote, no AppleScript. Walks every slide with
-  python-pptx and reconstructs each as absolutely-positioned HTML on a
-  1920×1080 canvas: text stays editable HTML, images become <img>, tables
-  become <table>, shapes/gradients/lines are reproduced in CSS/SVG.
+  Convert an existing PowerPoint (.pptx) into a STRUCTURED feishu-deck-h5
+  `canvas` deck.json (data.elements[]) — natively, with no PowerPoint app, no
+  Keynote, no AppleScript, no LibreOffice, NO SCREENSHOTS. Walks every slide
+  with python-pptx and emits each as a list of absolutely-positioned, typed,
+  id'd elements: text stays clean editable runs, images are the original
+  embedded assets, shapes/gradients/lines carry appearance/SVG fields. This is
+  the PPTX side of DECKJSON-UNIFIED-INTERMEDIATE-SPEC (§2/§3): one intermediate
+  layer = deck.json, one edit loop = edit→sync→deck.json.
 
   Triggers: "把 PPT/PPTX 转成 HTML", "import pptx", ".pptx 转 deck",
   "把这份 PowerPoint 还原成网页/H5", or when the user hands over a .pptx path.
 
-  This is the PowerPoint analogue of rollingai-decks' keynote-to-html, but
-  because .pptx is open OOXML, extraction is exact (EMU geometry) and
+  Because .pptx is open OOXML, extraction is exact (EMU geometry) and
   cross-platform — it does NOT shell out to any GUI app.
 
   Per-slide algorithm:
-    1. python-pptx walks every shape (recursing groups through their
-       chOff/chExt transform) → emits absolutely-positioned HTML.
-    2. Text frames → real <div>/<span> with per-run font/size/color/weight,
-       paragraph alignment, vertical anchor, bullets, soft line breaks <a:br>.
+    1. python-pptx walks every shape (recursing+flattening groups through their
+       chOff/chExt transform) → each shape → an element dict.
+    2. TEXT_BOX/PLACEHOLDER → {type:text, runs, anchor, insets}; PICTURE →
+       {type:image, src:"input/.."}; AUTO_SHAPE/FREEFORM/LINE → {type:shape,
+       kind/fill/gradient/border/radius/svg/style}.
     3. Theme colors resolved from the master's <a:clrScheme>.
-    4. Each slide is emitted as a `layout: "raw"` entry in deck.json.
-    5. feishu-deck-h5's render-deck.py wraps it in present-mode chrome.
+    4. Each slide is emitted as a `layout:"canvas"` entry in deck.json.
+    5. render-deck.py → positioned HTML (data-el-id, cqw/cqh); sync-index-to
+       -deck.py round-trips edits back into elements[] by id.
 
-  Lossy / acceptable failures (do NOT block on these):
+  Un-reconstructable (live chart / SmartArt / OLE) → that slide becomes a
+  placeholder ({placeholder:true, source_page:N}) and N is reported
+  (`unreconstructed slides: [..]`). NO screenshot fallback — --raster /
+  --full-raster are retired no-ops.
+
+  Lossy / acceptable (best-effort 还原, NOT pixel-perfect):
     · autofit "shrink-to-fit" text is not simulated (authored size used).
-    · charts / SmartArt / picture-fill backgrounds need `--raster` (LibreOffice).
-    · radial gradients, freeform custom geometry, image srcRect crop: approximated.
+    · only linear gradients; radial / lumMod-shade-tint approximated.
+    · freeform custGeom: move/line/cubic/quad/close (arc etc. skipped).
+    · image srcRect crop, complex table merges: approximated.
 ---
 
 # pptx-to-html
 
 ## When to invoke
 
-Trigger when the user has a `.pptx` and wants an HTML version that:
-  - Looks faithful to the original PowerPoint rendering
-  - Has editable text (HTML elements, not pixels)
+Trigger when the user has a `.pptx` and wants a structured, editable deck that:
+  - Reconstructs the original PowerPoint as best-effort (尽可能还原, not pixel-perfect)
+  - Has editable text + typed/positioned elements (deck.json, NOT pixels)
   - Carries feishu-deck-h5's present-mode chrome (←/→ nav, F fullscreen,
     progress bar, mobile scroll mode)
 
@@ -50,18 +59,17 @@ Do NOT use for: `.key` (use keynote-to-html), or a from-scratch redesign
 ## Preflight
 
 1. Verify the `.pptx` exists. If only a name was given, `mdfind "<name>.pptx"`.
-2. Python deps: `python-pptx`, `Pillow`, `PyMuPDF`. A venv at this sub-skill's
-   root is used if present:
+2. Python deps: `python-pptx`, `lxml`. A venv at this sub-skill's root is used
+   if present:
    ```bash
    python3 -m venv skills/feishu-deck-h5/pptx-to-html/.venv
-   skills/feishu-deck-h5/pptx-to-html/.venv/bin/pip install python-pptx Pillow PyMuPDF
+   skills/feishu-deck-h5/pptx-to-html/.venv/bin/pip install python-pptx
    ```
    (Or install on the system python; run.sh falls back to `python3`.)
+   No LibreOffice / Pillow / PyMuPDF needed — rasterization is retired.
 3. The renderer is the **parent feishu-deck-h5** skill (auto-located as the
    grandparent dir of build_pptx.py, else `~/.claude/skills/feishu-deck-h5`).
    Override with `--renderer DIR`.
-4. Raster fallback (`--raster` / `--full-raster`) additionally needs
-   **LibreOffice** (`soffice`); without it those flags no-op with a warning.
 
 ## Invocation
 
@@ -74,12 +82,18 @@ gitignored repo-wide: regenerable, never committed.)
 bash skills/feishu-deck-h5/pptx-to-html/assets/run.sh \
   <in.pptx>  skills/feishu-deck-h5/runs/<deck-name> \
   [--limit N]        # only first N slides
-  [--raster]         # per-element raster fallback for charts/SmartArt/picture-fill
-  [--full-raster]    # every slide = one full-bleed rasterized PNG (pixel-perfect)
+  [--no-render]      # emit deck.json + input/ assets only, skip HTML render
   [--inline]         # single-file delivery (base64-inline) — avoid for image-heavy decks
   [--renderer DIR]   # feishu-deck-h5 skill root (default: parent skill, auto-located)
   [--title TEXT]
+  [--raster]         # ⚠ RETIRED no-op (no screenshots)
+  [--full-raster]    # ⚠ RETIRED no-op (no screenshots)
 ```
+
+The build self-validates (DeckJSON schema gate runs before render) and prints
+`unreconstructed slides: [..]` — any listed page is a placeholder the user must
+redo by hand. Image assets are extracted to `<out-dir>/input/` and referenced
+as `elements[].src = "input/<file>"` (real scannable paths for copy-assets/lift).
 
 Preview: `bash skills/feishu-deck-h5/runs/<deck-name>/serve.sh` → localhost:8765
 

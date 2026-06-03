@@ -178,7 +178,20 @@ def show_story_case_accents(data: dict, slide_key: str) -> None:
 
 
 def relpath_from_to(src_dir: Path, dst_dir: Path) -> str:
-    return os.path.relpath(dst_dir, start=src_dir).replace(os.sep, "/")
+    # Canonicalize BOTH ends before diffing. `dst_dir` (ASSETS_DIR/TEMPLATES_DIR)
+    # is derived from Path(__file__).resolve(), so it is already realpath'd —
+    # but `src_dir` is the user-supplied output dir, which may carry a different
+    # spelling of a case-insensitive segment (e.g. cwd `…/Github/…` vs the
+    # on-disk canonical `…/GitHub/…`) or an unresolved symlink. Without
+    # normalizing, os.path.relpath treats the mismatched segment as a divergence
+    # and walks all the way up to the nearest *string*-common ancestor, emitting
+    # a long, non-portable `../../../../GitHub/…skills/…` ref that copy-assets'
+    # `(\.\./)+skills/feishu-deck-h5/` rewrite regex can't match → assets never
+    # get localized. realpath on both sides collapses the segment to one casing
+    # so the short canonical `../../../skills/feishu-deck-h5/…` ref is emitted.
+    src = os.path.realpath(src_dir)
+    dst = os.path.realpath(dst_dir)
+    return os.path.relpath(dst, start=src).replace(os.sep, "/")
 
 
 def render_template(template: str, data: dict) -> str:
@@ -1604,14 +1617,37 @@ def _enrich_canvas(ctx, slide):
             )
         elif etype == "shape":
             shape_style = style
-            if el.get("fill"):
+            # appearance: gradient takes precedence over solid fill (a shape
+            # carries one or the other); border / radius are additive.
+            if el.get("gradient"):
+                shape_style += f";background:{el['gradient']}"
+            elif el.get("fill"):
                 shape_style += f";background:{el['fill']}"
+            border = el.get("border")
+            if isinstance(border, dict) and border.get("width"):
+                bc = border.get("color", "#888")
+                shape_style += f";border:{border['width']}px solid {bc}"
             if el.get("radius") is not None:
                 shape_style += f";border-radius:{el['radius']}px"
-            parts.append(
-                f'          <div class="el shape" data-el-id="{eid}" '
-                f'style="{shape_style}"></div>'
-            )
+            # raw CSS escape-hatch (rotation/opacity/etc) appended last.
+            if el.get("style"):
+                shape_style += f";{el['style']}"
+            svg = el.get("svg")
+            if svg:
+                # FREEFORM / custGeom / LINE: inline SVG sized to the box.
+                # viewBox 0..100 + preserveAspectRatio:none → path coords are
+                # normalized 0..100 percentages of the element box.
+                parts.append(
+                    f'          <svg class="el shape" data-el-id="{eid}" '
+                    f'style="{shape_style};overflow:visible" '
+                    f'viewBox="0 0 100 100" preserveAspectRatio="none">'
+                    f'{svg}</svg>'
+                )
+            else:
+                parts.append(
+                    f'          <div class="el shape" data-el-id="{eid}" '
+                    f'style="{shape_style}"></div>'
+                )
     ctx["elements_html"] = "\n".join(parts)
 
 
