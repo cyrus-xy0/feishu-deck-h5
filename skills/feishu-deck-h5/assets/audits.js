@@ -3172,6 +3172,521 @@
     },
 
     {
+      // R-VIS-TITLE-POSITION · 内容版式的 .header 绝对 top 漂移。(步骤 3 第七批迁自
+      // visual-audit.js 的 title_position producer + validate.py 的 title_position 消费段)。
+      // 几何逐字搬 producer:
+      //   TITLE_SKIP_LAYOUTS(cover/section/end/quote/big-stat/replica/image-text)跳过;
+      //   header = :scope>.header;titleEl = header 内 .title-zh / h1.title-zh / h2.title-zh;
+      //   ⚠️ display:none / hidden header 跳过 —— getClientRects().length===0 是"未渲染"
+      //   的规范判定(display:none 报全 0 bbox → top:0 会误判),框架在某些版式(如无
+      //   with-header 的 agenda:`.header{display:none}`)故意隐藏 header,无可见标题可校
+      //   位置,必须跳过(此即任务要求 PRESERVE 的"skips display:none/hidden headers"规则);
+      //   scale = slide bbox 高 / 1080(本规则自算 scale,不用 ctx.scale,逐字搬 producer);
+      //   headerTop = (header.top - slide.top)/scale 取整;|headerTop-61| > 8 → push。
+      // 严重度(逐字搬 validate.py):always err。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-TITLE-POSITION',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        // TITLE_SKIP_LAYOUTS 逐字搬 producer(注意与 HERO_LAYOUTS 不同:含 replica、不含 image-text? —
+        // 实为 cover/section/end/quote/big-stat/replica/image-text,逐字对齐 producer 第 564 行)。
+        const TITLE_SKIP_LAYOUTS = new Set(['cover', 'section', 'end', 'quote',
+          'big-stat', 'replica', 'image-text']);
+        if (TITLE_SKIP_LAYOUTS.has(layout)) return [];
+        const header = slide.querySelector(':scope > .header');
+        const titleEl = slide.querySelector(
+          ':scope > .header > .title-zh, :scope > .header > h1.title-zh, '
+          + ':scope > .header > h2.title-zh, :scope > .header h2.title-zh, '
+          + ':scope > .header h1.title-zh');
+        // display:none / detached header 不渲染 → getClientRects().length===0 跳过(见注释)。
+        const headerRendered = !!header && header.getClientRects().length > 0;
+        if (!(header && titleEl && headerRendered)) return [];
+        // 本规则自算 scale = slide bbox 高 / 1080(逐字搬 producer 第 580 行,非 ctx.scale)。
+        const scale = (slide.getBoundingClientRect().height / 1080) || 1;
+        const headerTop = Math.round(
+          (header.getBoundingClientRect().top - slide.getBoundingClientRect().top) / scale);
+        const expectedTop = 61;
+        const tolerance = 8;
+        if (Math.abs(headerTop - expectedTop) <= tolerance) return [];
+        return [{
+          rule: 'R-VIS-TITLE-POSITION', severity: 'error', slide_idx,
+          layout, actual_top: headerTop, expected_top: expectedTop,
+          message:
+            `slide ${slide_idx} (layout \`${layout}\`) · `
+            + `\`.header\` rendered at top:${headerTop}px, expected `
+            + `~${expectedTop}px (master spec). Likely cause: the `
+            + 'layout is missing from the framework header-positioning '
+            + 'whitelist in `feishu-deck.css` / `extra-layouts.css`. Add '
+            + `\`.slide[data-layout="${layout}"] .header\` to the `
+            + 'unified positioning rule (`position:absolute; top:61px; '
+            + 'left:73px; right:320px`) so title aligns with the master '
+            + 'spec across all layouts.',
+        }];
+      },
+    },
+
+    {
+      // R-VIS-TITLE-GAP · 正文顶到/重叠标题。(步骤 3 第七批迁自 visual-audit.js 的
+      // title_gap producer + validate.py 的 title_gap 消费段)。几何逐字搬 producer:
+      //   同 TITLE_SKIP_LAYOUTS 跳过(producer 把 title_gap 嵌在同一 !TITLE_SKIP 块内);
+      //   命名通道:headerRendered && :scope>.stage → title=header bbox,contentTop = stage
+      //     后代里 w>40&&h>16 的最小 top;name-free 兜底(无 header):slide 内顶部 40% 区
+      //     内 ≥24px own-text 非 absolute 的最高块当 title,其下方块当 content;
+      //   contentTop 须 ≥ title.top-2(否则是 full-bleed bg);gap=(contentTop-title.bottom)/scale,
+      //     scale = ctx.scale(--fs-scale,逐字搬 producer 用的 _scale);gap<24 → push。
+      // 严重度(逐字搬 validate.py):gap_px<12 → err,else warn(_lev)。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-TITLE-GAP',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout, scale } = ctx;
+        const _scale = scale;
+        const TITLE_SKIP_LAYOUTS = new Set(['cover', 'section', 'end', 'quote',
+          'big-stat', 'replica', 'image-text']);
+        if (TITLE_SKIP_LAYOUTS.has(layout)) return [];
+        const header = slide.querySelector(':scope > .header');
+        const headerRendered = !!header && header.getClientRects().length > 0;
+        let tgTitleRect = null, tgTitleSel = null, tgContentTop = Infinity;
+        const tgStage = slide.querySelector(':scope > .stage');
+        if (headerRendered && tgStage) {
+          tgTitleRect = header.getBoundingClientRect();
+          tgTitleSel = shortSel(header);
+          for (const el of tgStage.querySelectorAll('*')) {
+            if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+            const r = el.getBoundingClientRect();
+            if (r.width > 40 && r.height > 16) tgContentTop = Math.min(tgContentTop, r.top);
+          }
+        } else if (!header) {
+          const sr = slide.getBoundingClientRect();
+          let tEl = null, tTop = Infinity;
+          for (const el of slide.querySelectorAll('*')) {
+            if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+            if (!hasOwnText(el)) continue;
+            const cs = getComputedStyle(el);
+            if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+            if (Math.round(parseFloat(cs.fontSize)) < 24) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 40 || r.height <= 16) continue;
+            if ((r.top - sr.top) > sr.height * 0.4) continue;
+            if (r.top < tTop) { tTop = r.top; tEl = el; }
+          }
+          if (tEl) {
+            tgTitleRect = tEl.getBoundingClientRect();
+            tgTitleSel = shortSel(tEl);
+            for (const el of slide.querySelectorAll('*')) {
+              if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
+              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+              const cs = getComputedStyle(el);
+              if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+              const r = el.getBoundingClientRect();
+              if (r.width > 40 && r.height > 16 && r.top >= tgTitleRect.bottom - 2) {
+                tgContentTop = Math.min(tgContentTop, r.top);
+              }
+            }
+          }
+        }
+        if (!(tgTitleRect && tgContentTop !== Infinity && tgContentTop >= tgTitleRect.top - 2)) {
+          return [];
+        }
+        const gap = (tgContentTop - tgTitleRect.bottom) / _scale;
+        if (gap >= 24) return [];
+        const gapPx = Math.round(gap);
+        // validate.py: _lev = err if gap_px<12 else warn(逐字搬)。
+        const severity = gapPx < 12 ? 'error' : 'warn';
+        return [{
+          rule: 'R-VIS-TITLE-GAP', severity, slide_idx,
+          layout, gap_px: gapPx, title_sel: tgTitleSel,
+          message:
+            `slide ${slide_idx} (layout \`${layout}\`) · content `
+            + `sits only ${gapPx}px below the title (< 24px / overlapping). `
+            + 'The body grew or overflowed UP toward `.header` — it is crowding / '
+            + 'colliding with the title. Fix: shorten or shrink the content so it '
+            + 'fits, OR move the content block DOWN (adjust the stage top / vertical '
+            + 'centering). 死规矩:标题/副标题位置不动,压内容或下移正文,绝不动标题。',
+        }];
+      },
+    },
+
+    {
+      // R-VIS-CROWD · 框内文字挤到底边。(步骤 3 第七批迁自 visual-audit.js 的 crowd
+      // producer + validate.py 的 crowd 消费段)。几何逐字搬 producer:
+      //   isHeroLayout / data-allow-imbalance 跳过;_framed = 后代里 _isFramedBox && !_isMediaBox
+      //   && bbox 高 > 80*scale;_boxes = _framed 里非被其它 framed 包含的(最外层);
+      //   每 box:cu=_contentUnion(box);distTop=(cu.top-r.top)/scale,distBottom=(r.bottom-
+      //   cu.bottom)/scale;distBottom<10 && distTop>distBottom+16 → push。scale = ctx.scale。
+      // 严重度(逐字搬 validate.py):always warn。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-CROWD',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout, scale } = ctx;
+        if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
+        const _scale = scale;
+        const findings = [];
+        const _framed = [...slide.querySelectorAll('*')].filter((el) =>
+          visIsFramedBox(el) && !visIsMediaBox(el)
+          && el.getBoundingClientRect().height > 80 * _scale);
+        const _boxes = _framed.filter((el) => !_framed.some((o) => o !== el && o.contains(el)));
+        for (const box of _boxes) {
+          const cu = visContentUnion(box); if (!cu) continue;
+          const r = box.getBoundingClientRect();
+          const distTop = (cu.top - r.top) / _scale;
+          const distBottom = (r.bottom - cu.bottom) / _scale;
+          if (distBottom < 10 && distTop > distBottom + 16) {
+            const sel = shortSel(box);
+            const topPx = Math.round(distTop);
+            const bottomPx = Math.round(distBottom);
+            findings.push({
+              rule: 'R-VIS-CROWD', severity: 'warn', slide_idx,
+              idx: slide_idx, label: ctx.label, sel,
+              top_px: topPx, bottom_px: bottomPx,
+              message:
+                `slide ${slide_idx} · \`${sel}\` 框内文字贴底 —— 内容离框可见底边`
+                + `只剩 ${bottomPx}px,顶部却留 ${topPx}px,文字被挤到框底。`
+                + 'Fix: 让卡片按内容尺寸 + 垂直居中(参考 content-3up `align-self: center; '
+                + 'justify-content: center`),或给框一个最小下内距 / 减少该框内容;'
+                + '若等高框内文字贴底是刻意设计 → 在 `.slide` 加 `data-allow-imbalance`。',
+            });
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-PANEL-TOP · 框内单内容贴顶、下方大片空(crowd 的反向孪生)。(步骤 3 第七批
+      // 迁自 visual-audit.js 的 panel_top producer + validate.py 的 panel_top 消费段)。
+      // ⚠️ producer 里 panel_top 嵌在 crowd 同一个 _boxes 循环内,与 crowd 共用 _framed/_boxes/
+      //   cu/r/distTop/distBottom;这里独立复算同一套 box 选择(纯几何,确定性,产出逐一对齐)。
+      // 几何逐字搬 producer:cuH=(cu.bottom-cu.top)/scale;boxH=r.height/scale;
+      //   boxH>160 && cuH>0 && cuH<boxH*0.62 && distTop<24 && distBottom>distTop+60 → push。
+      // 严重度(逐字搬 validate.py):always warn。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-PANEL-TOP',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout, scale } = ctx;
+        if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
+        const _scale = scale;
+        const findings = [];
+        const _framed = [...slide.querySelectorAll('*')].filter((el) =>
+          visIsFramedBox(el) && !visIsMediaBox(el)
+          && el.getBoundingClientRect().height > 80 * _scale);
+        const _boxes = _framed.filter((el) => !_framed.some((o) => o !== el && o.contains(el)));
+        for (const box of _boxes) {
+          const cu = visContentUnion(box); if (!cu) continue;
+          const r = box.getBoundingClientRect();
+          const distTop = (cu.top - r.top) / _scale;
+          const distBottom = (r.bottom - cu.bottom) / _scale;
+          const cuH = (cu.bottom - cu.top) / _scale;
+          const boxH = r.height / _scale;
+          if (boxH > 160 && cuH > 0 && cuH < boxH * 0.62
+              && distTop < 24 && distBottom > distTop + 60) {
+            const sel = shortSel(box);
+            const topPx = Math.round(distTop);
+            const bottomPx = Math.round(distBottom);
+            const contentH = Math.round(cuH);
+            const boxHpx = Math.round(boxH);
+            findings.push({
+              rule: 'R-VIS-PANEL-TOP', severity: 'warn', slide_idx,
+              idx: slide_idx, label: ctx.label, sel,
+              top_px: topPx, bottom_px: bottomPx,
+              content_h: contentH, box_h: boxHpx,
+              message:
+                `slide ${slide_idx} · \`${sel}\` 面板内单内容贴顶 —— 内容高 `
+                + `${contentH}px 只占框 ${boxHpx}px 的一部分,顶距 `
+                + `${topPx}px、底部却空了 ${bottomPx}px,内容卡在框顶。`
+                + 'Fix: 给该面板容器(panel/pane/col-visual 类)加 `display:flex; '
+                + 'flex-direction:column; justify-content:center`,让单内容在框内垂直居中'
+                + '(框架已对 content-2col `.col-visual` 单子默认居中;lifted/raw 页的自定义 '
+                + 'panel 需在该页 `custom_css` 补这条);若刻意顶对齐 → `.slide` 加 '
+                + '`data-allow-imbalance`。',
+            });
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-BALANCE · 视觉重心 / 留白均衡。(步骤 3 第七批迁自 visual-audit.js 的 balance
+      // producer + validate.py 的 balance 消费段)。几何逐字搬 producer(全部用 raw px,不除
+      // scale —— 阈值 120/140/150/0.22 皆 raw,与 producer 一致):
+      //   isHeroLayout / data-allow-imbalance 跳过;bodyContainer = :scope>.stage / .grid / .flow
+      //     / .nodes / .toc / .table-wrap / .stack / slide(兜底);单子且子 class 含 grid/flow/
+      //     nodes/toc/table-wrap/stack → 钻进去;height>=200 && width>=200;
+      //   blocks = 顶层可见 children(非 STYLE/SCRIPT/none/hidden/absolute/fixed,w>8&&h>8)按 top;
+      //   slack = topGap+bottomGap;slack>150 时:bottomGap>topGap+120 → top-heavy,
+      //     topGap>bottomGap+120 → bottom-heavy;相邻块 gap>140 → dead-band;
+      //   side-empty:contentEls(text|media 叶,可见,w>=8&&h>=8)左右 slack,
+      //     leftSlack+rightSlack>0.22*bw && |L-R|>0.22*bw && |L-R|>200 → push。
+      // 严重度(逐字搬 validate.py):always warn(四 sub-kind 皆 warn)。文案逐字保留。截断 [:25]。
+      id: 'R-VIS-BALANCE',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
+        const findings = [];
+        let bodyContainer = slide.querySelector(':scope > .stage')
+          || slide.querySelector(':scope > .grid')
+          || slide.querySelector(':scope > .flow')
+          || slide.querySelector(':scope > .nodes')
+          || slide.querySelector(':scope > .toc')
+          || slide.querySelector(':scope > .table-wrap')
+          || slide.querySelector(':scope > .stack')
+          || slide;
+        while (bodyContainer && bodyContainer.children.length === 1) {
+          const only = bodyContainer.children[0];
+          const rawc = only.className;
+          const clsc = (rawc && rawc.baseVal !== undefined ? rawc.baseVal
+            : (rawc || '')).toString().toLowerCase();
+          if (/\b(grid|flow|nodes|toc|table-wrap|stack)\b/.test(clsc)) {
+            bodyContainer = only;
+          } else { break; }
+        }
+        if (!bodyContainer) return [];
+        const bodyRect = bodyContainer.getBoundingClientRect();
+        if (!(bodyRect.height >= 200 && bodyRect.width >= 200)) return [];
+        const blocks = [...bodyContainer.children].filter((c) => {
+          if (c.tagName === 'STYLE' || c.tagName === 'SCRIPT') return false;
+          const cs = getComputedStyle(c);
+          if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+          if (cs.position === 'absolute' || cs.position === 'fixed') return false;
+          const r = c.getBoundingClientRect();
+          return r.width > 8 && r.height > 8;
+        }).map((c) => ({ el: c, rect: c.getBoundingClientRect() }))
+          .sort((a, b) => a.rect.top - b.rect.top);
+        if (blocks.length === 0) return [];
+        const containerSel = shortSel(bodyContainer);
+        const contentTop = blocks[0].rect.top;
+        const contentBottom = blocks[blocks.length - 1].rect.bottom;
+        const topGap = contentTop - bodyRect.top;
+        const bottomGap = bodyRect.bottom - contentBottom;
+        const slack = topGap + bottomGap;
+        if (slack > 150) {
+          if (bottomGap > topGap + 120) {
+            findings.push({
+              rule: 'R-VIS-BALANCE', severity: 'warn', slide_idx,
+              container_sel: containerSel, kind: 'top-heavy',
+              top_gap: Math.round(topGap), bottom_gap: Math.round(bottomGap),
+              body_height: Math.round(bodyRect.height),
+              message:
+                `slide ${slide_idx} · \`${containerSel}\` `
+                + `上重下空(top-heavy): 顶部留白 ${Math.round(topGap)}px,`
+                + `底部留白 ${Math.round(bottomGap)}px (容器高 ${Math.round(bodyRect.height)}px) `
+                + '— 内容堆在顶部,下半页大块空白。Fix: (1) 容器加 '
+                + '`justify-content: center`(框架对 fixed-shape layout 已默认开 R48,'
+                + '但 raw / flex column 默认 flex-start,需手动加);(2) 删 `flex: 1` 让'
+                + '内容随高度伸展的情况,改成 content-sized + center;(3) 内容确实太少 → '
+                + '加 supporting 元素(KPI / pullquote / case ref)填重心。Per-slide '
+                + 'opt-out: 在 .slide 加 `data-allow-imbalance` 标记为故意。',
+            });
+          } else if (topGap > bottomGap + 120) {
+            findings.push({
+              rule: 'R-VIS-BALANCE', severity: 'warn', slide_idx,
+              container_sel: containerSel, kind: 'bottom-heavy',
+              top_gap: Math.round(topGap), bottom_gap: Math.round(bottomGap),
+              body_height: Math.round(bodyRect.height),
+              message:
+                `slide ${slide_idx} · \`${containerSel}\` `
+                + `下重上空(bottom-heavy): 顶部留白 ${Math.round(topGap)}px,`
+                + `底部留白 ${Math.round(bottomGap)}px (容器高 ${Math.round(bodyRect.height)}px) `
+                + '— 内容沉底,上半页大块空白。Fix: 容器 `justify-content: center` '
+                + '或 `align-content: center`;或检查是否有 `margin-top: auto` 把'
+                + '内容硬推到底部(BF9 反模式)。',
+            });
+          }
+        }
+        for (let i = 1; i < blocks.length; i++) {
+          const prev = blocks[i - 1].rect;
+          const curr = blocks[i].rect;
+          const gap = curr.top - prev.bottom;
+          if (gap > 140) {
+            findings.push({
+              rule: 'R-VIS-BALANCE', severity: 'warn', slide_idx,
+              container_sel: containerSel, kind: 'dead-band',
+              gap_px: Math.round(gap),
+              between_a: shortSel(blocks[i - 1].el),
+              between_b: shortSel(blocks[i].el),
+              message:
+                `slide ${slide_idx} · \`${containerSel}\` `
+                + `中间留白 ${Math.round(gap)}px(dead-band)— \`${shortSel(blocks[i - 1].el)}\` `
+                + `和 \`${shortSel(blocks[i].el)}\` 之间有一条 >140px 的空带,`
+                + '页面被切成两半。Fix: (1) 容器去掉 `flex: 1` / `justify-content: '
+                + 'space-between`(BF9 反模式经常制造这种空白);(2) 缩小 gap;(3) '
+                + '在中间加一行 supporting 元素(pullquote / KPI / divider);(4) '
+                + '确实是设计意图(留白让 hero 呼吸)→ 加 `data-allow-imbalance`。',
+            });
+          }
+        }
+        const contentEls = [...bodyContainer.querySelectorAll('*')].filter((el) => {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return false;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+          const r = el.getBoundingClientRect();
+          if (r.width < 8 || r.height < 8) return false;
+          const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+          const isMedia = el.matches('img,video,canvas,iframe,picture,svg')
+            || (cs.backgroundImage && cs.backgroundImage !== 'none'
+                && !/gradient/i.test(cs.backgroundImage));
+          return hasText || isMedia;
+        });
+        if (contentEls.length) {
+          let cl = Infinity, cr = -Infinity;
+          for (const el of contentEls) {
+            const r = el.getBoundingClientRect(); cl = Math.min(cl, r.left); cr = Math.max(cr, r.right);
+          }
+          const leftSlack = cl - bodyRect.left;
+          const rightSlack = bodyRect.right - cr;
+          const bw = bodyRect.width;
+          if (leftSlack + rightSlack > 0.22 * bw
+              && Math.abs(leftSlack - rightSlack) > 0.22 * bw
+              && Math.abs(leftSlack - rightSlack) > 200) {
+            const _side = rightSlack > leftSlack ? '右侧' : '左侧';
+            findings.push({
+              rule: 'R-VIS-BALANCE', severity: 'warn', slide_idx,
+              container_sel: containerSel, kind: 'side-empty',
+              left_slack: Math.round(leftSlack), right_slack: Math.round(rightSlack),
+              body_width: Math.round(bw),
+              message:
+                `slide ${slide_idx} · \`${containerSel}\` `
+                + `横向失衡 / 单侧空壳(side-empty): 左空 ${Math.round(leftSlack)}px / `
+                + `右空 ${Math.round(rightSlack)}px(容器宽 ${Math.round(bw)}px)— `
+                + `真实内容(文字/图)挤向一边,${_side}一大块空(空框不算内容)。`
+                + '常见 #36「右半是个空壳面板」/ 内容偏左。Fix: (1) 给空的一侧填真内容 '
+                + '(图示 / 截图重建 / 要点);(2) 缩窄空面板、让内容两栏铺满;(3) 单列'
+                + '窄条飘着 → 加宽或配伴随块。真有图但被判空说明图是 media→已计入不会误报;'
+                + '故意留白 → `data-allow-imbalance`。',
+            });
+          }
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-GUTTER · 同组相邻框间距不等 / 框内 padding 不一致。(步骤 3 第七批迁自
+      // visual-audit.js 的 gutter producer + validate.py 的 gutter 消费段)。几何逐字搬 producer:
+      //   isHeroLayout / data-allow-imbalance 跳过;遍历 flex/grid 容器,kids = 直接子里
+      //   可见 && _isFramedBox && !_isMediaBox && bbox 高/宽 > 40*scale;kids<3 跳;
+      //   按主轴(x 跨度 >= y 跨度 = 横向)排序;相邻同轴对(中心错位 <半高/半宽)算 gutter
+      //   (/scale);≥2 gutter 且 gmax>max(gmin,1)*1.8 && (gmax-gmin)>10 → gutter finding;
+      //   再按 tag 分组(≥3),每框 padding = min(cu.top-r.top, r.bottom-cu.bottom)/scale
+      //   (任一 cu 缺或 pd<-2 整组作废);≥3 且 pmax>max(pmin,1)*1.8 && (pmax-pmin)>10 →
+      //   padding finding;_gutterSeen 去重(g::sel / p::sel::tag)。scale = ctx.scale。
+      // ⚠️ lifted-downgrade PRESERVE-EXACTLY:gutter producer 【从不】在 entry 上写 `lifted`
+      //   字段(g:: / p:: 两分支都没有);validate.py 消费段 `entry.get('lifted')` 因此恒
+      //   falsy → warn_soft / "LIFTED" 前缀分支【永远】是死的 —— 本规则同样不带 lifted,
+      //   severity 恒 warn、无 lifted 前缀,与 validate.py 现行行为零漂移(对照 batch7 的
+      //   card_overflow 死 lift 降级)。
+      // 严重度(逐字搬 validate.py):恒 warn(lifted 分支死)。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-GUTTER',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout, scale } = ctx;
+        if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
+        const _scale = scale;
+        const findings = [];
+        const _vis = (el) => {
+          const cs = getComputedStyle(el);
+          return cs.display !== 'none' && cs.visibility !== 'hidden'
+            && cs.position !== 'absolute' && cs.position !== 'fixed';
+        };
+        const _gutterSeen = new Set();
+        slide.querySelectorAll('*').forEach((container) => {
+          const ccs = getComputedStyle(container);
+          if (!['flex', 'inline-flex', 'grid', 'inline-grid'].includes(ccs.display)) return;
+          const kids = [...container.children].filter((el) => {
+            if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return false;
+            if (!_vis(el) || !visIsFramedBox(el) || visIsMediaBox(el)) return false;
+            const r = el.getBoundingClientRect();
+            return r.height > 40 * _scale && r.width > 40 * _scale;
+          });
+          if (kids.length < 3) return;
+          const rects = kids.map((el) => ({ el, r: el.getBoundingClientRect() }));
+          const xs = rects.map((o) => o.r.left + o.r.width / 2);
+          const ys = rects.map((o) => o.r.top + o.r.height / 2);
+          const horizontal = (Math.max(...xs) - Math.min(...xs)) >= (Math.max(...ys) - Math.min(...ys));
+          rects.sort((a, b) => (horizontal ? (a.r.left - b.r.left) : (a.r.top - b.r.top)));
+          const gutters = [];
+          for (let i = 1; i < rects.length; i++) {
+            const a = rects[i - 1].r, b = rects[i].r;
+            if (horizontal) {
+              if (Math.abs((a.top + a.height / 2) - (b.top + b.height / 2)) > a.height / 2) continue;
+              gutters.push(Math.max(0, (b.left - a.right) / _scale));
+            } else {
+              if (Math.abs((a.left + a.width / 2) - (b.left + b.width / 2)) > a.width / 2) continue;
+              gutters.push(Math.max(0, (b.top - a.bottom) / _scale));
+            }
+          }
+          if (gutters.length >= 2) {
+            const gmin = Math.min(...gutters), gmax = Math.max(...gutters);
+            if (gmax > (gmin < 1 ? 1 : gmin) * 1.8 && (gmax - gmin) > 10) {
+              const key = 'g::' + shortSel(container);
+              if (!_gutterSeen.has(key)) {
+                _gutterSeen.add(key);
+                const containerSel = shortSel(container);
+                const axis = horizontal ? 'row' : 'column';
+                const guttersR = gutters.map((g) => Math.round(g));
+                const minPx = Math.round(gmin), maxPx = Math.round(gmax);
+                // validate.py: _lev = warn_soft if entry.lifted else warn — producer 不带
+                // lifted → 恒 warn(死降级,见 rule 头注释)。
+                findings.push({
+                  rule: 'R-VIS-GUTTER', severity: 'warn', slide_idx,
+                  label: ctx.label, kind: 'gutter', container_sel: containerSel,
+                  axis, gutters: guttersR, min_px: minPx, max_px: maxPx,
+                  count: kids.length,
+                  message:
+                    `slide ${slide_idx} · \`${containerSel}\` 同组相邻框`
+                    + `(${axis})间距不等:${guttersR}px(min ${minPx} / `
+                    + `max ${maxPx})。同组框 gutter 应相等才齐整(P7 #3:卡片左右 `
+                    + '28px 但到下面只 8px)。Fix:把 gap 统一;故意不均 → .slide 加 '
+                    + '`data-allow-imbalance`。',
+                });
+              }
+            }
+          }
+          const byTag = {};
+          for (const { el } of rects) (byTag[el.tagName] = byTag[el.tagName] || []).push(el);
+          for (const tag of Object.keys(byTag)) {
+            const group = byTag[tag];
+            if (group.length < 3) continue;
+            const pads = [];
+            let abort = false;
+            for (const el of group) {
+              const cu = visContentUnion(el); if (!cu) { abort = true; break; }
+              const r = el.getBoundingClientRect();
+              const pd = Math.min((cu.top - r.top), (r.bottom - cu.bottom)) / _scale;
+              if (pd < -2) { abort = true; break; }
+              pads.push(Math.max(0, pd));
+            }
+            if (abort || pads.length < 3) continue;
+            const pmin = Math.min(...pads), pmax = Math.max(...pads);
+            if (pmax > (pmin < 1 ? 1 : pmin) * 1.8 && (pmax - pmin) > 10) {
+              const key = 'p::' + shortSel(container) + '::' + tag;
+              if (!_gutterSeen.has(key)) {
+                _gutterSeen.add(key);
+                const containerSel = shortSel(container);
+                const cellTag = tag.toLowerCase();
+                const padsR = pads.map((p) => Math.round(p));
+                const minPx = Math.round(pmin), maxPx = Math.round(pmax);
+                findings.push({
+                  rule: 'R-VIS-GUTTER', severity: 'warn', slide_idx,
+                  label: ctx.label, kind: 'padding', container_sel: containerSel,
+                  cell_tag: cellTag, pads: padsR, min_px: minPx, max_px: maxPx,
+                  count: group.length,
+                  message:
+                    `slide ${slide_idx} · \`${containerSel}\` 同 tag `
+                    + `\`${cellTag}\` 组框的内 padding 不一致:${padsR}px`
+                    + `(min ${minPx} / max ${maxPx})。同类 cell 内容到`
+                    + '边框的距离应一致才好看(P7 #4)。Fix:统一 padding / 让内容等距居中。',
+                });
+              }
+            }
+          }
+        });
+        return findings;
+      },
+    },
+
+    {
       // R-DOM · 整文档 .deck 结构不变量。(步骤 3 最终结构批迁自 _validate_audits.py
       // audit_dom_integrity)。原版用 stdlib html.parser 扫 <body> 源,逐 <div> 维护栈,
       // 查三条不变量:
