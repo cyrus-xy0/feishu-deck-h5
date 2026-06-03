@@ -731,9 +731,19 @@
     'ind-row', 'logo-cell',
   ];
   const VIS_CARD_SUFFIXES = ['-card', '-tile', '-cell', '-panel', '-box'];
-  // 真页面级 chrome 类(逐字搬 CHROME_WHITELIST,R-VIS-LABEL-FLOOR/HIER 用,本批 HIER 不用,
-  // 留作完整移植 — HIER 只用 META/BODY)。
-  // (CHROME_WHITELIST 迁随 R-VIS-LABEL-FLOOR;本批不含 LABEL-FLOOR，故不引入。)
+  // 真页面级 chrome 类(逐字搬 CHROME_WHITELIST)。原 R-VIS-LABEL-FLOOR/HIER 留待;
+  // 步骤 3 第九批 R-VIS-BAND-COLLIDE 用它把页面级 chrome 排除出"内容带"候选 → 引入。
+  const VIS_CHROME_WHITELIST = [
+    'source', 'pageno', 'footnote', 'attrib', 'copyright',
+    'wordmark', 'contact', 'cfoot', 'demo-tag',
+    'unit',
+  ];
+  // Grid 容器类(逐字搬 GRID_KEYS)。原 R-VIS-ALIGN(equal-height grid)未迁;步骤 3
+  // 第九批 R-VIS-PEER-SIZE 的 parallelAnchor 用它(连同 CARD_KEYS / CARD_SUFFIXES)→ 引入。
+  const VIS_GRID_KEYS = [
+    'overview-grid', 'todo-grid', 'scene-grid', 'north-star-map',
+    'dir-grid',
+  ];
   // Mock 容器类(逐字搬 TIER_MOCK — R-VIS-TIER 的 mock-internal 豁免;R-VIS-BODY-FLOOR /
   // R-VIS-ORPHAN 共用同一集,visual-audit.js 注释 "Shared with R-VIS-BODY-FLOOR")。
   const VIS_TIER_MOCK = [
@@ -3682,6 +3692,519 @@
             }
           }
         });
+        return findings;
+      },
+    },
+
+    {
+      // R-OVERLAP · body 容器内 sibling bbox 物理交叠。(步骤 3 第九批迁自 visual-audit.js
+      // 的 overlap producer + validate.py 的 overlap 消费段)。几何逐字搬 producer:
+      //   containers = slide 内 .stage/.grid/.flow/.nodes/.toc/.stack/.table-wrap;
+      //   kids = 直接子里可见(非 none/hidden/absolute/fixed,offsetW/H≠0);两两 i<j 对,
+      //   overlapX=min(right)-max(left),overlapY=min(bottom)-max(top);>2 && >2 → push;
+      //   seenPairs(slide::aSel::bSel)去重。无 scale(纯像素交叠)。
+      // 严重度(逐字搬 validate.py):always err。文案逐字保留。截断 [:20]。
+      id: 'R-OVERLAP',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        const containers = slide.querySelectorAll(
+          '.stage, .grid, .flow, .nodes, .toc, .stack, .table-wrap');
+        const seenPairs = new Set();
+        containers.forEach((container) => {
+          const kids = Array.from(container.children).filter((c) => {
+            const cs = getComputedStyle(c);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+            if (cs.position === 'absolute' || cs.position === 'fixed') return false;
+            if (c.offsetWidth === 0 || c.offsetHeight === 0) return false;
+            return true;
+          });
+          for (let i = 0; i < kids.length; i++) {
+            for (let j = i + 1; j < kids.length; j++) {
+              const a = kids[i].getBoundingClientRect();
+              const b = kids[j].getBoundingClientRect();
+              const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              // 2 px tolerance — 亚像素 rounding 会产生 0.5-1px 名义交叠。
+              if (overlapX > 2 && overlapY > 2) {
+                const aSel = shortSel(kids[i]);
+                const bSel = shortSel(kids[j]);
+                const key = `${slide_idx}::${aSel}::${bSel}`;
+                if (seenPairs.has(key)) continue;
+                seenPairs.add(key);
+                const containerSel = shortSel(container);
+                const ox = Math.round(overlapX);
+                const oy = Math.round(overlapY);
+                findings.push({
+                  rule: 'R-OVERLAP', severity: 'error', slide_idx,
+                  container_sel: containerSel, a_sel: aSel, b_sel: bSel,
+                  overlap_x: ox, overlap_y: oy,
+                  message:
+                    `slide ${slide_idx} · siblings inside \`${containerSel}\` `
+                    + `physically overlap: \`${aSel}\` and \`${bSel}\` `
+                    + `intersect by ${ox}×${oy} px. `
+                    + 'One sibling overflowed its allocated row/column and crashed '
+                    + 'into another. Fix: tighten content (smaller padding/gap, fewer '
+                    + 'items), expand the container (use `.stage.stage--tall` for 750 px '
+                    + 'vs default 680 px height), or add `min-height: 0; overflow: hidden` '
+                    + 'on the overflowing element so excess content is clipped instead of '
+                    + 'bleeding into siblings.',
+                });
+              }
+            }
+          }
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-BAND-COLLIDE · 绝对定位内容带压住流式正文。(步骤 3 第九批迁自 visual-audit.js
+      // 的 band_collide producer + validate.py 的 band_collide 消费段)。几何逐字搬 producer:
+      //   layout ∉ {cover,image-text,end,section};bands = .slide 直接子里 absolute/fixed、
+      //   可见、offsetW/H≠0、非 CHROME_WHITELIST、非 wordmark/pageno/deck-progress/deck-controls/
+      //   grid-bg/aurora/decor、_isFramedBox && !_isMediaBox、textContent.trim≥4;
+      //   hosts = :scope>.stage/.grid/.flow/.nodes/.toc/.stack/.table-wrap;每 band 对每 host 的
+      //   own-text 可见 leaf(w,h≥2)求交,ox>2 && oy>4 → 命中(first hit 即停)。无 scale。
+      // 严重度(逐字搬 validate.py):always err。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-BAND-COLLIDE',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        if (['cover', 'image-text', 'end', 'section'].includes(layout)) return [];
+        const findings = [];
+        const bands = Array.from(slide.children).filter((el) => {
+          const cs = getComputedStyle(el);
+          if (cs.position !== 'absolute' && cs.position !== 'fixed') return false;
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+          if (el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+          if (visHasAnyClass(el, VIS_CHROME_WHITELIST)) return false;
+          if (visHasAnyClass(el, ['wordmark', 'pageno', 'deck-progress', 'deck-controls',
+            'grid-bg', 'aurora', 'decor'])) return false;
+          if (!visIsFramedBox(el) || visIsMediaBox(el)) return false;   // 纯装饰 / 媒体 → 非内容带
+          if (el.textContent.trim().length < 4) return false;          // 必须带真文案
+          return true;
+        });
+        if (!bands.length) return [];
+        const hosts = Array.from(slide.querySelectorAll(
+          ':scope > .stage, :scope > .grid, :scope > .flow, :scope > .nodes, '
+          + ':scope > .toc, :scope > .stack, :scope > .table-wrap'));
+        bands.forEach((band) => {
+          const bb = band.getBoundingClientRect();
+          let hit = null;
+          for (const host of hosts) {
+            if (host === band || host.contains(band) || band.contains(host)) continue;
+            for (const leaf of host.querySelectorAll('*')) {
+              if (!hasOwnText(leaf)) continue;
+              const cs = getComputedStyle(leaf);
+              if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+              const lr = leaf.getBoundingClientRect();
+              if (lr.width < 2 || lr.height < 2) continue;
+              const ox = Math.min(bb.right, lr.right) - Math.max(bb.left, lr.left);
+              const oy = Math.min(bb.bottom, lr.bottom) - Math.max(bb.top, lr.top);
+              if (ox > 2 && oy > 4) { hit = { host, leaf, ox, oy }; break; }   // 真竖向侵入正文
+            }
+            if (hit) break;
+          }
+          if (hit) {
+            const bandSel = shortSel(band);
+            const hostSel = shortSel(hit.host);
+            const contentSel = shortSel(hit.leaf);
+            const ox = Math.round(hit.ox);
+            const oy = Math.round(hit.oy);
+            findings.push({
+              rule: 'R-VIS-BAND-COLLIDE', severity: 'error', slide_idx,
+              band_sel: bandSel, host_sel: hostSel, content_sel: contentSel,
+              overlap_x: ox, overlap_y: oy,
+              message:
+                `slide ${slide_idx} · 绝对定位内容带 \`${bandSel}\` 压住正文 `
+                + `\`${contentSel}\`(交叠 ${ox}×${oy}px)。`
+                + '底部/顶部内容带(takeaway / cta / principle-band 等有文字有底色的"带")若用 '
+                + 'position:absolute 挂在 .slide 上,运行时画布居中(centerSlideInCanvas)会把 '
+                + 'absolute 元素排除在内容并集外 → 把正文居中进带子下面、视觉重叠(旧 R-OVERLAP '
+                + '只查同容器兄弟,查不出这种)。Fix:把内容带作为 `.stage`(flex column)最后一个 '
+                + '流式子元素 + `margin-top` 间隔,让正文+带子作为整体被居中;或把 .stage 调高 / 内容下沉。'
+                + '绝不靠缩字号或让内容贴边。',
+            });
+          }
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-ABSPOS-DUAL-ANCHOR · absolute 元素 top+bottom 双锚拉伸高度(级联陷阱)。(步骤 3
+      // 第九批迁自 visual-audit.js 的 abspos_dual_anchor producer + validate.py 同名消费段)。
+      // 几何逐字搬 producer —— MUTATION TEST:
+      //   candidates = slide 内 position:absolute、无 data-allow-dual-anchor、非 LAYOUT_CONTAINER;
+      //   每 cand:h1=bbox 高(<4 跳);临时 style.bottom='auto' 再量 h2、还原;
+      //   delta=h1-h2;delta<30 跳;h1<h2*2 跳;命中 → push(cs.top/bottom 是 used px 值)。
+      //   ⚠️ getComputedStyle 对定位元素返回 USED(px)值,无法静态预筛 top/bottom==='auto' →
+      //   必须对每个非 layout candidate 做 mutation 测试(producer 注释)。
+      // 严重度(逐字搬 validate.py):always err。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-ABSPOS-DUAL-ANCHOR',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        // LAYOUT_CONTAINER_CLASSES 逐字搬 producer:框架布局壳(.stage/.stack/.panel 等)合法
+        // 用 top+bottom 双锚撑满父容器供子布局,by design 非 bug;bug 模式在 chrome 元素上。
+        const LAYOUT_CONTAINER_CLASSES = [
+          'stage', 'stack', 'toc', 'flow', 'nodes', 'grid', 'table-wrap',
+          'header', 'footer', 'col-text', 'col-visual',
+          'iframe-wrap', 'desktop-frame', 'phone-frame', 'phone-screen',
+          'arch-stack', 'arch-hands', 'arch-hand',
+          'slide-frame', 'deck', 'panel',
+          'two-hand-arch', 'pipeline', 'steps',
+        ];
+        const isLayoutContainer = (el) => {
+          const raw = el.className;
+          const cls = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || ''))
+            .toString().split(/\s+/);
+          return cls.some((c) => LAYOUT_CONTAINER_CLASSES.includes(c));
+        };
+        const candidates = [];
+        slide.querySelectorAll('*').forEach((el) => {
+          if (el.hasAttribute('data-allow-dual-anchor')) return;
+          if (isLayoutContainer(el)) return;
+          const cs = getComputedStyle(el);
+          if (cs.position !== 'absolute') return;
+          candidates.push(el);
+        });
+        candidates.forEach((el) => {
+          const h1 = el.getBoundingClientRect().height;
+          if (h1 < 4) return;                                  // 0×0(display:none 祖先等)跳过
+          // Mutation test:用 inline style(最高优先级)中和 bottom 锚;若 CSS 声明过 bottom:<px>,
+          // 去掉它会塌掉锚驱动高度;若本就 bottom:auto,mutation 是 no-op。
+          const orig = el.style.bottom;
+          el.style.bottom = 'auto';
+          const h2 = el.getBoundingClientRect().height;
+          if (orig) el.style.bottom = orig;                    // 还原
+          else el.style.removeProperty('bottom');
+          // Bug 签名:中和 bottom 后高度显著缩水。≥30px 缩水(滤微抖)且 h1≥2×h2(滤内容近乎
+          // 填满锚高的 content-driven 容器)。
+          const delta = h1 - h2;
+          if (delta < 30) return;
+          if (h1 < h2 * 2) return;
+          const cs = getComputedStyle(el);
+          const parent = el.offsetParent;
+          const parentH = parent ? parent.getBoundingClientRect().height : 1080;
+          const selector = shortSel(el);
+          const top = cs.top;
+          const bottom = cs.bottom;
+          const actualH = Math.round(h1);
+          const contentH = Math.round(h2);
+          findings.push({
+            rule: 'R-VIS-ABSPOS-DUAL-ANCHOR', severity: 'error', slide_idx,
+            selector, top, bottom, actual_h: actualH, content_h: contentH,
+            parent_h: Math.round(parentH),
+            message:
+              `slide ${slide_idx} · \`${selector}\` is `
+              + `\`position: absolute\` with BOTH \`top: ${top}\` AND `
+              + `\`bottom: ${bottom}\` declared — height stretched to `
+              + `${actualH} px; content-sized would be ${contentH} px. `
+              + 'Classic cascade footgun: an override added `top:` without '
+              + 'declaring `bottom: auto`, so an inherited `bottom:` from a '
+              + 'less-specific rule is still active and the element fills the '
+              + 'parent vertically. Fix: in the override block, add '
+              + '`bottom: auto` (or `top: auto`) to neutralize the inherited '
+              + 'anchor; OR use `inset:` shorthand to redeclare all four; OR '
+              + 'set `data-allow-dual-anchor` on the element if it is a real '
+              + 'fill-parent overlay (rare for slide content).',
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-SLACK-FLEX · flex:1 子容器内部撑出大块空白。(步骤 3 第九批迁自 visual-audit.js
+      // 的 slack_flex producer + validate.py 同名消费段)。几何逐字搬 producer:
+      //   isHeroLayout 跳过;遍历 display:flex/inline-flex && flex-direction:column 容器,
+      //   无 data-allow-flex-slack,bbox 高≥200;每直接 child(非 STYLE/SCRIPT、无 opt-out、
+      //   可见、flex-grow≥1、bbox 高≥200);可见 grandchild(h>4)按 top 排序;
+      //   contentTop=chRect.top+padTop,contentBottom=chRect.bottom-padBottom;
+      //   topSlack=gc[0].top-contentTop,bottomSlack=contentBottom-gc[last].bottom;
+      //   任一 ≥80 → push。无 scale(raw px 阈值 80)。
+      // 严重度(逐字搬 validate.py):always warn(kind 文案按 ts/bs ≥80 三分)。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-SLACK-FLEX',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        if (isHeroLayout) return [];
+        const findings = [];
+        slide.querySelectorAll('*').forEach((container) => {
+          const cs = getComputedStyle(container);
+          if (cs.display !== 'flex' && cs.display !== 'inline-flex') return;
+          if (!cs.flexDirection.startsWith('column')) return;
+          if (container.hasAttribute('data-allow-flex-slack')) return;
+          const cRect = container.getBoundingClientRect();
+          if (cRect.height < 200) return;
+          [...container.children].forEach((child) => {
+            if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') return;
+            if (child.hasAttribute('data-allow-flex-slack')) return;
+            const ccs = getComputedStyle(child);
+            if (ccs.display === 'none' || ccs.visibility === 'hidden') return;
+            const grow = parseFloat(ccs.flexGrow || '0');
+            if (!(grow >= 1)) return;
+            const chRect = child.getBoundingClientRect();
+            if (chRect.height < 200) return;
+            const gcs = [...child.children].filter((gc) => {
+              if (gc.tagName === 'STYLE' || gc.tagName === 'SCRIPT') return false;
+              const gccs = getComputedStyle(gc);
+              if (gccs.display === 'none' || gccs.visibility === 'hidden') return false;
+              const r = gc.getBoundingClientRect();
+              return r.height > 4;
+            });
+            if (gcs.length === 0) return;
+            const rects = gcs.map((gc) => gc.getBoundingClientRect())
+              .sort((a, b) => a.top - b.top);
+            const padTop = parseFloat(ccs.paddingTop) || 0;
+            const padBottom = parseFloat(ccs.paddingBottom) || 0;
+            const contentTop = chRect.top + padTop;
+            const contentBottom = chRect.bottom - padBottom;
+            const topSlack = rects[0].top - contentTop;
+            const bottomSlack = contentBottom - rects[rects.length - 1].bottom;
+            const THRESHOLD = 80;
+            if (topSlack < THRESHOLD && bottomSlack < THRESHOLD) return;
+            const containerSel = shortSel(container);
+            const childSel = shortSel(child);
+            const childHeight = Math.round(chRect.height);
+            const contentHeight = Math.round(rects[rects.length - 1].bottom - rects[0].top);
+            const ts = Math.round(topSlack);
+            const bs = Math.round(bottomSlack);
+            const justify = ccs.justifyContent;
+            // validate.py kind 三分(逐字搬):ts≥80 && bs≥80 / ts≥80 / else。
+            let kind;
+            if (ts >= 80 && bs >= 80) kind = `容器内部居中撑空(top ${ts}px / bottom ${bs}px)`;
+            else if (ts >= 80) kind = `容器内部上方撑空 ${ts}px`;
+            else kind = `容器内部下方撑空 ${bs}px(最后一个子元素到容器底距离过大)`;
+            findings.push({
+              rule: 'R-VIS-SLACK-FLEX', severity: 'warn', slide_idx,
+              container_sel: containerSel, child_sel: childSel, flex_grow: grow,
+              child_height: childHeight, content_height: contentHeight,
+              top_slack: ts, bottom_slack: bs, justify,
+              message:
+                `slide ${slide_idx} · \`${childSel}\` `
+                + `(flex-grow ${grow}, 高 ${childHeight}px, `
+                + `内容 ${contentHeight}px, justify-content: `
+                + `${justify}) — ${kind}。父 \`${containerSel}\`。`
+                + '原因:`flex:1` 把剩余空间给了该子容器,但内部内容比拿到的空间小,'
+                + '`justify-content` 把空白分到容器内部,视觉上跟相邻 sibling 间距'
+                + '异常大。Fix 选一个: (1) 去掉子容器的 `flex: 1`(改成 content-sized '
+                + '+ 父容器 `justify-content: center` 居中整组内容,这是最常见的修法);'
+                + '(2) 把子容器 `justify-content` 改成 `flex-start` / `flex-end` 让'
+                + '内容靠一端;(3) 内容确实太少 → 加 supporting 元素填重心;(4) '
+                + '确实是设计意图(故意让 hero 元素被推到某一端)→ 在子容器或父容器加 '
+                + '`data-allow-flex-slack` 跳过审计。',
+            });
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-FOCAL-CHECK · 视觉焦点是否清晰。(步骤 3 第九批迁自 visual-audit.js 的 focal producer
+      // + validate.py 的 focal 消费段)。几何逐字搬 producer:
+      //   isHeroLayout / FOCAL_PARALLEL_LAYOUTS(agenda/logo-wall/arch-stack/table/timeline/
+      //   process/stats/iframe-embed/replica) / data-allow-no-focal 跳过;
+      //   focalCands = own-text、非 STYLE/SCRIPT/SVG-text、非 FOCAL_CHROME_CLASSES、非 mock 内、
+      //   computed fontSize ≥20px;≥3 候选时取 maxPx、atMax=同 maxPx;atMax≥3 时:若 atMax 全部
+      //   共享某 PARALLEL_PATTERN_CONTAINERS 祖先 → 平行模式放行;否则若有任一 declared
+      //   (.is-hero/.focal/.hero-anchor/data-focal)→ 放行;else push。
+      // 严重度(逐字搬 validate.py):always warn。文案逐字保留。截断 [:20]。
+      id: 'R-FOCAL-CHECK',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout, isHeroLayout } = ctx;
+        const FOCAL_PARALLEL_LAYOUTS = new Set([
+          'agenda', 'logo-wall', 'arch-stack', 'table', 'timeline', 'process',
+          'stats', 'iframe-embed', 'replica',
+        ]);
+        if (isHeroLayout || FOCAL_PARALLEL_LAYOUTS.has(layout)
+            || slide.hasAttribute('data-allow-no-focal')) return [];
+        const FOCAL_CHROME_CLASSES = ['wordmark', 'pageno', 'source-footer',
+          'footnote', 'source', 'attrib', 'copyright', 'demo-tag',
+          'deck-progress', 'deck-controls', 'eyebrow', 'caption',
+          'iframe-hint'];
+        const focalCands = [];
+        slide.querySelectorAll('*').forEach((el) => {
+          if (!hasOwnText(el)) return;
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+          if (visHasAnyClass(el, FOCAL_CHROME_CLASSES)) return;
+          let inMock = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+          }
+          if (inMock) return;
+          const cs = getComputedStyle(el);
+          const px = Math.round(parseFloat(cs.fontSize));
+          if (!px || px < 20) return;                          // <20px 一般是 chrome / 注释
+          focalCands.push({ el, px });
+        });
+        if (focalCands.length < 3) return [];
+        const maxPx = Math.max(...focalCands.map((c) => c.px));
+        const atMax = focalCands.filter((c) => c.px === maxPx);
+        if (atMax.length < 3) return [];                       // 1 独享 = 清晰 / 2 共享 = title+body hero 允许
+        const PARALLEL_PATTERN_CONTAINERS = new Set([
+          'overview-grid', 'north-star-map', 'scene-grid', 'logo-wall',
+          'verdict-grid', 'principle-band', 'kpi-strip', 'arch-stack',
+          'arch-hands', 'pipeline', 'steps', 'pills', 'toc',
+          'agenda-stack', 'iron-corners', 'two-hand-arch',
+        ]);
+        const ancestorClassSets = atMax.map((c) => {
+          const set = new Set();
+          for (let n = c.el.parentElement; n && n !== slide; n = n.parentElement) {
+            const raw = n.className;
+            const cls = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || ''))
+              .toString().toLowerCase().split(/\s+/);
+            cls.forEach((x) => { if (x) set.add(x); });
+          }
+          return set;
+        });
+        const commonAncestors = [...ancestorClassSets[0]].filter(
+          (c) => ancestorClassSets.every((s) => s.has(c)));
+        const inParallelPattern = commonAncestors.some(
+          (c) => PARALLEL_PATTERN_CONTAINERS.has(c));
+        if (inParallelPattern) return [];                      // 显式平行模式,平等大小是设计
+        const declared = atMax.filter((c) =>
+          visHasAnyClass(c.el, ['is-hero', 'focal', 'hero-anchor'])
+          || (c.el.dataset && c.el.dataset.focal != null));
+        if (declared.length > 0) return [];                    // 作者已声明 hero,放行
+        const topSizePx = maxPx;
+        const tiedCount = atMax.length;
+        const examples = atMax.slice(0, 4).map((c) => shortSel(c.el));
+        const ex3 = examples.slice(0, 3).map((s) => '`' + s + '`').join(', ');
+        return [{
+          rule: 'R-FOCAL-CHECK', severity: 'warn', slide_idx,
+          layout, top_size_px: topSizePx, tied_count: tiedCount, examples,
+          message:
+            `slide ${slide_idx} (layout \`${layout}\`) · `
+            + `${tiedCount} 个元素共享最大字号 ${topSizePx}px `
+            + `(e.g. ${ex3}…)`
+            + `${tiedCount > 3 ? '…' : ''},视觉焦点模糊 — `
+            + '观众第一眼不知道该看哪个。Fix 选一个: (1) 把 N-1 个降一级'
+            + '(48→28 或 28→24,按 Card density 规则:≤4 卡 = 48,5-6 卡 = 28,'
+            + '≥7 卡 = 28);(2) 给真正的 hero 元素加 `class="is-hero"` 或 '
+            + '`data-focal`(明示该元素是焦点,审计放行);(3) 用 brand color / '
+            + 'border / 不同 padding 把 hero 元素从平行结构里抽出来;(4) 这页确实'
+            + '是 overview / 平权矩阵(N 项等大就是设计本身)→ 在 .slide 加 '
+            + '`data-allow-no-focal` 跳过审计。',
+        }];
+      },
+    },
+
+    {
+      // R-VIS-PEER-SIZE · 同角色并列 sibling 字号不一致。(步骤 3 第九批迁自 visual-audit.js
+      // 的 peer_size producer + validate.py 同名消费段)。几何逐字搬 producer:
+      //   isHeroLayout 跳过;ROLE_KEYS = BODY_KEYS ++ META_KEYS;roleOf(el):先命中已知语义
+      //   keyword,否则用 EXACT class 签名(排序后 class tokens),否则 null(无 class);
+      //   parallelAnchor(el):先找 PEER_PARALLEL/GRID_KEYS/CARD_KEYS/CARD_SUFFIX 祖先,否则最近
+      //   flex/grid 容器,否则 null;own-text、非 SVG-text/STYLE/SCRIPT、有 role、非 mock、无
+      //   data-allow-peer-size、有 anchor、可见、fontSize≥8px → 按 (anchorId+role) 分组;
+      //   每组 ≥2 且 maxPx-minPx>1:majority=出现最多(并列取大)的 px,offenders=|px-majority|>1。
+      // ⚠️ lifted PRESERVE-EXACTLY:peer_size producer 确实写 `lifted`(offenders.some closest
+      //   [data-lifted]),但 validate.py 消费段【从不读 entry['lifted']】(恒 iss.warn,无 lifted
+      //   分支)→ 实际 severity 恒 warn。本规则同保留 lifted payload(逐字)、severity 恒 warn。
+      // 严重度(逐字搬 validate.py):always warn。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-PEER-SIZE',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        if (isHeroLayout) return [];
+        const findings = [];
+        const PEER_PARALLEL = new Set([
+          'overview-grid', 'north-star-map', 'scene-grid', 'logo-wall',
+          'verdict-grid', 'principle-band', 'kpi-strip', 'arch-stack',
+          'arch-hands', 'pipeline', 'steps', 'pills', 'toc',
+          'agenda-stack', 'todo-grid', 'dir-grid',
+        ]);
+        const ROLE_KEYS = [...VIS_BODY_KEYS, ...VIS_META_KEYS];
+        const _cls = (el) => {
+          const raw = el.className;
+          return (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || ''))
+            .toString().toLowerCase();
+        };
+        const roleOf = (el) => {
+          const c = _cls(el);
+          for (const k of ROLE_KEYS) if (c.includes(k)) return k;
+          const sig = c.trim().split(/\s+/).filter(Boolean).sort().join('.');
+          return sig || null;
+        };
+        const parallelAnchor = (el) => {
+          for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
+            const toks = _cls(n).split(/\s+/).filter(Boolean);
+            if (toks.some((t) => PEER_PARALLEL.has(t) || VIS_GRID_KEYS.includes(t)
+              || VIS_CARD_KEYS.includes(t))) return n;
+            if (VIS_CARD_SUFFIXES.some((suf) => toks.some((t) => t.endsWith(suf)))) return n;
+          }
+          for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
+            const d = getComputedStyle(n).display;
+            if (d === 'flex' || d === 'inline-flex' || d === 'grid' || d === 'inline-grid') return n;
+          }
+          return null;
+        };
+        const peerOptOut = (el) => {
+          for (let n = el; n && n !== slide; n = n.parentElement)
+            if (n.hasAttribute && n.hasAttribute('data-allow-peer-size')) return true;
+          return false;
+        };
+        const groups = new Map();
+        const anchorIds = new WeakMap();
+        let aSeq = 0;
+        slide.querySelectorAll('*').forEach((el) => {
+          if (!hasOwnText(el)) return;
+          if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          const role = roleOf(el); if (!role) return;
+          let inMock = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+          }
+          if (inMock || peerOptOut(el)) return;
+          const anchor = parallelAnchor(el); if (!anchor) return;
+          const cs = getComputedStyle(el);
+          if (cs.visibility === 'hidden' || cs.display === 'none') return;
+          const px = Math.round(parseFloat(cs.fontSize)); if (!px || px < 8) return;
+          if (!anchorIds.has(anchor)) anchorIds.set(anchor, ++aSeq);
+          const key = anchorIds.get(anchor) + ' ' + role;
+          if (!groups.has(key)) groups.set(key, { anchor, role, items: [] });
+          groups.get(key).items.push({ el, px });
+        });
+        for (const { anchor, role, items } of groups.values()) {
+          if (items.length < 2) continue;
+          const sizes = items.map((i) => i.px);
+          const minPx = Math.min(...sizes), maxPx = Math.max(...sizes);
+          if (maxPx - minPx <= 1) continue;
+          const tally = {};
+          sizes.forEach((s) => { tally[s] = (tally[s] || 0) + 1; });
+          const majorityPx = +Object.keys(tally).sort(
+            (a, b) => tally[b] - tally[a] || (+b) - (+a))[0];
+          const offenders = items.filter((i) => Math.abs(i.px - majorityPx) > 1);
+          if (!offenders.length) continue;
+          const containerSel = shortSel(anchor);
+          const sizesSorted = [...new Set(sizes)].sort((a, b) => a - b);
+          const offendersOut = offenders.slice(0, 4).map(
+            (o) => ({ sel: shortSel(o.el), px: o.px }));
+          const lifted = offenders.some((o) => !!o.el.closest('[data-lifted]'));
+          const offStr = offendersOut.slice(0, 3).map(
+            (o) => '`' + o.sel + '`=' + o.px + 'px').join(', ');
+          findings.push({
+            rule: 'R-VIS-PEER-SIZE', severity: 'warn', slide_idx,
+            container_sel: containerSel, role, majority_px: majorityPx,
+            sizes: sizesSorted, count: items.length, offenders: offendersOut, lifted,
+            message:
+              `slide ${slide_idx} · \`${containerSel}\` 内同角色 `
+              + `\`${role}\` 字号不一致:多数 ${majorityPx}px,`
+              + `但 ${offStr} 偏离(本组出现 ${JSON.stringify(sizesSorted)} 多种尺寸)。`
+              + '同一并列容器里同角色的 sibling 应等大 —— "有大有小"靠这条抓。'
+              + 'Fix:把偏离者统一到多数派字号(按角色给一档);若确为有意不同 → '
+              + '元素或祖先加 `data-allow-peer-size`。',
+          });
+        }
         return findings;
       },
     },
