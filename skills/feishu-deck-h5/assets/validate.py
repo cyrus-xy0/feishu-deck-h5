@@ -32,6 +32,8 @@ from pathlib import Path
 #  STRUCTURE / DOM
 #    audit_structure             R02,R07          frame/deck nesting, required blocks
 #    audit_dom_integrity         R-DOM            balanced divs, 1 .slide per frame
+#    audit_doc_integrity         R-DOC-INTEGRITY  whole-doc complete: .deck closed,
+#                                                 runtime present, ends </body></html>
 #    audit_slide_keys            R-KEY            unique kebab data-slide-key
 #  TYPOGRAPHY / COPY
 #    audit_titles_one_line       R13              title one line (hero layouts exempt)
@@ -841,6 +843,7 @@ def inline_linked(html_text, base_dir):
 # is cosmetic). Adding/removing an audit = one registry line, both entries.
 STATIC_AUDITS = [
     (audit_dom_integrity,      ('html', 'iss')),
+    (audit_doc_integrity,      ('html', 'iss')),
     (audit_escaped_html,       ('slides', 'iss')),
     (audit_lift_style_lost,    ('html', 'iss')),
     (audit_structure,          ('slides', 'iss')),

@@ -2198,6 +2198,112 @@ def audit_autobalance_present(html, iss):
         '在 .deck 上加 data-no-autobalance 显式声明即可豁免本闸。')
 
 
+def audit_doc_integrity(html: str, iss: Issues):
+    """R-DOC-INTEGRITY (err · F-85): the deck index.html must be a COMPLETE,
+    runnable document — not just per-frame DOM nesting (that's R-DOM's job).
+
+    Gap this closes (production, 2026-06-03): a deck's closing tags were lost —
+    missing `.deck` close `</div>`, the `<script src=…feishu-deck.js>` runtime
+    gone, and no trailing `</body></html>`. In the browser the present-mode
+    runtime never initializes (`is-current` never gets set on any frame) → the
+    deck "显示不全 / 显示什么都没有". Yet R-DOM passed CLEAN, because its
+    `audit_dom_integrity` only checks per-frame NESTING — and worse, its whole
+    body parse is gated on a `<body…>(.*)</body>` regex that silently RETURNS
+    EARLY when the document is truncated (no `</body>`), so the broken deck
+    sailed through. This audit checks the document AS A WHOLE.
+
+    Three ERROR-severity invariants (only on real decks — skip non-deck HTML
+    fragments / replicas with no `.deck` container):
+
+      1. `.deck` opened AND closed — there is a `<div class="deck">` and the
+         document's <div>s balance such that .deck is closed. A `+N` div-open
+         surplus means truncation mid-deck (.deck never closes).
+      2. Present-mode runtime PRESENT — either LINKED (a `<script src=…
+         feishu-deck.js>` tag survives) OR INLINED (the auto-balance
+         fingerprint `function balanceSlide(slide)` is in the markup; covers
+         build.sh --inline single-file decks AND linked decks, whose
+         <script src> main()/check-only already inlined via inline_linked()).
+         Catches "runtime ENTIRELY ABSENT" — the new value here.
+      3. Document ENDS well-formed — contains `</body>` and `</html>` (not
+         truncated at the end).
+
+    Overlap note: R-AUTOBALANCE-PRESENT also fingerprints `balanceSlide`, but
+    its concern is NARROWER — a deck that HAS a runtime but a STALE one that
+    lacks the current auto-balance pass (raw/legacy not re-bundled). It honors
+    `data-no-autobalance`. R-DOC-INTEGRITY's runtime check is BROADER: "is ANY
+    runtime present at all (linked src OR inlined fingerprint)?" — it fires only
+    when the runtime is totally gone, which R-AUTOBALANCE-PRESENT's
+    fingerprint-only test also catches but frames as a re-bundle issue. Keeping
+    both: R-DOC-INTEGRITY reports the document-broken framing (missing closes /
+    truncation), R-AUTOBALANCE-PRESENT keeps the re-bundle remediation advice.
+
+    Author opt-out (rare HTML-fragment templates): `<!-- allow:doc-integrity -->`.
+    """
+    # Only police real decks — a fragment / replica with no .deck container
+    # is not a deliverable deck (mirrors R-AUTOBALANCE-PRESENT's gate).
+    if not re.search(r'class="(?:[^"]*\s)?deck(?:\s[^"]*)?"', html):
+        return
+    if 'allow:doc-integrity' in html:
+        return
+
+    # ---- Invariant 1: .deck present AND closed (no mid-deck truncation) ----
+    # Count <div> open vs close across the WHOLE document, ignoring comments /
+    # <script> / <style> bodies (they can carry pseudo-tags / string literals).
+    scan = re.sub(r'<!--.*?-->',                '', html, flags=re.S)
+    scan = re.sub(r'<script[^>]*>.*?</script>', '', scan, flags=re.S | re.I)
+    scan = re.sub(r'<style[^>]*>.*?</style>',   '', scan, flags=re.S | re.I)
+    div_opens  = len(re.findall(r'<div\b', scan, re.I))
+    div_closes = len(re.findall(r'</div\s*>', scan, re.I))
+    if div_opens > div_closes:
+        delta = div_opens - div_closes
+        iss.err('R-DOC-INTEGRITY',
+            f'document has {div_opens} <div> opens vs {div_closes} </div> '
+            f'closes (+{delta}) — the .deck container is opened but never '
+            'closed (truncated mid-deck). The closing `</div><!-- /.deck -->` '
+            'was lost (a regex/sed/manual edit ate it). In the browser the '
+            'present-mode runtime cannot lay out the deck → "显示不全 / 显示'
+            '什么都没有". Re-render via render-deck.py (never splice the deck '
+            'shell by hand); inspect the most recent edit for a dropped </div>.')
+
+    # ---- Invariant 2: present-mode runtime present (linked OR inlined) ----
+    # Version-INDEPENDENT detector (must NOT false-positive on a deck that HAS
+    # a runtime but a stale one lacking the current balanceSlide build — that's
+    # R-AUTOBALANCE-PRESENT's narrower job). A runtime is present when ANY of:
+    #   (a) a `<script src=…feishu-deck.js>` tag survives (raw linked deck, or
+    #       a linked deck whose JS file was unresolvable at validate time);
+    #   (b) a `<script>` body toggles `is-current` — the class the present-mode
+    #       runtime sets on the current .slide-frame (every runtime version:
+    #       inlined single-file OR a linked deck whose JS main()/check-only
+    #       already inlined). `is-current` in CSS alone does NOT count — only
+    #       inside a <script>;
+    #   (c) the current auto-balance fingerprint (newest builds) as a backstop.
+    linked = bool(re.search(r'<script[^>]*\bsrc="[^"]*feishu-deck\.js"', html, re.I))
+    inlined = (_AUTOBALANCE_SIG in html) or any(
+        'is-current' in body
+        for body in re.findall(r'<script\b[^>]*>(.*?)</script>', html, re.S | re.I))
+    if not (linked or inlined):
+        iss.err('R-DOC-INTEGRITY',
+            'present-mode runtime is ABSENT — no `<script src="…feishu-deck.js">` '
+            'tag and no inlined runtime (auto-balance fingerprint '
+            f'`{_AUTOBALANCE_SIG}` not found). Without the runtime, present mode '
+            'never initializes — `is-current` is never set on any .slide-frame, '
+            'so the deck renders blank / "显示不全". A linked deck needs '
+            '`<script src="…/assets/feishu-deck.js"></script>` before </body>; a '
+            'single-file deck (build.sh --inline) inlines the JS. Re-render via '
+            'render-deck.py rather than hand-editing the deck shell.')
+
+    # ---- Invariant 3: document ends well-formed ----
+    missing = [t for t in ('</body>', '</html>') if t.lower() not in html.lower()]
+    if missing:
+        iss.err('R-DOC-INTEGRITY',
+            f'document is truncated at the end — missing {" and ".join(missing)}. '
+            'A complete deck ends with `</div><!-- /.deck --><script …></script>'
+            '</body></html>`. Truncation means closing tags / the runtime script '
+            'were lost (regex/manual edit), and the browser will not finish '
+            'parsing/initializing the deck → "显示不全". Re-render via '
+            'render-deck.py.')
+
+
 # Tags that — when found HTML-ESCAPED in rendered slide text — prove raw HTML
 # was typed into a SCHEMA text field the renderer escapes (render-deck.py
 # `{{ field }}` → _esc_br). Matched ONLY in real-markup shape so math/prose

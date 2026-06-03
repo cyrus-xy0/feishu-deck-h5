@@ -1,6 +1,50 @@
 # CHANGES — feishu-deck-h5 历史/已固化的修复记录
 > 从 SKILL.md 拆出(F-30)。这些防御的可执行部分已固化进 feishu-deck.css / validate.py;此处仅留叙事供追溯。
 
+## F-85 — R-DOC-INTEGRITY:整份文档完整性硬闸(`.deck` 闭合 / runtime 存在 / 末尾 `</body></html>`)(2026-06-03)
+
+线上事故:一份 deck `index.html` 的收尾标签丢了 —— 少了 `.deck` 的闭合 `</div>`、
+`<script src="…feishu-deck.js">` runtime 整段没了、结尾也没有 `</body></html>`。
+浏览器里 present-mode runtime 永不初始化(任何 `.slide-frame` 都没被设 `is-current`)
+→ deck **"显示不全 / 显示什么都没有"**。但 `validate.py` 照样报 **R-DOM 干净 / PASS**:
+现有 `audit_dom_integrity`(R-DOM)只查 **每帧嵌套**(`.slide-frame` 是 `.deck` 直接子、
+恰好 1 个 `.slide`),而且它的 body 解析 **以 `<body…>(.*)</body>` 正则为门**,文档被截断
+(没有 `</body>`)时 **静默 early-return** —— 于是这份坏掉、根本交付不了的 deck 通过了校验。
+
+修法(`assets/_validate_audits.py` 新增 `audit_doc_integrity`,registry 注册在
+`audit_dom_integrity` 之后;`validate.py` 导航表加一行;`check-only.py` FAMILIES「结构 / DOM」
+加 `R-DOC-INTEGRITY`;`references/validator-rules.md` 新增一行)。三条 **ERROR** 级不变量,
+只打真 deck(无 `.deck` 容器的片段 / replica 跳过;HTML 片段模板可 `<!-- allow:doc-integrity -->`
+豁免):
+1. **`.deck` 开且闭** —— 全文 `<div>` 开合计数(剥 comment/script/style 后),`+N` 盈余 =
+   `.deck` 截断未闭合。
+2. **runtime 存在** —— 版本无关探测:`<script src=…feishu-deck.js>` 标签存活(linked),**或**
+   某个 `<script>` 体里出现 runtime 设置的 `is-current` 类(任意 runtime 版本:`build.sh --inline`
+   单文件 / linked deck 经 `inline_linked()` 已把 JS 内联),**或** 当前 `function balanceSlide(slide)`
+   指纹兜底。只有 runtime **整段缺失** 才报 —— 这是本规则新增的核心价值。
+3. **末尾良构** —— 含 `</body>` 与 `</html>`(没被尾部截断)。
+
+与 **R-AUTOBALANCE-PRESENT** 的重叠处理:后者更 **窄** —— 它要的是 deck 带 **当前**
+`balanceSlide` 构建(raw/legacy 没 re-bundle = runtime 在但 **过期**),且认 `data-no-autobalance`
+豁免。R-DOC-INTEGRITY 的 runtime 检测更 **宽**:"到底有没有 **任何** runtime(linked 或 内联指纹)",
+**只在 runtime 彻底没了 / 文档结构坏了时**才触发,绝不对"runtime 在但过期"误报(那是
+R-AUTOBALANCE-PRESENT 的活)。二者并存:R-DOC-INTEGRITY 报"文档坏了(缺闭合 / 截断)",
+R-AUTOBALANCE-PRESENT 保留"重新 re-bundle"的修复指引。**关键校准**:示例 `sample-deck-inline.html`
+正是"runtime 在但缺 balanceSlide 指纹"的老构建 —— 早期把 runtime 检测只绑 balanceSlide 会误报,
+故改用"`<script>` 体里 `is-current`"做版本无关指纹。
+
+复现/回归(只读 `examples/`,坏 deck 走临时副本,绝不动 `runs/`):
+- 健康对照(linked `sample-deck.html` / inline `sample-deck-inline.html` / showcase / with-texts /
+  layout-proposal)R-DOC-INTEGRITY **全 0 误报**;`sample-deck.html` 默认 + `--strict` 仍 PASS(exit 0)。
+- (a) 砍掉尾部 `</div></body></html>` + runtime script → 三条不变量全报;同一份在 **修复前** R-DOM
+  报 **0 条**(印证 gap:截断时 early-return 盲),R-DOC-INTEGRITY 报 3 条。
+- (b) `.deck` 开了但中途截断 → div 失衡报错。
+- (c) 仅缺 runtime script(闭合完整)→ 只报"runtime ABSENT"一条。
+- 新增 `deck-json/tests/test_doc_integrity.py`(11 例,含"R-DOM 盲 / R-DOC-INTEGRITY 补"守门用例);
+  全量套件 **279 passed**(F-84 基线 265 + 本批新增/文档同步守门)。
+
+承 F-84;补齐 render-deck 三道闸 / check-only / PostToolUse hook —— 缺任一收尾的 deck 现在都被拦下。
+
 ## F-84 — lift 把出界的 `../input/` 内容资源自包含进 `output/input/`(2026-06-03)
 
 源 deck 的一页可能用 `../input/<file>` 引用 per-run 内容图(产品照等)—— 在源 run 里
