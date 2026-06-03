@@ -28,6 +28,20 @@ description: |
     · 媒体音轨探测决定 GIF(无声→自动循环) 还是视频(有声→点播)。
 ---
 
+> # ⚠️ DEPRECATED / 已退役 — 图片(双背景)路线
+>
+> **本技能（pptx-to-editable-html，含 manifest / 双背景图 / 截图 / 整页渲染图路线）已退役。**
+> 按用户「完全不要图」的决定,PPTX 现在统一走:
+>
+> **parser → build_pptx → 结构化 `canvas` deck.json(代码重建、无截图)。**
+>
+> 啃不动的页(原生图表 / SmartArt / OLE)产纯文字占位 + 汇总报告页号,由用户自己重做那几页。
+> 见 `skills/feishu-deck-h5/subskills/parser/SKILL.md` 与
+> `skills/feishu-deck-h5/pptx-to-html/assets/build_pptx.py`。
+>
+> 代码仍保留(未删除)仅作存档参考;**请勿用于新任务**。build_pptx 已是 python-pptx 原生
+> OOXML 抽取,无需从本技能搬运任何抽取能力。
+
 # pptx-to-editable-html — PPT 转 HTML 技能（网页翻译版）
 
 > **网页翻译版**：在「双背景可编辑」基础上加了一套**可见真文字层 + 浏览器翻译**模式，

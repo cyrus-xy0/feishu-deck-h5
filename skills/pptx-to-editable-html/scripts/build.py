@@ -152,6 +152,20 @@ def font_css(font_base, fonts):
 
 
 def main():
+    # DEPRECATION (不要图): the image / dual-background path is retired. PPTX now
+    # goes through parser → build_pptx → a structured `canvas` deck.json
+    # (code reconstruction, no screenshots); un-reconstructable pages become
+    # placeholders + are reported for the user to redo. This manifest/dual-image
+    # builder is kept for archival reference only — do not use it for new tasks.
+    print(
+        "⚠️  DEPRECATED: pptx-to-editable-html (manifest / dual-background image "
+        "path) is RETIRED.\n"
+        "    PPTX now goes through parser → build_pptx → canvas deck.json "
+        "(structured, no screenshots);\n"
+        "    manifest/dual-image path retired per 不要图 decision. See "
+        "skills/feishu-deck-h5/subskills/parser/SKILL.md.\n",
+        file=sys.stderr,
+    )
     ap = argparse.ArgumentParser()
     ap.add_argument('manifest')
     ap.add_argument('--out', default='index.html')

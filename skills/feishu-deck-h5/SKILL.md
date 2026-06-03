@@ -133,7 +133,7 @@ Read exactly the subskill needed for the next step:
 | Check finished or in-progress deck for text, visual, structural, language, and delivery compliance                                            | `subskills/validator/SKILL.md` |
 | Operate existing artifacts: edit existing decks, reskin foreign HTML, lift/swap slides, convert/import existing material, round-trip recovery | `subskills/editor/SKILL.md`    |
 | Publish confirmed HTML to Feishu hosting and write publish metadata back to Base                                                              | `subskills/publisher/SKILL.md` |
-| Parse uploaded materials into local `input/runtime-library/source-dossier.json` and normalize assets into `input/runtime-library/assets/`     | `subskills/parser/SKILL.md`    |
+| Parse uploaded materials into local `input/runtime-library/source-dossier.json` and normalize assets into `input/runtime-library/assets/`. A `.pptx` is converted (build_pptx) into a structured `canvas` deck.json — code reconstruction, no screenshots; hard pages → placeholder + reported | `subskills/parser/SKILL.md`    |
 | Rehearse how a validated deck may land with target customer or stakeholder roles                                                              | `subskills/simulator/SKILL.md` |
 
 ## Canonical Workflow
@@ -166,7 +166,11 @@ For target HTML, bootstrap the existing state before editing:
 For a new deck:
 
 1. **Parser** if the user uploaded files or raw materials. Spawn a Parser worker
-   when multi-agent dispatch is available.
+   when multi-agent dispatch is available. A `.pptx` import goes Parser →
+   build_pptx → a structured, editable `canvas` deck.json (no screenshots);
+   un-reconstructable pages (live chart / SmartArt / OLE) are placeholdered and
+   reported for the user to redo — so this can hand straight to Renderer/Editor
+   without a Designer pass when the deck is just being imported.
 2. **Designer** to produce scenario, `design_plan`, and `outline.json`. Spawn a
    Designer worker when multi-agent dispatch is available.
 3. **Renderer** to produce `deck.json`, render HTML, and prepare handoff files.
@@ -200,7 +204,11 @@ For an existing deck:
 
 ## Shared Contracts
 
-- `deck.json` is the source of truth. `index.html` is derived.
+- `deck.json` is the single intermediate layer and source of truth; `index.html`
+  is derived. A PPTX import becomes a structured `canvas` deck.json (no
+  screenshots); a legacy HTML-only deck (no deck.json) is backfilled to deck.json
+  from its real DOM before it is operated on. Editing is uniform across canvas /
+  raw / schema slides: render → edit → sync back to `deck.json` → re-render.
 - Work happens inside `runs/<timestamp>-<slug>/`. After preflight and before any
   new generation, create a run with `assets/new-run.sh <slug>` and announce the
   absolute run path. Use a short ASCII slug derived from the topic/customer; do

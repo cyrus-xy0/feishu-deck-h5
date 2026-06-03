@@ -724,5 +724,145 @@ class LiftSlidesDeCollideCssTest(unittest.TestCase):
             "lifted page's CSS leaked bare-'hero' selectors (F-255 regressed).")
 
 
+RENDER = HERE.parent / "render-deck.py"
+VALIDATE = HERE.parent / "validate-deck.py"
+
+
+class LiftFromLegacyHtmlOnlySourceIntoDeckJsonTest(unittest.TestCase):
+    """SCENARIO 2 (cross-deck): lift ONE page FROM a LEGACY HTML-only deck (no
+    deck.json) INTO a deck.json deck.
+
+    Empirically verified behaviour (DECKJSON-UNIFIED-INTERMEDIATE-SPEC §5):
+      · lift-slides.py reads the source's index.html DIRECTLY (frame-based DOM
+        parsing) — the SOURCE never needs a deck.json, and lift does NOT backfill
+        it. There is no backfill prerequisite for this direction at all.
+      · The selected page becomes a `layout: "raw"` slide ADDED to the dest's
+        deck.json (the dest's `中间层` gets the page appended), `lifted`-marked +
+        carrying structured `lift_origin` provenance.
+      · It carries faithfully (content + the source's per-slide custom_css block,
+        inlined into data.html), re-renders, and strict-validates.
+
+    This is the native cross-deck path: no manual backfill step is required (in
+    contrast to Scenario 1's paste-into-legacy-dest, which DOES require a backfill
+    prerequisite). Reported as: WORKS, no gap."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-from-legacy-src-")
+        tmp = Path(cls.tmp)
+        # SOURCE: a real 2-slide deck.json → render → index.html, then MOVE the
+        # deck.json aside so the source is legacy HTML-only.
+        cls.src_dir = tmp / "source"
+        cls.src_dir.mkdir()
+        src_deck = {
+            "version": "1.0",
+            "deck": {"title": "Legacy source deck", "author": "a", "date": "2026-06"},
+            "slides": [
+                {"key": "src-page-a", "layout": "raw", "screen_label": "01 A",
+                 "data": {"html": '<div class="stage" style="position:absolute;'
+                                  'inset:96px;display:flex;align-items:center;">'
+                                  '<h1 style="font-size:96px;color:#fff;margin:0;">'
+                                  'Source page A</h1></div>'}},
+                {"key": "src-page-b", "layout": "raw", "screen_label": "02 B",
+                 "custom_css": ".lifted-marker{letter-spacing:.05em}",
+                 "data": {"html": '<div class="stage" style="position:absolute;'
+                                  'inset:96px;"><h2 class="lifted-marker" '
+                                  'style="font-size:64px;color:#fff;margin:0;">'
+                                  'Source page B</h2><p style="font-size:28px;'
+                                  'color:rgba(255,255,255,.8);margin:32px 0 0;">'
+                                  '这一页要被 lift 进 deck.json dest</p></div>'}},
+            ],
+        }
+        (cls.src_dir / "deck.json").write_text(
+            json.dumps(src_deck, ensure_ascii=False), encoding="utf-8")
+        r0 = subprocess.run(
+            [sys.executable, str(RENDER), str(cls.src_dir / "deck.json"),
+             str(cls.src_dir) + "/"], capture_output=True, text=True)
+        assert r0.returncode == 0, f"source render failed:\n{r0.stdout}\n{r0.stderr}"
+        # MOVE the source deck.json aside → source is now legacy HTML-only.
+        (cls.src_dir / "deck.json").rename(cls.src_dir / "deck.json.aside")
+
+        # DEST: a deck.json-native deck (one existing slide).
+        cls.dst_dir = tmp / "dest"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        dst_deck = {
+            "version": "1.0",
+            "deck": {"title": "Dest deck.json deck", "author": "a", "date": "2026-06"},
+            "slides": [
+                {"key": "dest-existing", "layout": "raw",
+                 "data": {"html": '<div class="stage" style="position:absolute;'
+                                  'inset:96px;display:flex;align-items:center;">'
+                                  '<h1 style="font-size:96px;color:#fff;margin:0;">'
+                                  'Dest page one</h1></div>'}},
+            ],
+        }
+        cls.dst_deck.write_text(json.dumps(dst_deck, ensure_ascii=False),
+                                encoding="utf-8")
+
+        # LIFT one page (src-page-b) from the HTML-only source into the dest deck.json.
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(cls.src_dir / "index.html"),
+             "--key", "src-page-b", str(cls.dst_deck)],
+            capture_output=True, text=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _dest(self):
+        return json.loads(self.dst_deck.read_text(encoding="utf-8"))
+
+    def test_lift_from_no_deckjson_source_succeeded(self):
+        # The source is HTML-only — lift reads its index.html directly, no
+        # backfill of the source required.
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift from HTML-only source failed: exit "
+                         f"{self.proc.returncode}\n{self.proc.stdout}\n{self.proc.stderr}")
+
+    def test_page_added_as_raw_slide_to_dest_deckjson(self):
+        deck = self._dest()
+        keys = [s["key"] for s in deck["slides"]]
+        self.assertEqual(keys, ["dest-existing", "src-page-b"],
+                         "lifted page was not appended to the dest deck.json")
+        lifted = next(s for s in deck["slides"] if s["key"] == "src-page-b")
+        self.assertEqual(lifted["layout"], "raw",
+                         "lifted page should land as a raw slide")
+        self.assertTrue(lifted.get("lifted", "").startswith("source#"),
+                        "lifted slide should carry `lifted` provenance")
+        self.assertIn("lift_origin", lifted,
+                      "lifted slide should carry structured lift_origin provenance")
+
+    def test_lifted_content_and_custom_css_carried(self):
+        lifted = next(s for s in self._dest()["slides"] if s["key"] == "src-page-b")
+        html = lifted["data"]["html"]
+        self.assertIn("Source page B", html, "lifted page content not carried")
+        self.assertIn("这一页要被 lift", html, "lifted page body text not carried")
+        # the source's per-slide custom_css block travels inline in data.html
+        self.assertIn("lifted-marker", html,
+                      "source per-slide custom_css was not carried with the page")
+
+    def test_dest_renders_and_validates_after_lift(self):
+        r = subprocess.run(
+            [sys.executable, str(RENDER), str(self.dst_deck), str(self.dst_dir) + "/"],
+            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0,
+                         f"dest re-render after lift failed:\n{r.stdout}\n{r.stderr}")
+        html = (self.dst_dir / "index.html").read_text(encoding="utf-8")
+        # exactly one .slide WRAPPER for the lifted key (extra data-slide-key hits
+        # are inside the carried scoped custom_css <style> block — not wrappers).
+        wrappers = re.findall(
+            r'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="src-page-b"', html)
+        self.assertEqual(len(wrappers), 1,
+                         "lifted page should produce exactly one .slide wrapper")
+        v = subprocess.run(
+            [sys.executable, str(VALIDATE), str(self.dst_deck), "--strict"],
+            capture_output=True, text=True)
+        self.assertEqual(v.returncode, 0,
+                         f"dest deck.json failed strict validation after lift:\n"
+                         f"{v.stdout}\n{v.stderr}")
+
+
 if __name__ == "__main__":
     unittest.main()

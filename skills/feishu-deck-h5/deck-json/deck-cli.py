@@ -499,7 +499,14 @@ def _strip_text_ids(obj):
 def _slide_asset_text(slide: dict) -> str:
     """Concatenate all string values in a slide (custom_css + every string in
     `data`, recursively) so asset references can be scanned without JSON-escape
-    noise."""
+    noise.
+
+    The recursive `data` walk INCLUDES a `canvas` slide's
+    `data.elements[].src` (each image element stores its path there, e.g.
+    `input/img-001.jpg`) — so the `input/<file>` regex in _copy_slide_assets
+    picks up canvas images for free, same as a raw slide's data.html refs. See
+    _canvas_element_srcs for the explicit, name-free collector used as a belt-
+    and-braces second pass for any non-`input/` element src form."""
     parts: list[str] = []
     cc = slide.get("custom_css")
     if isinstance(cc, str):
@@ -519,13 +526,61 @@ def _slide_asset_text(slide: dict) -> str:
     return "\n".join(parts)
 
 
+def _canvas_element_srcs(slide: dict) -> list[str]:
+    """Explicit collector for a `canvas` slide's image element sources:
+    `data.elements[].src` (and nested group children, if any future emitter
+    adds them). Returns the raw `src` strings in document order, de-duplicated.
+
+    A PPTX-imported `canvas` slide stores image paths ONLY here — not in
+    data.html (there is none) — so paste/lift must scan elements[].src to carry
+    the images. The generic `input/` text scan already catches the common
+    `src:"input/<file>"` form; this collector makes the contract explicit and
+    also surfaces bare/relative element srcs (`scene.png`, `./img.jpg`) that the
+    deck-local media pass copies."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def walk(elements):
+        if not isinstance(elements, list):
+            return
+        for el in elements:
+            if not isinstance(el, dict):
+                continue
+            src = el.get("src")
+            if isinstance(src, str) and src.strip() and src not in seen:
+                seen.add(src)
+                out.append(src.strip())
+            # tolerate a future grouped form: elements with nested children
+            for child_key in ("elements", "children"):
+                if isinstance(el.get(child_key), list):
+                    walk(el[child_key])
+
+    data = slide.get("data")
+    if isinstance(data, dict):
+        walk(data.get("elements"))
+    return out
+
+
 def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     """Copy a pasted slide's referenced LOCAL assets from the source deck dir to
     the destination deck dir, preserving deck-relative paths (`input/<file>`,
     `prototypes/<slug>/`). Skill-relative (`../../../skills/...`) and shared-pool
     refs resolve identically in both decks, so they need no copy. Returns a
-    report dict {input, prototypes, missing}."""
+    report dict {input, prototypes, missing}.
+
+    CANVAS slides store image paths in `data.elements[].src` (NOT in data.html —
+    there is none). The `input/` text scan below already catches the common
+    `src:"input/<file>"` form because _slide_asset_text walks `data` recursively;
+    the explicit `_canvas_element_srcs` pass folds those srcs into the SAME text
+    buffer so the contract is name-free and obvious, and any bare/relative
+    element src (`scene.png`) falls through to the deck-local media pass."""
     text = _slide_asset_text(slide)
+    # Belt-and-braces: explicitly append every canvas `data.elements[].src` to the
+    # scanned text so a canvas slide's images are guaranteed to be seen by the
+    # input/ + deck-local passes below (DECKJSON-UNIFIED-INTERMEDIATE-SPEC §7).
+    canvas_srcs = _canvas_element_srcs(slide)
+    if canvas_srcs:
+        text = text + "\n" + "\n".join(canvas_srcs)
     copied = {"input": [], "prototypes": [], "local": [], "missing": []}
     for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "input" / fname

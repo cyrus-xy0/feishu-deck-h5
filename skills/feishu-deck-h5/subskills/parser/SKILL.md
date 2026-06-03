@@ -5,7 +5,11 @@ description: |
   feishu-deck-h5. Accepts PPT/PPTX/PDF/Keynote, Feishu/Lark docs, images,
   videos, audio, HTML decks, demos, and asset folders. Converts user content into
   current-task knowledge and reusable materials under input/runtime-library/.
-  Reuses keynote-to-html for Keynote/PPTX layout extraction when fidelity matters.
+  A .pptx is the single native-PowerPoint entry: it is converted by build_pptx
+  into a structured `canvas` deck.json (code reconstruction of every element —
+  text runs / embedded images / shapes — NO screenshots); un-reconstructable
+  pages (live chart / SmartArt / OLE) become placeholders and are reported for
+  the user to redo. The image / dual-background path is retired (不要图).
 ---
 
 # feishu-deck-h5-parser
@@ -31,7 +35,9 @@ downloaded Feishu artifacts, extracted media, or prior source inventories.
 - 用户提交 HTML 并要求“修改/调整/优化/继续改当前 HTML”时,该 HTML 是
   `target-html`,parser 仍要分析它,但目标是把当前状态反建模为
   `imported_existing_state`,供 editor 后续修改,不是把它当普通素材重做。
-- 用户明确要把 PPT/PPTX/Keynote 拆成可复用素材或忠实迁移页面时,仍先触发 parser;parser 再按需要复用 `keynote-to-html` 的抽取/渲染资产链路。
+- 用户明确要把 PPT/PPTX/Keynote 拆成可复用素材或迁移页面时,仍先触发 parser。`.pptx`
+  一律走 build_pptx → 结构化 `canvas` deck.json(代码重建、无截图);`.key` Keynote
+  才走 `keynote-to-html` 抽取链路。
 
 不要触发本 skill 的情况:
 
@@ -100,14 +106,38 @@ For HTML inputs, always record the HTML role in `source_inventory` and
 
 作为独立 subagent 执行时,输入只包含 `context_packet`、用户 brief 和明确列出的 source files / URLs。输出只允许以 `source-dossier.json` 作为机器事实源,并在 `handoff` 中列出 designer / renderer / publisher 可消费字段。不得把解析过程中的自由文本总结或上游长对话传给 designer。
 
-## 复用 keynote-to-html
+## PPTX → 结构化 `canvas` deck.json(build_pptx,无截图)
 
-当来源是 `.key` 或用户要求 PPTX/Keynote 页面忠实迁移、保留版式、提取可编辑文本/图片/视频时,优先复用同仓库 `skills/keynote-to-html`:
+`.pptx` 是唯一的原生 PowerPoint 入口。parser 调用 pptx-to-html 子技能里的
+`build_pptx.py`(在它自己的 venv `pptx-to-html/.venv/bin/python3` 里跑,因为
+python-pptx 不在 parser 的 stdlib 世界),把每页 OOXML 逐元素**代码重建**成一个
+`layout:"canvas"` 的 deck.json slide(`data.elements[]` 描述定位的文字框 runs /
+嵌入图片 / 形状),**绝不截图**。
 
-- 对 `.key`:调用 `skills/keynote-to-html/assets/run.sh <key-file> <parser-assets-dir>/keynote-html/<stem>`。
-- 对 `.pptx`:若用户目标是 1:1 复刻且本机可用 Keynote,提示或执行“用 Keynote 打开并另存为 `.key`”后复用上述链路;否则走 parser 的轻量 PPTX 文本/媒体清单解析。
+- 调用:`pptx-to-html/.venv/bin/python3 pptx-to-html/assets/build_pptx.py <in.pptx>
+  runs/<task-id>/output --renderer <skill-root> --title <原始文件名>`。产物落在本轮
+  run 的 `output/`:`deck.json`(canvas)、`input/<嵌入图片>`、`index.html`(渲染预览)。
+- **啃不动的页**(原生图表 chart / SmartArt / OLE 对象)不硬撑成图:build_pptx 产一个
+  **纯文字占位 slide**(`data.placeholder=true`),并把页号汇总进结尾的
+  `unreconstructed slides: [...]` 报告行。parser 把这份报告抓进
+  `source_inventory[].canvas_conversion.unreconstructed_slides` 和
+  `warnings`,**由用户照报告自己重做那几页**。
+- parser 把转换结果(`deck_json` 路径、`slide_count`、`unreconstructed_slides`、
+  `warnings`)登记进 `source_inventory[].canvas_conversion`,这份 canvas deck.json
+  就是下游 designer / renderer / editor 直接可用、可编辑、可 round-trip 的中间层
+  (统一中间层 = deck.json)。
+- **图片/双背景路线已整条退役**(用户决定:完全不要图)。不要再用
+  `pptx-to-editable-html` 的截图/manifest/双底图方案,也不要为「保真」把 PPTX 转 `.key`
+  再走 keynote-to-html 抽图——`.pptx` 一律走 build_pptx 结构化重建。
+
+## 复用 keynote-to-html(仅限 .key)
+
+当来源是 `.key` Keynote 文件时,复用同仓库 `skills/keynote-to-html` 的 iWA 结构化重建链路:
+
+- 调用 `skills/keynote-to-html/assets/run.sh <key-file> <parser-assets-dir>/keynote-html/<stem>`。
 - 复用产物只作为 parser 的素材来源:把 `deck.json`、`index.html`、`assets/slide-NN/*`、每页 text/media/bbox 结果登记进 `source-dossier.json` 的 `material_layer`、`slide_layer` 和 `provenance`。
 - parser 不把 `keynote-to-html` 生成的 HTML 当最终交付物;最终 H5 仍由 `deck-renderer` 决定是否直接复用、重建或抽取页面。
+- `.pptx` **不**走这条路——它有 build_pptx 这条原生结构化入口(见上一节)。
 
 ## 飞书身份与媒体获取硬规则
 
@@ -141,7 +171,7 @@ python3 skills/feishu-deck-h5/subskills/parser/parse.py \
 它会输出 `source-dossier.json`;默认位置就是
 `runs/<task-id>/input/runtime-library/`,不复制到 `output/` 作为重复交付物。支持:
 
-- PPTX:统计页数,抽取每页文本和 `ppt/media/*` 素材清单;若目标是 1:1 复刻,优先转 `.key` 后复用 `keynote-to-html`。
+- PPTX:调 build_pptx 转成结构化 `canvas` deck.json(代码重建、无截图),啃不动的页留占位并报告页号;同时仍登记每页文本和 `ppt/media/*` 素材清单作为 provenance。
 - PPT:登记为需转换来源,建议转 PPTX / PDF / Keynote 后继续解析。
 - Keynote `.key`:登记为 Keynote 来源;需要页面级素材时复用 `keynote-to-html` 抽取 `deck.json`、HTML 和 slide assets。
 - PDF:统计页数,保留来源和页序。

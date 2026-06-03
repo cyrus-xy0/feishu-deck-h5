@@ -364,6 +364,100 @@ def xml_texts(raw: bytes) -> list[str]:
     return texts
 
 
+# ── PPTX → structured `canvas` deck.json (build_pptx backend) ────────────────
+# .pptx is the ONLY native-PowerPoint entry. It is converted to a structured
+# `canvas` deck.json (code reconstruction of every element — text runs, embedded
+# images, shapes — NO screenshots) by build_pptx.py, which lives in the
+# pptx-to-html sub-skill and runs in ITS OWN venv (python-pptx is not in the
+# parser's stdlib world). Un-reconstructable pages (live chart / SmartArt / OLE)
+# become text placeholders and are reported back as `unreconstructed slides` for
+# the user to redo. The image / dual-background path (pptx-to-editable-html) is
+# RETIRED per the 不要图 decision — we never produce screenshots here.
+PPTX_TO_HTML_DIR = REPO / "pptx-to-html"
+PPTX_VENV_PY = PPTX_TO_HTML_DIR / ".venv" / "bin" / "python3"
+BUILD_PPTX = PPTX_TO_HTML_DIR / "assets" / "build_pptx.py"
+UNRECONSTRUCTED_RE = re.compile(r"unreconstructed slides:\s*\[([^\]]*)\]")
+
+
+def build_pptx_canvas(pptx_path: Path, out_dir: Path, title: str = "") -> dict[str, Any]:
+    """Convert a .pptx to a structured `canvas` deck.json via build_pptx.py
+    (run in the pptx-to-html venv). Emits deck.json + extracted images under
+    `out_dir`, then renders index.html. Returns a structured result record for
+    the source-dossier: deck.json path, slide count, the `unreconstructed`
+    page-number report, and any warnings. Never raises — a conversion failure is
+    recorded as a warning so the dossier still writes."""
+    result: dict[str, Any] = {
+        "engine": "build_pptx",
+        "layout": "canvas",
+        "reconstruction": "structured-code-no-screenshots",
+        "ok": False,
+        "deck_json": "",
+        "output_dir": repo_rel(out_dir),
+        "unreconstructed_slides": [],
+        "warnings": [],
+    }
+    if not PPTX_VENV_PY.is_file():
+        result["warnings"].append(
+            f"pptx-to-html venv python not found at {repo_rel(PPTX_VENV_PY)}; "
+            "PPTX was preserved but not converted to canvas deck.json."
+        )
+        return result
+    if not BUILD_PPTX.is_file():
+        result["warnings"].append(
+            f"build_pptx.py not found at {repo_rel(BUILD_PPTX)}; PPTX not converted."
+        )
+        return result
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        str(PPTX_VENV_PY),
+        str(BUILD_PPTX),
+        str(pptx_path),
+        str(out_dir),
+        "--renderer",
+        str(REPO),
+    ]
+    # The parser copies the source .pptx to a hashed runtime path, so build_pptx's
+    # default `<stem>` title would be the hash. Pass the ORIGINAL filename stem so
+    # the deck title is human-readable.
+    if title:
+        cmd += ["--title", title]
+    try:
+        proc = subprocess.run(cmd, cwd=REPO, text=True, capture_output=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        result["warnings"].append("build_pptx.py timed out converting PPTX to canvas deck.json.")
+        return result
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+    match = UNRECONSTRUCTED_RE.search(stdout)
+    if match:
+        result["unreconstructed_slides"] = [
+            int(piece) for piece in re.findall(r"\d+", match.group(1))
+        ]
+    deck_path = out_dir / "deck.json"
+    if proc.returncode != 0 or not deck_path.is_file():
+        reason = " ".join((stderr or stdout).splitlines()[-6:])[:600]
+        result["warnings"].append(
+            "build_pptx.py failed to produce a canvas deck.json: " + (reason or "unknown error")
+        )
+        return result
+    result["ok"] = True
+    result["deck_json"] = repo_rel(deck_path)
+    index_html = out_dir / "index.html"
+    if index_html.is_file():
+        result["index_html"] = repo_rel(index_html)
+    try:
+        deck = json.loads(deck_path.read_text(encoding="utf-8"))
+        result["slide_count"] = len(deck.get("slides") or [])
+    except (json.JSONDecodeError, OSError):
+        pass
+    if result["unreconstructed_slides"]:
+        result["warnings"].append(
+            "unreconstructed slides (live chart / SmartArt / OLE → placeholder, "
+            "redo these pages): " + ", ".join(str(n) for n in result["unreconstructed_slides"])
+        )
+    return result
+
+
 def pptx_slides(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
     slides: list[dict[str, Any]] = []
     media: list[str] = []
@@ -1430,6 +1524,16 @@ def main(argv: list[str] | None = None) -> int:
         out_dir = REPO / out_dir
 
     library_dir = out_dir / "source-library"
+    # Run output dir for PPTX → canvas deck.json conversion. Canonical layout is
+    # runs/<task-id>/input/runtime-library, so the run output is the sibling
+    # `output/` of the run root (out_dir.parents[1] == runs/<task-id>). If
+    # --output-dir points somewhere non-canonical, fall back to a `pptx-canvas`
+    # subdir under it so the conversion artifacts still have a home.
+    try:
+        run_root = out_dir.parents[1]
+        pptx_canvas_root = run_root / "output"
+    except IndexError:
+        pptx_canvas_root = out_dir / "pptx-canvas"
     prepared_sources = [prepare_runtime_source(source, library_dir) for source in args.sources]
     inventory = []
     for prepared in prepared_sources:
@@ -1460,6 +1564,25 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     "deckjson_strategy": "preserve slides/data-slide-key when detected; otherwise wrap page or major sections as raw slides",
                 }
+        # PPTX → structured `canvas` deck.json (single .pptx entry point). Run
+        # build_pptx via the pptx-to-html venv; record the canvas deck.json + the
+        # `unreconstructed slides` report on this inventory item. Multiple .pptx
+        # sources get per-source output dirs so they don't clobber each other.
+        if item.get("type") == "pptx" and item.get("exists", True):
+            pptx_path = Path(str(prepared["runtime_source"]))
+            multi = sum(1 for s in args.sources if str(s).lower().endswith(".pptx")) > 1
+            conv_dir = (pptx_canvas_root / safe_source_stem(item["original_source"])
+                        if multi else pptx_canvas_root)
+            orig_stem = Path(str(item.get("original_source") or pptx_path)).stem
+            conv = build_pptx_canvas(pptx_path, conv_dir, title=orig_stem)
+            item["canvas_conversion"] = conv
+            if conv.get("ok"):
+                item["deck_json"] = conv.get("deck_json", "")
+                item["unreconstructed_slides"] = conv.get("unreconstructed_slides", [])
+            warnings = list(item.get("warnings") or [])
+            warnings.extend(conv.get("warnings") or [])
+            if warnings:
+                item["warnings"] = list(dict.fromkeys(warnings))
         inventory.append(item)
     materialize_html_assets(inventory, out_dir)
     layers = build_layers(inventory, args.brief)
