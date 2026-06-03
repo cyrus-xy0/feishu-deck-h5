@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# ===========================================================================
+#  FROZEN (unify-validate step 1, 2026-06-03): do NOT add new rules here.
+#  New/migrated rules live in assets/audits.js (single rule source). This file
+#  is being migrated rule-by-rule and will be retired.
+#  See UNIFY-VALIDATE-ARCH-2026-06-03.md for the migration plan.
+# ===========================================================================
 """
 feishu-deck-h5  ·  validator AUDIT FUNCTIONS (_validate_audits)
 
