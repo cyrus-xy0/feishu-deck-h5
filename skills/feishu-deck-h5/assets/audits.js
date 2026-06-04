@@ -4611,6 +4611,292 @@
     },
 
     {
+      // R-VIS-DEAD-ANIM · 该页 CSS 声明了 animation 但选择器运行时零匹配 (F-57)。
+      // (步骤 3 最终视觉批迁自 visual-audit.js 的 dead_anim producer + validate.py 的
+      //  dead_anim 消费段)。堵 F-51 整类:lift / 前缀注入用正则啃选择器,把合法的
+      //  `.slide-frame.is-current` 啃成非法的 `-frame.is-current`(`-frame` 是合法 CSS
+      //  ident 故能解析,但没有 `<-frame>` 元素 → 永不匹配)→ 动画永不触发,被驱动元素
+      //  停在初态(常 opacity:0)→ 内容永久隐身。静态 CSS 分析看不出(每条单独读都合法),
+      //  只有运行时 querySelectorAll 才暴露。
+      //
+      // ⚠️ 隔离(逐字搬 producer 的"主循环末尾 per-slide force-toggle"):`.is-current` 是
+      //  present 模式运行时挂在当前帧的类,审计时只有一帧带它 —— 其余帧的健康 scoped 选择器
+      //  会"假性零匹配"。所以临时给【所有】.slide-frame 强加 is-current 让 scoped 选择器
+      //  解析,扫完本页样式,finally 还原 —— toggle 包在本 evaluate 内,绝不泄漏到别的规则
+      //  (它们在本帧迭代的前/后跑,但永不在 toggle 生效期间被调用)。真死的 `-frame.is-current`
+      //  即便强加也仍零匹配(没有 `<-frame>` 元素),force 不会掩盖真断裂。
+      //  只查本 slide 自己的 <style>(co-located custom_css + raw inline <style>),
+      //  绝不碰 head 框架样式表(其 `.slide-frame.is-current .slide>*` reveal 是健康的)。
+      //  与 R-VIS-DEAD-RULE 各有独立 producer:这里【只发 dead_anim,绝不碰 dead_rule】。
+      //
+      // 严重度(逐字搬 validate.py):always err(内容隐身是硬伤,lifted 页同样报 err)。
+      // 文案逐字保留。截断 [:20]。
+      id: 'R-VIS-DEAD-ANIM',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const dead = [];
+        const seenDead = new Set();
+        // Force .is-current on every frame so runtime-scoped selectors resolve;
+        // record which ones we touched so we can restore exactly.
+        const _forcedFrames = [];
+        slide.ownerDocument.querySelectorAll('.slide-frame').forEach((f) => {
+          if (!f.classList.contains('is-current')) { f.classList.add('is-current'); _forcedFrames.push(f); }
+        });
+        try {
+          const _declaresAnim = (styleDecl) => {
+            try {
+              const name = (styleDecl.animationName || '').trim();
+              if (name && name !== 'none') return true;
+              const sh = (styleDecl.animation || '').trim();
+              // shorthand `animation: none` / empty → not a real animation
+              if (sh && !/^none(\s|$)/i.test(sh)) return true;
+            } catch (e) { /* exotic decl access — ignore */ }
+            return false;
+          };
+          // Depth/string-aware comma split — commas inside :is()/:not()/:has()/
+          // [attr="a,b"] must NOT shatter a valid selector (the shards would throw
+          // in querySelectorAll → false 'parse-error' on a HEALTHY animation,
+          // failing the gate). Mirrors the DEAD-RULE pass's _splitSelectorList.
+          const _splitSelList = (sel) => {
+            const parts = []; let depth = 0, inStr = 0, buf = '';
+            for (let i = 0; i < sel.length; i++) {
+              const ch = sel[i];
+              if (inStr) { buf += ch; if (ch === inStr && sel[i - 1] !== '\\') inStr = 0; continue; }
+              if (ch === '"' || ch === "'") { inStr = ch; buf += ch; continue; }
+              if (ch === '(' || ch === '[') depth++;
+              else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+              if (ch === ',' && depth === 0) { parts.push(buf.trim()); buf = ''; continue; }
+              buf += ch;
+            }
+            if (buf.trim()) parts.push(buf.trim());
+            return parts;
+          };
+          const _checkSel = (selectorText) => {
+            // A rule's selectorText may be a comma list; test each part — any dead
+            // part is reported (one dead branch = that target never animates).
+            const parts = _splitSelList(selectorText || '').filter(Boolean);
+            for (const sel of parts) {
+              const key = slide_idx + '::' + sel;
+              if (seenDead.has(key)) continue;
+              let reason = null;
+              try {
+                if (slide.ownerDocument.querySelectorAll(sel).length === 0) reason = 'no-match';
+              } catch (e) {
+                reason = 'parse-error';
+              }
+              if (reason) {
+                seenDead.add(key);
+                dead.push({ slide_idx, selector: sel, reason });
+              }
+            }
+          };
+          const _walkRules = (rules) => {
+            for (const rule of rules) {
+              // CSSStyleRule = 1; group rules (@media/@supports/@container) expose .cssRules.
+              if (rule.type === 1 && rule.selectorText && rule.style && _declaresAnim(rule.style)) {
+                _checkSel(rule.selectorText);
+              } else if (rule.cssRules && rule.constructor && /Keyframes|FontFace/i.test(rule.constructor.name) === false) {
+                // @media / @supports / @container etc. — recurse. @keyframes/@font-face
+                // expose cssRules too but their inner rules are keyframe steps, not
+                // DOM selectors, so skip them by constructor name.
+                try { _walkRules(rule.cssRules); } catch (e) { /* opaque group rule */ }
+              }
+            }
+          };
+          slide.querySelectorAll('style').forEach((styleEl) => {
+            let sheet = null;
+            try { sheet = styleEl.sheet; } catch (e) { sheet = null; }
+            if (!sheet) return;
+            let rules = null;
+            try { rules = sheet.cssRules; } catch (e) { rules = null; }  // cross-origin / not-yet-parsed
+            if (rules) _walkRules(rules);
+          });
+        } finally {
+          // Restore: remove only the .is-current we added.
+          _forcedFrames.forEach((f) => f.classList.remove('is-current'));
+        }
+
+        const findings = [];
+        for (const entry of dead.slice(0, 20)) {
+          const _why = (entry.reason === 'parse-error')
+            ? '选择器解析失败(伪类 :is()/:has() 等写法非法)'
+            : '选择器运行时零匹配(很可能被前缀注入/lift 啃坏,'
+              + '如合法的 `.slide-frame.is-current` 被啃成非法的 `-frame.is-current`)';
+          findings.push({
+            rule: 'R-VIS-DEAD-ANIM', severity: 'error', slide_idx,
+            selector: entry.selector, reason: entry.reason,
+            message:
+              `slide ${slide_idx} · 该页 CSS 里 \`${entry.selector}\` 声明了 `
+              + `animation,但${_why} —— 这条动画永不触发,被它驱动的元素停在动画初态`
+              + '(通常是 opacity:0 / transform 偏移),内容在投影上永久隐身或永不进场/上滚。'
+              + 'Fix: 把选择器修正到合法、运行时真能命中的形态(常见即把 `-frame.is-current` '
+              + '还原成 `.slide-frame.is-current`,或把损坏的伪类写对);若该规则本就该删,'
+              + '连 animation 声明一起删,别留死规则。(几何/DOM 判定,lift 页同样报 err —— '
+              + '动画静默失效就是真缺陷。)',
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-DEAD-RULE · 该页 CSS 声明了重要视觉属性但选择器运行时零匹配 (F-68 · F-57 超集)。
+      // (步骤 3 最终视觉批迁自 visual-audit.js 的 dead_rule producer + validate.py 的
+      //  dead_rule 消费段)。F-57(dead_anim)只覆盖 animation;同一类"规则声明在源里、运行
+      //  时选择器死掉、元素静默退回浏览器默认值"的盲区还有非动画属性:冰山 `.hero-pct` 从
+      //  100px 死成 16px(16 是合规档、字号闸全绿不报)、`.loop-row` 从 grid 死成 block
+      //  (排版塌掉、无报警)。这条把 dead-selector 判定扩到 position:absolute|fixed /
+      //  display:grid|flex / font-size≥48px / width|height≥120px 这些一旦失效就视觉塌陷的
+      //  重要属性。判定逻辑同 dead_anim:运行时 querySelectorAll 零匹配或解析抛错才算死,绝不
+      //  靠"选择器里有没有注释"(`.a /*c*/ .b{}` ≡ 合法的 `.a .b{}`,注释=空白后代组合子)。
+      //
+      // ⚠️ 隔离(逐字搬 producer 顶部那个自成一体的 bracketed pass):同 R-VIS-DEAD-ANIM,
+      //  临时给所有 .slide-frame 强加 is-current 让 scoped 选择器解析,finally 还原,toggle
+      //  绝不泄漏到别的规则。dead-rule 只看 querySelectorAll 命中数(与布局/可见性无关),放
+      //  隔离 pass 既拿正确 scoped 解析、又不污染后续测量。只查本 slide 自己的 <style>,
+      //  绝不碰 head 框架样式表。与 R-VIS-DEAD-ANIM 各有独立 producer:这里【只发 dead_rule,
+      //  绝不碰 dead_anim】(否则双报死动画)。
+      //
+      // 严重度(逐字搬 validate.py):always err(规则静默失效是硬伤,lifted 页同样报 err)。
+      // 文案逐字保留。截断 [:20]。
+      id: 'R-VIS-DEAD-RULE',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const dead = [];
+        const _DEAD_BIG_PX = 48;     // hero/font threshold (master sub-hero & up)
+        const _DEAD_SIZE_PX = 120;   // width/height threshold — a real layout block, not a chip
+        // Parse the selector list of a CSS rule, splitting on top-level commas only
+        // (commas inside :is()/:not()/:has()/[attr="a,b"] must NOT split the list).
+        const _splitSelectorList = (sel) => {
+          const parts = []; let depth = 0, inStr = 0, buf = '';
+          for (let i = 0; i < sel.length; i++) {
+            const ch = sel[i];
+            if (inStr) { buf += ch; if (ch === inStr && sel[i - 1] !== '\\') inStr = 0; continue; }
+            if (ch === '"' || ch === "'") { inStr = ch; buf += ch; continue; }
+            if (ch === '(' || ch === '[') depth++;
+            else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+            if (ch === ',' && depth === 0) { parts.push(buf.trim()); buf = ''; continue; }
+            buf += ch;
+          }
+          if (buf.trim()) parts.push(buf.trim());
+          return parts;
+        };
+        // Decide which IMPORTANT visual property a CSSStyleRule declares (for F-68).
+        // Returns {prop, detail} of the first hit, or null. animation handled by F-57.
+        const _importantVisualProp = (style) => {
+          const pos = style.getPropertyValue('position');
+          if (pos === 'absolute' || pos === 'fixed') return { prop: 'position', detail: pos };
+          const disp = style.getPropertyValue('display');
+          if (disp === 'grid' || disp === 'inline-grid') return { prop: 'display', detail: disp };
+          if (disp === 'flex' || disp === 'inline-flex') return { prop: 'display', detail: disp };
+          // font-size (direct or via `font:` shorthand) ≥ _DEAD_BIG_PX (px only — em/% unresolved at parse time)
+          let fs = style.getPropertyValue('font-size');
+          if (!fs) { const f = style.getPropertyValue('font'); if (f) { const m = f.match(/(\d+(?:\.\d+)?)px/); if (m) fs = m[0]; } }
+          if (fs) { const m = fs.match(/^(\d+(?:\.\d+)?)px$/); if (m && parseFloat(m[1]) >= _DEAD_BIG_PX) return { prop: 'font-size', detail: fs }; }
+          for (const dim of ['width', 'height']) {
+            const v = style.getPropertyValue(dim);
+            const m = v && v.match(/^(\d+(?:\.\d+)?)px$/);
+            if (m && parseFloat(m[1]) >= _DEAD_SIZE_PX) return { prop: dim, detail: v };
+          }
+          return null;
+        };
+        // Recursively walk a CSSRuleList, collecting style rules (descends into @media
+        // and other grouping at-rules so nested per-slide grid/position rules count).
+        const _collectStyleRules = (ruleList, acc) => {
+          for (const rule of ruleList) {
+            if (rule.type === 1 /* STYLE_RULE */) acc.push(rule);
+            else if (rule.cssRules) _collectStyleRules(rule.cssRules, acc);  // @media / @supports / @layer
+          }
+        };
+        // For one slide: read its OWN inline <style> elements, parse each rule, and for
+        // every rule that declares an IMPORTANT non-animation visual property, test
+        // whether ANY selector in the list matches at runtime. Zero match → dead_rule.
+        const _auditDeadRulesOnly = (sl, sIdx) => {
+          const styleEls = sl.querySelectorAll('style');
+          const seen = new Set();
+          styleEls.forEach((styleEl) => {
+            let sheet = null;
+            try { sheet = styleEl.sheet; } catch (e) { return; }
+            if (!sheet) return;
+            let rules; try { rules = sheet.cssRules; } catch (e) { return; }  // cross-origin guard
+            const styleRules = [];
+            try { _collectStyleRules(rules, styleRules); } catch (e) { return; }
+            for (const rule of styleRules) {
+              const selText = rule.selectorText;
+              if (!selText) continue;
+              const impProp = _importantVisualProp(rule.style);
+              if (!impProp) continue;  // animation-only rules are F-57's job, NOT dead_rule
+              // Does the selector list match anything? Treat a parse error on ANY
+              // member as "dead" (an illegal selector silently kills the whole rule).
+              let matchCount = 0, parseError = false;
+              for (const member of _splitSelectorList(selText)) {
+                if (!member) continue;
+                try { matchCount += document.querySelectorAll(member).length; }
+                catch (e) { parseError = true; }
+              }
+              if (matchCount > 0 && !parseError) continue;  // healthy — at least one element styled
+              const reason = parseError ? 'parse-error' : 'no-match';
+              const key = selText + '::' + impProp.prop;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              const lifted = !!(sl.closest && sl.closest('[data-lifted]'))
+                           || !!(sl.querySelector && sl.querySelector('[data-lifted]'));
+              dead.push({ slide_idx: sIdx, selector: selText, reason, lifted,
+                          prop: impProp.prop, value: impProp.detail });
+            }
+          });
+        };
+        // Force is-current on every frame so runtime-scoped selectors resolve; restore
+        // in finally so it NEVER leaks into the other rules' measurement.
+        const _forcedFrames = [];
+        document.querySelectorAll('.slide-frame').forEach((f) => {
+          if (!f.classList.contains('is-current')) { f.classList.add('is-current'); _forcedFrames.push(f); }
+        });
+        try {
+          _auditDeadRulesOnly(slide, slide_idx);
+        } finally {
+          _forcedFrames.forEach((f) => f.classList.remove('is-current'));
+        }
+
+        const _DEAD_RULE_PROP_NOTE = {
+          position: ['退回 static → 定位元素跑位 / 叠层错乱', 'position:absolute|fixed'],
+          display: ['退回 block → grid/flex 排版整体塌掉(行/列变竖排)', 'display:grid|flex'],
+          'font-size': ['退回浏览器默认 ~16px → hero/大字号文字缩成小字,且 16 是合规档、'
+            + '字号闸(R20 / R-VIS-TIER)全绿不会报', '大字号'],
+          width: ['退回 auto → 尺寸塌缩 / 布局错位', '具体宽度'],
+          height: ['退回 auto → 尺寸塌缩 / 布局错位', '具体高度'],
+        };
+        const findings = [];
+        for (const entry of dead.slice(0, 20)) {
+          const _why = (entry.reason === 'parse-error')
+            ? '选择器解析失败(伪类 :is()/:has() 等写法非法)'
+            : '选择器运行时零匹配(很可能被前缀注入/lift 啃坏,'
+              + '如合法的 `.slide-frame.is-current` 被啃成非法的 `-frame.is-current`)';
+          const note = _DEAD_RULE_PROP_NOTE[entry.prop] || ['元素退回浏览器默认值', entry.prop || '?'];
+          const _effect = note[0];
+          const _label = note[1];
+          findings.push({
+            rule: 'R-VIS-DEAD-RULE', severity: 'error', slide_idx,
+            selector: entry.selector, reason: entry.reason, prop: entry.prop,
+            value: entry.value, lifted: entry.lifted,
+            message:
+              `slide ${slide_idx} · 该页 CSS 里 \`${entry.selector}\` 声明了 `
+              + `\`${entry.prop}: ${entry.value || ''}\`(${_label}),但${_why} —— `
+              + `这条规则永不生效,被它本该驱动的元素静默${_effect}。源里逐条读都合法、`
+              + '字号/排版闸全绿,只有运行时 querySelectorAll 才暴露。'
+              + 'Fix: 把选择器修正到合法、运行时真能命中的形态(常见即把 `-frame.is-current` '
+              + '还原成 `.slide-frame.is-current`,或把损坏的伪类写对);若该规则本就该删,'
+              + '连声明一起删,别留死规则。(几何/DOM 判定,lift 页同样报 err —— '
+              + '规则静默失效就是真缺陷。)',
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
       // R-DOM · 整文档 .deck 结构不变量。(步骤 3 最终结构批迁自 _validate_audits.py
       // audit_dom_integrity)。原版用 stdlib html.parser 扫 <body> 源,逐 <div> 维护栈,
       // 查三条不变量:
