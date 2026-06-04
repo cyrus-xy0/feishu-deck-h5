@@ -147,6 +147,22 @@
     const sheets = (typeof document !== 'undefined' && document.styleSheets) || [];
     for (const ss of sheets) {
       if (sheetIsFramework(ss)) continue;          // 只查作者 CSS
+      // /* allow:white-opacity */ 注释豁免 —— CSSOM 的 cssText 丢注释,改读 owning
+      // <style> 的【原始文本】(保留注释,与 R06 同套路):收集 declaration 块里带 marker
+      // 的选择器 → 规则级豁免。恢复迁移前作者一直在用的注释 opt-out(否则存量 deck 静默报警)。
+      const _rawExempt = new Set();
+      const _rawCss = (ss.ownerNode && ss.ownerNode.textContent) || '';
+      if (_rawCss.indexOf('allow:white-opacity') >= 0) {
+        const _blockRe = /([^{}]+)\{([^{}]*)\}/g;
+        let _m;
+        while ((_m = _blockRe.exec(_rawCss))) {
+          if (_m[2].indexOf('allow:white-opacity') < 0) continue;
+          for (const s of _m[1].split(',')) {
+            const n = s.replace(/\s+/g, ' ').trim();
+            if (n) _rawExempt.add(n);
+          }
+        }
+      }
       let rules;
       try { rules = ss.cssRules; } catch (e) { continue; }
       const walk = (ruleList) => {
@@ -159,6 +175,7 @@
           if (selector.indexOf('.slide') < 0 && selector.indexOf('.card') < 0
               && selector.indexOf('.col') < 0) continue;
           if (WHITE_CHROME_SEL_RE.test(selector)) continue;   // chrome 类豁免
+          if (_rawExempt.size && _rawExempt.has(selector.replace(/\s+/g, ' ').trim())) continue;  // /* allow:white-opacity */ 注释豁免(读原始文本恢复)
           const cssText = r.style.cssText || '';
           // allow:white-opacity opt-out —— cssText 不含注释,改用 data-* 属性 opt-out
           //（见下面 evaluate 的 data-allow-white-opacity 链),此处对应原版注释 marker 已无法读取。
