@@ -2132,14 +2132,21 @@ def inline_html(out_html: Path, deck: dict) -> None:
             lambda u: f"url({_resolve_bg(css_path, u.group(1))})",
             css,
         )
-        return f"<style>{css}</style>"
+        # data-source="framework": the audit engine (audits.js sheetIsFramework)
+        # classifies provenance by this attr. In LINKED mode framework CSS is
+        # recognized by its href; once inlined the href is gone, so without this
+        # attr the inlined framework master-spec rules (soft-white
+        # /* allow:white-opacity */ etc.) get misclassified as AUTHOR and fire
+        # false R-WHITE-TEXT positives. Everything _inline_stylesheet inlines is a
+        # framework <link> (per-page author CSS is already inline custom_css).
+        return f'<style data-source="framework">{css}</style>'
 
     def _inline_script(m):
         src = m.group(1)
         js_path = (out_html.parent / src).resolve()
         if not js_path.is_file():
             return m.group(0)
-        return f"<script>{js_path.read_text(encoding='utf-8')}</script>"
+        return f'<script data-source="framework">{js_path.read_text(encoding="utf-8")}</script>'
 
     # Order matters: stylesheet first (cheap), then script, then bg images
     html_text = re.sub(

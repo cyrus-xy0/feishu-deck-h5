@@ -1034,13 +1034,15 @@
       // 遍历 .slide 下元素(含 ::before/::after)的 computed box-shadow,逐层判定:
       // inset / glow-ring(0 0 0)豁免,有偏移/模糊 = 真投影。
       // 原 CSS 注释 opt-out `/* allow:drop-shadow */` 在 computed 里看不到(注释不进
-      // 样式),改为:① UI-mock 窗体类(.ui-window/.phone-frame/.desktop-frame 等)豁免
-      // ② `data-allow-drop-shadow` 属性 opt-out(就近祖先链)。
+      // 样式),改为:① 框架里有 sanctioned depth shadow 的元素类(每个在框架 CSS 里都带
+      // `/* allow:drop-shadow */`:ui-window/phone-frame/desktop-frame/browser-frame/
+      // app-frame 是 UI-mock 窗体,scene-frame 是 story-case 纪实影像框
+      // feishu-deck-patterns.css)豁免 ② `data-allow-drop-shadow` 属性 opt-out(就近祖先链)。
       id: 'R12',
       severity: 'warn',
       evaluate(slide, ctx) {
         const { slide_idx } = ctx;
-        const UI_MOCK = ['ui-window', 'phone-frame', 'desktop-frame', 'browser-frame', 'app-frame'];
+        const UI_MOCK = ['ui-window', 'phone-frame', 'desktop-frame', 'browser-frame', 'app-frame', 'scene-frame'];
         const findings = [];
         const flaggedSel = new Set();   // 同一 selector(短选择器)一页只报一次,降噪
         const all = [slide, ...slide.querySelectorAll('*')];
