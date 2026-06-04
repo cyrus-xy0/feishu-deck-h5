@@ -365,6 +365,12 @@ body {
   width: 160px; height: 50px;          /* master 106.4 × 33.5 native × 1.5 */
   background: var(--fs-asset-logo) left center/contain no-repeat;
   text-indent: -9999px; overflow: hidden;
+  z-index: 20;                          /* brand chrome ABOVE flattened content.
+     .slide>* (line ~1838) puts every direct .slide child at z-index:1; the
+     wordmark declared none, so it tied content at 1 and a later full-bleed raw
+     child (layout:"raw") painted over it by DOM order = logo flash-then-gone.
+     20 sits in the chrome band 2–49: above content, below pager(50/60) &
+     mobile chrome(1001). cover/end overrides inherit this. */
 }
 /* Cover & End (封面 / 封底) — same colored logo, top-LEFT, larger */
 .slide[data-layout="cover"] .wordmark,
