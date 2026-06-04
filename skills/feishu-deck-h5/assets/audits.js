@@ -4210,6 +4210,407 @@
     },
 
     {
+      // R-VIS-ALIGN · grid 子等高(maxH-minH>4px)。(步骤 3 第十批迁自 visual-audit.js
+      // 的 align producer)。几何逐字搬:遍历 slide 内所有元素,命中 GRID_KEYS(=VIS_GRID_KEYS)
+      //   的当 grid;kids = grid.children;<2 跳;heights = 各 kid bbox 高 round(注:producer
+      //   用【渲染 px】不除 scale,verbatim 保留);maxH-minH>4 → push entry。
+      // ⚠️ NO-CONSUMER / DEAD-END(PRESERVE-EXACTLY):validate.py run_visual_audits 里
+      //   【没有】`report.get('align')` 消费段(全 report.get key 已核:overflow/tier/hier/
+      //   title_position/title_gap/opt_out_abuse/card_overflow/body_floor/abspos_dual_anchor/
+      //   orphan/balance/canvas_center/crowd/panel_top/slack_flex/card_min_height_sparse/focal/
+      //   peer_size/gutter/hero_floor/short_label_floor/band_collide/dead_anim/dead_rule —— 无
+      //   align)。_validate_audits.py 同样不消费(只有 align-content/align-items CSS 子串,无关)。
+      //   既无 id / severity / message,producer 跑出的 entry 在 validate.py 端【永远】被丢弃
+      //   → 端到端零 finding。其它批的"死 lifted 分支"是把死降级折成常量 severity verbatim;
+      //   本规则是【整条】死(连 finding 都不该 emit),所以这条规则【不 push 任何 finding】——
+      //   几何照搬求值(与 producer 行为同),但因无消费段可折叠的 id/severity/message,evaluate
+      //   返回 [],与 validate.py 现行端到端行为零漂移(老 validate.py 永不报 R-VIS-ALIGN)。
+      //   见迁移报告 / audits.js 第九批头注 "原 R-VIS-ALIGN(equal-height grid)未迁"。
+      // 备注:几何子串仍逐字保留在 reference 注释里,留 step 4 / 将来真要立 R-VIS-ALIGN 时复用。
+      //   geometry verbatim(若日后接消费段则解封):
+      //     slide.querySelectorAll('*').forEach(grid => {
+      //       if (!visHasAnyClass(grid, VIS_GRID_KEYS)) return;
+      //       const kids = [...grid.children]; if (kids.length < 2) return;
+      //       const heights = kids.map(k => Math.round(k.getBoundingClientRect().height));
+      //       const minH = Math.min(...heights), maxH = Math.max(...heights);
+      //       if (maxH - minH > 4) { /* entry: grid_sel, count, heights[:8], delta */ }
+      //     });
+      id: 'R-VIS-ALIGN',
+      severity: 'warn',
+      evaluate() {
+        // No consumer in validate.py → no id/severity/message to fold in → emit nothing
+        // (preserves the existing end-to-end behavior: R-VIS-ALIGN never reported).
+        return [];
+      },
+    },
+
+    {
+      // R-VIS-LABEL-FLOOR · content-tier(≥28px)卡内 <24px 非 chrome 标签。(步骤 3 第十批
+      // 迁自 visual-audit.js 的 label_floor producer + validate.py 的 label_floor 消费段)。
+      // 几何逐字搬 producer(嵌在 card 循环里,与 R-VIS-HIER 同遍历):
+      //   cards = slide 内命中 VIS_CARD_KEYS 或 -card/-tile/-cell/-panel/-box 后缀的元素;
+      //   seenCards WeakSet 去重;allTextEls = card 后代里 hasOwnText 者;
+      //   sizes = allTextEls computed px;hasContentAnchor = 任一 ≥28;
+      //   PAGE_CHROME_ANCESTORS = [header,footer,source-footer,pageno,wordmark,deck-progress,
+      //     deck-controls];hasContentAnchor 时:每个 allTextEl px≥24 跳;CHROME_WHITELIST 命中
+      //     且祖先(到 card 为止)含 PAGE_CHROME_ANCESTORS → 豁免;否则 push;(sel,px) 一页一报。
+      // 严重度(逐字搬 validate.py):lifted → warn(+前缀),else → err。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-LABEL-FLOOR',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        const cards = slide.querySelectorAll('*');
+        const seenCards = new WeakSet();
+        const seenLabelFloor = new Set();
+        const PAGE_CHROME_ANCESTORS = ['header', 'footer', 'source-footer',
+          'pageno', 'wordmark', 'deck-progress', 'deck-controls'];
+        cards.forEach((card) => {
+          if (!visHasAnyClass(card, VIS_CARD_KEYS) && !visHasCardSuffix(card)) return;
+          if (seenCards.has(card)) return;
+          seenCards.add(card);
+          const allTextEls = [...card.querySelectorAll('*')].filter(hasOwnText);
+          const sizes = allTextEls.map(
+            (e) => Math.round(parseFloat(getComputedStyle(e).fontSize)));
+          const hasContentAnchor = sizes.some((s) => s >= 28);
+          if (!hasContentAnchor) return;
+          allTextEls.forEach((el) => {
+            const px = Math.round(parseFloat(getComputedStyle(el).fontSize));
+            if (px >= 24) return;   // Body tier or above is OK
+            if (visHasAnyClass(el, VIS_CHROME_WHITELIST)) {
+              let pageChromeAncestor = false;
+              for (let n = el.parentElement; n && n !== card; n = n.parentElement) {
+                if (visHasAnyClass(n, PAGE_CHROME_ANCESTORS)) {
+                  pageChromeAncestor = true; break;
+                }
+              }
+              if (pageChromeAncestor) return;
+            }
+            const sel = shortSel(el);
+            const key = `${slide_idx}::${sel}::${px}`;
+            if (seenLabelFloor.has(key)) return;
+            seenLabelFloor.add(key);
+            const cardSel = shortSel(card);
+            const lifted = !!(el.closest && el.closest('[data-lifted]'));
+            const severity = lifted ? 'warn' : 'error';
+            findings.push({
+              rule: 'R-VIS-LABEL-FLOOR', severity, slide_idx,
+              card_sel: cardSel, label_sel: sel, label_px: px, lifted,
+              message:
+                (lifted ? 'LIFTED slide (verbatim) — downgraded to WARNING, '
+                  + 'you choose whether to bump. ' : '')
+                + `slide ${slide_idx} · card \`${cardSel}\` `
+                + 'contains content-tier text (≥28px) but label '
+                + `\`${sel}\` is ${px}px — `
+                + 'content-card labels MUST be ≥ 24 (Body tier). 16/18 chrome '
+                + 'is reserved for true page metadata (.source / .pageno / '
+                + '.footnote / .attrib / etc., reached via .header / .footer '
+                + 'ancestor). See SKILL.md "Hero-context label floor". '
+                + 'Promote to 24 + differentiate via font-weight or brand '
+                + 'color, not by shrinking the size.',
+            });
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-OPT-OUT-ABUSE · 单帧 ≥6 同类 opt-out = silence 反模式。(步骤 3 第十批迁自
+      // visual-audit.js 的 opt_out_abuse producer + validate.py 的 opt_out_abuse 消费段)。
+      // 几何/源逐字搬 producer:OPT_OUT_THRESHOLD=5;
+      //   (a) [data-allow-body-floor] DOM 计数 >5 → push(type='data-allow-body-floor',
+      //       examples = 前 3 个 shortSel);
+      //   (b) per-slide <style> 块里 CSS comment opt-out 计数:/* allow:typescale */ /
+      //       /* allow:white-opacity */ / /* allow:body-floor */ 各 >5 → push(examples=[])。
+      // 严重度(逐字搬 validate.py):always warn(iss.warn)。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-OPT-OUT-ABUSE',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        const OPT_OUT_THRESHOLD = 5;
+        const emit = (type, count, examples) => {
+          const exStr = examples && examples.length
+            ? ` (e.g. ${examples.join(', ')})` : '';
+          findings.push({
+            rule: 'R-VIS-OPT-OUT-ABUSE', severity: 'warn', slide_idx,
+            type, count, threshold: OPT_OUT_THRESHOLD, examples: examples || [],
+            message:
+              `slide ${slide_idx} has ${count} occurrences of `
+              + `\`${type}\` (threshold: ${OPT_OUT_THRESHOLD})${exStr}. `
+              + 'opt-out attribute / comment is documented exception, NOT '
+              + 'silence button. Batch-muting validator warnings hides real '
+              + 'issues (text too small / chrome class abuse / palette drift). '
+              + 'Fix: revisit each opt-out — if it is true by-design chrome / '
+              + 'axis label / decorative element, KEEP it AND write a one-line '
+              + 'justification comment; if it is regular body content, REMOVE '
+              + 'the opt-out and bump to 24 (or use brand color, etc). '
+              + 'Documented exception is 1-3 per slide, not 6+.',
+          });
+        };
+        // (a) data-allow-body-floor attributes (DOM)
+        const dafEls = slide.querySelectorAll('[data-allow-body-floor]');
+        if (dafEls.length > OPT_OUT_THRESHOLD) {
+          emit('data-allow-body-floor', dafEls.length,
+            [...dafEls].slice(0, 3).map((e) => shortSel(e)));
+        }
+        // (b) CSS comment opt-outs in per-slide <style> blocks
+        const styleEls = slide.querySelectorAll('style');
+        let typescaleCount = 0, whiteOpacityCount = 0, bodyFloorCount = 0;
+        styleEls.forEach((s) => {
+          const txt = s.textContent;
+          typescaleCount += (txt.match(/\/\*\s*allow:typescale[^*]*\*\//g) || []).length;
+          whiteOpacityCount += (txt.match(/\/\*\s*allow:white-opacity[^*]*\*\//g) || []).length;
+          bodyFloorCount += (txt.match(/\/\*\s*allow:body-floor[^*]*\*\//g) || []).length;
+        });
+        if (typescaleCount > OPT_OUT_THRESHOLD) emit('/* allow:typescale */', typescaleCount, []);
+        if (whiteOpacityCount > OPT_OUT_THRESHOLD) emit('/* allow:white-opacity */', whiteOpacityCount, []);
+        if (bodyFloorCount > OPT_OUT_THRESHOLD) emit('/* allow:body-floor */', bodyFloorCount, []);
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-CARD-MIN-HEIGHT-SPARSE · min-height 撑空 + 没 space-between。(步骤 3 第十批
+      // 迁自 visual-audit.js 的 card_min_height_sparse producer + validate.py 同名消费段)。
+      // 几何逐字搬 producer:isHeroLayout 整体跳;遍历元素:.fs-card-fill 跳;
+      //   [data-allow-min-height-sparse] 跳;display 非 flex/inline-flex 跳;flexDirection 非
+      //   column* 跳;minH = minHeight px,<50 跳;justifyContent ∈ {space-between/evenly/around}
+      //   跳;kids = 可见直接子(非 STYLE/SCRIPT、非 none/hidden、bbox 高>4),<2 跳;
+      //   contentExtent = lastBottom-firstTop(bbox,含 margin/gap);usableH = elH - padTop -
+      //   padBottom;slack = usableH - contentExtent,<60 跳;否则 push(各值 round)。
+      // 严重度(逐字搬 validate.py):always warn(iss.warn)。文案逐字保留。截断 [:15]。
+      id: 'R-VIS-CARD-MIN-HEIGHT-SPARSE',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        if (isHeroLayout) return [];
+        const findings = [];
+        slide.querySelectorAll('*').forEach((el) => {
+          if (el.classList.contains('fs-card-fill')) return;
+          if (el.hasAttribute('data-allow-min-height-sparse')) return;
+          const cs = getComputedStyle(el);
+          if (cs.display !== 'flex' && cs.display !== 'inline-flex') return;
+          if (!cs.flexDirection.startsWith('column')) return;
+          const minH = parseFloat(cs.minHeight) || 0;
+          if (minH < 50) return;
+          const jc = cs.justifyContent;
+          if (jc === 'space-between' || jc === 'space-evenly' || jc === 'space-around') return;
+          const kids = [...el.children].filter((c) => {
+            if (c.tagName === 'STYLE' || c.tagName === 'SCRIPT') return false;
+            const ccs = getComputedStyle(c);
+            if (ccs.display === 'none' || ccs.visibility === 'hidden') return false;
+            return c.getBoundingClientRect().height > 4;
+          });
+          if (kids.length < 2) return;
+          const elRect = el.getBoundingClientRect();
+          const firstTop = kids[0].getBoundingClientRect().top - elRect.top;
+          const lastBottom = kids[kids.length - 1].getBoundingClientRect().bottom - elRect.top;
+          const contentExtent = lastBottom - firstTop;
+          const padTop = parseFloat(cs.paddingTop) || 0;
+          const padBottom = parseFloat(cs.paddingBottom) || 0;
+          const usableH = elRect.height - padTop - padBottom;
+          const slack = usableH - contentExtent;
+          if (slack < 60) return;
+          const sel = shortSel(el);
+          const clientH = Math.round(elRect.height);
+          const contentExtentR = Math.round(contentExtent);
+          const usableHR = Math.round(usableH);
+          const slackR = Math.round(slack);
+          const kidCount = kids.length;
+          const minHR = Math.round(minH);
+          findings.push({
+            rule: 'R-VIS-CARD-MIN-HEIGHT-SPARSE', severity: 'warn', slide_idx,
+            selector: sel, client_h: clientH, content_extent: contentExtentR,
+            usable_h: usableHR, slack: slackR, kid_count: kidCount,
+            justify: jc, min_height: minHR,
+            message:
+              `slide ${slide_idx} · \`${sel}\` `
+              + `(min-height ${minHR}px, 实际 ${clientH}px, `
+              + `内容延展 ${contentExtentR}px (first→last bbox), `
+              + `可用 ${usableHR}px (减 padding), 真 slack ${slackR}px, `
+              + `${kidCount} children, justify-content: ${jc}) `
+              + '— 作者设了 min-height 撑卡片体量,但内容堆顶,卡底大量空白。'
+              + 'Fix: (1) 给该元素加 `class="fs-card-fill"`(框架 utility · 内部 '
+              + '`justify-content: space-between !important` · {N children 跨高度均布}'
+              + ');(2) 或缩小 min-height 到自然内容高度附近(slack < 30px · 让 '
+              + 'flex-start 看不出来);(3) 确实是设计意图(顶部 hero + 底部留白)→ '
+              + '给元素加 `data-allow-min-height-sparse` 跳过审计。'
+              + '完整 pattern 见 `feishu-deck.css` 的 `.fs-card-fill` 注释。',
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-HERO-FLOOR · hero 主元素字号下限。(步骤 3 第十批迁自 visual-audit.js 的
+      // hero_floor producer + validate.py 的 hero_floor 消费段)。方向 = 尺寸下限(不是白名单)。
+      // 几何逐字搬 producer:HERO_FLOORS / KPI_FLOOR / _heroFloorCheck 均为本规则局部(producer
+      //   同样局部声明);_heroFloorCheck(specs):每 spec 取 sel 命中的可见(非 none/hidden/
+      //   opacity0、bbox≥2、非 TIER_MOCK 祖先、非 [data-allow-typescale] 链)元素,取 px 最大的
+      //   best,best 且 0<bestPx<floor → push(layout/role/spec/floor/rendered_px)。
+      //   若 layout ∈ HERO_FLOORS:跑该 layout 的 specs;再做 raw fallback —— 若【无】任一 spec
+      //   选择器命中可见元素(_classHit=false),用 slide 内最大可见 own-text 字号 vs 该 layout 的
+      //   最小 floor(role='hero 主元素 (name-free)')比;最后无条件跑 KPI_FLOOR。
+      // 严重度(逐字搬 validate.py):lifted → warn_soft,else → warn(_lev)。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-HERO-FLOOR',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, label, layout } = ctx;
+        const findings = [];
+        const HERO_FLOORS = {
+          cover: [{ sel: 'h1.title, .title-zh, .cover-title, .cover-h1', floor: 88, role: '封面主标题', spec: 100 }],
+          section: [{ sel: 'h2.title, .title-zh', floor: 72, role: '章节标题', spec: 88 },
+            { sel: '.chapter-num', floor: 112, role: '章节序号', spec: 160 }],
+          'big-stat': [{ sel: '.num', floor: 168, role: '大数字', spec: 240 }],
+          stats: [{ sel: '.col .num', floor: 92, role: '指标数字', spec: 132 }],
+          quote: [{ sel: 'blockquote, .quote-body, .bq', floor: 56, role: '引言主体', spec: 88 }],
+        };
+        const KPI_FLOOR = { sel: '.kpi-val, .kpi .v, .metric-value', floor: 40, role: 'KPI 值', spec: 56 };
+        const emit = (role, sel, renderedPx, floorPx, specPx, lifted) => {
+          const severity = lifted ? 'warn_soft' : 'warn';
+          findings.push({
+            rule: 'R-VIS-HERO-FLOOR', severity, slide_idx, label, layout,
+            role, selector: sel, rendered_px: renderedPx,
+            floor_px: floorPx, spec_px: specPx, lifted,
+            message:
+              `slide ${slide_idx} (layout \`${layout}\`) · `
+              + `${role} \`${sel}\` 渲染 ${renderedPx}px,`
+              + `低于该版式 hero 下限 ${floorPx}px(master 规格约 `
+              + `${specPx}px)→ 偏小、不够大气(P11 封面 82<100)。方向是`
+              + '"够不够大"不是"在不在白名单":hero 主元素该走 layout 规定尺寸。'
+              + 'Fix:放大到 master 规格;若刻意做小变体 → 加 `data-allow-typescale`。',
+          });
+        };
+        const _heroFloorCheck = (specs) => {
+          for (const { sel, floor, role, spec } of specs) {
+            const cands = [...slide.querySelectorAll(sel)].filter((el) => {
+              const cs = getComputedStyle(el);
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+              const r = el.getBoundingClientRect();
+              if (r.width < 2 || r.height < 2) return false;
+              for (let n = el; n && n !== slide; n = n.parentElement) if (visHasAnyClass(n, VIS_TIER_MOCK)) return false;
+              for (let n = el; n; n = n.parentElement) if (n.dataset && n.dataset.allowTypescale != null) return false;
+              return true;
+            });
+            if (!cands.length) continue;
+            let best = null, bestPx = -1;
+            for (const el of cands) {
+              const px = Math.round(parseFloat(getComputedStyle(el).fontSize));
+              if (px > bestPx) { bestPx = px; best = el; }
+            }
+            if (best && bestPx > 0 && bestPx < floor) {
+              emit(role, shortSel(best), bestPx, floor, spec,
+                !!best.closest('[data-lifted]'));
+            }
+          }
+        };
+        if (HERO_FLOORS[layout]) {
+          _heroFloorCheck(HERO_FLOORS[layout]);
+          const _specs = HERO_FLOORS[layout];
+          const _classHit = _specs.some((s) => [...slide.querySelectorAll(s.sel)].some((el) => {
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+            const r = el.getBoundingClientRect();
+            return r.width >= 2 && r.height >= 2;
+          }));
+          if (!_classHit) {
+            const _minFloor = Math.min(..._specs.map((s) => s.floor));
+            let _best = null, _bestPx = -1;
+            slide.querySelectorAll('*').forEach((el) => {
+              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+              if (!hasOwnText(el)) return;
+              for (let n = el; n && n !== slide; n = n.parentElement) if (visHasAnyClass(n, VIS_TIER_MOCK)) return;
+              for (let n = el; n; n = n.parentElement) if (n.dataset && n.dataset.allowTypescale != null) return;
+              const cs = getComputedStyle(el);
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+              const r = el.getBoundingClientRect();
+              if (r.width < 2 || r.height < 2) return;
+              const px = Math.round(parseFloat(cs.fontSize));
+              if (px > _bestPx) { _bestPx = px; _best = el; }
+            });
+            if (_best && _bestPx > 0 && _bestPx < _minFloor) {
+              emit('hero 主元素 (name-free)', shortSel(_best), _bestPx, _minFloor, _minFloor,
+                !!_best.closest('[data-lifted]'));
+            }
+          }
+        }
+        _heroFloorCheck([KPI_FLOOR]);
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-SHORT-LABEL-FLOOR · 1–7 字短标签 / SVG 轴标 <18px。(步骤 3 第十批迁自
+      // visual-audit.js 的 short_label_floor producer + validate.py 同名消费段)。补 BODY-FLOOR
+      // 的「≥8 字」门槛漏掉的短轴标/分类标签,并专门下钻 SVG <text>/<tspan>。
+      // 几何逐字搬 producer:isHeroLayout 整体跳;SHORT_FLOOR=18;_SL_CHROME / _SL_MOCK / _slClass
+      //   均为本规则局部(producer 自带,避免依赖块内常量);遍历 '*, text, tspan':STYLE/SCRIPT
+      //   跳;非 hasOwnText 跳;px≥18 跳;directText(直接文本)为空跳;len = max(CJK,latin)||长度;
+      //   len<1 || >7 跳(8+ 归 BODY-FLOOR);自身 class 命中 _SL_CHROME 跳;祖先(非自身)命中
+      //   _SL_MOCK 或 _isMediaBox、或链上 [data-allow-body-floor] → skip;否则 push;(sel,px) 一页
+      //   一报。is_svg = SVG 文本判定。
+      // 严重度(逐字搬 validate.py):lifted → warn_soft,else → warn(_lev);is_svg → '(SVG 轴标)'
+      //   后缀。文案逐字保留。截断 [:20]。
+      id: 'R-VIS-SHORT-LABEL-FLOOR',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        if (isHeroLayout) return [];
+        const findings = [];
+        const SHORT_FLOOR = 18;
+        const _SL_CHROME = /(^|[\s-])(eyebrow|kicker|pill|tag|chip|badge|source|pageno|footnote|attrib|copyright|wordmark|unit|legend)([\s-]|$)/i;
+        const _SL_MOCK = /(mock|phone|screen|device|chat|im-|app-ui|pd-card|doc-frame)/i;
+        const _slClass = (el) => { const r = el.className; return (r && r.baseVal !== undefined ? r.baseVal : (r || '')).toString(); };
+        const seenShortLabel = new Set();
+        slide.querySelectorAll('*, text, tspan').forEach((el) => {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          if (!hasOwnText(el)) return;
+          const isSvgText = !!el.ownerSVGElement || el.tagName === 'text' || el.tagName === 'TEXT' || el.tagName === 'tspan';
+          const px = Math.round(parseFloat(getComputedStyle(el).fontSize) || 0);
+          if (!px || px >= SHORT_FLOOR) return;
+          let directText = '';
+          for (const n of el.childNodes) if (n.nodeType === 3) directText += n.textContent;
+          directText = directText.trim();
+          if (!directText) return;
+          const cjk = (directText.match(/[一-鿿]/g) || []).length;
+          const latin = (directText.match(/[A-Za-z0-9%]/g) || []).length;
+          const len = Math.max(cjk, latin) || directText.length;
+          if (len < 1 || len > 7) return;                 // 8+ 归 R-VIS-BODY-FLOOR
+          if (_SL_CHROME.test(_slClass(el))) return;
+          let skip = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (n !== el && (_SL_MOCK.test(_slClass(n)) || visIsMediaBox(n))) { skip = true; break; }
+            if (n.dataset && n.dataset.allowBodyFloor != null) { skip = true; break; }
+          }
+          if (skip) return;
+          const sel = shortSel(el);
+          const key = slide_idx + '::' + sel + '::' + px;
+          if (seenShortLabel.has(key)) return;
+          seenShortLabel.add(key);
+          const text = directText.length > 16 ? directText.slice(0, 16) + '…' : directText;
+          const lifted = !!(el.closest && el.closest('[data-lifted]'));
+          const severity = lifted ? 'warn_soft' : 'warn';
+          const svgNote = isSvgText ? ' (SVG 轴标)' : '';
+          findings.push({
+            rule: 'R-VIS-SHORT-LABEL-FLOOR', severity, slide_idx,
+            selector: sel, rendered_px: px, char_count: len, is_svg: isSvgText,
+            text, lifted,
+            message:
+              `slide ${slide_idx} · \`${sel}\`${svgNote} 短标签 `
+              + `"${text}"(${len} 字)渲染 ${px}px `
+              + '< 18px,投影看不清。R-VIS-BODY-FLOOR 的「≥8 字」门槛放过了这种短轴标/'
+              + '分类标签,这条专补(含 SVG 轴标)。Fix:放大到 ≥18(图表轴标)/24(正文);'
+              + '若确为单位/装饰 → 元素加 `data-allow-body-floor`。',
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
       // R-DOM · 整文档 .deck 结构不变量。(步骤 3 最终结构批迁自 _validate_audits.py
       // audit_dom_integrity)。原版用 stdlib html.parser 扫 <body> 源,逐 <div> 维护栈,
       // 查三条不变量:
