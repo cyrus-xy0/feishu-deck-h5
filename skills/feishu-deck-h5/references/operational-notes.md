@@ -44,8 +44,14 @@
 - **多 session 同改一份 deck 时写前重读**:`deck.json` 是单文件 SSOT,last-writer
   wins。写入前重读并确认关键字段仍是预期;遇到 mtime/git 状态变化或工具报
   concurrent modification,先 rebase 自己的改动到最新版。
-
-## Workspace Layout
+- **`GEO-EDIT-01` 几何位移小改 = 先算边界,禁止负定位试错(2026-06-04 立)**:
+  「把上面那块上移一点 / 下面那块下移 / 卡片靠近些 / 雷达·罗盘·中心图形挪一挪 /
+  上下左右框对齐」这类**单页几何微调**,不许靠 `top:-N` / 反复改值边改边截图试错——
+  那是把秒级动作拖成十几分钟的根因。铁律:**先花 30 秒做纸面几何**(读出该元素及其
+  容器的当前 `top/left/width/height` 与目标位置,算出唯一应改的偏移量),**再一次性
+  改 CSS,然后才 render+量一次确认**。负定位(负 margin / 负 top)几乎总是试错的信号,
+  禁用;改不动先回去算边界,不要再猜一个值。**只改该元素自身的定位,绝不为「顺手对齐」
+  动整个 stage / 容器**(那会连标题一起挪走,见同类约定)。
 
 After preflight and before generating new HTML, create a per-run workspace under
 repo-root `runs/`, not under `skills/<skill-name>/`:
