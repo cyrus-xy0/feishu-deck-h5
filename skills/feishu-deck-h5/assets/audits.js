@@ -2782,20 +2782,54 @@
     },
 
     {
-      // R-OVERFLOW · 单帧内容溢出 1920×1080 画布。(步骤 3 第六批迁自 visual-audit.js 的
-      // overflow producer + validate.py run_visual_audits 的 overflow 消费段)。
-      // 几何:slide.scrollHeight > 1080 || slide.scrollWidth > 1920(逐字搬 producer)。
-      // 严重度分级(逐字搬 validate.py):_ov = max(Δh, Δw);>60 → error(内容被切),
-      //   ≥24 → warn(约 1-2 行),else → warn_soft(半行内,空间够,不阻断)。文案逐字保留。
+      // R-OVERFLOW · 单帧真实内容溢出 1920×1080 画布(被画布裁掉 = 用户看不到)。
+      // (VISUAL-AUDIT-SETTLED-STATE-SPEC §2(A):不再用 slide.scrollWidth>1920 —— 那会把
+      //  position:absolute 的 glow/drift 装饰(本就该 bleed 出框、被 .slide overflow:hidden
+      //  视觉裁掉)算成溢出 → 误报(实测一个 left:1650/width:700 的 glow 撑出 +503px,误报
+      //  ERROR)。改为「可见并集」:跳隐藏 / 跳 absolute|fixed 装饰 / 与每个 overflow≠visible
+      //  祖先(两轴,不含 .slide 自身——画布边界就是 .slide,要查的正是越出它的真内容)求交后,
+      //  仍越出画框 [0,0,1920,1080] 的才算。复用 R-VIS-CANVAS-CENTER 同款 skip+clip 模式。)
+      // 严重度分级(逐字保留 validate.py):_ov = max(Δh, Δw);>60 → error(内容被切),
+      //   ≥24 → warn(约 1-2 行),else → warn_soft(半行内,空间够,不阻断)。
       id: 'R-OVERFLOW',
       severity: 'error',
       evaluate(slide, ctx) {
-        const { slide_idx, label } = ctx;
-        if (!(slide.scrollHeight > 1080 || slide.scrollWidth > 1920)) return [];
-        const h = slide.scrollHeight;
-        const w = slide.scrollWidth;
-        const deltaH = h - 1080;
-        const deltaW = w - 1920;
+        const { slide_idx, label, scale } = ctx;
+        const TOL = 2;  // design px,抗亚像素抖动
+        const _sr = slide.getBoundingClientRect();
+        const _st = _sr.top, _sl = _sr.left;
+        let overR = 0, overB = 0, overL = 0, overT = 0;
+        slide.querySelectorAll('*').forEach((el) => {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          if (cs.position === 'absolute' || cs.position === 'fixed') return;  // 装饰/glow,bleed by design
+          const tag = el.tagName;
+          const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg'
+            || tag === 'CANVAS' || tag === 'VIDEO';
+          const isLeaf = el.children.length === 0;
+          if (!hasOwnText(el) && !isMedia && !isLeaf) return;
+          const r = el.getBoundingClientRect();
+          if (r.width < 6 || r.height < 6) return;
+          // 与每个 overflow≠visible 祖先(两轴)求交;完全被裁则丢弃;不含 .slide 自身。
+          let vl = r.left, vr = r.right, vt = r.top, vb = r.bottom;
+          for (let p = el.parentElement; p && p !== slide; p = p.parentElement) {
+            const pcs = getComputedStyle(p);
+            const pr = p.getBoundingClientRect();
+            if (pcs.overflowX !== 'visible') { if (pr.left > vl) vl = pr.left; if (pr.right < vr) vr = pr.right; }
+            if (pcs.overflowY !== 'visible') { if (pr.top > vt) vt = pr.top; if (pr.bottom < vb) vb = pr.bottom; }
+          }
+          if (vr - vl < 6 || vb - vt < 6) return;
+          const left = (vl - _sl) / scale, right = (vr - _sl) / scale;
+          const top = (vt - _st) / scale, bot = (vb - _st) / scale;
+          if (right - 1920 > overR) overR = right - 1920;
+          if (bot - 1080 > overB) overB = bot - 1080;
+          if (-left > overL) overL = -left;
+          if (-top > overT) overT = -top;
+        });
+        const deltaW = Math.round(Math.max(overR, overL));
+        const deltaH = Math.round(Math.max(overB, overT));
+        if (deltaW <= TOL && deltaH <= TOL) return [];
         const bits = [];
         if (deltaH > 0) bits.push(`height +${deltaH} px`);
         if (deltaW > 0) bits.push(`width +${deltaW} px`);
@@ -2806,11 +2840,11 @@
             : '可忽略 · 半行内，空间够，不阻断';
         return [{
           rule: 'R-OVERFLOW', severity, slide_idx,
-          idx: slide_idx, label, h, w,
+          idx: slide_idx, label, deltaH, deltaW,
           message:
-            `slide ${slide_idx} (${label}): content overflows canvas — `
+            `slide ${slide_idx} (${label}): real content overflows canvas — `
             + `${bits.join(', ')}（${sev}）. 对症修：标题溢出→换行/加宽容器，`
-            + '正文→压字数，条目过多→删条目/减列。',
+            + '正文→压字数，条目过多→删条目/减列。(position:absolute 装饰 bleed 已豁免)',
         }];
       },
     },
