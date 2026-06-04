@@ -100,6 +100,152 @@ from _validate_audits import (
 )
 
 # ---------------------------------------------------------------------------
+#  UNIFY-VALIDATE-ARCH (2026-06-03/04) · single rule source = the unified engine
+# ---------------------------------------------------------------------------
+# validate.py no longer runs its own audit registries. ALL rule findings are
+# sourced from the unified engine (`assets/audits.js`, evaluated against the
+# RENDERED DOM by `run-audits.py`'s shared `run_unified_engine`) + a handful of
+# source-byte / file-system checks that live in the runner (R-DOC-INTEGRITY /
+# R-SELF-CONTAINED / perf — things a browser can't see faithfully). One rule
+# source, one language; the old STATIC_AUDITS / _validate_audits.py /
+# visual-audit.js dual registries are retired (step 4).
+#
+# validate.py's job is now purely the CLI / OUTPUT-CONTRACT adapter: parse flags,
+# call the engine, map its findings into the historical {code, severity, msg,
+# slide, selector_hint} shape (errors / warnings split, --strict promotion,
+# --json, --slide, exit codes) that render-deck / delivery / the write-hook /
+# the test suite depend on.
+#
+# DEPENDENCY: the engine is DOM/browser-based → validate.py now needs playwright
+# for its DEFAULT (full) path. `--no-visual` runs ONLY the no-browser byte/source
+# rules (see main()); it is documented as a partial check, never a silent green.
+import importlib.util as _importlib_util
+
+_RUN_AUDITS_PATH = Path(__file__).resolve().parent / 'run-audits.py'
+_ENGINE = None  # lazily-loaded module handle (run-audits.py has a hyphen)
+
+
+def _engine():
+    """Lazily import run-audits.py (hyphenated → importlib). Cached. Returns the
+    module exposing run_unified_engine + EngineUnavailable. Lazy so that merely
+    importing validate (e.g. check-only's source scan, the surface test) never
+    forces the engine module to load."""
+    global _ENGINE
+    if _ENGINE is None:
+        spec = _importlib_util.spec_from_file_location(
+            'run_audits', _RUN_AUDITS_PATH)
+        mod = _importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _ENGINE = mod
+    return _ENGINE
+
+
+# Map the engine's severity vocabulary → the Issues buckets. The engine emits
+# 'error' / 'warn' / 'warn_soft' (1:1 with iss.err / iss.warn / iss.warn_soft).
+_SEV_TO_BUCKET = {
+    'error': 'err',
+    'warn': 'warn',
+    'warn_soft': 'warn_soft',
+}
+
+
+def engine_findings_to_issues(findings, iss):
+    """Pour unified-engine findings (each {rule, severity, slide_idx, message,
+    ...}) into the Issues buckets, preserving the (code, msg) tuple shape every
+    downstream consumer expects. Unknown severities default to a warning (never
+    silently dropped)."""
+    for f in findings:
+        code = f.get('rule', '?')
+        msg = f.get('message', '')
+        bucket = _SEV_TO_BUCKET.get(f.get('severity'), 'warn')
+        getattr(iss, bucket)(code, msg)
+
+
+def run_unified_audits(path, iss, *, dom_rules=True, scope=None,
+                       want_screenshots=False):
+    """Run the unified engine against the rendered deck and fold its findings
+    into `iss`. This REPLACES the old run_static_audits + run_visual_audits.
+
+    dom_rules=True  → full engine: render in headless Chromium + audits.js
+                      (geometry / DOM-text / structure rules) PLUS runner
+                      byte/source rules. Requires playwright.
+    dom_rules=False → `--no-visual`: NO browser; only the runner byte/source
+                      rules (R-DOC-INTEGRITY / R-SELF-CONTAINED / perf). The
+                      DOM/geometry rules do NOT run — documented partial check.
+
+    Mirrors the old run_visual_audits failure semantics: an INABILITY to render
+    (playwright missing / Chromium launch flake / nav timeout) is an environment
+    glitch, NOT a deck defect, so it degrades to a single soft advisory rather
+    than blocking a good deck under --strict. A real rule VIOLATION found by the
+    engine still errs/warns normally."""
+    eng = _engine()
+    try:
+        result = eng.run_unified_engine(
+            path, scope, dom_rules=dom_rules)
+    except eng.EngineUnavailable as e:
+        if not dom_rules:
+            # byte-only path should never raise for env reasons (no browser),
+            # but be defensive — surface as a soft advisory, never block.
+            iss.warn_soft('R-VISUAL',
+                f'byte/source checks could not run ({type(e).__name__}: {e}).')
+            return
+        # Full path needs a browser. Missing playwright / Chromium flake →
+        # degrade to static-only-ish: still run the byte/source rules (no
+        # browser) so R-DOC-INTEGRITY etc. are never skipped, then advise.
+        try:
+            result = eng.run_unified_engine(path, scope, dom_rules=False)
+            engine_findings_to_issues(result.get('findings', []), iss)
+        except Exception:
+            pass
+        iss.warn_soft('R-VISUAL',
+            f'visual/DOM checks could not run ({type(e).__name__}: {e}). '
+            'Install with `pip install playwright && python -m playwright '
+            'install chromium`, or open the deck in a browser to verify. '
+            'Byte/source rules (R-DOC-INTEGRITY / R-SELF-CONTAINED / perf) '
+            'still ran.')
+        return
+    engine_findings_to_issues(result.get('findings', []), iss)
+    if want_screenshots and dom_rules:
+        _archive_screenshots(path)
+
+
+def _archive_screenshots(html_path):
+    """Optional PNG archival of each slide (preserves the legacy --screenshots
+    flag). Independent of rule sourcing — a separate lightweight Chromium pass.
+    Degrades silently if playwright is unavailable (the engine path already
+    advised)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return
+    shots_dir = html_path.parent / (html_path.stem + '-previews')
+    try:
+        shots_dir.mkdir(parents=True, exist_ok=True)
+        url = html_path.resolve().as_uri()
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_context(
+                viewport={'width': 1920, 'height': 1080}).new_page()
+            page.goto(url, wait_until='load', timeout=60_000)
+            try:
+                page.wait_for_function(
+                    "() => document.querySelector('.deck[data-js-ready] "
+                    ".slide-frame.is-current') !== null", timeout=3000)
+            except Exception:
+                pass
+            slide_count = page.evaluate(
+                "() => document.querySelectorAll('.slide').length")
+            for i in range(1, slide_count + 1):
+                page.evaluate(f"window.location.hash = '#{i}'")
+                page.wait_for_timeout(350)
+                page.screenshot(path=str(shots_dir / f's{i:02d}.png'),
+                                full_page=False)
+            browser.close()
+    except Exception:
+        pass  # archival is best-effort; never break validation
+
+
+# ---------------------------------------------------------------------------
 #  Main
 # ---------------------------------------------------------------------------
 
@@ -980,39 +1126,35 @@ def main():
         return 2
 
     html = path.read_text(encoding='utf-8')
-
-    # Resolve linked stylesheets and scripts so audits can see their content
-    # (the linked-mode deck doesn't inline CSS/JS — without this, runtime-chrome
-    # and centering-pattern audits would false-fail).
-    #
-    # Inlined `<style>` and `<script>` blocks carry `data-source="framework"`
-    # so author-CSS audits (R-WHITE-TEXT, R47, future rules) can scope
-    # themselves to author markup and skip framework rules they shouldn't
-    # police. Audits that DO want to see framework (R29-R32 runtime chrome,
-    # R36 centering pattern, R10 hex palette) can ignore the attribute.
-    html = inline_linked(html, path.parent)  # module-level helper (F-14)
-
+    # `slides` is still needed for the human header count (`slides: N`) and the
+    # --slide diagnostic filter. extract_slides reads the raw frame markup; the
+    # engine does its OWN framework inlining / rendering, so we no longer need
+    # inline_linked here on the rule path (kept as a public helper for
+    # check-only / tests via F-14).
     slides = extract_slides(html)
 
     iss = Issues()
-    # All audits emit warn/err at their inherent severity. The global
-    # `--strict` flag promotes ALL warnings to errors after the audits
-    # complete (see end of main()) — per-audit `strict` branches were
-    # redundant and removed 2026-05-18. Audits run from the shared
-    # STATIC_AUDITS registry so check-only.py runs the identical set (F-10/F-08).
-    run_static_audits(STATIC_AUDITS, html=html, slides=slides, path=path, iss=iss)
-
-    if args.visual:
-        # The visual-report formatting indexes report entries directly
-        # (entry['h'], entry['slide_idx'], …) OUTSIDE the Playwright try; a
-        # malformed/partial audit entry would crash the WHOLE validate. Degrade
-        # to a non-blocking advisory instead (findings already emitted stay).
-        try:
-            run_visual_audits(path, iss, want_screenshots=args.screenshots)
-        except Exception as e:
-            iss.warn_soft('R-VISUAL',
-                f'visual report formatting failed ({type(e).__name__}: {e}) — '
-                'a malformed audit entry; visual findings may be incomplete.')
+    # UNIFY-VALIDATE-ARCH: ALL rule findings come from the single unified engine
+    # (audits.js on the rendered DOM + runner byte/source rules). No more
+    # STATIC_AUDITS / visual-audit.js dual registries. `--strict` still promotes
+    # warnings → errors after the run (see end of main()).
+    #   · DEFAULT (`--visual`): full engine — geometry / DOM-text / structure +
+    #     byte/source rules. Needs playwright; degrades to byte/source-only +
+    #     advisory if Chromium is unavailable (never blocks a good deck on a CI
+    #     hiccup; never a silent green either).
+    #   · `--no-visual`: byte/source rules ONLY (no browser). A documented
+    #     PARTIAL check — the DOM/geometry rules (R-VIS-*, R06/R20/R10/R-DOM/…)
+    #     do not run. Use only where Chromium is unavailable.
+    try:
+        run_unified_audits(path, iss, dom_rules=args.visual,
+                           want_screenshots=args.screenshots)
+    except Exception as e:
+        # The engine adapter should self-degrade; a leak here must still never
+        # crash the whole validate — emit a soft advisory and continue so any
+        # findings already folded in survive.
+        iss.warn_soft('R-VISUAL',
+            f'unified engine failed ({type(e).__name__}: {e}) — '
+            'findings may be incomplete.')
 
     slide_filter_note = None
     if args.slide is not None:

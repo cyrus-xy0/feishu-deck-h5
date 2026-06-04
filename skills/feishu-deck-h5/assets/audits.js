@@ -570,6 +570,64 @@
     return missing;
   };
 
+  // ── L1/L2/L4 layout-integrity（LKK exchange-deck 四大失败模式之三，ingest-gate
+  //    MANDATORY，business-rules.yaml）。逐字镜像 _validate_audits.py 的
+  //    check_logo_default / check_balance / check_attrs_density —— 三者都是对
+  //    【整 deck 源 HTML（含框架 CSS + 渲染后 markup）】的正则文本扫描，与渲染计算
+  //    无关，故在 audits.js 里对 deckOuterHTML()（runner 已注入框架 <style>，等价于
+  //    Python inline_linked 后的 html）做同套正则即逐字对齐。三规则共用同一 deck-level
+  //    锚帧（audit_layout_integrity 在 Python 里是单 audit emit L1/L2/L4 三 code）。
+
+  // L1：wordmark 默认必须引用 --fs-asset-logo（彩色）；mono 须 opt-in。
+  //   Python：re.search(r'\.slide \.wordmark\s*\{[^}]*background:\s*([^;]+);', html, DOTALL)
+  //   找不到该规则 → False（报）；找到 → decl 须含 'asset-logo)' 且不含 'asset-logo-mono'。
+  const L1_WORDMARK_RE = /\.slide \.wordmark\s*\{[^}]*background:\s*([^;]+);/s;
+  const checkLogoDefault = (html) => {
+    const m = L1_WORDMARK_RE.exec(html);
+    if (!m) return false;
+    const decl = m[1];
+    return decl.indexOf('asset-logo)') >= 0 && decl.indexOf('asset-logo-mono') < 0;
+  };
+
+  // L2：易短内容版式的 body 容器须显式垂直居中（align/justify-content: center）或
+  //   flex: 1。容器别名 stage/grid/flow/nodes 任一命中即该版式 OK。版式若未在 deck 中
+  //   使用（`data-layout="L"` 整 html 串里都没有）→ 跳过。逐字镜像 check_balance：
+  //   返回 [ok, brokenLayout]。timeline 故意排除（见 Python 注释，轴线/节点固定 y）。
+  const L2_SHORT_LAYOUTS = ['content-2col', 'process', 'content-3up', 'pipeline'];
+  const L2_ALIASES = ['stage', 'grid', 'flow', 'nodes'];
+  const checkBalance = (html) => {
+    for (const layout of L2_SHORT_LAYOUTS) {
+      let ok = false;
+      for (const alias of L2_ALIASES) {
+        // 逐字镜像 Python 正则：.slide[data-layout="L"]\s+.alias\s*\{([^}]*)\}
+        const re = new RegExp(
+          '\\.slide\\[data-layout="' + layout + '"\\]\\s+\\.' + alias + '\\s*\\{([^}]*)\\}',
+          'gs');
+        let m;
+        while ((m = re.exec(html))) {
+          const block = m[1];
+          if (block.indexOf('align-content: center') >= 0
+            || block.indexOf('justify-content: center') >= 0
+            || block.indexOf('flex: 1') >= 0) { ok = true; break; }
+        }
+        if (ok) break;
+      }
+      // 该版式没在 deck 用到 → 跳过。
+      if (html.indexOf('data-layout="' + layout + '"') < 0) continue;
+      if (!ok) return [false, layout];
+    }
+    return [true, null];
+  };
+
+  // L4：process .output .attrs 须 grid-template-columns: 1fr（窄 output 面板单列）。
+  //   逐字镜像 check_attrs_density：无该 .output .attrs 规则 → True（N/A，不报）。
+  const L4_ATTRS_RE = /\.slide\[data-layout="process"\]\s+\.output\s+\.attrs\s*\{[^}]*\}/s;
+  const checkAttrsDensity = (html) => {
+    const m = L4_ATTRS_RE.exec(html);
+    if (!m) return true;   // deck 无 output 面板 → 规则 N/A
+    return m[0].indexOf('grid-template-columns: 1fr;') >= 0;
+  };
+
   // ── R47 variant-discipline 触发集(逐字对应 audit_variant_discipline)。
   const R47_LAYOUT_DISPLAY = new Set(['flex', 'grid', 'block', 'inline-block',
     'inline-flex', 'inline-grid', 'inline', 'table', 'table-row', 'table-cell']);
@@ -2099,6 +2157,70 @@
               + 'exceptions that fill.',
           });
         }
+        return findings;
+      },
+    },
+
+    {
+      // L1/L2/L4 · layout-integrity（LKK exchange-deck 失败模式之三，ingest-gate
+      // MANDATORY · business-rules.yaml）。迁自 _validate_audits.py
+      // audit_layout_integrity（→ check_logo_default / check_balance /
+      // check_attrs_density）。三 code 在 Python 里由单个 audit emit，全是 iss.err
+      // （error 严重度），无 lifted 降级 / 无 opt-out（须逐字保留）。
+      //   L1：.slide .wordmark 默认 background 必须引用 var(--fs-asset-logo)（彩色）；
+      //       缺该规则 / 默认指向 mono → 报。
+      //   L2：易短内容版式（content-2col/process/content-3up/pipeline，timeline 故意排除）
+      //       的 body 容器须 align/justify-content:center 或 flex:1；版式未用到 → 跳过。
+      //   L4：process .output .attrs 须 grid-template-columns:1fr（窄面板单列）；无该规则 → N/A。
+      // 移植：对 deckOuterHTML()（runner 已注入框架 <style>，等价 Python inline_linked 后的
+      // html —— 含全部框架 CSS 源文本 + 渲染后 markup）做与 Python 逐字相同的正则文本扫描。
+      // 三者判定全在源文本里（CSS 规则声明 + `data-layout="L"` presence），与渲染计算无关，
+      // 故文本扫描即与原版完全对齐。deck 级，整 deck 算一次挂第一帧。
+      id: 'L1/L2/L4',
+      severity: 'error',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__L124_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];
+        if (typeof window !== 'undefined') window.__L124_DONE__ = true;
+
+        const html = deckOuterHTML();
+        const findings = [];
+
+        // L1 — logo-default。
+        if (!checkLogoDefault(html)) {
+          findings.push({
+            rule: 'L1', severity: 'error', slide_idx,
+            message:
+              '.slide .wordmark default does NOT reference var(--fs-asset-logo). '
+              + 'Mono-white must be opt-in via .is-mono — color is the规范 default.',
+          });
+        }
+
+        // L2 — balance。
+        const [ok, brokenLayout] = checkBalance(html);
+        if (!ok) {
+          findings.push({
+            rule: 'L2', severity: 'error', slide_idx,
+            message:
+              `data-layout="${brokenLayout}" body-content container missing `
+              + 'vertical-centering rule (align-content: center) AND not declared '
+              + 'flex: 1. Short content will stack at top with empty bottom — '
+              + 'the most-reported "looks unfinished" bug.',
+          });
+        }
+
+        // L4 — attrs-density。
+        if (!checkAttrsDensity(html)) {
+          findings.push({
+            rule: 'L4', severity: 'error', slide_idx,
+            message:
+              '.slide[data-layout="process"] .output .attrs is NOT '
+              + 'grid-template-columns: 1fr. The output panel is ~400 px wide; '
+              + 'a 2-col grid truncates 22 px body text. Use a single column.',
+          });
+        }
+
         return findings;
       },
     },

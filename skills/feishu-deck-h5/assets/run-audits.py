@@ -457,6 +457,129 @@ def runner_source_byte_findings(html, base_dir):
     return out
 
 
+class EngineUnavailable(Exception):
+    """Raised when the unified engine cannot run (playwright missing or render
+    failed). Carries an exit-2 'environment' meaning, distinct from a deck
+    defect. validate.py catches this to degrade / hard-prompt as appropriate."""
+
+
+def run_unified_engine(html_path, scope=None, *, settle_ms=350,
+                       dom_rules=True):
+    """Run the unified engine against ONE rendered deck and return the merged
+    result dict {engine, version, rules:[...], scope, slides_total, findings:[...]}.
+
+    This is the SINGLE shared entry both run-audits.py's CLI and validate.py
+    call — so the unified engine is sourced from exactly one place (no second
+    rule path). Findings carry the canonical schema
+    {rule, severity, slide_idx, message, ...payload}.
+
+    Composition:
+      · DOM/geometry rules (audits.js) — need a headless browser. Run when
+        `dom_rules=True` (the default / `--visual` path).
+      · runner-level SOURCE-BYTE / file-system checks (R-DOC-INTEGRITY /
+        R-SELF-CONTAINED / perf P50-P55) — read raw index.html bytes, NO
+        browser. ALWAYS run (so `--no-visual` still enforces the byte-level
+        invariants without Chromium).
+
+    `dom_rules=False` is the `--no-visual` / no-Chromium path: skip the browser
+    entirely, return ONLY the runner byte/source findings. Geometry & DOM-text
+    rules (R-VIS-*, R06/R20/R10/R-DOM/…) are NOT evaluated in that mode — they
+    require a rendered DOM (see UNIFY-VALIDATE-ARCH §1). Callers must surface
+    this so it is never a silent half-check.
+
+    Raises EngineUnavailable when dom_rules=True but playwright is missing or
+    the render/eval fails — the caller decides whether that is fatal (run-audits
+    CLI: hard exit 2) or a degrade-to-byte-only advisory (validate.py)."""
+    html_path = Path(html_path)
+    if not AUDITS_JS.is_file():
+        raise EngineUnavailable(f"规则源缺失 {AUDITS_JS}")
+
+    # ── runner 层源字节检查读【原始 index.html 字节】(浏览器自动闭合标签会抹掉截断信号,
+    #    DOM 看不到 —— R-DOC-INTEGRITY 等【必须】读字节,见上方函数注释 / UNIFY-VALIDATE §0)。
+    raw_html = html_path.read_text(encoding="utf-8", errors="replace")
+    runner_findings = runner_source_byte_findings(raw_html, html_path.parent)
+    runner_rules = []
+    for f in runner_findings:
+        if f["rule"] not in runner_rules:
+            runner_rules.append(f["rule"])
+
+    if not dom_rules:
+        # NO-CHROMIUM path: byte/source rules only. Stable result shape so the
+        # caller maps it uniformly with the full-engine path.
+        return {
+            "engine": "audits.js",
+            "version": None,
+            "rules": runner_rules,
+            "scope": list(scope) if scope else None,
+            "slides_total": None,
+            "findings": runner_findings,
+            "dom_rules": False,
+        }
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as e:
+        raise EngineUnavailable(
+            "统一校验引擎需要 playwright/chromium —— 这是硬依赖,绝不静默放行。\n"
+            "  几何类规则(R-VIS-CANVAS-CENTER 等)必须在渲染后 DOM 上判定,静态解析做不到。\n"
+            "  安装:pip install playwright && python -m playwright install chromium"
+        ) from e
+
+    audits_src = AUDITS_JS.read_text(encoding="utf-8")
+    url = html_path.resolve().as_uri()
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+            page.goto(url, wait_until="load", timeout=60_000)
+            page.wait_for_timeout(settle_ms)  # 让 scale-to-fit / 布局稳定
+            # ── 把链接的【框架 CSS】源文本注入成 <style data-source="framework"> ──
+            # R-CSSVAR 要读"所有 CSS 源文本"判定 var(--x) 定义/引用,而 file:// 下外链
+            # 样式表的 cssRules 被 CORS 挡、且浏览器会丢掉含未定义 var() 的整条声明(正是
+            # 本规则要抓的东西)→ CSSOM 读不到。runner(load 层)做这件事:读盘 → 注入文本,
+            # 纯"让源可读",不含规则逻辑。
+            _inline_framework_css(page, html_path.parent)
+            # ── 把链接的【框架 JS】源文本注入成 <script data-source="framework"
+            #    type="text/plain"> ── R29-32 要读 JS 源判 requestFullscreen 等
+            #    needle;外链脚本已执行(DOM needle 是真元素),这里只补源可读(不二次执行)。
+            _inline_framework_js(page, html_path.parent)
+            # ── 把页面切到 present 模式 ── 每帧拿整块 1920×1080 画布,几何规则(R-OVERFLOW
+            #    /canvas-center 等)才量得准(scroll 模式会误报)。镜像旧 run_visual_audits。
+            page.evaluate("""
+                () => {
+                    const deck = document.querySelector('.deck');
+                    if (deck) deck.setAttribute('data-mode', 'present');
+                }
+            """)
+            page.wait_for_timeout(200)  # 让 present 布局再稳定一次
+            # ── 把旁边的 deck.json(若存在)注入 window.__DECK_JSON__ ──
+            # R-RAW-LOOKS-SCHEMA 的 SOURCE-OF-TRUTH 是 deck.json 的 layout:"raw" key
+            # (渲染后 data-layout 会伪装借框架 CSS,不可信)。纯文件读,不含规则逻辑。
+            deck_json = _load_deck_json(html_path.parent)
+            page.evaluate("(dj) => { window.__DECK_JSON__ = dj; }", deck_json)
+            page.evaluate("(s) => { window.__AUDIT_SCOPE__ = s; }", scope)
+            result = page.evaluate(audits_src)
+            browser.close()
+    except EngineUnavailable:
+        raise
+    except Exception as e:  # noqa: BLE001 — render/eval 失败 = 环境故障,非 deck 缺陷
+        raise EngineUnavailable(f"渲染/求值失败:{e}") from e
+
+    # ── 合并 runner 层源字节/文件系统检查(R-DOC-INTEGRITY / R-SELF-CONTAINED / perf)。
+    #    这些是整文档级(slide_idx=0),与 scope 无关、始终对整份源跑;emit 进【同一】 findings
+    #    列表、同 schema,报告层不区分来源。runner 检查的规则名也并入 result['rules'](去重、保序)。
+    findings = list(result.get("findings", [])) + runner_findings
+    result["findings"] = findings
+    rules = list(result.get("rules", []))
+    for r in runner_rules:
+        if r not in rules:
+            rules.append(r)
+    result["rules"] = rules
+    result["dom_rules"] = True
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser(description="统一校验引擎 runner(单规则源 audits.js)")
     ap.add_argument("html", type=Path, help="渲染好的 deck index.html")
@@ -469,73 +592,19 @@ def main():
     if not args.html.is_file():
         print(f"ERROR: 找不到文件 {args.html}", file=sys.stderr)
         sys.exit(2)
-    if not AUDITS_JS.is_file():
-        print(f"ERROR: 规则源缺失 {AUDITS_JS}", file=sys.stderr)
-        sys.exit(2)
 
+    scope = parse_scope(args.slide)
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
+        result = run_unified_engine(args.html, scope, settle_ms=args.settle_ms)
+    except EngineUnavailable as e:
         print(
-            "ERROR: 统一校验引擎需要 playwright/chromium —— 这是硬依赖,绝不静默放行。\n"
-            "  几何类规则(R-VIS-CANVAS-CENTER 等)必须在渲染后 DOM 上判定,静态解析做不到。\n"
-            "  安装:pip install playwright && python -m playwright install chromium\n"
+            f"ERROR: {e}\n"
             "  (若确需仅静态档,显式跑 `validate.py --no-visual`,但 R-VIS-* 几何规则不会被执行。)",
             file=sys.stderr,
         )
         sys.exit(2)
 
-    scope = parse_scope(args.slide)
-    audits_src = AUDITS_JS.read_text(encoding="utf-8")
-    url = args.html.resolve().as_uri()
-    # ── runner 层源字节检查读【原始 index.html 字节】(浏览器自动闭合标签会抹掉截断信号,
-    #    DOM 看不到 —— R-DOC-INTEGRITY 等【必须】读字节,见上方函数注释 / UNIFY-VALIDATE §0)。
-    raw_html = args.html.read_text(encoding="utf-8", errors="replace")
-
-    try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(viewport={"width": 1920, "height": 1080})
-            page = context.new_page()
-            page.goto(url, wait_until="load", timeout=30_000)
-            page.wait_for_timeout(args.settle_ms)  # 让 scale-to-fit / 布局稳定
-            # ── 把链接的【框架 CSS】源文本注入成 <style data-source="framework"> ──
-            # R-CSSVAR 要读"所有 CSS 源文本"判定 var(--x) 定义/引用,而 file:// 下外链
-            # 样式表的 cssRules 被 CORS 挡、且浏览器会丢掉含未定义 var() 的整条声明(正是
-            # 本规则要抓的东西)→ CSSOM 读不到。validate.py 的 audit_undefined_css_vars 同样
-            # 依赖 inline_linked 先把框架 CSS 拉进 <style data-source=framework>。这里在
-            # runner(load 层)做同一件事:读盘 → 注入文本,纯"让源可读",不含规则逻辑。
-            _inline_framework_css(page, args.html.parent)
-            # ── 把链接的【框架 JS】源文本注入成 <script data-source="framework"
-            #    type="text/plain"> ── R29-32 要读 JS 源判 requestFullscreen 等
-            #    needle;外链脚本已执行(DOM needle 是真元素),这里只补源可读(不二次执行)。
-            _inline_framework_js(page, args.html.parent)
-            # ── 把旁边的 deck.json(若存在)注入 window.__DECK_JSON__ ──
-            # R-RAW-LOOKS-SCHEMA 的 SOURCE-OF-TRUTH 是 deck.json 的 layout:"raw" key
-            # (渲染后 data-layout 会伪装借框架 CSS,不可信);与 validate.py
-            # audit_raw_looks_schema 读 index.html 旁 deck.json 等价。纯文件读,不含规则逻辑。
-            deck_json = _load_deck_json(args.html.parent)
-            page.evaluate("(dj) => { window.__DECK_JSON__ = dj; }", deck_json)
-            page.evaluate("(s) => { window.__AUDIT_SCOPE__ = s; }", scope)
-            result = page.evaluate(audits_src)
-            browser.close()
-    except Exception as e:  # noqa: BLE001 — runner 层兜底,报清楚比吞掉好
-        print(f"ERROR: 渲染/求值失败:{e}", file=sys.stderr)
-        sys.exit(2)
-
     findings = result.get("findings", [])
-    # ── 合并 runner 层源字节/文件系统检查(R-DOC-INTEGRITY / R-SELF-CONTAINED / perf)。
-    #    这些是整文档级(slide_idx=0),与 scope 无关、始终对整份源跑(与 Python 静态档always-run
-    #    等价);emit 进【同一】 findings 列表、同 schema,报告层不区分来源。runner 检查的规则名
-    #    也并入 result['rules'](去重、保序)让头部 "规则 …" 列表完整。
-    runner_findings = runner_source_byte_findings(raw_html, args.html.parent)
-    findings = findings + runner_findings
-    result["findings"] = findings
-    rules = list(result.get("rules", []))
-    for f in runner_findings:
-        if f["rule"] not in rules:
-            rules.append(f["rule"])
-    result["rules"] = rules
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
