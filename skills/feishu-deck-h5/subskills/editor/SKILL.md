@@ -61,6 +61,21 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
   slide depends on head-coupled CSS. `lift-slides.py --to-html` extracts the
   rendered frame, transforms assets/CSS with the same logic as DeckJSON lift,
   splices into `.deck`, backs up, and validates the inserted page.
+- **Always pass ABSOLUTE paths to `lift-slides.py` and `render-deck.py`** (src,
+  DEST `deck.json`, OUTPUT_DIR). The skill root is usually a symlink
+  (`~/.claude/skills/feishu-deck-h5` → `.../Github/feishu-deck-h5/skills/
+  feishu-deck-h5`), so a relative `runs/...` path resolves against the
+  de-symlinked CWD into a non-existent `runs/` that does not match where
+  `new-run.sh` created the run — wasting a full source parse before the write
+  fails. Use the absolute run path `new-run.sh` prints.
+- **`--shake` faithfully recovers the source's per-`[data-slide-key]` head CSS,
+  including dead cruft.** If a source author pasted one shared kitchen-sink
+  stylesheet onto every page, a lifted slide can carry dozens of rules whose
+  target elements do not exist on it → `R-VIS-DEAD-RULE` errors. Verify the root
+  cause is source cruft (grep the source for the key+selector — if present, it
+  is the source's, not a shake mis-scope), then prune only the rules whose leaf
+  selector references no element in that slide's body DOM. Keep the framework
+  layout block and every rule that targets a live class/tag.
 - **Conversion/import**: read `converting-existing-material.md` and choose replica
   vs rewrite. Existing material defaults to 1:1 page count unless user says to
   compress/restructure.
