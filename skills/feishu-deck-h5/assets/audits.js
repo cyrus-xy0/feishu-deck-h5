@@ -2970,6 +2970,37 @@
           }
         };
 
+        // §2A guard: scrollHeight/scrollWidth count position:absolute descendants
+        // (glow / rail / tail decorations that bleed past the box by design) → false
+        // clip/overflow. Returns true only if some IN-FLOW (non-absolute, visible)
+        // descendant — or el's own direct text — actually extends past el's box on
+        // `axis` ('y'|'x'). When el has NO absolute|fixed descendant the scroll metric
+        // is already trustworthy → returns true (preserves existing behavior).
+        const _cardRealOverflow = (el, axis) => {
+          const all = [...el.querySelectorAll('*')];
+          const hasAbs = all.some((d) => {
+            const p = getComputedStyle(d).position; return p === 'absolute' || p === 'fixed';
+          });
+          if (!hasAbs) return true;
+          const er = el.getBoundingClientRect();
+          const bound = axis === 'x' ? er.right : er.bottom;
+          for (const desc of all) {
+            const dcs = getComputedStyle(desc);
+            if (dcs.position === 'absolute' || dcs.position === 'fixed') continue;
+            if (dcs.display === 'none' || dcs.visibility === 'hidden' || +dcs.opacity === 0) continue;
+            const r = desc.getBoundingClientRect();
+            if ((axis === 'x' ? r.right : r.bottom) > bound + 4) return true;
+          }
+          for (const n of el.childNodes) {
+            if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+            const rng = document.createRange(); rng.selectNode(n);
+            for (const lr of rng.getClientRects()) {
+              if (lr.width < 1 || lr.height < 1) continue;
+              if ((axis === 'x' ? lr.right : lr.bottom) > bound + 4) return true;
+            }
+          }
+          return false;  // 全部溢出来自 absolute 装饰 → 非真实裁切
+        };
         overflowCandidates.forEach((el) => {
           if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return;
           const cs = getComputedStyle(el);
@@ -2984,7 +3015,7 @@
             || overflow === 'hidden' || overflow === 'clip');
           if (clips) {
             const dh = el.scrollHeight - el.clientHeight;
-            if (dh > 4) {
+            if (dh > 4 && _cardRealOverflow(el, 'y')) {   // 排除纯 absolute 装饰撑高
               let recoverable = false;
               for (let n = el.parentElement; n && n !== slide; n = n.parentElement) {
                 const ncs = getComputedStyle(n);
@@ -3010,6 +3041,10 @@
               let spill = 0;
               for (const ch of el.children) {
                 if (ch.tagName === 'SCRIPT' || ch.tagName === 'STYLE') continue;
+                const ccs = getComputedStyle(ch);
+                // 装饰/隐藏子元素不算「自身内容」溢出(spec §2A)。
+                if (ccs.position === 'absolute' || ccs.position === 'fixed'
+                    || ccs.display === 'none' || ccs.visibility === 'hidden' || +ccs.opacity === 0) continue;
                 spill = Math.max(spill, ch.getBoundingClientRect().bottom - elBottom);
               }
               if (spill > 8) {
@@ -3063,7 +3098,7 @@
           const noWrap = cs.flexWrap === 'nowrap' || cs.display === 'grid' || cs.display === 'inline-grid';
           if (isFlexGrid && noWrap) {
             const dw = el.scrollWidth - el.clientWidth;
-            if (dw > 4) {
+            if (dw > 4 && _cardRealOverflow(el, 'x')) {   // 排除纯 absolute 装饰撑宽
               pushEntry({
                 selector: shortSel(el),
                 content_h: el.scrollWidth,
