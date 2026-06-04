@@ -37,10 +37,24 @@ description: |
 >
 > 啃不动的页(原生图表 / SmartArt / OLE)产纯文字占位 + 汇总报告页号,由用户自己重做那几页。
 > 见 `skills/feishu-deck-h5/subskills/parser/SKILL.md` 与
-> `skills/feishu-deck-h5/pptx-to-html/assets/build_pptx.py`。
+> `skills/pptx-to-deck/assets/build_pptx.py`(continuator;旧的 `pptx-to-html` 嵌套路径已提升为顶层 `pptx-to-deck`)。
 >
 > 代码仍保留(未删除)仅作存档参考;**请勿用于新任务**。build_pptx 已是 python-pptx 原生
 > OOXML 抽取,无需从本技能搬运任何抽取能力。
+>
+> ---
+> **2026-06-04 归档**:本目录已 `git mv` 到 `skills/_deprecated/`,从 `skills/` 顶层撤出,
+> 不再作为可加载 skill。`.pptx` 的活路径 = `pptx-to-deck`;`.key` = `keynote-to-html`。
+>
+> **保留它的唯一理由 = 4 项 `pptx-to-deck` 至今没有、且绑死在双背景架构上的「蓝图能力」**,
+> 将来要做「飞书妙搭可翻译 deck」时直接抄这里、不要重新发明:
+> 1. **CJK 字体子集化** — `scripts/subset_font.py`(fonttools+brotli,12MB→~200KB woff2,仅用到的字形)
+> 2. **离线多语言切换** — `scripts/make_i18n.py` + OpenCC s2tw 繁体 + Lark `translation:text` API
+>    批处理(3 并发 + 指数退避),可在妙笔 iframe 沙箱内切换(浏览器翻译被禁时仍可用)
+> 3. **FaaS 跨设备共享持久化** — `scripts/faas_store.js`(browser↔TOS,绕过 html-box 沙箱禁 localStorage)
+> 4. **浏览器「网页翻译」模式** — `body.xl` 可见真文字层 + `--fit/--gfit` 防溢出,专为妙搭顶层渲染
+>
+> 这 4 项不可直接移植进 deck.json 模型(需重写),所以归档保留作蓝图,而非搬进 build_pptx。
 
 # pptx-to-editable-html — PPT 转 HTML 技能（网页翻译版）
 
