@@ -2960,6 +2960,11 @@
         overflowCandidates.forEach((el) => {
           if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return;
           const cs = getComputedStyle(el);
+          // 跳隐藏(VISUAL-AUDIT-SETTLED-STATE-SPEC §2A:card_overflow「同样跳 opacity:0」)。
+          // 不可见元素(display:none / visibility:hidden / opacity:0)的内部裁切用户根本看不到,
+          // 不是缺陷;与 R-OVERFLOW / R-VIS-CANVAS-CENTER 的跳隐藏一致。只移除不可见元素的
+          // 误报,绝不漏掉可见内容(可见 → opacity>0)。
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
           const overflowY = cs.overflowY;
           const overflow = cs.overflow;
           const clips = (overflowY === 'hidden' || overflowY === 'clip'
@@ -3079,6 +3084,7 @@
           if (!hasOwnText(el)) return;
           if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
           const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;  // 跳隐藏(spec §2A)
           const px = Math.round(parseFloat(cs.fontSize));
           if (!px || px < 8) return;
           if (VIS_TIER.has(px)) return;
@@ -3142,7 +3148,11 @@
           if (!visHasAnyClass(card, VIS_CARD_KEYS) && !visHasCardSuffix(card)) return;
           if (seenCards.has(card)) return;
           seenCards.add(card);
-          const allTextEls = [...card.querySelectorAll('*')].filter(hasOwnText);
+          const allTextEls = [...card.querySelectorAll('*')].filter((e) => {
+            if (!hasOwnText(e)) return false;
+            const cs = getComputedStyle(e);  // 跳隐藏(spec §2A):隐藏文本不参与卡内层级/字号下限
+            return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity !== 0;
+          });
           const metaEls = allTextEls.filter((e) => visHasAnyClass(e, VIS_META_KEYS));
           const bodyEls = allTextEls.filter((e) => visHasAnyClass(e, VIS_BODY_KEYS));
           if (metaEls.length && bodyEls.length) {
@@ -3195,6 +3205,7 @@
           if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
           if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
           const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;  // 跳隐藏(spec §2A)
           const px = Math.round(parseFloat(cs.fontSize));
           if (!px || px >= 24) return;
           let directTextStr = '';
@@ -3420,6 +3431,10 @@
           tgTitleSel = shortSel(header);
           for (const el of tgStage.querySelectorAll('*')) {
             if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+            const cs = getComputedStyle(el);
+            // 跳隐藏(spec §2A,同 card_overflow/R-OVERFLOW):opacity:0/隐藏元素紧贴标题底
+            // 不该被当成最顶内容驱动 gap —— 用户根本看不到它。
+            if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
             const r = el.getBoundingClientRect();
             if (r.width > 40 && r.height > 16) tgContentTop = Math.min(tgContentTop, r.top);
           }
@@ -3431,6 +3446,7 @@
             if (!hasOwnText(el)) continue;
             const cs = getComputedStyle(el);
             if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+            if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
             if (Math.round(parseFloat(cs.fontSize)) < 24) continue;
             const r = el.getBoundingClientRect();
             if (r.width <= 40 || r.height <= 16) continue;
@@ -3445,6 +3461,7 @@
               if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
               const cs = getComputedStyle(el);
               if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
               const r = el.getBoundingClientRect();
               if (r.width > 40 && r.height > 16 && r.top >= tgTitleRect.bottom - 2) {
                 tgContentTop = Math.min(tgContentTop, r.top);
@@ -4199,6 +4216,7 @@
           }
           if (inMock) return;
           const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;  // 跳隐藏(spec §2A)
           const px = Math.round(parseFloat(cs.fontSize));
           if (!px || px < 20) return;                          // <20px 一般是 chrome / 注释
           focalCands.push({ el, px });
@@ -4427,7 +4445,11 @@
           if (!visHasAnyClass(card, VIS_CARD_KEYS) && !visHasCardSuffix(card)) return;
           if (seenCards.has(card)) return;
           seenCards.add(card);
-          const allTextEls = [...card.querySelectorAll('*')].filter(hasOwnText);
+          const allTextEls = [...card.querySelectorAll('*')].filter((e) => {
+            if (!hasOwnText(e)) return false;
+            const cs = getComputedStyle(e);  // 跳隐藏(spec §2A):隐藏文本不参与卡内层级/字号下限
+            return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity !== 0;
+          });
           const sizes = allTextEls.map(
             (e) => Math.round(parseFloat(getComputedStyle(e).fontSize)));
           const hasContentAnchor = sizes.some((s) => s >= 28);
@@ -4727,7 +4749,9 @@
           if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
           if (!hasOwnText(el)) return;
           const isSvgText = !!el.ownerSVGElement || el.tagName === 'text' || el.tagName === 'TEXT' || el.tagName === 'tspan';
-          const px = Math.round(parseFloat(getComputedStyle(el).fontSize) || 0);
+          const _slCs = getComputedStyle(el);
+          if (_slCs.display === 'none' || _slCs.visibility === 'hidden' || +_slCs.opacity === 0) return;  // 跳隐藏(spec §2A)
+          const px = Math.round(parseFloat(_slCs.fontSize) || 0);
           if (!px || px >= SHORT_FLOOR) return;
           let directText = '';
           for (const n of el.childNodes) if (n.nodeType === 3) directText += n.textContent;
