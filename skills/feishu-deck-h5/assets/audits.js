@@ -54,6 +54,19 @@
     return out;
   };
 
+  // DEAD-ANIM / DEAD-RULE host stripper. A rule targeting a pseudo-element
+  // (::before/::after/…) or a dynamic state (:hover/:focus/…) NEVER matches
+  // querySelectorAll (pseudo-elements aren't selectable; states aren't active at
+  // audit time) → the raw selector looks "dead" even when the host element is
+  // present and healthy (false dead-anim/dead-rule on glow/ring/line ::after
+  // decorations — the same ::after class R12 avoids by reading pseudo styles via
+  // getComputedStyle(el,'::after')). Strip those tails to the structural HOST;
+  // a rule is only truly dead when even the host matches zero.
+  const _PSEUDO_EL_RE = /::?(?:before|after|first-line|first-letter|marker|placeholder|selection|backdrop|cue|cue-region|file-selector-button|target-text|spelling-error|grammar-error)\b(?:\([^)]*\))?/gi;
+  const _DYN_PSEUDO_RE = /:(?:hover|focus|focus-within|focus-visible|active|target|checked|visited|link|enabled|disabled|indeterminate|default|placeholder-shown|autofill|user-invalid|user-valid|current|past|future)\b(?:\([^)]*\))?/gi;
+  const hostSelForDeadCheck = (sel) =>
+    (sel || '').replace(_PSEUDO_EL_RE, '').replace(_DYN_PSEUDO_RE, '').trim();
+
   // 把 getComputedStyle().boxShadow 的规范串拆成逐层(顶层逗号分层;rgba()/hsl()
   // 内的逗号不分)。与 _validate_audits.py audit_no_drop_shadows 的手写 depth 拆分等价。
   const splitShadowLayers = (value) => {
@@ -4863,7 +4876,18 @@
               if (seenDead.has(key)) continue;
               let reason = null;
               try {
-                if (slide.ownerDocument.querySelectorAll(sel).length === 0) reason = 'no-match';
+                if (slide.ownerDocument.querySelectorAll(sel).length === 0) {
+                  // sel matched 0 — but a ::pseudo / :state tail never matches
+                  // querySelectorAll. Confirm against the structural host; only
+                  // truly dead if the host element is also absent.
+                  const host = hostSelForDeadCheck(sel);
+                  let hostDead = false;
+                  if (host) {
+                    try { hostDead = slide.ownerDocument.querySelectorAll(host).length === 0; }
+                    catch (e2) { hostDead = false; }
+                  }
+                  if (hostDead) reason = 'no-match';
+                }
               } catch (e) {
                 reason = 'parse-error';
               }
@@ -5015,7 +5039,17 @@
               let matchCount = 0, parseError = false;
               for (const member of _splitSelectorList(selText)) {
                 if (!member) continue;
-                try { matchCount += document.querySelectorAll(member).length; }
+                try {
+                  let n = document.querySelectorAll(member).length;
+                  if (n === 0) {
+                    // ::pseudo / :state member never matches querySelectorAll —
+                    // count its structural host instead so a healthy pseudo-element
+                    // decoration (glow/ring ::after) isn't reported dead.
+                    const host = hostSelForDeadCheck(member);
+                    if (host) { try { n = document.querySelectorAll(host).length; } catch (e2) { /* keep 0 */ } }
+                  }
+                  matchCount += n;
+                }
                 catch (e) { parseError = true; }
               }
               if (matchCount > 0 && !parseError) continue;  // healthy — at least one element styled
