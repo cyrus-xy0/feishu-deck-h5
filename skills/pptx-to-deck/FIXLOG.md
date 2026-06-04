@@ -56,6 +56,12 @@
 - **修复**：**永不** `pkill "Google Chrome"`。只杀本次截图的进程树：`kill $cpid` + `pkill -P $cpid`（子进程）+ `pkill -f -- "$udd"`（按唯一临时 user-data-dir 匹配）。每张用唯一 `mktemp -d` 做 profile，既隔离又能精准定位。
 - **教训**：任何 `pkill`/`killall` 按名字杀进程前，先想「这名字会不会命中用户自己的进程」。宁可留几个 idle helper，也绝不广杀。
 
+### F10 · ⚠️ QA sweep 把重图页误报成黑屏（**假阳性，差点冤枉重建器**）
+- **现象**：57 页 sweep 后有 7 页（s17/24/28/37/38/43/54）截图全黑（13–22KB），看上去像 `build_pptx` 整页重建失败、内容全丢。
+- **真因**：**不是重建坏了，是 QA 截图计时太短。** 这些页的 `deck.json` 元素其实都在（5–116 个，几何/颜色/白字全对），但每页压着 PPTX 原图的多 MB 嵌入 blob（实测 slide 28 = 两张 3.1MB 全幅 JPG + 1MB 内容 PNG ≈ 7MB）。`sweep.sh` 用 `--virtual-time-budget=2500`，Chrome 在 blob 解码完成**之前**就截了图 → 抓到黑帧。把 budget 提到 12000ms，7 页全部恢复（13–22KB → 0.6–1.4MB），内容完整。
+- **修复**：`sweep.sh` `--virtual-time-budget` 2500 → **12000**，kill 轮询上限 70 → 120（60s），加注释说明 VTB 是上限非固定等待（轻页仍快，只有重图页多等解码）。
+- **通用性**：✅ 任何含重嵌入图的重建 deck 的 QA 截图都不再假黑。**教训：截图工具的"页面坏了"要先排除"截早了"，别急着改重建器——本例诊断一度误判为 build_pptx 静默吞错（`_slide_is_hard` / `except: continue`），实测 `is_hard=False`、`data.elements` 非空才翻案。**
+
 ## 待办 / 已知有损（按优先级）
 
 - **T1 · autofit 文本收缩**：PPT「溢出时缩小字号」未模拟，超长文本按写死字号渲染会溢出框。keynote 技能也主动放弃了（估算不准）。暂不处理，溢出靠自然换行。

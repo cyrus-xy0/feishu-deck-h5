@@ -27,10 +27,17 @@ shot() {
   local udd; udd="$(mktemp -d)"     # unique → both isolates AND lets us target-kill
   "$CHROME" --headless --disable-gpu --no-first-run --no-default-browser-check \
     --user-data-dir="$udd" --hide-scrollbars --force-device-scale-factor=1 \
-    --window-size=1920,1080 --virtual-time-budget=2500 \
+    --window-size=1920,1080 --virtual-time-budget=12000 \
     --screenshot="$out" "$URL#${h}" >/dev/null 2>&1 &
+  # ⚠️ virtual-time-budget is a CAP, not a fixed wait — a static page screenshots
+  # as soon as it goes idle, so light pages stay fast. Image-HEAVY reconstructed
+  # slides (PPTX pages carry the original multi-MB embedded blobs — e.g. two 3MB
+  # full-bleed JPEGs + a 1MB content PNG on one slide) need the headroom: at the
+  # old 2500ms budget Chrome screenshotted BEFORE the blobs decoded, capturing a
+  # black frame → good reconstructions were falsely flagged as collapsed pages.
+  # 12000ms covers the heaviest pages observed. See FIXLOG F10.
   local cpid=$! i
-  for i in $(seq 1 70); do kill -0 $cpid 2>/dev/null || break; sleep 0.5; done
+  for i in $(seq 1 120); do kill -0 $cpid 2>/dev/null || break; sleep 0.5; done
   # kill ONLY this shot's process tree — the launched pid, its children, and
   # any helper whose cmdline carries our unique "$udd". NEVER touch other Chrome.
   kill -9 $cpid 2>/dev/null
