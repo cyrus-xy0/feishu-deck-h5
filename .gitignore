@@ -66,9 +66,10 @@ package-lock.json
 venv/
 env/
 
-# pptx-to-html sub-skill: ignore the heavy regenerable assets (689MB of extracted
+# pptx-to-deck skill: ignore the heavy regenerable assets (689MB of extracted
 # slide images) + scratch dirs. Keep the lightweight evidence (deck.json, *.md,
-# montage_*.png, index.html) tracked.
-skills/feishu-deck-h5/pptx-to-html/out/
-skills/feishu-deck-h5/pptx-to-html/example/**/assets/
-skills/feishu-deck-h5/pptx-to-html/example/**/sweep/
+# montage_*.png, index.html) tracked. (Belt-and-suspenders: the skill also ships
+# its own local skills/pptx-to-deck/.gitignore.)
+skills/pptx-to-deck/out/
+skills/pptx-to-deck/example/**/assets/
+skills/pptx-to-deck/example/**/sweep/

@@ -170,7 +170,10 @@ For a new deck:
    build_pptx → a structured, editable `canvas` deck.json (no screenshots);
    un-reconstructable pages (live chart / SmartArt / OLE) are placeholdered and
    reported for the user to redo — so this can hand straight to Renderer/Editor
-   without a Designer pass when the deck is just being imported.
+   without a Designer pass when the deck is just being imported. `build_pptx`
+   (and the high-fidelity `build_pptx_hybrid`) live in the **`pptx-to-deck`**
+   skill — a top-level sibling that Parser delegates to and that uses this skill
+   as its render backend; a user may also invoke `pptx-to-deck` directly.
 2. **Designer** to produce scenario, `design_plan`, and `outline.json`. Spawn a
    Designer worker when multi-agent dispatch is available.
 3. **Renderer** to produce `deck.json`, render HTML, and prepare handoff files.

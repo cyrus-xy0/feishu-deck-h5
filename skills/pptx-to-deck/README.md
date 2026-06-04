@@ -1,4 +1,4 @@
-# pptx-to-html
+# pptx-to-deck
 
 把现有 **PowerPoint (.pptx)** **尽可能还原**成一份**结构化的** feishu-deck-h5
 `canvas` deck.json，渲染器用你本机的

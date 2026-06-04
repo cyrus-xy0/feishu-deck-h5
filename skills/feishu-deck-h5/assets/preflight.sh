@@ -136,7 +136,6 @@ if ! ( touch "$PROBE" 2>/dev/null && rm -f "$PROBE" 2>/dev/null ); then
         --exclude='.pytest_cache' \
         --exclude='.DS_Store' \
         --exclude='*.bak*' \
-        --exclude='pptx-to-html/example/' \
         "$SKILL_ROOT/" "$WORKSPACE/" 2>/dev/null; then
       MIRROR_OK=1; MIRROR_TOOL="rsync"
     fi
@@ -148,9 +147,6 @@ src, dst = os.environ["SRC"], os.environ["DST"]
 NAMES = {".git", "__pycache__", ".pytest_cache", ".DS_Store", "runs"}
 def ignore(dirpath, names):
     skip = {n for n in names if n in NAMES or ".bak" in n}
-    # drop the heavy pptx example corpus (689 MB of slide images)
-    if os.path.basename(dirpath) == "pptx-to-html" and "example" in names:
-        skip.add("example")
     return skip
 try:
     shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True, symlinks=True)

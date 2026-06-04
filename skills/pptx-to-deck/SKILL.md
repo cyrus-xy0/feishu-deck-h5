@@ -1,49 +1,49 @@
 ---
-name: pptx-to-html
+name: pptx-to-deck
 description: |
-  SUB-SKILL of feishu-deck-h5 (lives at feishu-deck-h5/pptx-to-html/, NOT an
-  independently-registered skill). It is the .pptx import path into the deck
-  system — invoked from feishu-deck-h5 when the user hands over a PowerPoint.
+  Convert an existing PowerPoint (.pptx) into an EDITABLE feishu-deck-h5 deck —
+  a structured `canvas` deck.json that renders to a 16:9 present-mode HTML deck.
+  STANDALONE skill that uses feishu-deck-h5 as its RENDER BACKEND: it shells into
+  that skill's deck-json/render-deck.py, and the final deck needs its framework
+  CSS/JS. (feishu-deck-h5's parser also delegates .pptx import to this skill.)
 
-  Convert an existing PowerPoint (.pptx) into a STRUCTURED feishu-deck-h5
-  `canvas` deck.json (data.elements[]) — natively, with no PowerPoint app, no
-  Keynote, no AppleScript, no LibreOffice, NO SCREENSHOTS. Walks every slide
-  with python-pptx and emits each as a list of absolutely-positioned, typed,
-  id'd elements: text stays clean editable runs, images are the original
-  embedded assets, shapes/gradients/lines carry appearance/SVG fields. This is
-  the PPTX side of DECKJSON-UNIFIED-INTERMEDIATE-SPEC (§2/§3): one intermediate
-  layer = deck.json, one edit loop = edit→sync→deck.json.
+  Triggers: "把 PPT/PPTX 转成 deck/HTML/H5", "import pptx", ".pptx 转 deck",
+  "把这份 PowerPoint 还原成网页/可编辑 deck", or when the user hands over a
+  .pptx path and wants it as an editable deck. Do NOT use for `.key` Keynote
+  (use keynote-to-html), a from-scratch redesign (use feishu-deck-h5 directly),
+  or producing a real .pptx.
 
-  Triggers: "把 PPT/PPTX 转成 HTML", "import pptx", ".pptx 转 deck",
-  "把这份 PowerPoint 还原成网页/H5", or when the user hands over a .pptx path.
+  TWO pipelines — pick per fidelity need:
+    1. build_pptx.py — PURE CODE RECONSTRUCTION (python-pptx). Walks every slide,
+       emits each shape as an absolutely-positioned typed element: text = clean
+       editable runs, images = original embedded blobs, shapes/gradients/lines =
+       appearance/SVG fields. No PowerPoint app, no Keynote, no LibreOffice, NO
+       SCREENSHOTS; exact EMU geometry, cross-platform. Fully editable; decorative
+       elements (gradients/glow/freeform/cropped images) are best-effort
+       APPROXIMATE.
+    2. build_pptx_hybrid.py — HIGH-FIDELITY HYBRID (needs LibreOffice + PyMuPDF).
+       LibreOffice renders the text-stripped slides into PIXEL-PERFECT decoration
+       backgrounds; foreground text is overlaid as structured editable elements
+       (real per-line bbox / font / color) and original images overlaid lossless.
+       Output is self-contained / portable. Use when decoration must be
+       pixel-perfect AND text editable.
 
-  Because .pptx is open OOXML, extraction is exact (EMU geometry) and
-  cross-platform — it does NOT shell out to any GUI app.
+  Both emit a `layout:"canvas"` deck.json (DECKJSON-UNIFIED-INTERMEDIATE-SPEC
+  §2/§3: one intermediate layer = deck.json, one edit loop = edit→sync→deck.json),
+  rendered by feishu-deck-h5's render-deck.py; sync-index-to-deck.py round-trips
+  edits back into elements[] by id.
 
-  Per-slide algorithm:
-    1. python-pptx walks every shape (recursing+flattening groups through their
-       chOff/chExt transform) → each shape → an element dict.
-    2. TEXT_BOX/PLACEHOLDER → {type:text, runs, anchor, insets}; PICTURE →
-       {type:image, src:"input/.."}; AUTO_SHAPE/FREEFORM/LINE → {type:shape,
-       kind/fill/gradient/border/radius/svg/style}.
-    3. Theme colors resolved from the master's <a:clrScheme>.
-    4. Each slide is emitted as a `layout:"canvas"` entry in deck.json.
-    5. render-deck.py → positioned HTML (data-el-id, cqw/cqh); sync-index-to
-       -deck.py round-trips edits back into elements[] by id.
-
-  Un-reconstructable (live chart / SmartArt / OLE) → that slide becomes a
-  placeholder ({placeholder:true, source_page:N}) and N is reported
-  (`unreconstructed slides: [..]`). NO screenshot fallback — --raster /
-  --full-raster are retired no-ops.
-
-  Lossy / acceptable (best-effort 还原, NOT pixel-perfect):
-    · autofit "shrink-to-fit" text is not simulated (authored size used).
-    · only linear gradients; radial / lumMod-shade-tint approximated.
-    · freeform custGeom: move/line/cubic/quad/close (arc etc. skipped).
-    · image srcRect crop, complex table merges: approximated.
+  Un-reconstructable in build_pptx (live chart / SmartArt / OLE) → that slide
+  becomes a placeholder ({placeholder:true, source_page:N}) reported as
+  `unreconstructed slides: [..]`. NO screenshot fallback (--raster /
+  --full-raster are retired no-ops). build_pptx lossy/acceptable (best-effort
+  还原, NOT pixel-perfect): autofit shrink-to-fit not simulated; only linear
+  gradients (radial / lumMod approximated); freeform arcs skipped; image srcRect
+  crop + complex table merges approximated — for pixel-perfect decoration use the
+  hybrid pipeline.
 ---
 
-# pptx-to-html
+# pptx-to-deck
 
 ## When to invoke
 
@@ -68,8 +68,8 @@ Do NOT use for: `.key` (use keynote-to-html), or a from-scratch redesign
 混合管线一条命令（**自动**：剥字→LibreOffice渲背景→栅格→抽原图→抽文字位置/字体/颜色→组装→渲染→**自包含打包**→前端增强 letterbox/nowrap/scaleX/懒加载）。产物**默认即交付级自包含**：框架 CSS/JS（及其内部 `url()` 引的 lark logo）自动拷进 `<deck>/assets/` 并把引用改写成相对路径，`bg/`、`input/` 本就是 deck 本地目录——整夹拷走 / 打包 / 发给别人都不断，无需再单独跑交付/copy-assets 步骤。打包器路径无关（判据=引用解析后落在技能内且不在 deck 内→框架资源），输出到 `runs/` 内外都能自包含。
 
 ```bash
-skills/feishu-deck-h5/pptx-to-html/.venv/bin/python3 \
-  skills/feishu-deck-h5/pptx-to-html/assets/build_pptx_hybrid.py \
+skills/pptx-to-deck/.venv/bin/python3 \
+  skills/pptx-to-deck/assets/build_pptx_hybrid.py \
   <in.pptx>  skills/feishu-deck-h5/runs/<deck-name> \
   [--renderer DIR] [--title TEXT] [--soffice /path/to/soffice]
 ```
@@ -84,32 +84,32 @@ skills/feishu-deck-h5/pptx-to-html/.venv/bin/python3 \
 ## Preflight
 
 1. Verify the `.pptx` exists. If only a name was given, `mdfind "<name>.pptx"`.
-2. Python deps: `python-pptx`, `lxml`. A venv at this sub-skill's root is used
+2. Python deps: `python-pptx`, `lxml`. A venv at this skill's root is used
    if present:
    ```bash
-   python3 -m venv skills/feishu-deck-h5/pptx-to-html/.venv
-   skills/feishu-deck-h5/pptx-to-html/.venv/bin/pip install python-pptx
+   python3 -m venv skills/pptx-to-deck/.venv
+   skills/pptx-to-deck/.venv/bin/pip install python-pptx
    ```
    (Or install on the system python; run.sh falls back to `python3`.)
    No LibreOffice / Pillow / PyMuPDF needed — rasterization is retired.
-3. The renderer is the **parent feishu-deck-h5** skill (auto-located as the
-   grandparent dir of build_pptx.py, else `~/.claude/skills/feishu-deck-h5`).
+3. The renderer is the **sibling feishu-deck-h5** skill (auto-located as the
+   sibling `<skills>/feishu-deck-h5/` dir, else `~/.claude/skills/feishu-deck-h5`).
    Override with `--renderer DIR`.
 
 ## Invocation
 
 **Output convention:** generated decks go to the MAIN feishu-deck-h5 skill's
 **outer** `runs/` (`skills/feishu-deck-h5/runs/<deck-name>/`) — alongside every
-other deck the main skill produces, NOT inside this sub-skill. (`runs/` is
+other deck the main skill produces, NOT inside this skill. (`runs/` is
 gitignored repo-wide: regenerable, never committed.)
 
 ```bash
-bash skills/feishu-deck-h5/pptx-to-html/assets/run.sh \
+bash skills/pptx-to-deck/assets/run.sh \
   <in.pptx>  skills/feishu-deck-h5/runs/<deck-name> \
   [--limit N]        # only first N slides
   [--no-render]      # emit deck.json + input/ assets only, skip HTML render
   [--inline]         # single-file delivery (base64-inline) — avoid for image-heavy decks
-  [--renderer DIR]   # feishu-deck-h5 skill root (default: parent skill, auto-located)
+  [--renderer DIR]   # feishu-deck-h5 skill root (default: sibling feishu-deck-h5, auto-located)
   [--title TEXT]
   [--raster]         # ⚠ RETIRED no-op (no screenshots)
   [--full-raster]    # ⚠ RETIRED no-op (no screenshots)
@@ -125,8 +125,8 @@ Preview: `bash skills/feishu-deck-h5/runs/<deck-name>/serve.sh` → localhost:87
 ## Example / test fixture
 
 `example/营销人的AI副驾/` is the kept reference deck — the real 60-page PowerPoint
-this sub-skill was hardened against (every fix in FIXLOG was verified here). It is
-NOT a runtime output; it stays in the sub-skill as the regression/demo fixture.
+this skill was hardened against (every fix in FIXLOG was verified here). It is
+NOT a runtime output; it stays in the skill as the regression/demo fixture.
 Committed lightweight (deck.json + montage_*.png + RESTORATION-REPORT.md +
 index.html); the heavy regenerable `assets/` are gitignored.
 
@@ -135,7 +135,7 @@ index.html); the heavy regenerable `assets/` are gitignored.
 Screenshot every slide and build contact-sheet montages to scan for drift:
 
 ```bash
-bash skills/feishu-deck-h5/pptx-to-html/assets/sweep.sh <out-dir> [N]   # writes <out-dir>/montage_*.png
+bash skills/pptx-to-deck/assets/sweep.sh <out-dir> [N]   # writes <out-dir>/montage_*.png
 ```
 
 Montage thumbnails downscale dark/detailed slides toward black — confirm any

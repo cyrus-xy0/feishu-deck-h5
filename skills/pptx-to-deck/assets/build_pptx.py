@@ -1398,12 +1398,18 @@ def compose_slide(slide, idx: int, cv: Canvas, prs, input_dir: Path,
 
 
 def _default_renderer() -> Path:
-    """Locate the feishu-deck-h5 renderer. This is a SUB-skill nested inside
-    the feishu-deck-h5 skill (.../feishu-deck-h5/pptx-to-html/assets/), so the
-    renderer is the grandparent dir. Fall back to ~/.claude/skills/feishu-deck-h5."""
-    parent_skill = Path(__file__).resolve().parent.parent.parent  # → feishu-deck-h5/
-    if (parent_skill / "deck-json/render-deck.py").is_file():
-        return parent_skill
+    """Locate the feishu-deck-h5 renderer (deck-json/render-deck.py).
+    pptx-to-deck is a TOP-LEVEL skill that uses feishu-deck-h5 as its render
+    backend; feishu-deck-h5 normally sits as a SIBLING skill dir. Resolution:
+      1. sibling  <skills>/feishu-deck-h5/   (this skill at <skills>/pptx-to-deck/)
+      2. legacy nested grandparent (when still inside feishu-deck-h5/<sub>/)
+      3. ~/.claude/skills/feishu-deck-h5 (registered symlink) fallback."""
+    skills_dir = Path(__file__).resolve().parent.parent.parent  # <skills>/
+    for cand in (skills_dir / "feishu-deck-h5",                 # sibling (new layout)
+                 skills_dir,                                     # legacy nested
+                 Path.home() / ".claude/skills/feishu-deck-h5"):  # registered symlink
+        if (cand / "deck-json/render-deck.py").is_file():
+            return cand
     return Path.home() / ".claude/skills/feishu-deck-h5"
 
 

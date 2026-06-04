@@ -108,14 +108,15 @@ For HTML inputs, always record the HTML role in `source_inventory` and
 
 ## PPTX → 结构化 `canvas` deck.json(build_pptx,无截图)
 
-`.pptx` 是唯一的原生 PowerPoint 入口。parser 调用 pptx-to-html 子技能里的
-`build_pptx.py`(在它自己的 venv `pptx-to-html/.venv/bin/python3` 里跑,因为
+`.pptx` 是唯一的原生 PowerPoint 入口。parser 委派给**独立 skill `pptx-to-deck`**
+里的 `build_pptx.py`(在它自己的 venv `pptx-to-deck/.venv/bin/python3` 里跑,因为
 python-pptx 不在 parser 的 stdlib 世界),把每页 OOXML 逐元素**代码重建**成一个
 `layout:"canvas"` 的 deck.json slide(`data.elements[]` 描述定位的文字框 runs /
-嵌入图片 / 形状),**绝不截图**。
+嵌入图片 / 形状),**绝不截图**。`pptx-to-deck` 是 feishu-deck-h5 的兄弟 skill,反过来
+用 feishu-deck-h5 的 render-deck.py 渲染(parse.py 自动按兄弟路径定位它)。
 
-- 调用:`pptx-to-html/.venv/bin/python3 pptx-to-html/assets/build_pptx.py <in.pptx>
-  runs/<task-id>/output --renderer <skill-root> --title <原始文件名>`。产物落在本轮
+- 调用:`<skills>/pptx-to-deck/.venv/bin/python3 <skills>/pptx-to-deck/assets/build_pptx.py
+  <in.pptx> runs/<task-id>/output --renderer <feishu-deck-h5-skill-root> --title <原始文件名>`。产物落在本轮
   run 的 `output/`:`deck.json`(canvas)、`input/<嵌入图片>`、`index.html`(渲染预览)。
 - **啃不动的页**(原生图表 chart / SmartArt / OLE 对象)不硬撑成图:build_pptx 产一个
   **纯文字占位 slide**(`data.placeholder=true`),并把页号汇总进结尾的

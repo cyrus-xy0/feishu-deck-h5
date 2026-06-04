@@ -368,20 +368,31 @@ def xml_texts(raw: bytes) -> list[str]:
 # .pptx is the ONLY native-PowerPoint entry. It is converted to a structured
 # `canvas` deck.json (code reconstruction of every element — text runs, embedded
 # images, shapes — NO screenshots) by build_pptx.py, which lives in the
-# pptx-to-html sub-skill and runs in ITS OWN venv (python-pptx is not in the
+# `pptx-to-deck` skill and runs in ITS OWN venv (python-pptx is not in the
 # parser's stdlib world). Un-reconstructable pages (live chart / SmartArt / OLE)
 # become text placeholders and are reported back as `unreconstructed slides` for
 # the user to redo. The image / dual-background path (pptx-to-editable-html) is
 # RETIRED per the 不要图 decision — we never produce screenshots here.
-PPTX_TO_HTML_DIR = REPO / "pptx-to-html"
-PPTX_VENV_PY = PPTX_TO_HTML_DIR / ".venv" / "bin" / "python3"
-BUILD_PPTX = PPTX_TO_HTML_DIR / "assets" / "build_pptx.py"
+#
+# `pptx-to-deck` was promoted out of feishu-deck-h5 into a TOP-LEVEL sibling skill
+# (it uses feishu-deck-h5 as its render backend). Resolve it as a sibling, with
+# fallbacks to the legacy nested location and the registered ~/.claude symlink so
+# the parser keeps working across layouts.
+PPTX_SKILL_DIR = next(
+    (d for d in (REPO.parent / "pptx-to-deck",                 # sibling (new layout)
+                 REPO / "pptx-to-html",                         # legacy nested
+                 Path.home() / ".claude" / "skills" / "pptx-to-deck")  # registered symlink
+     if (d / "assets" / "build_pptx.py").is_file()),
+    REPO.parent / "pptx-to-deck",                              # default for the warning path
+)
+PPTX_VENV_PY = PPTX_SKILL_DIR / ".venv" / "bin" / "python3"
+BUILD_PPTX = PPTX_SKILL_DIR / "assets" / "build_pptx.py"
 UNRECONSTRUCTED_RE = re.compile(r"unreconstructed slides:\s*\[([^\]]*)\]")
 
 
 def build_pptx_canvas(pptx_path: Path, out_dir: Path, title: str = "") -> dict[str, Any]:
     """Convert a .pptx to a structured `canvas` deck.json via build_pptx.py
-    (run in the pptx-to-html venv). Emits deck.json + extracted images under
+    (run in the pptx-to-deck venv). Emits deck.json + extracted images under
     `out_dir`, then renders index.html. Returns a structured result record for
     the source-dossier: deck.json path, slide count, the `unreconstructed`
     page-number report, and any warnings. Never raises — a conversion failure is
@@ -398,7 +409,7 @@ def build_pptx_canvas(pptx_path: Path, out_dir: Path, title: str = "") -> dict[s
     }
     if not PPTX_VENV_PY.is_file():
         result["warnings"].append(
-            f"pptx-to-html venv python not found at {repo_rel(PPTX_VENV_PY)}; "
+            f"pptx-to-deck venv python not found at {repo_rel(PPTX_VENV_PY)}; "
             "PPTX was preserved but not converted to canvas deck.json."
         )
         return result
@@ -1565,7 +1576,7 @@ def main(argv: list[str] | None = None) -> int:
                     "deckjson_strategy": "preserve slides/data-slide-key when detected; otherwise wrap page or major sections as raw slides",
                 }
         # PPTX → structured `canvas` deck.json (single .pptx entry point). Run
-        # build_pptx via the pptx-to-html venv; record the canvas deck.json + the
+        # build_pptx via the pptx-to-deck venv; record the canvas deck.json + the
         # `unreconstructed slides` report on this inventory item. Multiple .pptx
         # sources get per-source output dirs so they don't clobber each other.
         if item.get("type") == "pptx" and item.get("exists", True):

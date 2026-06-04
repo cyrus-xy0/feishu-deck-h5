@@ -51,9 +51,15 @@ def _find_soffice(explicit: str | None) -> str:
 
 
 def _default_renderer() -> Path:
-    parent = Path(__file__).resolve().parent.parent.parent  # → feishu-deck-h5/
-    if (parent / "deck-json/render-deck.py").is_file():
-        return parent
+    """feishu-deck-h5 渲染后端定位:pptx-to-deck 是顶层 skill,feishu-deck-h5 通常
+    是兄弟 skill 目录。优先兄弟 <skills>/feishu-deck-h5/,兼容旧的内嵌祖父布局,
+    最后回退已注册的 ~/.claude/skills/feishu-deck-h5(symlink)。"""
+    skills_dir = Path(__file__).resolve().parent.parent.parent  # <skills>/
+    for cand in (skills_dir / "feishu-deck-h5",                 # 兄弟(新布局)
+                 skills_dir,                                     # 旧内嵌
+                 Path.home() / ".claude/skills/feishu-deck-h5"):  # 注册 symlink
+        if (cand / "deck-json/render-deck.py").is_file():
+            return cand
     return Path.home() / ".claude/skills/feishu-deck-h5"
 
 
@@ -107,7 +113,7 @@ def extract_original_images(pptx: Path, work: Path, out: Path, renderer: Path,
     crop. Return {1-based page: [image elements]} for the SAME content pictures
     strip_for_bg removed (non-full-bleed, non-WMF). Blobs are copied into
     out/input, downsized to scale× their display box (retina-sharp, sane size)."""
-    bp = renderer / "pptx-to-html/assets/build_pptx.py"
+    bp = Path(__file__).resolve().parent / "build_pptx.py"   # 同目录兄弟管线
     bp_out = work / "bp"
     try:
         subprocess.run([sys.executable, str(bp), str(pptx), str(bp_out),
