@@ -27,6 +27,10 @@ thmx_unpacked/
 screenshots/
 *.thmx
 
+# Scratch / per-invocation temp state (e.g. skills/feishu-deck-h5/tmp/slide-library/
+# ppt-uploads.json registry — points at ephemeral /tmp sources, never source). Any level.
+tmp/
+
 # Per-invocation outputs from new-run.sh / render.py — regenerable, and
 # often contain large user-provided scene images. Keep out of source.
 runs/
