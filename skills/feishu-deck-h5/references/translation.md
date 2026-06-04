@@ -105,7 +105,10 @@ pixels. List them in the localization report (e.g. by spotting `<iframe>`-less r
 requires re-exporting source art or new captures — out of translation scope.
 
 ## QA gates
-- `validate-deck.py` — generic structure/visual/language/delivery.
+- `assets/validate.py <index.html>` — the renderer's own HTML gate (structure /
+  visual / language / delivery; `--visual` runs the Playwright R-OVERFLOW audit —
+  worth it for translated decks where longer EN text can clip). NOT `validate-deck.py`,
+  which is the deck.json *schema* validator (run at render time, takes deck.json).
 - `translation-qa.py residual-cjk <files…>` — HARD-fails on untranslated CJK
   ideographs; lists fullwidth-punctuation residue (／ ＋ （） 「」 　) as a soft note
   (`--strict-fullwidth` to gate it too). Run on the deck AND every iframe copy.

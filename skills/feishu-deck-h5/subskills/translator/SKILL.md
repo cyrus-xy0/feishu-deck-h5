@@ -115,7 +115,7 @@ applied to a copy of index.html (no re-render, so all bespoke CSS survives):
 
 ## QA gates (before handoff)
 ```bash
-python3 $DJ/validate-deck.py <deck>/index.html                              # generic structure/visual/lang
+python3 assets/validate.py <deck>/index.html                                # HTML structure/visual/lang gate (add --visual for R-OVERFLOW: catches EN-over-CJK clipping)
 python3 $DJ/translation-qa.py residual-cjk --strict-fullwidth <deck>/index.<lang>.html <iframe-copies…>
 python3 $DJ/translation-qa.py overflow <deck>/index.html <deck>/index.<lang>.html      # 0 NEW overflow
 ```
