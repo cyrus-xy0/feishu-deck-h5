@@ -300,6 +300,11 @@ def _build_data_attrs(slide: dict) -> str:
         # overflow rules stay full severity. Value = source ref string.
         val = slide["lifted"] if isinstance(slide["lifted"], str) else "1"
         parts.append(f'data-lifted="{_esc_br(val)}"')
+    if slide.get("hidden"):
+        # 隐藏页 (PPT-style hide): the slide is still rendered + reachable by a
+        # direct #N/#key hash and in scroll mode, but feishu-deck.js skips it in
+        # linear present-mode navigation and excludes it from the page count.
+        parts.append("data-hidden")
     return " ".join(parts)
 
 
@@ -1985,15 +1990,22 @@ def main(argv=None) -> int:
     asset_path = relpath_from_to(args.output_dir, ASSETS_DIR)
 
     # 4. Render each slide
-    # Skip slides with `_disabled: true` (escape hatch for "this slide errors,
-    # let the rest of the deck render so I can keep working"). SKILL.md
-    # promises this; the renderer must honor it. Skipped slides don't count
-    # toward `total` (page numbers stay sane).
+    # Skip ONLY slides marked `_disabled: true` (escape hatch for "this slide
+    # errors, let the rest of the deck render so I can keep working"). SKILL.md
+    # promises this. `hidden: true` slides ARE rendered (they get data-hidden and
+    # the runtime skips them in present-mode 翻页 — 隐藏页, PPT-style hide), so
+    # they stay reachable by direct #hash / scroll mode. _disabled slides don't
+    # count toward `total` (page numbers stay sane).
     active_slides = [(i, s) for i, s in enumerate(deck["slides"])
                      if not s.get("_disabled")]
     n_skipped = len(deck["slides"]) - len(active_slides)
     if n_skipped > 0:
         print(f"  ⚠ skipped {n_skipped} slide(s) marked _disabled: true",
+              file=sys.stderr)
+    n_hidden = sum(1 for _, s in active_slides if s.get("hidden"))
+    if n_hidden > 0:
+        print(f"  ℹ {n_hidden} hidden slide(s) (隐藏页) rendered but skipped in "
+              f"present-mode 翻页 (still reachable by direct #hash / scroll)",
               file=sys.stderr)
     slides_html = []
     total = len(active_slides)

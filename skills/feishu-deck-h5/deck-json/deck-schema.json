@@ -121,9 +121,13 @@
           "enum": ["front", "back"],
           "description": "Per-slide override of deck.logo_position. See deck_meta.logo_position."
         },
+        "hidden": {
+          "type": "boolean",
+          "description": "隐藏页 (PPT-style 'hide slide'). The slide IS still rendered (gets data-hidden) and stays reachable by a direct #N/#key hash and in scroll mode, but the runtime SKIPS it in linear present-mode navigation (→/←/space/wheel/swipe/prev-next) and excludes it from the page count. For appendix/backup/draft/'skip for this audience' slides you want to keep but not walk through. Durable — re-render/publish keep it. Toggle with `deck-cli hide/unhide KEY`. Distinct from `_disabled` (which means 'this slide errors' and is dropped from render entirely)."
+        },
         "_disabled": {
           "type": "boolean",
-          "description": "If true, renderer skips this slide entirely. Escape hatch for 'this slide errors, let the rest render'. SKILL.md Troubleshooting section."
+          "description": "If true, renderer skips this slide entirely (not rendered at all). Escape hatch for 'this slide errors, let the rest render'. SKILL.md Troubleshooting section. To keep a slide in the deck but skip it during the show, use the author-facing `hidden` field instead."
         },
         "_orig_layout": {
           "type": "string",

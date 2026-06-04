@@ -676,12 +676,19 @@
     const list = sidebar.querySelector('.edit-sidebar-list');
     const frames = [...document.querySelectorAll('.slide-frame')];
     list.innerHTML = frames.map((sf, i) => {
-      const key = sf.querySelector('.slide')?.dataset.slideKey || '';
-      const label = sf.querySelector('.slide')?.dataset.screenLabel || `Slide ${i + 1}`;
+      const slide = sf.querySelector('.slide');
+      const key = slide?.dataset.slideKey || '';
+      const label = slide?.dataset.screenLabel || `Slide ${i + 1}`;
+      const hidden = !!slide?.hasAttribute('data-hidden');
       return `
-        <li class="es-item" data-key="${escapeAttr(key)}" draggable="true">
+        <li class="es-item${hidden ? ' es-hidden' : ''}" data-key="${escapeAttr(key)}" draggable="true">
           <span class="es-num">${String(i + 1).padStart(2, '0')}</span>
           <span class="es-label" title="${escapeAttr(label)}">${escapeHtml(label)}</span>
+          <button class="es-eye" type="button" tabindex="-1"
+                  title="放映时隐藏/显示这一页(隐藏页仍可用直链访问)" aria-label="toggle hidden">
+            <svg class="i-eye" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="i-eye-off" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
         </li>`;
     }).join('');
     sidebar.querySelector('.es-count').textContent = `${frames.length}`;
@@ -692,6 +699,11 @@
         const key = li.dataset.key;
         const target = document.querySelector(`.slide-frame .slide[data-slide-key="${cssEscape(key)}"]`);
         if (target) target.closest('.slide-frame').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      const eye = li.querySelector('.es-eye');
+      if (eye) eye.addEventListener('click', (e) => {
+        e.stopPropagation();           // don't trigger click-to-scroll
+        toggleSlideHidden(li.dataset.key, li);
       });
       li.addEventListener('dragstart', onSidebarDragStart);
       li.addEventListener('dragend',   onSidebarDragEnd);
@@ -712,6 +724,24 @@
       });
     }, { rootMargin: '-40% 0px -40% 0px', threshold: 0 });
     frames.forEach((f) => intersectionObs.observe(f));
+  }
+
+  // Toggle 隐藏页 from the sidebar eye button. Flips `data-hidden` on the
+  // slide (feishu-deck.js reads it to skip the slide in present-mode 翻页). The
+  // attribute lives in the .slide DOM, so the existing ⌘S save serializes it
+  // into the HTML — durable, no extra plumbing. Undoable via the snapshot stack.
+  function toggleSlideHidden(key, li) {
+    const slide = document.querySelector(
+      `.slide-frame .slide[data-slide-key="${cssEscape(key)}"]`);
+    if (!slide) return;
+    snapshot('toggle-hidden');
+    const nowHidden = !slide.hasAttribute('data-hidden');
+    if (nowHidden) slide.setAttribute('data-hidden', '');
+    else           slide.removeAttribute('data-hidden');
+    li.classList.toggle('es-hidden', nowHidden);   // CSS swaps eye ↔ eye-off icon
+    showToast(nowHidden
+      ? `已隐藏「${key}」· 放映翻页跳过(${isMac ? '⌘' : 'Ctrl'}S 保存)`
+      : `已取消隐藏「${key}」`, 2200);
   }
 
   let sbDragSrc = null;

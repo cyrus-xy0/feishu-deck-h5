@@ -434,14 +434,14 @@
         // that map "advance" to Enter.
         case 'ArrowRight': case 'ArrowDown': case 'PageDown':
         case ' ': case 'Spacebar': case 'Enter':
-          e.preventDefault(); goTo(deck, frames, Math.min(cur + 1, frames.length - 1)); break;
+          e.preventDefault(); goTo(deck, frames, stepNext(frames, cur)); break;
         case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
         case 'Backspace':
-          e.preventDefault(); goTo(deck, frames, Math.max(cur - 1, 0)); break;
+          e.preventDefault(); goTo(deck, frames, stepPrev(frames, cur)); break;
         case 'Home':
-          e.preventDefault(); goTo(deck, frames, 0); break;
+          e.preventDefault(); goTo(deck, frames, firstVisible(frames)); break;
         case 'End':
-          e.preventDefault(); goTo(deck, frames, frames.length - 1); break;
+          e.preventDefault(); goTo(deck, frames, lastVisible(frames)); break;
         case 'Escape':
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
           break;
@@ -470,9 +470,7 @@
       if (Math.abs(e.deltaY) < 30) return;
       wheelLock = now;
       const cur = currentIdx(frames);
-      const next = e.deltaY > 0
-        ? Math.min(cur + 1, frames.length - 1)
-        : Math.max(cur - 1, 0);
+      const next = e.deltaY > 0 ? stepNext(frames, cur) : stepPrev(frames, cur);
       goTo(deck, frames, next);
     }, { signal, passive: true });
 
@@ -488,9 +486,7 @@
       touchStartY = null;
       if (Math.abs(dy) < 50) return;
       const cur = currentIdx(frames);
-      const next = dy < 0
-        ? Math.min(cur + 1, frames.length - 1)
-        : Math.max(cur - 1, 0);
+      const next = dy < 0 ? stepNext(frames, cur) : stepPrev(frames, cur);
       goTo(deck, frames, next);
     }, { signal, passive: true });
 
@@ -519,7 +515,18 @@
       return false;
     }
     window.addEventListener('hashchange', readHash, { signal });
-    if (!readHash()) goTo(deck, frames, 0, false);
+    if (!readHash()) goTo(deck, frames, firstVisible(frames), false);
+
+    // ---- Kiosk / projection mode — hash keyword force-hides all chrome ----
+    // #proj | #bare | #clean | #kiosk → page bar + controls + hint vanish and
+    // stay hidden (idle-fade still wakes on hover; kiosk does not). For
+    // projecting, embedding in an iframe (e.g. Miaoda), and signage. Pure
+    // present-layer: works for any deck regardless of source model.
+    function applyKioskChrome() {
+      ui.classList.toggle('is-kiosk', /(^|[#&/])(proj|bare|clean|kiosk)\b/i.test(location.hash || ''));
+    }
+    window.addEventListener('hashchange', applyKioskChrome, { signal });
+    applyKioskChrome();
     // Initial target is now visible via .is-current; disable the CSS
     // first-frame fallback so the cover cannot bleed through later fades.
     deck.setAttribute('data-js-ready', '');
@@ -604,10 +611,10 @@
     // scroll mode is auto-detected via viewport. Toggle button became redundant
     // and added noise to top-right corner where the brand logo sits.
     ui.querySelector('.ctl.prev').addEventListener('click', () => {
-      goTo(deck, frames, Math.max(0, currentIdx(frames) - 1));
+      goTo(deck, frames, stepPrev(frames, currentIdx(frames)));
     }, { signal });
     ui.querySelector('.ctl.next').addEventListener('click', () => {
-      goTo(deck, frames, Math.min(frames.length - 1, currentIdx(frames) + 1));
+      goTo(deck, frames, stepNext(frames, currentIdx(frames)));
     }, { signal });
     ui.querySelector('.ctl.fs').addEventListener('click', toggleFullscreen, { signal });
 
@@ -684,6 +691,44 @@
       if (frames[i].classList.contains('is-current')) return i;
     }
     return 0;
+  }
+
+  // ---- Hidden slides (隐藏页, PPT-style "hide slide") -----------------------
+  // A slide marked `hidden: true` in deck.json renders `data-hidden` on its
+  // `.slide` (durable — re-render keeps it). The slide stays in the DOM and is
+  // still reachable by a direct #N / #key hash and in scroll mode, but LINEAR
+  // present-mode navigation (→ / ← / space / wheel / swipe / prev-next) skips
+  // over it, and the page indicator counts only visible slides.
+  function isHidden(f) {
+    const s = f.querySelector('.slide');
+    return !!(s && s.hasAttribute('data-hidden'));
+  }
+  function stepNext(frames, cur) {            // next visible after cur (else stay)
+    for (let i = cur + 1; i < frames.length; i++) if (!isHidden(frames[i])) return i;
+    return cur;
+  }
+  function stepPrev(frames, cur) {            // prev visible before cur (else stay)
+    for (let i = cur - 1; i >= 0; i--) if (!isHidden(frames[i])) return i;
+    return cur;
+  }
+  function firstVisible(frames) {
+    for (let i = 0; i < frames.length; i++) if (!isHidden(frames[i])) return i;
+    return 0;
+  }
+  function lastVisible(frames) {
+    for (let i = frames.length - 1; i >= 0; i--) if (!isHidden(frames[i])) return i;
+    return frames.length - 1;
+  }
+  function visibleCount(frames) {
+    let n = 0; for (const f of frames) if (!isHidden(f)) n++; return n;
+  }
+  // 1-based position of `idx` among visible frames (visible frames at-or-before
+  // idx). A hidden current slide reports the count of visible frames before it,
+  // floored at 1, so the indicator never reads 0.
+  function visibleOrdinal(frames, idx) {
+    let n = 0;
+    for (let i = 0; i <= idx && i < frames.length; i++) if (!isHidden(frames[i])) n++;
+    return Math.max(1, n);
   }
 
   // Restart-on-enter for slide media (2026-05-24).
@@ -797,13 +842,16 @@
     const ui = document.querySelector('.deck-ui');
     if (!ui) return;
     const cur = currentIdx(frames);
-    const total = frames.length;
+    // Indicator counts only VISIBLE slides (hidden 隐藏页 are skipped in the
+    // show), so "3 / 12" matches what the audience actually pages through.
+    const total = visibleCount(frames);
+    const pos   = visibleOrdinal(frames, cur);
     const isPresent = deck.dataset.mode === 'present';
     const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
 
-    ui.querySelector('.cur').textContent   = pad(cur + 1);
+    ui.querySelector('.cur').textContent   = pad(pos);
     ui.querySelector('.total').textContent = pad(total);
-    const pct = total > 0 ? ((cur + 1) / total) * 100 : 0;
+    const pct = total > 0 ? (pos / total) * 100 : 0;
     ui.querySelector('.deck-progress .bar').style.width = pct + '%';
     ui.querySelector('.ctl.fs .i-enter').style.display = isFullscreen ? 'none'  : 'block';
     ui.querySelector('.ctl.fs .i-exit').style.display  = isFullscreen ? 'block' : 'none';

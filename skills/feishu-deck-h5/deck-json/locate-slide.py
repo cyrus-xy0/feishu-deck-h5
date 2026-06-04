@@ -102,7 +102,7 @@ def _load_index(src: Path):
     # deck.json → synthesize.
     entries, fi = [], 0
     for s in slides:
-        if s.get("_disabled"):
+        if s.get("_disabled"):   # hidden slides ARE rendered (skipped only in nav)
             continue
         fi += 1
         entries.append({

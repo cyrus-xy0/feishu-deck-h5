@@ -522,6 +522,72 @@ def run_backfill(index_html_path: Path, deck_json_path: Path,
     return 0
 
 
+def _slide_open_tag(html: str, key: str) -> str | None:
+    """The full `<div class="slide..." ... data-slide-key="K" ...>` opening tag
+    (so we can inspect data-* on it). data-hidden may sit before OR after
+    data-slide-key — the `[^>]*` on both sides captures either."""
+    pat = (rf'<div class="slide(?:\s[^"]*)?"[^>]*'
+           rf'data-slide-key="{re.escape(key)}"[^>]*>')
+    m = re.search(pat, html)
+    return m.group(0) if m else None
+
+
+def run_hidden_sync(index_html_path: Path, deck_json_path: Path, dry_run: bool) -> int:
+    """Surgical: reconcile ONLY the `hidden` flag (隐藏页) from the rendered
+    index.html back into deck.json. Reads `data-hidden` per slide-key and
+    sets/clears `slide.hidden` — touches nothing else (no raw conversion, no
+    inner-HTML diff). This is what the in-browser edit-mode eye toggle writes
+    into the saved HTML; run this to push it back to the deck.json source."""
+    html = index_html_path.read_text(encoding="utf-8")
+    deck = json.loads(deck_json_path.read_text(encoding="utf-8"))
+
+    changes, missing = [], []
+    for slide in deck.get("slides", []):
+        key = slide.get("key")
+        if not key:
+            continue
+        tag = _slide_open_tag(html, key)
+        if tag is None:
+            missing.append(key)
+            continue
+        html_hidden = bool(re.search(r'\bdata-hidden\b', tag))
+        cur_hidden = bool(slide.get("hidden"))
+        if html_hidden == cur_hidden:
+            continue
+        changes.append((key, cur_hidden, html_hidden))
+        if not dry_run:
+            if html_hidden:
+                slide["hidden"] = True
+            else:
+                slide.pop("hidden", None)   # clean-remove, no hidden:false residue
+
+    print(f"sync-index-to-deck --hidden-only: scanned {len(deck.get('slides', []))} slides")
+    for key, old, new in changes:
+        print(f"  {key}: hidden {old} → {new}")
+    if missing:
+        print(f"  ⚠ {len(missing)} deck.json slide(s) not found in HTML "
+              f"(skipped): {', '.join(missing[:8])}")
+    if not changes:
+        print("  ✓ no hidden-flag drift — deck.json already matches the HTML.")
+        return 0
+    if dry_run:
+        print(f"\n  (--dry-run; {deck_json_path} NOT written. "
+              f"{len(changes)} flag(s) would change.)")
+        return 0
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak = deck_json_path.with_suffix(f".json.bak-pre-sync-{ts}")
+    shutil.copy2(deck_json_path, bak)
+    print(f"  ✓ backup: {bak.name}")
+    deck_json_path.write_text(
+        json.dumps(deck, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  ✓ updated {len(changes)} hidden flag(s) in {deck_json_path.name}")
+    print(f"\nNext step: re-render to apply:")
+    print(f"  python3 {Path(__file__).parent.name}/render-deck.py "
+          f"{deck_json_path}  {deck_json_path.parent}/")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("index_html", type=Path, help="path to rendered index.html")
@@ -536,11 +602,23 @@ def main() -> int:
                          "has none (legacy HTML-only deck). Reverse-engineers the "
                          "rendered DOM into raw slides marked lifted (imported "
                          "provenance). Auto-engaged when deck.json is absent.")
+    ap.add_argument("--hidden-only", action="store_true",
+                    help="surgical: reconcile ONLY the `hidden` flag (隐藏页) from "
+                         "data-hidden in the HTML back into deck.json. Touches "
+                         "nothing else (no raw conversion). Use after the in-browser "
+                         "edit-mode eye toggle + ⌘S to push the change to the source.")
     args = ap.parse_args()
 
     if not args.index_html.exists():
         print(f"sync-index-to-deck: {args.index_html} not found", file=sys.stderr)
         return 2
+
+    if args.hidden_only:
+        if not args.deck_json.exists():
+            print(f"sync-index-to-deck: --hidden-only needs an existing "
+                  f"{args.deck_json}", file=sys.stderr)
+            return 2
+        return run_hidden_sync(args.index_html, args.deck_json, dry_run=args.dry_run)
 
     # BACKFILL: explicit flag, OR auto-engaged when the deck.json target doesn't
     # exist yet (a legacy HTML-only deck being operated on for the first time).

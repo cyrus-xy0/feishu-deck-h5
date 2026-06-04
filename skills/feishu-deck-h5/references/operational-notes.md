@@ -3,6 +3,14 @@
 
 ## Operational notes (gotchas)
 
+- **纯净投屏模式 — URL hash `#proj` / `#bare` / `#clean` / `#kiosk`.**
+  Appending any of these keywords to the deck URL force-hides ALL present
+  chrome (page bar + prev/next/fs controls + nav hint) and keeps it hidden —
+  unlike the 2.5s idle-fade, hover / mousemove does NOT wake it back. For
+  projecting, embedding the deck in an iframe (e.g. 妙搭 / Miaoda), and signage.
+  Pure present-layer: works for any deck regardless of source (canvas / raw /
+  schema). Toggled live on `hashchange`, so `#proj` ↔ `#3` switches cleanly.
+  Lives in `feishu-deck.js` (`applyKioskChrome`) + `.deck-ui.is-kiosk` CSS.
 - **`templates/_shell.html` uses `../assets/feishu-deck.css`.** It assumes the
   shell stays one directory deep relative to `assets/`. If you `cp` it to a
   new working directory, fix the relative paths to point at the actual

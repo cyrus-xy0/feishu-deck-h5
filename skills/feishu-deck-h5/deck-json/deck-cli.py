@@ -321,6 +321,37 @@ VARIANT_DATA_FIELDS = {
 }
 
 
+def _set_hidden(deck: dict, keys, value: bool) -> tuple[int, dict | None]:
+    """Shared body for hide/unhide: set `hidden` on each slide by key. A hidden
+    slide (隐藏页) is still rendered + reachable by direct #hash / scroll, but the
+    runtime skips it in present-mode 翻页 and drops it from the page count.
+    Re-render to apply. Idempotent; reports per-key old→new."""
+    changed = False
+    for key in keys:
+        try:
+            idx = find_slide_index(deck, key)
+        except KeyError as e:
+            print(f"deck-cli: {e}", file=sys.stderr); return 1, None
+        old = bool(deck["slides"][idx].get("hidden", False))
+        if value:
+            deck["slides"][idx]["hidden"] = True
+        else:
+            deck["slides"][idx].pop("hidden", None)   # clear, don't leave hidden:false
+        print(f"  slides[{idx}] (key={key}) hidden: {old} → {value}")
+        changed = changed or (old != value)
+    if not changed:
+        print("  (no change — re-render not needed)")
+    return 0, deck
+
+
+def cmd_hide(deck: dict, args) -> tuple[int, dict | None]:
+    return _set_hidden(deck, args.keys, True)
+
+
+def cmd_unhide(deck: dict, args) -> tuple[int, dict | None]:
+    return _set_hidden(deck, args.keys, False)
+
+
 def cmd_set_variant(deck: dict, args) -> tuple[int, dict | None]:
     try:
         idx = find_slide_index(deck, args.key)
@@ -936,6 +967,12 @@ def main(argv=None) -> int:
     sp = sub.add_parser("set-variant", help="change variant of content/stats/flow slide")
     sp.add_argument("key"); sp.add_argument("variant")
 
+    sp = sub.add_parser("hide", help="隐藏页: skip slide(s) in present-mode 翻页 (still rendered + reachable by #hash/scroll)")
+    sp.add_argument("keys", nargs="+", help="one or more slide keys")
+
+    sp = sub.add_parser("unhide", help="un-hide slide(s) by key (re-render to apply)")
+    sp.add_argument("keys", nargs="+", help="one or more slide keys")
+
     sp = sub.add_parser("reorder", help="move slide by position (1-indexed)")
     sp.add_argument("from_pos", type=int); sp.add_argument("to_pos", type=int)
 
@@ -1012,6 +1049,8 @@ def main(argv=None) -> int:
         "set-accent":  cmd_set_accent,
         "set-decor":   cmd_set_decor,
         "set-variant": cmd_set_variant,
+        "hide":        cmd_hide,
+        "unhide":      cmd_unhide,
         "reorder":     cmd_reorder,
         "move-key":    cmd_move_key,
         "insert":      cmd_insert,

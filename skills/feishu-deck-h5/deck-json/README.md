@@ -121,6 +121,7 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 | `decor` | string[] (token) | violet-glow / blue-glow / mix-glow / teal-glow / orange-spark / aurora / grain / topo / flower-bg / section-bg / photo-bg |
 | `language_override` | enum | 单 slide override `deck.language` |
 | `notes` | string | 作者备注(不渲染) |
+| `hidden` | boolean | **隐藏页**(类 PPT「隐藏幻灯片」):页照常渲染、仍能用直链 `#N`/`#key` 和滚动模式访问,但运行时**线性翻页(→/←/空格/滚轮/滑动)自动跳过**它、页码也不计它。适合附录 / 备份 / 草稿 / 本场不讲又想留着的页。持久(重渲染/发布都不丢)。开关用 `deck-cli hide/unhide KEY`。与 `_disabled`(这页坏了→整页不渲染)语义区分 |
 
 ---
 

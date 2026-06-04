@@ -338,6 +338,13 @@ body {
 .deck-ui.is-idle .deck-progress { opacity: .35; }
 /* Hovering chrome cancels idle fade visually (the JS mousemove also fires) */
 .deck-ui .deck-controls:hover { opacity: 1 !important; }
+/* Kiosk / projection mode (URL hash #proj | #bare | #clean | #kiosk):
+   force-hide ALL chrome — page bar, controls, hint — and stay hidden
+   (unlike .is-idle, hover/mousemove never wakes it). For projection,
+   embedded iframes (e.g. Miaoda), and signage. Toggled by JS on hashchange. */
+.deck-ui.is-kiosk .deck-progress,
+.deck-ui.is-kiosk .deck-controls,
+.deck-ui.is-kiosk .nav-hint { display: none !important; }
 
 /* Mobile: shrink controls, remove hint */
 @media (max-width: 640px) {

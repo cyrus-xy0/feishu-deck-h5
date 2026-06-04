@@ -183,7 +183,7 @@ body.deck-edit-mode .deck[data-mode="scroll"] {
 }
 .es-item {
   display: grid;
-  grid-template-columns: 30px 1fr;
+  grid-template-columns: 30px 1fr auto;
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
@@ -192,6 +192,31 @@ body.deck-edit-mode .deck[data-mode="scroll"] {
   transition: background 0.12s, border-color 0.12s;
   user-select: none;
 }
+/* 隐藏页 eye toggle — appears per slide in the edit sidebar. */
+/* Hide/show toggle — a clean monochrome line icon (eye / eye-off), matching the
+ * deck-ui control icons. PPT/Keynote-style: subtle, no color, just an outline. */
+.es-eye {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  opacity: 0;                    /* hidden until you hover the row (keeps list clean) */
+  transition: opacity 0.12s, color 0.12s;
+}
+.es-item:hover .es-eye { opacity: 1; }
+.es-eye:hover { color: #fff; }
+.es-eye .i-eye-off { display: none; }
+/* A hidden slide (PPT-style): row dimmed, slide number struck, eye-off icon shown
+ * and kept visible even without hover so you can see which slides are skipped. */
+.es-item.es-hidden .es-num { opacity: 0.4; text-decoration: line-through; }
+.es-item.es-hidden .es-label { opacity: 0.45; }
+.es-item.es-hidden .es-eye { opacity: 1; color: rgba(255, 255, 255, 0.7); }
+.es-item.es-hidden .es-eye .i-eye     { display: none; }
+.es-item.es-hidden .es-eye .i-eye-off { display: inline; }
 .es-item:hover {
   background: rgba(60, 127, 255, 0.10);
   border-left-color: rgba(60, 127, 255, 0.45);
