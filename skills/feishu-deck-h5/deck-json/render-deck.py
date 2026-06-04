@@ -66,6 +66,26 @@ VALIDATE_DECK = HERE / "validate-deck.py"
 VALIDATE_HTML = ASSETS_DIR / "validate.py"
 COPY_ASSETS   = ASSETS_DIR / "copy-assets.py"
 
+# Single-source the run-root precondition: reuse copy-assets.find_run_root so the
+# render-deck pre-check can't drift from the copier's real rule. It did drift —
+# an inline reimplementation used loop var `p` with `p.parent.parent.parent`
+# (3 hops up), whereas find_run_root uses var `parent` with the same dotted
+# expression meaning only 2 hops; so the canonical runs/<ts>/output/ layout was
+# wrongly rejected and copy-assets got skipped on the happy path. Importing the
+# real predicate (copy-assets.py is import-safe; main() is __main__-guarded)
+# keeps the two in lockstep, same spirit as the _story_case_fit single-source.
+def _load_find_run_root():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_copy_assets_runroot", COPY_ASSETS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.find_run_root
+
+try:
+    _find_run_root = _load_find_run_root()
+except Exception:
+    _find_run_root = None
+
 # Phase 4 / post-review-medium-6: there's now ONE pathway for \n→<br>.
 # Every {{ field }} substitution goes through _esc_br (see render_template
 # sub_safe). Templates use {{ title }} not {{{ title }}}, so user text gets
@@ -1836,6 +1856,47 @@ def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
 # Main render
 # ---------------------------------------------------------------------------
 
+def _maybe_auto_snapshot(out_html) -> None:
+    """渲染成功后,给开着制作日志(log/)的 deck 自动拍一版 deck-log snapshot。
+
+    为什么放这里(代码)而不是 harness hook:render-deck.py 是 SKILL 硬闸
+    「deck 必须走 render-deck.py」的必经路径,焊在这里 → 全用户、全 harness
+    (含无 hook 机制的 Mira / cron / headless)、每次 render 都自动记,不靠任何人自觉。
+    与 `deck-log init` 焊进 new-run.sh 是同一思路。
+
+    范围 gate:只在 deck 已 init 过制作日志(run 根下有 log/)时才拍 —— 临时转换 /
+    pptx 中间产物(没 log/)一概不碰。停录用 ~/.claude/deck-log.off 或
+    env DECK_LOG_NO_AUTOSNAP=1。
+
+    铁律:这段绝不能让 render 失败 —— 任何缺失 / 异常 / 超时只安静跳过,不动 return 0。
+    """
+    try:
+        out_html = Path(out_html).resolve()
+        run_root = out_html.parent.parent          # .../runs/<slug>/output/index.html → run 根
+        if not (run_root / "log").is_dir():        # 没开制作日志 → 不强建、不打扰
+            return
+        if os.environ.get("DECK_LOG_NO_AUTOSNAP"):  # 显式旁路
+            return
+        if os.environ.get("DECK_LOG_AUTOSNAP") == "1":  # 防递归:snapshot 子进程内的 render 不再二次拍
+            return
+        if (Path(os.path.expanduser("~")) / ".claude" / "deck-log.off").exists():
+            return
+        deck_log = Path(__file__).resolve().parent.parent / "log-tool" / "deck-log.py"
+        if not deck_log.exists():                   # 纯 main 没带 deck-log → 静默跳过
+            return
+        env = dict(os.environ, DECK_LOG_AUTOSNAP="1")
+        r = subprocess.run(
+            [sys.executable, str(deck_log), "snapshot", str(run_root),
+             "--label", "auto · post-render"],
+            capture_output=True, text=True, timeout=120, env=env)
+        first = (r.stdout.strip().splitlines() or [""])[0] if r.stdout else ""
+        if r.returncode == 0 and first:
+            print(f"\n[deck-log] {first}")
+        # 失败(没装 Playwright / snapshot 内部报错)就安静 —— 不报错、不拖垮 render
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="render-deck.py",
@@ -2119,15 +2180,23 @@ def main(argv=None) -> int:
         # bare "/runs/" substring. A path like runs/<deck-name>/ (e.g. the
         # documented `build_pptx … runs/<deck-name>`) contains "/runs/" yet is
         # NOT runs/<ts>/output/, so copy-assets.find_run_root() SystemExits and
-        # render-deck returned 5 on the documented happy path. Mirror
-        # copy-assets.py:find_run_root so misshapen /runs/ paths take the
-        # warn+skip (linked) branch instead of crashing.
+        # render-deck returned 5 on the documented happy path. Reuse
+        # copy-assets.find_run_root directly so this pre-check matches the
+        # copier's real rule exactly (an inline reimplementation drifted by one
+        # .parent hop and rejected the canonical layout). Fallback below mirrors
+        # find_run_root with the correct 2-hop test only if the import failed.
         _out = args.output_dir.resolve()
-        _canonical_run = any(
-            (p.name == "output" and p.parent.parent.parent.name == "runs")
-            or p.parent.parent.parent.name == "runs"
-            for p in [_out, *_out.parents]
-        )
+        if _find_run_root is not None:
+            try:
+                _find_run_root(_out)
+                _canonical_run = True
+            except SystemExit:
+                _canonical_run = False
+        else:
+            _canonical_run = any(
+                p.parent.parent.name == "runs"
+                for p in [_out, *_out.parents]
+            )
         if not _canonical_run:
             # FOOTGUN WARNING — output paths reference the skill via relative
             # paths that only resolve inside the repo. Moving / emailing this
@@ -2173,6 +2242,10 @@ def main(argv=None) -> int:
         print("\nACCENT 复核 (1 秒目测,被高亮的词是该突出的吗?)")
         for s in sc_slides:
             show_story_case_accents(s.get("data", {}), s.get("key", "?"))
+
+    # 渲染全部成功后:若这份 deck 开着制作日志(log/ 存在)就自动拍一版 making-of。
+    # 纯代码实现、不依赖任何 harness hook —— 每个用户 / 每种 harness / 每次 render 都生效。
+    _maybe_auto_snapshot(out_html)
     return 0
 
 

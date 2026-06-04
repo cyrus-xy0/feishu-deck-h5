@@ -3487,13 +3487,25 @@
         const TITLE_SKIP_LAYOUTS = new Set(['cover', 'section', 'end', 'quote',
           'big-stat', 'replica', 'image-text']);
         if (TITLE_SKIP_LAYOUTS.has(layout)) return [];
+        // Per-slide opt-out (framework-consistent with data-allow-imbalance et al.):
+        // a bespoke header-less raw slide authors its own title + subtitle and may
+        // trip the name-free fallback below even when the spacing is correct. This
+        // explicit escape hatch lets the author affirm intentional title spacing.
+        // See validator-rules.md. (Precision is also improved by subtitle-folding
+        // in the name-free branch, so this opt-out is the last resort, not routine.)
+        if (slide.hasAttribute('data-allow-title-gap')) return [];
         const header = slide.querySelector(':scope > .header');
         const headerRendered = !!header && header.getClientRects().length > 0;
         let tgTitleRect = null, tgTitleSel = null, tgContentTop = Infinity;
+        let tgBandBottom = null;   // bottom of the title band (title, or title+subtitle)
+        let tgSubtitleProtected = false;  // a subtitle sits under the title → title can't be crowded
         const tgStage = slide.querySelector(':scope > .stage');
         if (headerRendered && tgStage) {
           tgTitleRect = header.getBoundingClientRect();
           tgTitleSel = shortSel(header);
+          // Header channel: the .header bbox already encloses any subtitle inside it,
+          // so the band bottom is simply the header bottom (no folding needed).
+          tgBandBottom = tgTitleRect.bottom;
           for (const el of tgStage.querySelectorAll('*')) {
             if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
             const cs = getComputedStyle(el);
@@ -3521,24 +3533,97 @@
           if (tEl) {
             tgTitleRect = tEl.getBoundingClientRect();
             tgTitleSel = shortSel(tEl);
+            tgBandBottom = tgTitleRect.bottom;
+            // Subtitle-folding: a bespoke title is frequently followed immediately by
+            // its OWN subtitle (smaller font, ~single line, a few px below). That
+            // subtitle is part of the title group, NOT content crowding the title —
+            // measuring the gap to it produced false positives on the header-less raw
+            // slides that are this branch's only callers. Geometrically (name-free)
+            // fold an immediate subtitle into the band: own-text, font strictly
+            // smaller than the title, ~single line tall, hugging the title (<24px
+            // below). Then the gap is measured from the band bottom and the subtitle
+            // is excluded from the content scan. A tall/large block right under the
+            // title is NOT a subtitle and still fires (real crowding).
+            const titleFs = parseFloat(getComputedStyle(tEl).fontSize) || 0;
+            // Multi-column-header guard: if the picked "title" shares its row with
+            // another similar-size text block, it is NOT the page title but one of a
+            // ROW of column anchors (e.g. `GPT之前 / GPT时代 / Agent时代`, or product
+            // pane headers). Treating a column's own content as "crowding a column
+            // heading" is a false positive — and on a slide whose real page title is
+            // rendered as chrome (not inside the stage) there is no title here to
+            // protect at all. Bail. Pure geometry, name-free: a real page title is
+            // alone on its top row; column anchors are not.
+            let sameRowPeer = false;
             for (const el of slide.querySelectorAll('*')) {
               if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
               if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+              if (!hasOwnText(el)) continue;
+              const cs = getComputedStyle(el);
+              if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+              const fs = parseFloat(cs.fontSize) || 0;
+              if (!(titleFs > 0 && fs >= titleFs * 0.75 && fs <= titleFs * 1.25)) continue;
+              const r = el.getBoundingClientRect();
+              if (r.width <= 40 || r.height <= 16) continue;
+              if (Math.abs(r.top - tgTitleRect.top) < tgTitleRect.height * 0.6) { sameRowPeer = true; break; }
+            }
+            if (sameRowPeer) return [];
+            // Subtitle-folding: a bespoke title is frequently followed immediately by
+            // its OWN subtitle (smaller font, ~single line, a few px below). That
+            // subtitle is part of the title group, NOT content crowding the title.
+            // Fold it into the band (geometry/name-free): own-text, font strictly
+            // smaller than the title, ~single line tall, hugging the title (<24px).
+            let subEl = null, subTop = Infinity;
+            for (const el of slide.querySelectorAll('*')) {
+              if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
+              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+              if (!hasOwnText(el)) continue;
               const cs = getComputedStyle(el);
               if (cs.position === 'absolute' || cs.position === 'fixed') continue;
               if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
               const r = el.getBoundingClientRect();
-              if (r.width > 40 && r.height > 16 && r.top >= tgTitleRect.bottom - 2) {
+              if (r.width <= 40 || r.height <= 16) continue;
+              if (r.top < tgTitleRect.bottom - 2) continue;            // must sit below title
+              const fs = parseFloat(cs.fontSize) || 0;
+              const isSubtitle = fs > 0 && fs < titleFs
+                && r.height <= fs * 2.0                                // ~single line (fs & height share scale)
+                && (r.top - tgTitleRect.bottom) < 24 * _scale;         // hugging the title
+              if (isSubtitle && r.top < subTop) { subTop = r.top; subEl = el; }
+            }
+            if (subEl) { tgBandBottom = subEl.getBoundingClientRect().bottom; tgSubtitleProtected = true; }
+            for (const el of slide.querySelectorAll('*')) {
+              if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
+              if (subEl && (el === subEl || subEl.contains(el) || el.contains(subEl))) continue;
+              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+              // Name-free "crowding content" must be TEXT overflowing UP toward the
+              // title (the rule's stated intent: "body grew / overflowed up"). A
+              // decorative sibling GRAPHIC (e.g. the evo-arrow `<svg>` 8px under its
+              // own `.evo-label`, a divider rule, a glow) is NOT body crowding a title
+              // — and when the guessed "title" is itself a decorative label, its
+              // adjacent graphic produced a phantom 8px gap (slide-4 false positive).
+              // Geometric graphic overlaps are R-OVERLAP / R-VISUAL's job, not this.
+              if (!hasOwnText(el)) continue;
+              const cs = getComputedStyle(el);
+              if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+              const r = el.getBoundingClientRect();
+              if (r.width > 40 && r.height > 16 && r.top >= tgBandBottom - 2) {
                 tgContentTop = Math.min(tgContentTop, r.top);
               }
             }
           }
         }
-        if (!(tgTitleRect && tgContentTop !== Infinity && tgContentTop >= tgTitleRect.top - 2)) {
+        if (!(tgTitleRect && tgBandBottom != null && tgContentTop !== Infinity && tgContentTop >= tgTitleRect.top - 2)) {
           return [];
         }
-        const gap = (tgContentTop - tgTitleRect.bottom) / _scale;
-        if (gap >= 24) return [];
+        const gap = (tgContentTop - tgBandBottom) / _scale;
+        // Floor: 24px breathing room below the title band. BUT when a subtitle was
+        // folded into the band, the title is already protected by the subtitle
+        // beneath it — a deliberate, sub-24px layout gap between that head and the
+        // body is by design, not crowding (false-positived P5/P8). With a subtitle
+        // present only a real OVERLAP (gap < 0) means content is colliding upward.
+        const floor = tgSubtitleProtected ? 0 : 24;
+        if (gap >= floor) return [];
         const gapPx = Math.round(gap);
         // validate.py: _lev = err if gap_px<12 else warn(逐字搬)。
         const severity = gapPx < 12 ? 'error' : 'warn';
