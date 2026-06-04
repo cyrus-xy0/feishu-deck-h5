@@ -1,0 +1,34 @@
+{
+  "_doc": "Default term map for the translator subskill. Workers MUST apply these for cross-deck consistency. Override per run with runs/<deck>/glossary.json (merged on top). Keys are source (zh) terms; values are the target-language rendering. This default targets English; ship a glossary.<lang>.json for other targets.",
+  "lang": "en",
+  "terms": {
+    "飞书": "Lark",
+    "豆包": "Doubao",
+    "字节跳动": "ByteDance",
+    "字节": "ByteDance",
+    "企业微信": "WeCom",
+    "企微": "WeCom",
+    "小红书": "RED",
+    "星巴克": "Starbucks",
+    "拿铁": "Latte",
+    "绿围裙": "Green Apron",
+    "数字员工": "digital employee",
+    "数字分身": "digital clone",
+    "管理分身": "management clone",
+    "口味雷达": "TasteRadar",
+    "AI 协调员": "AI Coordinator",
+    "AI协调员": "AI Coordinator",
+    "AI 伙伴教练": "AI Partner Coach",
+    "万店时代": "chain-store era",
+    "复合型人才": "cross-functional talent",
+    "知识冰山": "knowledge iceberg",
+    "飞轮": "flywheel"
+  },
+  "rules": [
+    "飞书 is ALWAYS Lark, never \"Feishu\".",
+    "Keep numbers / %, dates, currency, units, and proper-noun brand names byte-identical to the source.",
+    "Romanize Chinese company names to their established English form (Yum China, Chagee, Mixue, Luckin, Walmart, ...); keep product/brand names (TRAE, aily, Base, Miaoda) as-is.",
+    "Condense for fit: target text is longer than CJK and frames are fixed 1920x1080 — prefer the shortest accurate phrasing.",
+    "ASCII-ize CJK/fullwidth punctuation in the target ( ／→/  ＋→+  （）→()  「」→\"\"  　→ space )."
+  ]
+}

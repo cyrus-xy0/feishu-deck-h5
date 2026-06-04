@@ -25,7 +25,7 @@ materials directly.
 Before doing anything, lock three things:
 
 1. **Mode**: parse / design / render / validate / simulate / edit / publish /
-   full pipeline / generation-from-source-html / edit-imported-html.
+   full pipeline / generation-from-source-html / edit-imported-html / translate.
 2. **Scope**: one slide, named slides, whole deck, or one run folder. Default to the
    smallest scope the user asked for.
 3. **Target**: run directory, `outline.json`, `deck.json`, `index.html`, slide key,
@@ -132,6 +132,7 @@ Read exactly the subskill needed for the next step:
 | Turn `outline.json` into `deck.json`, render `index.html`, package assets                                                                     | `subskills/renderer/SKILL.md`  |
 | Check finished or in-progress deck for text, visual, structural, language, and delivery compliance                                            | `subskills/validator/SKILL.md` |
 | Operate existing artifacts: edit existing decks, reskin foreign HTML, lift/swap slides, convert/import existing material, round-trip recovery | `subskills/editor/SKILL.md`    |
+| Translate / localize an existing deck (or page range) into another language: backfill → parity branch-decision → verbatim text-pairs → apply → render (or in-place for lossy-backfill decks), plus embedded-iframe and brand-asset localization | `subskills/translator/SKILL.md` |
 | Publish confirmed HTML to Feishu hosting and write publish metadata back to Base                                                              | `subskills/publisher/SKILL.md` |
 | Parse uploaded materials into local `input/runtime-library/source-dossier.json` and normalize assets into `input/runtime-library/assets/`. A `.pptx` is converted (build_pptx) into a structured `canvas` deck.json — code reconstruction, no screenshots; hard pages → placeholder + reported | `subskills/parser/SKILL.md`    |
 | Rehearse how a validated deck may land with target customer or stakeholder roles                                                              | `subskills/simulator/SKILL.md` |
@@ -195,14 +196,20 @@ For an existing deck:
 2. Use **Editor** for edits, reskin, lift/swap, import/conversion, or round-trip
    recovery. Spawn an Editor worker when multi-agent dispatch is available unless
    the task is a known small edit.
-3. Use **Renderer** only when a changed `deck.json` or `outline.json` must be
+3. Use **Translator** to translate/localize the deck into another language. Routes
+   to `subskills/translator/SKILL.md`: backfill (if no deck.json) → parity branch
+   decision → verbatim text-pairs → `apply-text-pairs.py` → re-render (or in-place
+   for lossy-backfill decks), plus embedded-iframe + brand-asset localization. Spawn
+   a Translator worker (and parallel pair-fill workers) when multi-agent dispatch is
+   available.
+4. Use **Renderer** only when a changed `deck.json` or `outline.json` must be
    re-rendered. Spawn a Renderer worker when multi-agent dispatch is available.
-4. Run **Validator** before any HTML handoff after Editor or Renderer changes,
-   and fix non-zero findings before local delivery or publish confirmation.
-5. Use **Simulator** only after the deck has passed Validator and the local HTML
+5. Run **Validator** before any HTML handoff after Editor, Translator, or Renderer
+   changes, and fix non-zero findings before local delivery or publish confirmation.
+6. Use **Simulator** only after the deck has passed Validator and the local HTML
    artifact has been delivered, when the user asks for rehearsal or improvement
    advice.
-6. Use **Publisher** only after explicit publish confirmation. Spawn a Publisher
+7. Use **Publisher** only after explicit publish confirmation. Spawn a Publisher
    worker when multi-agent dispatch is available.
 
 ## Shared Contracts
@@ -294,6 +301,7 @@ Workers should load only the reference files they need:
 - `references/editing-discipline.md`
 - `references/round-trip-integrity.md`
 - `references/reskin.md`
+- `references/translation.md`
 - `references/converting-existing-material.md`
 - `references/prototype-embed.md`
 - `references/slide-deletion.md`
