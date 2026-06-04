@@ -679,22 +679,29 @@
       const slide = sf.querySelector('.slide');
       const key = slide?.dataset.slideKey || '';
       const label = slide?.dataset.screenLabel || `Slide ${i + 1}`;
+      // screen_label is "NN name" (baked leading number) — strip it so it isn't
+      // shown twice next to the live .es-num (which also drifts after reorder).
+      const name = label.replace(/^\s*\d[\w-]*\s+/, '') || label;
       const hidden = !!slide?.hasAttribute('data-hidden');
       return `
         <li class="es-item${hidden ? ' es-hidden' : ''}" data-key="${escapeAttr(key)}" draggable="true">
-          <span class="es-num">${String(i + 1).padStart(2, '0')}</span>
-          <span class="es-label" title="${escapeAttr(label)}">${escapeHtml(label)}</span>
-          <button class="es-eye" type="button" tabindex="-1"
-                  title="放映时隐藏/显示这一页(隐藏页仍可用直链访问)" aria-label="toggle hidden">
-            <svg class="i-eye" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-            <svg class="i-eye-off" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-          </button>
+          <div class="es-row">
+            <span class="es-num">${String(i + 1).padStart(2, '0')}</span>
+            <span class="es-label" title="${escapeAttr(label)}">${escapeHtml(name)}</span>
+            <button class="es-eye" type="button" tabindex="-1"
+                    title="放映时隐藏/显示这一页(隐藏页仍可用直链访问)" aria-label="toggle hidden">
+              <svg class="i-eye" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="i-eye-off" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </button>
+          </div>
+          <div class="es-thumb" aria-hidden="true"></div>
         </li>`;
     }).join('');
     sidebar.querySelector('.es-count').textContent = `${frames.length}`;
 
-    // wire click-to-scroll + drag
-    list.querySelectorAll('.es-item').forEach((li) => {
+    // wire click-to-scroll + drag + build the live thumbnail preview
+    list.querySelectorAll('.es-item').forEach((li, i) => {
+      buildThumb(li.querySelector('.es-thumb'), frames[i] && frames[i].querySelector('.slide'));
       li.addEventListener('click', () => {
         const key = li.dataset.key;
         const target = document.querySelector(`.slide-frame .slide[data-slide-key="${cssEscape(key)}"]`);
@@ -742,6 +749,34 @@
     showToast(nowHidden
       ? `已隐藏「${key}」· 放映翻页跳过(${isMac ? '⌘' : 'Ctrl'}S 保存)`
       : `已取消隐藏「${key}」`, 2200);
+  }
+
+  // Build a live thumbnail preview (PPT/Keynote slide navigator). Clone the real
+  // 1920×1080 `.slide` and scale it into the 16:9 thumb box — its own CSS renders
+  // a faithful mini-preview, fully offline, no rasterization. The clone lives
+  // OUTSIDE any `.slide-frame`, so the `.slide-frame.is-current` reveal rule never
+  // hides its children. We must restore the sizing that `.slide-frame .slide`
+  // normally provides (1920×1080 + scale), and neutralize heavy embeds.
+  function buildThumb(thumbEl, slide) {
+    if (!thumbEl || !slide) return;
+    thumbEl.textContent = '';
+    const clone = slide.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.querySelectorAll('[id]').forEach((e) => e.removeAttribute('id'));
+    clone.querySelectorAll('[contenteditable]').forEach((e) => e.removeAttribute('contenteditable'));
+    // iframes/videos: don't reload heavy embeds N× in the list — swap for a tile
+    clone.querySelectorAll('iframe, video').forEach((el) => {
+      const ph = document.createElement('div');
+      ph.className = 'es-thumb-embed';
+      el.replaceWith(ph);
+    });
+    clone.style.cssText =
+      'position:absolute;top:0;left:0;margin:0;width:1920px;height:1080px;' +
+      'transform-origin:top left;pointer-events:none;';
+    thumbEl.appendChild(clone);
+    // thumbEl is in the DOM → clientWidth is live; scale 1920 down to fit.
+    const w = thumbEl.clientWidth || 224;
+    clone.style.transform = 'scale(' + (w / 1920) + ')';
   }
 
   let sbDragSrc = null;

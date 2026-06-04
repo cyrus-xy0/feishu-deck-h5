@@ -532,47 +532,74 @@ def _slide_open_tag(html: str, key: str) -> str | None:
     return m.group(0) if m else None
 
 
-def run_hidden_sync(index_html_path: Path, deck_json_path: Path, dry_run: bool) -> int:
-    """Surgical: reconcile ONLY the `hidden` flag (隐藏页) from the rendered
-    index.html back into deck.json. Reads `data-hidden` per slide-key and
-    sets/clears `slide.hidden` — touches nothing else (no raw conversion, no
-    inner-HTML diff). This is what the in-browser edit-mode eye toggle writes
-    into the saved HTML; run this to push it back to the deck.json source."""
+def run_surgical_sync(index_html_path: Path, deck_json_path: Path,
+                      do_hidden: bool, do_order: bool, dry_run: bool) -> int:
+    """Surgical: reconcile ONLY structural flags from the rendered index.html back
+    into deck.json — `hidden` (隐藏页, per-slide data-hidden) and/or slide ORDER
+    (the edit-mode drag-reorder). Touches nothing else (no raw conversion, no
+    inner-HTML diff). This is what the in-browser editor changes; run this to push
+    those changes to the deck.json source. Both can run together."""
     html = index_html_path.read_text(encoding="utf-8")
     deck = json.loads(deck_json_path.read_text(encoding="utf-8"))
+    changed = False
 
-    changes, missing = [], []
-    for slide in deck.get("slides", []):
-        key = slide.get("key")
-        if not key:
-            continue
-        tag = _slide_open_tag(html, key)
-        if tag is None:
-            missing.append(key)
-            continue
-        html_hidden = bool(re.search(r'\bdata-hidden\b', tag))
-        cur_hidden = bool(slide.get("hidden"))
-        if html_hidden == cur_hidden:
-            continue
-        changes.append((key, cur_hidden, html_hidden))
-        if not dry_run:
-            if html_hidden:
-                slide["hidden"] = True
-            else:
-                slide.pop("hidden", None)   # clean-remove, no hidden:false residue
+    # --- hidden flag ---
+    if do_hidden:
+        h_changes, missing = [], []
+        for slide in deck.get("slides", []):
+            key = slide.get("key")
+            if not key:
+                continue
+            tag = _slide_open_tag(html, key)
+            if tag is None:
+                missing.append(key)
+                continue
+            html_hidden = bool(re.search(r'\bdata-hidden\b', tag))
+            if html_hidden == bool(slide.get("hidden")):
+                continue
+            h_changes.append((key, bool(slide.get("hidden")), html_hidden))
+            if not dry_run:
+                if html_hidden:
+                    slide["hidden"] = True
+                else:
+                    slide.pop("hidden", None)   # clean-remove, no hidden:false residue
+        print(f"[hidden] scanned {len(deck.get('slides', []))} slides")
+        for key, old, new in h_changes:
+            print(f"  {key}: hidden {old} → {new}")
+        if missing:
+            print(f"  ⚠ {len(missing)} slide(s) not found in HTML (skipped): "
+                  f"{', '.join(missing[:8])}")
+        if not h_changes:
+            print("  ✓ no hidden-flag drift.")
+        changed = changed or bool(h_changes)
 
-    print(f"sync-index-to-deck --hidden-only: scanned {len(deck.get('slides', []))} slides")
-    for key, old, new in changes:
-        print(f"  {key}: hidden {old} → {new}")
-    if missing:
-        print(f"  ⚠ {len(missing)} deck.json slide(s) not found in HTML "
-              f"(skipped): {', '.join(missing[:8])}")
-    if not changes:
-        print("  ✓ no hidden-flag drift — deck.json already matches the HTML.")
-        return 0
+    # --- slide order (drag-reorder) ---
+    if do_order:
+        dom_order = re.findall(
+            r'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="([^"]+)"', html)
+        deck_keys = [s.get("key") for s in deck.get("slides", []) if s.get("key")]
+        print(f"[order] HTML has {len(dom_order)} slides, deck.json has {len(deck_keys)}")
+        if not dom_order:
+            print("  ⚠ no data-slide-key in HTML — can't sync order (skipped).")
+        elif set(dom_order) != set(deck_keys):
+            only_html = set(dom_order) - set(deck_keys)
+            only_deck = set(deck_keys) - set(dom_order)
+            print(f"  ⚠ key sets differ (added/removed slides) — order NOT synced. "
+                  f"only-in-HTML: {sorted(only_html)[:5]}  only-in-deck: {sorted(only_deck)[:5]}")
+        elif dom_order == deck_keys:
+            print("  ✓ order already matches.")
+        else:
+            print(f"  reorder: {deck_keys}  →  {dom_order}")
+            if not dry_run:
+                order_idx = {k: i for i, k in enumerate(dom_order)}
+                deck["slides"].sort(key=lambda s: order_idx.get(s.get("key"), 1 << 30))
+            changed = True
+
     if dry_run:
-        print(f"\n  (--dry-run; {deck_json_path} NOT written. "
-              f"{len(changes)} flag(s) would change.)")
+        print(f"\n  (--dry-run; {deck_json_path} NOT written.)")
+        return 0
+    if not changed:
+        print("  ✓ deck.json already in sync — nothing written.")
         return 0
 
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -581,7 +608,7 @@ def run_hidden_sync(index_html_path: Path, deck_json_path: Path, dry_run: bool) 
     print(f"  ✓ backup: {bak.name}")
     deck_json_path.write_text(
         json.dumps(deck, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"  ✓ updated {len(changes)} hidden flag(s) in {deck_json_path.name}")
+    print(f"  ✓ wrote {deck_json_path.name}")
     print(f"\nNext step: re-render to apply:")
     print(f"  python3 {Path(__file__).parent.name}/render-deck.py "
           f"{deck_json_path}  {deck_json_path.parent}/")
@@ -607,18 +634,24 @@ def main() -> int:
                          "data-hidden in the HTML back into deck.json. Touches "
                          "nothing else (no raw conversion). Use after the in-browser "
                          "edit-mode eye toggle + ⌘S to push the change to the source.")
+    ap.add_argument("--order-only", action="store_true",
+                    help="surgical: reconcile ONLY slide ORDER (the edit-mode "
+                         "drag-reorder) from the HTML DOM order back into deck.json. "
+                         "Touches nothing else. Combine with --hidden-only to sync both.")
     args = ap.parse_args()
 
     if not args.index_html.exists():
         print(f"sync-index-to-deck: {args.index_html} not found", file=sys.stderr)
         return 2
 
-    if args.hidden_only:
+    if args.hidden_only or args.order_only:
         if not args.deck_json.exists():
-            print(f"sync-index-to-deck: --hidden-only needs an existing "
+            print(f"sync-index-to-deck: --hidden-only/--order-only need an existing "
                   f"{args.deck_json}", file=sys.stderr)
             return 2
-        return run_hidden_sync(args.index_html, args.deck_json, dry_run=args.dry_run)
+        return run_surgical_sync(args.index_html, args.deck_json,
+                                 do_hidden=args.hidden_only, do_order=args.order_only,
+                                 dry_run=args.dry_run)
 
     # BACKFILL: explicit flag, OR auto-engaged when the deck.json target doesn't
     # exist yet (a legacy HTML-only deck being operated on for the first time).
