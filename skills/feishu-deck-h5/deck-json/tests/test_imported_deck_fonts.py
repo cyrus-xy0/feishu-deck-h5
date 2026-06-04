@@ -11,17 +11,19 @@ layout's defined size — never snap-and-overflow, never advisory-and-ignore.
 L3 (still valid): present-mode UI chrome (pager / fullscreen-hint / mode-toggle
     / mobile nav) is framework UI, NOT slide content — excluded from R06.
 
-Static — no Chromium needed.
+UNIFY-VALIDATE-ARCH step 4b: R06 / R20 now live in the unified engine (rendered
+DOM). The `_deck_imported` helper that the old _validate_audits.py exported is
+gone; the behavioral invariant it backed (imported decks are NOT exempted from
+the font floors — L1 reverted) is now asserted directly through the engine.
+Requires Chromium.
 """
 import sys
 import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-from _validate_common import Issues          # noqa: E402
-from _validate_audits import (               # noqa: E402
-    audit_font_sizes, audit_type_ladder, _deck_imported,
-)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import engine_helpers as E  # noqa: E402
 
 # off-floor body (18px) + off-tier (82px) in slide content; plus chrome fonts
 _CONTENT = ('<style>'
@@ -34,17 +36,11 @@ _META = '<meta name="fs-deck-origin" content="imported">'
 
 
 def _run(html):
-    i = Issues()
-    audit_font_sizes(html, i)
-    audit_type_ladder(html, i)
-    err = [c for c, _ in i.errors]
-    warn = [c for c, _ in i.warnings]
+    E.skip_if_no_engine()
+    findings = E.run(html)
+    err = [f["rule"] for f in findings if f.get("severity") == "error"]
+    warn = [f["rule"] for f in findings if f.get("severity") == "warn"]
     return err, warn
-
-
-def test_deck_imported_detection():
-    assert _deck_imported(_META + _CONTENT) is True
-    assert _deck_imported(_CONTENT) is False
 
 
 def test_normal_deck_font_violations_are_errors():
@@ -56,7 +52,8 @@ def test_imported_deck_font_violations_still_error():
     """L1 REVERTED: being imported does NOT exempt fonts. Small body (R06) and
     off-size hero (R20) STILL error — being a foreign deck is not a license for
     unreadable text. The fix is enlarge+grow-box / hero-layout-size, not a
-    severity downgrade."""
+    severity downgrade. (The engine reproduces the no-downgrade behavior the old
+    _deck_imported gate enforced.)"""
     err, warn = _run(_META + _CONTENT)
     assert "R06" in err, f"imported deck small-body must still ERROR (got err={err})"
     assert "R20" in err, f"imported deck off-size hero must still ERROR (got err={err})"
@@ -67,11 +64,11 @@ def test_present_mode_chrome_excluded_from_r06():
     never flagged as content font-floor violations — even though they sit below
     the chrome floor (11-13px). Holds regardless of imported origin."""
     for html in (_CONTENT, _META + _CONTENT):
-        i = Issues()
-        audit_font_sizes(html, i)
-        chrome_hits = [m for c, m in i.errors + i.warnings
-                       if c == "R06" and ("pager" in m or "nav-hint" in m
-                                          or "mode-toggle" in m or "fs-mobile" in m)]
+        E.skip_if_no_engine()
+        chrome_hits = [f["message"] for f in E.run(html)
+                       if f.get("rule") == "R06" and any(
+                           tok in f.get("message", "")
+                           for tok in ("pager", "nav-hint", "mode-toggle", "fs-mobile"))]
         assert not chrome_hits, f"present-mode chrome wrongly flagged by R06: {chrome_hits}"
 
 

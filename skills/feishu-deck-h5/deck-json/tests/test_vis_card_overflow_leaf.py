@@ -12,33 +12,22 @@ import pathlib
 
 HERE = pathlib.Path(__file__).resolve()
 ASSETS = HERE.parents[2] / "assets"
-AUDIT = ASSETS / "visual-audit.js"
+sys.path.insert(0, str(HERE.parent))
+import engine_helpers as E  # noqa: E402
 
 
-def test_leaf_spill_wired_in_visual_audit_js():
-    js = AUDIT.read_text(encoding="utf-8")
-    assert "leaf-text-spill" in js, "leaf-text-spill direction missing"
-    assert "getClientRects()" in js, "Range line-box measurement missing"
+def test_leaf_spill_wired_in_engine():
+    js = E.audits_js_text()
+    assert E.rule_in_engine("R-VIS-CARD-OVERFLOW")
+    assert "leaf-text-spill" in js, "leaf-text-spill direction missing from audits.js"
+    assert "getClientRects()" in js, "Range line-box measurement missing from audits.js"
     assert "children.length === 0" in js, "text-leaf guard (no element children) missing"
 
 
 def _run(html):
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return None
-    audit = AUDIT.read_text(encoding="utf-8")
-    try:
-        with sync_playwright() as p:
-            b = p.chromium.launch()
-            pg = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
-            pg.set_content(html)
-            pg.wait_for_timeout(150)
-            rep = pg.evaluate("(" + audit + ")()")
-            b.close()
-    except Exception:
-        return None
-    return [c for c in rep.get("card_overflow", []) if c.get("direction") == "leaf-text-spill"]
+    E.skip_if_no_engine()
+    return [c for c in E.findings_for("R-VIS-CARD-OVERFLOW", html)
+            if c.get("direction") == "leaf-text-spill"]
 
 
 # a framed cell (border) too short for its text leaf → leaf wraps + spills past border

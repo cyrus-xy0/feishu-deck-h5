@@ -72,7 +72,8 @@ REQUIRED=(
   "assets/feishu-deck.css"
   "assets/feishu-deck.js"
   "assets/validate.py"
-  "assets/visual-audit.js"
+  "assets/audits.js"
+  "assets/run-audits.py"
   "assets/lark-logo.png"
   "assets/lark-cover-bg.jpg"
   "_body.partial.html"
@@ -288,18 +289,18 @@ if command -v git >/dev/null 2>&1 && [ -d "$SKILL_ROOT/.git" ]; then
   fi
 fi
 
-# ---- Check 6: visual-audit.js syntax (gate before Playwright runs) ----
-# 2026-05-24 · audit JS was extracted from validate.py r"""...""" string.
-# Catch syntax errors at preflight time, not 30s later inside Chromium.
-# `node --check` is a parse-only check (no execution), takes ~50ms.
-# Skip silently if node isn't installed — the audit still works via
-# Playwright (which has its own JS engine), the gate is just a nice-to-have.
+# ---- Check 6: audits.js syntax (gate before Playwright runs) ----
+# UNIFY-VALIDATE-ARCH step 4: the SINGLE rule source is assets/audits.js (the
+# old visual-audit.js was retired). Catch syntax errors at preflight time, not
+# 30s later inside Chromium. `node --check` is a parse-only check (no execution),
+# takes ~50ms. Skip silently if node isn't installed — the engine still parses
+# via Playwright (its own JS engine), the gate is just a nice-to-have.
 if command -v node >/dev/null 2>&1; then
-  if ! node --check "$SKILL_ROOT/assets/visual-audit.js" >/dev/null 2>&1; then
-    echo "PREFLIGHT FAIL · exit 4 · visual-audit.js has JS syntax errors"
+  if ! node --check "$SKILL_ROOT/assets/audits.js" >/dev/null 2>&1; then
+    echo "PREFLIGHT FAIL · exit 4 · audits.js has JS syntax errors"
     echo
     echo "  Run for details:"
-    echo "    node --check $SKILL_ROOT/assets/visual-audit.js"
+    echo "    node --check $SKILL_ROOT/assets/audits.js"
     echo
     exit 4
   fi

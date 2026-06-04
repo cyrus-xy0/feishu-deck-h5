@@ -4,25 +4,29 @@ The most lethal process root-cause this session: a raw deck NOT re-bundled with
 the current feishu-deck.js has 0 lines of auto-balance — the runtime box-crowd
 fix never runs. Static gate: deck must carry the `balanceSlide` fingerprint.
 
-Static — no Chromium needed.
+UNIFY-VALIDATE-ARCH step 4b: R-AUTOBALANCE-PRESENT now lives in the unified
+engine (rendered DOM). Fixtures render headlessly via engine_helpers (raw=True,
+so the fragment's deck-ness — the rule's firing condition — is preserved
+verbatim). The auto-balance fingerprint is the same literal the engine uses.
+Requires Chromium.
 """
 import sys
 import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-from _validate_common import Issues          # noqa: E402
-from _validate_audits import (               # noqa: E402
-    audit_autobalance_present, _AUTOBALANCE_SIG,
-)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import engine_helpers as E  # noqa: E402
 
+# The auto-balance runtime fingerprint the engine looks for (audits.js
+# AUTOBALANCE_SIG / run-audits.py _AUTOBALANCE_SIG — same literal).
+_AUTOBALANCE_SIG = "function balanceSlide(slide)"
 _SIG_SCRIPT = '<script>' + _AUTOBALANCE_SIG + ' { /* ... */ }</script>'
 
 
 def _run(html):
-    i = Issues()
-    audit_autobalance_present(html, i)
-    return [c for c, _ in i.errors]
+    E.skip_if_no_engine()
+    return E.err_codes("R-AUTOBALANCE-PRESENT", html, raw=True)
 
 
 def test_fires_on_raw_deck_without_autobalance():

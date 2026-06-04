@@ -8,34 +8,23 @@ import pathlib
 
 HERE = pathlib.Path(__file__).resolve()
 ASSETS = HERE.parents[2] / "assets"
-AUDIT = ASSETS / "visual-audit.js"
+sys.path.insert(0, str(HERE.parent))
+import engine_helpers as E  # noqa: E402
 VALIDATE = ASSETS / "validate.py"
 DOC = HERE.parents[2] / "references" / "validator-rules.md"
 
 
 def test_hero_floor_wired():
-    js = AUDIT.read_text(encoding="utf-8")
-    assert "hero_floor: []" in js and "out.hero_floor.push" in js
-    assert "report.get('hero_floor'" in VALIDATE.read_text(encoding="utf-8")
+    # UNIFY-VALIDATE step 4b: single rule source — emitted by the unified
+    # engine (audits.js) + documented (was bucket-in-visual-audit.js +
+    # validate.py report.get mapping, both retired).
+    assert E.rule_in_engine("R-VIS-HERO-FLOOR")
     assert "R-VIS-HERO-FLOOR" in DOC.read_text(encoding="utf-8")
 
 
 def _run(html):
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return None
-    audit = AUDIT.read_text(encoding="utf-8")
-    try:
-        with sync_playwright() as p:
-            b = p.chromium.launch()
-            pg = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
-            pg.set_content(html); pg.wait_for_timeout(150)
-            rep = pg.evaluate("(" + audit + ")()")
-            b.close()
-    except Exception:
-        return None
-    return rep.get("hero_floor", [])
+    E.skip_if_no_engine()
+    return E.findings_for("R-VIS-HERO-FLOOR", html)
 
 
 def _cover(px):

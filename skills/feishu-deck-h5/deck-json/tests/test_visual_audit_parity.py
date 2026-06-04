@@ -1,11 +1,16 @@
-"""F-13: cross-language parity between Python validate.py and the JS
-visual-audit.js for the genuinely-SHARED vocab. Static — parses the JS source,
-no Chromium/Playwright needed (the visual audits don't run here anyway).
+"""UNIFY-VALIDATE-ARCH step 4b · repurposed.
 
-Covers SAME-concept pairs only. The HERO sets are intentionally DIFFERENT
-(Python HERO_TITLE_LAYOUTS = hero-TITLE/header layouts, excludes big-stat;
-JS HERO_LAYOUTS = hero-ZONE layouts, includes big-stat) and are deliberately
-NOT asserted equal — see the cross-referencing comments on both definitions.
+Originally this asserted cross-LANGUAGE parity between Python validate.py and the
+JS visual-audit.js for the genuinely-SHARED vocab (TIER ladder, mock-container
+set). After step 4 there is a SINGLE rule source — the unified engine
+`assets/audits.js` — so that Python↔JS parity no longer exists to test.
+
+What still matters and is checked here: the engine's hardcoded R-VIS-TIER ladder
+(`VIS_TIER`) must equal the CSS `--fs-*` type tokens (the Python `TYPE_LADDER_PX`,
+which is still derived from the tokens in _validate_common) — catching drift if
+the ladder is re-tuned in CSS but the engine's hardcoded set isn't. And the
+mock-container set (`VIS_TIER_MOCK`) is single-sourced inside the engine (the
+member that once drifted, `pd-card`, is present). Static — no Chromium needed.
 """
 import re
 import sys
@@ -13,30 +18,28 @@ import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-import validate as V  # noqa: E402
+import validate as V  # noqa: E402  (TYPE_LADDER_PX survives in _validate_common)
 
-JS = (ASSETS / "visual-audit.js").read_text(encoding="utf-8")
+JS = (ASSETS / "audits.js").read_text(encoding="utf-8")
 
 
-def test_js_tier_matches_python_ladder():
-    """The JS R-VIS-TIER ladder must equal the Python R20 ladder (both = the
-    CSS --fs-* tokens). Catches drift if the ladder is re-tuned in CSS but the
-    JS hardcoded TIER isn't updated."""
-    m = re.search(r'const TIER = new Set\(\[([\d,\s]+)\]\)', JS)
-    assert m, "could not find `const TIER = new Set([...])` in visual-audit.js"
+def test_engine_tier_matches_css_token_ladder():
+    """The engine R-VIS-TIER ladder (VIS_TIER) must equal the CSS --fs-* token
+    ladder (Python TYPE_LADDER_PX). Catches drift if the ladder is re-tuned in
+    CSS but the engine's hardcoded VIS_TIER isn't updated."""
+    m = re.search(r'const VIS_TIER = new Set\(\[([\d,\s]+)\]\)', JS)
+    assert m, "could not find `const VIS_TIER = new Set([...])` in audits.js"
     js_tier = {int(x) for x in re.findall(r'\d+', m.group(1))}
     assert js_tier == set(V.TYPE_LADDER_PX) == {16, 24, 28, 48}, \
-        f"JS TIER {js_tier} != Python TYPE_LADDER_PX {set(V.TYPE_LADDER_PX)}"
+        f"engine VIS_TIER {js_tier} != Python TYPE_LADDER_PX {set(V.TYPE_LADDER_PX)}"
 
 
 def test_mock_containers_single_sourced():
-    """The tier-mock and body-floor-mock container sets must stay identical —
-    enforced by aliasing (MOCK_CONTAINERS = TIER_MOCK), not a parallel copy
-    that can drift (it drifted on pd-card before F-13)."""
-    assert re.search(r'MOCK_CONTAINERS\s*=\s*TIER_MOCK\b', JS), \
-        "MOCK_CONTAINERS should alias TIER_MOCK (single source), not duplicate it"
-    tm = re.search(r'TIER_MOCK = \[(.*?)\]', JS, re.S)
-    assert tm, "TIER_MOCK array not found"
+    """The mock-container set is single-sourced inside the engine (VIS_TIER_MOCK,
+    shared by the tier-mock and body-floor-mock exemptions). The member that once
+    drifted (pd-card) must be present."""
+    tm = re.search(r'VIS_TIER_MOCK = \[(.*?)\]', JS, re.S)
+    assert tm, "VIS_TIER_MOCK array not found in audits.js"
     members = set(re.findall(r"'([^']+)'", tm.group(1)))
     assert 'pd-card' in members  # the member that had drifted
 

@@ -7,10 +7,11 @@ hand-built / imported deck: the slide is rendered and audited (``raw`` is NOT in
 (``.stage`` / ``.header`` / ``.grid`` / ``.card`` / ``CARD_KEYS`` …) finds zero
 candidates and silently passes.
 
-Methodology mirrors the sibling per-rule tests (``test_vis_gutter`` etc.): read
-``assets/visual-audit.js``, run it in headless Chromium via ``set_content`` with a
-minimal, geometry-self-contained fixture (all sizes inline — no framework CSS), and
-inspect the report bucket.
+Methodology mirrors the sibling per-rule tests (``test_vis_gutter`` etc.): run
+the unified engine (``assets/audits.js``) in headless Chromium via
+``engine_helpers`` with a minimal, geometry-self-contained fixture (all sizes
+inline — no framework CSS), and inspect the rule's findings (the engine carries
+the same payload fields the old visual-audit.js report buckets did).
 
 Empirically verified raw coverage (workflow wgry1zvgg, real render + Chromium). All 5
 gaps were FIXED 2026-05-31 — name-free fallbacks that add raw coverage WITHOUT changing
@@ -56,45 +57,36 @@ import pathlib
 # imports cleanly under the CI's `unittest` discovery, where pytest is not installed.
 # Matches the convention of the sibling test_vis_*.py files.
 
+import sys
+
 HERE = pathlib.Path(__file__).resolve()
 ASSETS = HERE.parents[2] / "assets"
-AUDIT = ASSETS / "visual-audit.js"
-VALIDATE = ASSETS / "validate.py"
+sys.path.insert(0, str(HERE.parent))
+import engine_helpers as E  # noqa: E402
+
+# The old visual-audit.js report buckets → unified-engine rule codes. The engine
+# carries the SAME payload fields on each finding (kind/is_svg/text/right_slack…),
+# so the per-test inspections are unchanged.
+_BUCKET_RULE = {
+    "gutter": "R-VIS-GUTTER",
+    "short_label_floor": "R-VIS-SHORT-LABEL-FLOOR",
+    "crowd": "R-VIS-CROWD",
+    "hero_floor": "R-VIS-HERO-FLOOR",
+    "peer_size": "R-VIS-PEER-SIZE",
+    "balance": "R-VIS-BALANCE",
+    "card_overflow": "R-VIS-CARD-OVERFLOW",
+    "title_gap": "R-VIS-TITLE-GAP",
+}
 
 
 # --------------------------------------------------------------------------- #
 # harness                                                                      #
 # --------------------------------------------------------------------------- #
-def _run(html):
-    """Run visual-audit.js against `html` in headless Chromium; return the report
-    dict, or None if Playwright/Chromium is unavailable (caller skips)."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return None
-    audit = AUDIT.read_text(encoding="utf-8")
-    try:
-        with sync_playwright() as p:
-            b = p.chromium.launch()
-            pg = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
-            pg.set_content(html)
-            pg.wait_for_timeout(150)
-            rep = pg.evaluate("(" + audit + ")()")
-            b.close()
-    except Exception:
-        return None
-    return rep
-
-
 def _bucket(html, name, kind=None):
-    rep = _run(html)
-    if rep is None:
-        import pytest
-        pytest.skip("Chromium/Playwright unavailable")
-    rows = rep.get(name, [])
-    if kind is not None:
-        rows = [r for r in rows if r.get("kind") == kind]
-    return rows
+    """Findings for the engine rule behind report bucket `name` (optionally
+    filtered to a `kind`). Skips if Chromium is unavailable."""
+    E.skip_if_no_engine()
+    return E.findings_for(_BUCKET_RULE[name], html, kind=kind)
 
 
 def _slide(layout, inner):
@@ -111,15 +103,13 @@ _BORDER = "border:1px solid #888"
 # wiring sanity (no browser needed)                                            #
 # --------------------------------------------------------------------------- #
 def test_buckets_declared_and_mapped():
-    """Every bucket these tests inspect must be declared in visual-audit.js's
-    `out = {...}` and consumed in validate.py — else a rename silently zeroes the
-    rule and every raw/schema assertion here would skip-pass on an empty list."""
-    js = AUDIT.read_text(encoding="utf-8")
-    vy = VALIDATE.read_text(encoding="utf-8")
-    for bucket in ("gutter", "short_label_floor", "crowd", "hero_floor",
-                   "peer_size", "balance", "card_overflow", "title_gap"):
-        assert bucket + ": []" in js, f"bucket {bucket} not declared in visual-audit.js"
-        assert "report.get('" + bucket + "'" in vy, f"bucket {bucket} not mapped in validate.py"
+    """Every rule these tests inspect must be emitted by the unified engine — else
+    a rename silently zeroes the rule and every raw/schema assertion here would
+    skip-pass on an empty list. (Was: a bucket declared in visual-audit.js AND
+    mapped via validate.py report.get — both retired in step 4b.)"""
+    for bucket, rule in _BUCKET_RULE.items():
+        assert E.rule_in_engine(rule), \
+            f"rule {rule} (bucket {bucket}) not emitted by the unified engine"
 
 
 # --------------------------------------------------------------------------- #

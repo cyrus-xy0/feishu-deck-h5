@@ -2,12 +2,15 @@
 """
 feishu-deck-h5  ·  validator SHARED KERNEL (_validate_common)
 
-The clean-DAG base layer of the validator (F-10 module split). Holds the
-`Issues` collector, slide extraction, the DOM text-leaf walker, and ALL the
-module-level constants / compiled regexes / helpers that ≥1 audit shares.
+The shared KERNEL of the validator. Holds the `Issues` collector, slide
+extraction, the DOM text-leaf walker, the type-token ladder, and ALL the
+module-level constants / compiled regexes / helpers shared across the validator
+adapter (validate.py) and the runner byte/source checks (run-audits.py).
 
-Imports nothing from validate.py or _validate_audits.py — it is the bottom of
-the DAG (_validate_common ← _validate_audits ← validate).
+UNIFY-VALIDATE-ARCH step 4: the old `_validate_audits` audit module was retired
+(its rules moved to the unified engine). This module imports nothing from
+validate.py — it stays the bottom of the DAG (_validate_common ← validate.py /
+run-audits.py).
 """
 
 from __future__ import annotations

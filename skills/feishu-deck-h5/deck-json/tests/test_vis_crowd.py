@@ -29,10 +29,12 @@ VALIDATE = ASSETS / "validate.py"
 
 # ---------- 1. STATIC wiring (always runs) ----------
 
-def test_crowd_wired_in_visual_audit_js():
-    js = (ASSETS / "visual-audit.js").read_text(encoding="utf-8")
-    assert "crowd: []" in js, "out.crowd array missing from visual-audit.js"
-    assert "out.crowd.push" in js, "crowd push site missing"
+def test_crowd_wired_in_engine():
+    # UNIFY-VALIDATE step 4b: single rule source — the crowd geometry now lives
+    # in the unified engine (audits.js). (Was: out.crowd in visual-audit.js +
+    # validate.py report.get('crowd') mapping — both retired.)
+    js = (ASSETS / "audits.js").read_text(encoding="utf-8")
+    assert "R-VIS-CROWD" in js, "R-VIS-CROWD missing from audits.js"
     # the geometric gate: distBottom < N (crowding floor) AND bottom-shift
     assert re.search(r"distBottom\s*<\s*10\s*&&\s*distTop\s*>\s*distBottom\s*\+\s*16", js), \
         "crowd threshold (distBottom<10 && distTop>distBottom+16) drifted"
@@ -40,10 +42,13 @@ def test_crowd_wired_in_visual_audit_js():
     assert "_isMediaBox" in js and "_isFramedBox" in js
 
 
-def test_crowd_emitted_in_validate_py():
-    py = (ASSETS / "validate.py").read_text(encoding="utf-8")
-    assert "report.get('crowd'" in py, "validate.py does not consume report['crowd']"
-    assert "R-VIS-CROWD" in py, "validate.py does not emit R-VIS-CROWD"
+def test_crowd_emitted_by_engine():
+    # The rule is emitted by the unified engine (single source); validate.py is
+    # now a thin adapter that folds engine findings in — no per-bucket mapping.
+    sys.path.insert(0, str(TESTS))
+    import engine_helpers as E  # noqa: E402
+    assert E.rule_in_engine("R-VIS-CROWD"), \
+        "R-VIS-CROWD not emitted by the unified engine"
 
 
 def test_crowd_documented():

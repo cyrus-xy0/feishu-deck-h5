@@ -14,15 +14,19 @@ while STRUCTURAL / GEOMETRY rules stay full-severity error regardless of import:
 
     R-KEY  DUPLICATE / empty / invalid-kebab slug         (round-trip locator)
 
-These tests import the audits directly (no render / no Playwright) and assert the
-severity bucket each finding lands in for an imported slide vs an authored one.
+UNIFY-VALIDATE-ARCH step 4b: these rules now live in the unified engine (rendered
+DOM). The tests still assert the SEVERITY BUCKET each finding lands in for an
+imported (data-lifted) slide vs an authored one — engine_helpers.buckets() maps
+the engine severities (error/warn/warn_soft) onto the historical bucket names
+(errors/warnings/soft_warnings) so the assertions are unchanged. Requires Chromium.
 """
 import sys
 import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-import validate as V  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import engine_helpers as E  # noqa: E402
 
 
 # --- fixture builders -------------------------------------------------------
@@ -37,31 +41,25 @@ def _slide(body: str = "", *, key: str = "k", lifted: bool = False,
     )
 
 
-def _doc(slides: list[str]) -> str:
-    return "<html><head></head><body>" + "".join(slides) + "</body></html>"
+def _run(rule, slides):
+    """One engine run over the slide fragments → bucket dict for `rule`."""
+    E.skip_if_no_engine()
+    return E.buckets(list(slides), rule=rule)
 
 
-def _run(fn, *args):
-    iss = V.Issues()
-    fn(*args, iss)
-    return iss
-
-
-def _codes(iss, bucket):
-    return [c for c, _ in getattr(iss, bucket)]
+def _codes(buckets, bucket):
+    return buckets[bucket]
 
 
 # --- R05 banned punctuation (deck-wide; downgrades when ALL slides imported) -
 def test_r05_ellipsis_errors_on_authored_deck():
-    html = _doc([_slide("<p>未完待续…</p>")])
-    iss = _run(V.audit_copy_rules, html)
+    iss = _run("R05", [_slide("<p>未完待续…</p>")])
     assert "R05" in _codes(iss, "errors")
     assert "R05" not in _codes(iss, "soft_warnings")
 
 
 def test_r05_ellipsis_downgrades_on_imported_deck():
-    html = _doc([_slide("<p>未完待续…</p>", lifted=True)])
-    iss = _run(V.audit_copy_rules, html)
+    iss = _run("R05", [_slide("<p>未完待续…</p>", lifted=True)])
     assert "R05" not in _codes(iss, "errors"), "imported deck must NOT block on R05"
     assert "R05" in _codes(iss, "soft_warnings"), "R05 must be surfaced as soft warn"
 
@@ -71,42 +69,37 @@ _OFF_HEX_BODY = '<div class="card" style="color:#c00000">红</div>'
 
 
 def test_r10_hex_warns_on_authored_deck():
-    html = _doc([_slide(_OFF_HEX_BODY)])
-    iss = _run(V.audit_hex_palette, html)
+    iss = _run("R10", [_slide(_OFF_HEX_BODY)])
     # authored: regular warning (promoted to error under --strict)
     assert "R10" in _codes(iss, "warnings")
     assert "R10" not in _codes(iss, "soft_warnings")
 
 
 def test_r10_hex_downgrades_on_imported_deck():
-    html = _doc([_slide(_OFF_HEX_BODY, lifted=True)])
-    iss = _run(V.audit_hex_palette, html)
+    iss = _run("R10", [_slide(_OFF_HEX_BODY, lifted=True)])
     assert "R10" not in _codes(iss, "errors")
     assert "R10" in _codes(iss, "soft_warnings"), "imported R10 must be soft (no --strict promote)"
 
 
 # --- R-KEY positional slug (per-slide downgrade) ----------------------------
 def test_rkey_positional_warns_on_authored_slide():
-    slides = [_slide(key="slide-001", lifted=False)]
-    iss = _run(V.audit_slide_keys, slides)
+    iss = _run("R-KEY", [_slide(key="slide-001", lifted=False)])
     assert "R-KEY" in _codes(iss, "warnings")
     assert "R-KEY" not in _codes(iss, "soft_warnings")
 
 
 def test_rkey_positional_downgrades_on_imported_slide():
-    slides = [_slide(key="slide-001", lifted=True)]
-    iss = _run(V.audit_slide_keys, slides)
+    iss = _run("R-KEY", [_slide(key="slide-001", lifted=True)])
     assert "R-KEY" not in _codes(iss, "errors")
     assert "R-KEY" in _codes(iss, "soft_warnings"), "imported positional key must be soft"
 
 
 # --- R-KEY DUPLICATE stays a full error even when imported (structural) ------
 def test_rkey_duplicate_stays_error_even_when_imported():
-    slides = [
+    iss = _run("R-KEY", [
         _slide(key="dup", lifted=True),
         _slide(key="dup", lifted=True),
-    ]
-    iss = _run(V.audit_slide_keys, slides)
+    ])
     # real collision breaks the round-trip / library locator → stays ERROR
     assert "R-KEY" in _codes(iss, "errors"), "duplicate key must stay error regardless of import"
 
@@ -117,38 +110,34 @@ _TRANS_PAIR = ('<div class="card"><span class="t">审批聚合</span>'
 
 
 def test_rlang_pair_warns_on_authored_slide():
-    slides = [_slide(_TRANS_PAIR, lifted=False)]
-    html = _doc(slides)
-    iss = _run(V.audit_language_policy, html, slides)
+    iss = _run("R-LANG", [_slide(_TRANS_PAIR, lifted=False)])
     assert "R-LANG" in _codes(iss, "warnings")
     assert "R-LANG" not in _codes(iss, "soft_warnings")
 
 
 def test_rlang_pair_downgrades_on_imported_slide():
-    slides = [_slide(_TRANS_PAIR, lifted=True)]
-    html = _doc(slides)
-    iss = _run(V.audit_language_policy, html, slides)
+    iss = _run("R-LANG", [_slide(_TRANS_PAIR, lifted=True)])
     assert "R-LANG" not in _codes(iss, "errors")
     assert "R-LANG" in _codes(iss, "soft_warnings"), "imported Latin-pair must be soft"
 
 
 # --- end-to-end: a fully-imported canvas deck has 0 errors via the audits ----
+_TARGET_RULES = {"R05", "R10", "R-KEY", "R-LANG"}
+
+
 def test_imported_deck_no_blocking_errors_across_target_rules():
-    """All four target families on imported slides → 0 errors (soft warns ok)."""
+    """The four CONTENT-AUTHORING families on imported slides → 0 errors (soft
+    warns ok). Scoped to the target rules (the original ran exactly these 4
+    audit functions); a minimal fixture also trips unrelated STRUCTURAL rules
+    (R48/R36/L1/R07/runtime/doc-integrity) which were never in this test's
+    purview and are covered elsewhere."""
+    E.skip_if_no_engine()
     slides = [
         _slide("<p>未完待续…</p>" + _OFF_HEX_BODY + _TRANS_PAIR,
                key="slide-001", lifted=True),
     ]
-    html = _doc(slides)
-    errs = []
-    for fn, args in (
-        (V.audit_copy_rules, (html,)),
-        (V.audit_hex_palette, (html,)),
-        (V.audit_slide_keys, (slides,)),
-        (V.audit_language_policy, (html, slides)),
-    ):
-        iss = _run(fn, *args)
-        errs += iss.errors
+    errs = [f["rule"] for f in E.run(slides)
+            if f.get("severity") == "error" and f.get("rule") in _TARGET_RULES]
     assert errs == [], f"imported canvas deck must have 0 blocking errors, got {errs}"
 
 

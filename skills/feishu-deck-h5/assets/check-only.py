@@ -109,30 +109,56 @@ def load_business_rules() -> dict:
 
 
 def enumerate_validate_rules() -> set:
-    """Best-effort set of rule codes emitted by the validator (literal first arg
-    of iss.err/warn/warn_soft). Used to detect gate drift (F-18).
+    """Best-effort set of rule codes the validator can emit. Used to detect gate
+    drift (F-18) and to drive the FAMILIES / business-rules coverage guards.
 
-    F-10 · the validator was split into a clean DAG of three source files
-    (validate.py = orchestrator, _validate_audits.py = the audit functions,
-    _validate_common.py = shared kernel). The `iss.err(...)` emit sites now
-    live mostly in _validate_audits.py, so scan all three sibling modules — a
-    single-file scan of validate.py alone would miss ~20 codes after the split.
+    UNIFY-VALIDATE-ARCH (step 4): there is now a SINGLE rule source — the unified
+    engine. Codes come from exactly three places, scanned here:
+      · assets/audits.js — the DOM/geometry/structure rules. Each finding carries
+        a `rule: '<code>'` literal (NOTE the emitted code can differ from the
+        rule's `id:` — e.g. the `R02-R07-STRUCTURE` rule emits `R02` and `R07`;
+        the `L1/L2/L4` rule emits `L1`/`L2`/`L4` — so we scan the EMITTED
+        `rule:` literals, not the `id:` declarations).
+      · assets/run-audits.py — the runner-level source-byte / file-system checks
+        (R-DOC-INTEGRITY via `DOC = "…"`, R-SELF-CONTAINED via a `"rule": "…"`
+        literal, perf P50–P55 via `warn("P5x", …)` / the PERF_* constants).
+      · assets/validate.py — the CLI/adapter layer's own advisory `R-VISUAL`
+        (engine-unavailable degrade), emitted via `iss.warn_soft('R-VISUAL', …)`.
+    The OLD _validate_audits.py / visual-audit.js dual registries were retired;
+    they are no longer scanned (and no longer exist).
     """
     here = Path(__file__).resolve().parent
-    content = ''
-    for name in ('validate.py', '_validate_audits.py', '_validate_common.py'):
-        try:
-            content += here.joinpath(name).read_text(encoding='utf-8') + '\n'
-        except OSError:
-            continue
-    if not content:
-        return set()
-    # Match direct iss.err/warn/warn_soft AND the local lev/_lev aliases
-    # (e.g. `_lev = iss.warn if ... else iss.err; _lev('R-VIS-TIER', ...)`),
-    # so indirectly-emitted codes aren't mistaken for gate drift.
-    return set(re.findall(
-        r"(?:iss\.(?:err|warn|warn_soft)|_?lev)\(\s*['\"]([A-Za-z0-9][\w-]*)['\"]",
-        content))
+    codes: set[str] = set()
+
+    # 1) audits.js — emitted `rule: '<code>'` literals (single + double quote).
+    try:
+        js = here.joinpath('audits.js').read_text(encoding='utf-8')
+        codes |= set(re.findall(r"\brule:\s*['\"]([A-Za-z0-9][\w-]*)['\"]", js))
+    except OSError:
+        pass
+
+    # 2) run-audits.py — runner byte/source rules. Catch all the emit idioms:
+    #    `"rule": "X"`, the `DOC = "R-DOC-INTEGRITY"` alias, and `warn("P5x", …)`.
+    try:
+        runner = here.joinpath('run-audits.py').read_text(encoding='utf-8')
+        codes |= set(re.findall(r'"rule":\s*"([A-Za-z0-9][\w-]*)"', runner))
+        codes |= set(re.findall(r'\bDOC\s*=\s*"([A-Za-z0-9][\w-]*)"', runner))
+        codes |= set(re.findall(r'\bwarn\(\s*"([A-Za-z0-9][\w-]*)"', runner))
+        codes |= set(re.findall(r'\bfindings\.append\(\{\s*"rule":\s*"([A-Za-z0-9][\w-]*)"', runner))
+    except OSError:
+        pass
+
+    # 3) validate.py — the adapter layer's own emits (R-VISUAL degrade advisory),
+    #    via iss.err/warn/warn_soft or the local lev/_lev aliases.
+    try:
+        vp = here.joinpath('validate.py').read_text(encoding='utf-8')
+        codes |= set(re.findall(
+            r"(?:iss\.(?:err|warn|warn_soft)|_?lev)\(\s*['\"]([A-Za-z0-9][\w-]*)['\"]",
+            vp))
+    except OSError:
+        pass
+
+    return codes
 
 
 def warn_on_gate_rule_drift(yaml_rules, emitted_rules) -> None:
@@ -571,17 +597,24 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
 
 def _run_all_audits(html: str, slides: list, path: Path,
                      iss: V.Issues, strict: bool, visual: bool) -> None:
-    """触发全部 audits. strict 影响哪些规则报 err vs warn,
-    visual 控制是否调 Playwright."""
-    # F-08 · run the SAME static audit set as validate.py main(), via the
-    # shared registry. This helper previously omitted 6 audits
-    # (lift_style_lost / undefined_css_vars / bullet_dash / empty_header_zone /
-    # list_echo / visual_richness) despite the "全部 audits" docstring — silent
-    # under-reporting in default review mode. The ingest gate is unaffected
-    # (it keeps only the 21 business-rules.yaml codes).
-    V.run_static_audits(V.STATIC_AUDITS, html=html, slides=slides, path=path, iss=iss)
-    if visual:
-        V.run_visual_audits(path, iss, want_screenshots=False)
+    """触发全部 audits via the SINGLE unified engine (UNIFY-VALIDATE-ARCH step 4).
+
+    check-only no longer iterates its own audit registry — it folds the unified
+    engine's findings into `iss` exactly the way validate.py main() does (shared
+    `V.run_unified_audits`), so the two entry points can NEVER run different rule
+    sets (the F-08 drift class is now structurally impossible — one source).
+
+      visual=True  → full engine: render in headless Chromium (audits.js
+                     geometry/DOM/structure rules) PLUS runner byte/source rules
+                     (R-DOC-INTEGRITY / R-SELF-CONTAINED / perf). Degrades to
+                     byte/source-only + a soft advisory if Chromium is missing —
+                     never a silent green, never blocks a good deck on a CI hiccup.
+      visual=False → `--no-visual`: byte/source rules ONLY (no browser); the
+                     DOM/geometry rules do not run (documented partial check).
+
+    `html` / `slides` are still parsed by the caller for the per-page report
+    (labels, page count); the engine itself re-reads + renders `path`."""
+    V.run_unified_audits(path, iss, dom_rules=visual, want_screenshots=False)
 
 
 # ---------------------------------------------------------------------------

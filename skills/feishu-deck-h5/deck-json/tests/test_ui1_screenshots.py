@@ -1,15 +1,18 @@
 """UI1 升级 · 整页截图当正文 → err (2026-05-31, P9).
 
 字号检查够不到栅格图像里的 8-10px 字 → 从源头禁止贴截图当正文。内容版式非品牌
-<img> → err;replica / imported → 降 warn;品牌资产豁免。Static.
+<img> → err;replica / imported → 降 warn;品牌资产豁免。
+
+UNIFY-VALIDATE-ARCH step 4b: UI1 now lives in the unified engine (rendered DOM).
+Each fixture renders headlessly and we read UI1 findings by severity. Chromium req.
 """
 import sys
 import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-from _validate_common import Issues          # noqa: E402
-from _validate_audits import audit_ui_mocks_are_html  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import engine_helpers as E  # noqa: E402
 
 
 def _deck(slide_inner, meta=""):
@@ -19,9 +22,9 @@ def _deck(slide_inner, meta=""):
 
 
 def _run(html):
-    i = Issues()
-    audit_ui_mocks_are_html(html, i)
-    return [c for c, _ in i.errors], [c for c, _ in i.warnings]
+    E.skip_if_no_engine()
+    b = E.buckets(html, rule="UI1")
+    return b["errors"], b["warnings"]
 
 
 def test_content_screenshot_img_is_error():
