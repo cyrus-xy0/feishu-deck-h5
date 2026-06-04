@@ -3591,3 +3591,62 @@ body {
   align-self: center;
   justify-content: center;
 }
+
+/* ============================================================================
+   Presenter mode (speaker view) — PowerPoint/Keynote-style. Built by
+   feishu-deck.js setupPresenter(); toggled with 'P'. Audience sees the deck
+   (this window behind the overlay, and/or the projector window); the presenter
+   sees current + next previews, notes, and a timer.
+   ============================================================================ */
+.fs-presenter {
+  position: fixed; inset: 0;
+  z-index: 2147483000;
+  display: none;                /* JS sets flex */
+  flex-direction: column;
+  background: #0b0e16;
+  color: #e6edf7;
+  padding: 20px 22px 14px;
+  gap: 14px;
+  font: 500 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.fs-presenter .pv-grid {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 18px;
+}
+.fs-presenter .pv-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.fs-presenter .pv-lab { font-size: 12px; color: #8b93ad; margin: 0 0 6px 2px; letter-spacing: .04em; }
+.fs-presenter .pv-notes-lab { margin-top: 14px; }
+.fs-presenter .pv-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+}
+.fs-presenter .pv-cur { box-shadow: 0 0 0 2px rgba(58,134,255,.55); }
+.fs-presenter .pv-embed { position: absolute; inset: 0; background: linear-gradient(135deg,#1a2238,#0c1222); }
+.fs-presenter .pv-notes {
+  flex: 1; min-height: 0; overflow-y: auto;
+  background: #121726; border: 1px solid #2a3450; border-radius: 8px;
+  padding: 12px 14px; font-size: 17px; line-height: 1.6; color: #fff;
+  white-space: pre-wrap;
+}
+.fs-presenter .pv-bar {
+  display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
+}
+.fs-presenter .pv-btn {
+  border: 0; border-radius: 999px; padding: 9px 16px; font-size: 15px; cursor: pointer;
+  background: rgba(255,255,255,.12); color: #fff;
+}
+.fs-presenter .pv-btn:hover { background: rgba(255,255,255,.2); }
+.fs-presenter .pv-proj { background: #3a86ff; }
+.fs-presenter .pv-proj:hover { background: #2f74e6; }
+.fs-presenter .pv-pos { font-size: 15px; color: #cfe0ff; min-width: 70px; text-align: center; }
+.fs-presenter .pv-timer {
+  font-size: 22px; font-variant-numeric: tabular-nums; color: #fff;
+  margin-left: 8px; min-width: 64px; text-align: center;
+}

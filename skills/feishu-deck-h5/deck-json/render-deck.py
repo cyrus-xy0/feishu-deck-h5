@@ -2095,6 +2095,17 @@ def main(argv=None) -> int:
         deck_data_attrs_parts.append(f' data-logo-position="{deck["deck"]["logo_position"]}"')
     deck_data_attrs = "".join(deck_data_attrs_parts)
 
+    # Speaker notes island: a hidden JSON map {slide-key → notes} the presenter
+    # mode reads at runtime. `notes` is NOT rendered into the slide (deck-schema
+    # says so) — this island is display:none and only the presenter view shows it.
+    notes_map = {s["key"]: s["notes"] for _, s in active_slides
+                 if s.get("key") and isinstance(s.get("notes"), str) and s["notes"].strip()}
+    notes_json = (
+        '\n  <script type="application/json" id="fs-deck-notes">'
+        + json.dumps(notes_map, ensure_ascii=False).replace("</", "<\\/")
+        + "</script>"
+    ) if notes_map else ""   # empty → zero extra bytes for note-less decks
+
     final = render_template(shell_tpl.read_text(encoding="utf-8"), {
         "title":                      deck["deck"]["title"],
         "asset_path":                 asset_path,
@@ -2103,6 +2114,7 @@ def main(argv=None) -> int:
         "language":                   deck["deck"].get("language", "zh-only"),
         "slides_html":                "\n".join(slides_html),
         "deck_data_attrs":            deck_data_attrs,
+        "notes_json":                 notes_json,
     })
 
     out_html = args.output_dir / "index.html"

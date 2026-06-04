@@ -11,6 +11,16 @@
   Pure present-layer: works for any deck regardless of source (canvas / raw /
   schema). Toggled live on `hashchange`, so `#proj` ↔ `#3` switches cleanly.
   Lives in `feishu-deck.js` (`applyKioskChrome`) + `.deck-ui.is-kiosk` CSS.
+- **演示者模式(Presenter / 放映窗)— 按 `P` 调出。** PowerPoint/Keynote 式
+  演示者视图:当前页 + 下一页**实时预览**(克隆 `.slide` 缩放,无截图)、**口播稿**、
+  **计时器**、翻页。口播稿来自 deck.json 每页的 `notes` 字段——渲染时输出成隐藏的
+  `<script type="application/json" id="fs-deck-notes">` JSON 岛(`notes` 本身不渲进
+  页面,只演示者视图读)。视图里点 **📺 放映窗** → `window.open(...#proj)` 开一个
+  纯净(kiosk)观众窗,经 **BroadcastChannel**(同源,无后端;localStorage 兜底)
+  **自动跟随**主窗翻页;观众窗是 follower(`window.name='fs-projector'`),自身翻页
+  不回弹主窗。`Esc`/再按 `P` 退出。实现在 `feishu-deck.js` `setupPresenter()`。
+  注:跨窗跟随需同源——`file://` 下浏览器可能不桥接 BroadcastChannel,**发布到
+  http(s) 后稳定生效**。
 - **`templates/_shell.html` uses `../assets/feishu-deck.css`.** It assumes the
   shell stays one directory deep relative to `assets/`. If you `cp` it to a
   new working directory, fix the relative paths to point at the actual

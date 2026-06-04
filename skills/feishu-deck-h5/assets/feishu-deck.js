@@ -418,12 +418,20 @@
     signal.addEventListener('abort', () => ro.disconnect());
     frames.forEach(scaleFrame);   // initial scale
 
+    // ---- Presenter mode (speaker view + projector-window follow) ----
+    setupPresenter(deck, frames, signal);
+
     // ---- Keyboard nav (present mode) + F = fullscreen (any mode) ----
     document.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTypingTarget(e.target)) return;
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault(); toggleFullscreen(); nudgeIdle(); return;
+      }
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        if (typeof window.__fsTogglePresenter === 'function') window.__fsTogglePresenter();
+        return;
       }
       if (deck.dataset.mode !== 'present') return;
       const cur = currentIdx(frames);
@@ -811,6 +819,160 @@
       if (location.hash !== newHash) history.replaceState(null, '', newHash);
     }
     updateUI(deck, frames);
+    if (typeof window.__fsOnNav === 'function') window.__fsOnNav(idx);  // presenter hook
+  }
+
+  // ============================================================
+  // Presenter mode (2026-06): PowerPoint/Keynote-style speaker view + a separate
+  // projector/audience window that follows the presenter's navigation.
+  //  · Speaker view: current + next-slide live previews (cloned .slide, scaled —
+  //    same technique as the editor thumbnails, no rasterization), per-slide
+  //    speaker notes (from deck.json `notes`, emitted as a hidden JSON island),
+  //    a timer, and prev/next.
+  //  · Projector window: window.open(...#proj) → clean kiosk view; follows nav
+  //    via BroadcastChannel (same-origin, no backend; localStorage fallback).
+  //  · Entry: 'P' toggles speaker view (no-op in the projector follower window).
+  // ============================================================
+  function setupPresenter(deck, frames, signal) {
+    let notes = {};
+    try {
+      const el = document.getElementById('fs-deck-notes');
+      if (el) notes = JSON.parse(el.textContent || '{}');
+    } catch (e) { notes = {}; }
+
+    // A projector window is opened by openProjector() with window.name
+    // 'fs-projector'. It FOLLOWS the leader's nav and never leads.
+    const isFollower = (window.name === 'fs-projector');
+
+    let chan = null;
+    try { chan = new BroadcastChannel('fs-deck-present'); } catch (e) { chan = null; }
+    const LS_KEY = 'fs-deck-present-goto';
+    function broadcast(idx) {
+      if (isFollower) return;
+      const msg = { type: 'goto', idx: idx, t: Date.now() };
+      if (chan) { try { chan.postMessage(msg); } catch (e) {} }
+      try { localStorage.setItem(LS_KEY, JSON.stringify(msg)); } catch (e) {}
+    }
+    function onRemoteGoto(msg) {
+      if (!isFollower || !msg || msg.type !== 'goto' || typeof msg.idx !== 'number') return;
+      if (frames[msg.idx]) goTo(deck, frames, msg.idx, false);
+    }
+    if (chan) chan.onmessage = (e) => onRemoteGoto(e.data);
+    window.addEventListener('storage', (e) => {
+      if (e.key === LS_KEY && e.newValue) { try { onRemoteGoto(JSON.parse(e.newValue)); } catch (x) {} }
+    }, { signal });
+
+    let pv = null, pvOpen = false, timerStart = 0, timerId = 0;
+
+    // nav hook called by goTo: mirror to the projector + refresh speaker view.
+    window.__fsOnNav = (idx) => { broadcast(idx); if (pvOpen) renderPV(); };
+
+    const curIdx = () => currentIdx(frames);
+
+    // Live preview: clone the real .slide and scale it (no <img>, no raster).
+    function thumbInto(box, slide) {
+      if (!box) return;
+      box.textContent = '';
+      if (!slide) return;
+      const c = slide.cloneNode(true);
+      c.removeAttribute('id');
+      c.querySelectorAll('[id]').forEach((e) => e.removeAttribute('id'));
+      c.querySelectorAll('[contenteditable]').forEach((e) => e.removeAttribute('contenteditable'));
+      c.querySelectorAll('iframe, video').forEach((e) => {
+        const ph = document.createElement('div'); ph.className = 'pv-embed'; e.replaceWith(ph);
+      });
+      c.style.cssText = 'position:absolute;top:0;left:0;margin:0;width:1920px;height:1080px;' +
+                        'transform-origin:top left;pointer-events:none;';
+      box.appendChild(c);
+      const w = box.clientWidth || 480;
+      c.style.transform = 'scale(' + (w / 1920) + ')';
+    }
+
+    function renderPV() {
+      if (!pv) return;
+      const ci = curIdx();
+      const ni = stepNext(frames, ci);
+      const curSlide = frames[ci] && frames[ci].querySelector('.slide');
+      const hasNext = ni !== ci;
+      thumbInto(pv.querySelector('.pv-cur'),  curSlide);
+      thumbInto(pv.querySelector('.pv-next'), hasNext ? frames[ni].querySelector('.slide') : null);
+      const key = curSlide && curSlide.dataset.slideKey;
+      pv.querySelector('.pv-notes').textContent =
+        (key && notes[key]) ? notes[key] : '（这一页没有备注）';
+      pv.querySelector('.pv-pos').textContent =
+        visibleOrdinal(frames, ci) + ' / ' + visibleCount(frames);
+      pv.querySelector('.pv-nextlabel').textContent = hasNext ? '下一页' : '（已是最后一页）';
+    }
+
+    function fmtTime(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60), r = s % 60;
+      return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    function buildPV() {
+      pv = document.createElement('div');
+      pv.className = 'fs-presenter';
+      pv.innerHTML =
+        '<div class="pv-grid">' +
+          '<div class="pv-col"><div class="pv-lab">当前</div><div class="pv-cur pv-box"></div></div>' +
+          '<div class="pv-col"><div class="pv-lab pv-nextlabel">下一页</div><div class="pv-next pv-box"></div>' +
+            '<div class="pv-lab pv-notes-lab">备注</div><div class="pv-notes"></div></div>' +
+        '</div>' +
+        '<div class="pv-bar">' +
+          '<button class="pv-btn pv-prev" type="button">‹ 上一页</button>' +
+          '<span class="pv-pos">1 / 1</span>' +
+          '<button class="pv-btn pv-nextbtn" type="button">下一页 ›</button>' +
+          '<span class="pv-timer">00:00</span>' +
+          '<button class="pv-btn pv-reset" type="button" title="计时归零">↺</button>' +
+          '<button class="pv-btn pv-proj" type="button" title="打开放映窗(观众屏,自动跟随)">📺 放映窗</button>' +
+          '<button class="pv-btn pv-exit" type="button" title="退出 (Esc / P)">✕ 退出</button>' +
+        '</div>';
+      document.body.appendChild(pv);
+      pv.querySelector('.pv-prev').onclick    = () => goTo(deck, frames, stepPrev(frames, curIdx()));
+      pv.querySelector('.pv-nextbtn').onclick = () => goTo(deck, frames, stepNext(frames, curIdx()));
+      pv.querySelector('.pv-proj').onclick    = openProjector;
+      pv.querySelector('.pv-exit').onclick    = closePresenter;
+      pv.querySelector('.pv-reset').onclick   = () => { timerStart = Date.now(); };
+    }
+
+    function openPresenter() {
+      if (pvOpen) return;
+      if (!pv) buildPV();
+      pv.style.display = 'flex';
+      pvOpen = true;
+      if (!timerStart) timerStart = Date.now();
+      timerId = setInterval(() => {
+        const t = pv && pv.querySelector('.pv-timer');
+        if (t) t.textContent = fmtTime(Date.now() - timerStart);
+      }, 1000);
+      requestAnimationFrame(renderPV);   // ensure boxes have width before scaling
+    }
+    function closePresenter() {
+      if (!pvOpen) return;
+      pvOpen = false;
+      if (pv) pv.style.display = 'none';
+      clearInterval(timerId);
+    }
+    window.__fsTogglePresenter = isFollower
+      ? function () {}
+      : function () { pvOpen ? closePresenter() : openPresenter(); };
+
+    function openProjector() {
+      const url = location.pathname + location.search + '#proj';
+      window.open(url, 'fs-projector', 'width=1280,height=760');
+      setTimeout(() => broadcast(curIdx()), 400);   // land the new window on our slide
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && pvOpen) { e.preventDefault(); closePresenter(); }
+    }, { signal });
+
+    signal.addEventListener('abort', () => {
+      clearInterval(timerId);
+      if (chan) { try { chan.close(); } catch (e) {} }
+      window.__fsOnNav = null;
+      window.__fsTogglePresenter = null;
+    });
   }
 
   function buildUI() {
