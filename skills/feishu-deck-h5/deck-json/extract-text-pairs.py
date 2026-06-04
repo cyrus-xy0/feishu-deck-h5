@@ -6,8 +6,11 @@ The pipeline can APPLY find/replace pairs (apply-text-pairs.py) but nothing
 GENERATES the find side from a deck. Hand-authoring `find` strings is exactly what
 causes apply-text-pairs' "unmatched" failures (<br>/emoji/whitespace normalization
 between source and product). This tool extracts every visible CJK-bearing run
-VERBATIM from each slide's `data.html` (+ translatable attributes + CSS content:),
-so the find strings match byte-for-byte what apply-text-pairs will operate on.
+VERBATIM from each slide — `data.html` (+ translatable attributes + CSS content:)
+for raw/schema slides, or the nested `data.elements[].runs[].text` for canvas
+(PPTX/hybrid-import) slides — so the find strings match byte-for-byte what
+apply-text-pairs will operate on. (Canvas decks are usually normalized first with
+merge-canvas-lines.py so PDF-fragmented glyphs become whole logical lines.)
 
 Output is the apply-text-pairs input format with `replace` left empty for a
 translator (human/agent) to fill:

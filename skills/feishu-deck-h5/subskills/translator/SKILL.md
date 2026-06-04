@@ -50,6 +50,41 @@ python3 $DJ/apply-text-pairs.py <deck>/deck.json pairs.filled.json         # det
 python3 $DJ/render-deck.py <deck>/deck.json <deck>/                        # re-render index.html
 ```
 
+## BRANCH A-CANVAS — PPTX / hybrid-import decks (layout:"canvas")
+A `.pptx` import (pptx-to-deck, esp. the LibreOffice-PDF **hybrid** pipeline) is a
+canvas deck: text lives in `data.elements[].runs[].text`, NOT `data.html`. Two
+extra facts change the flow — handle both or the output is garbage:
+
+1. **PDF抽词把整行拆成碎片** (often single glyphs, each its own positioned element).
+   Translating per-fragment CJK→EN is impossible. **First normalize**:
+   ```bash
+   python3 $DJ/merge-canvas-lines.py <deck>/deck.json --review <deck>/merge-review.json
+   ```
+   Clusters same-style + same-row + x-adjacent fragments into one logical line on
+   the leftmost host (widened), deletes the siblings. Idempotent; `--dry-run` to
+   preview. Skim the review sidecar — heavily scrambled pages (text over video /
+   negative-gap overlap) may merge imperfectly; flag those.
+2. Then the normal A flow — `extract-text-pairs` already reads canvas run texts,
+   and `apply-text-pairs` swaps them **whole-run, strip-matched** (canvas-aware):
+   ```bash
+   python3 $DJ/extract-text-pairs.py <deck>/deck.json > pairs.skeleton.json
+   #   → fan out workers; give each its slides' PPTX ground-truth text as context so
+   #     it can repair any still-fragmented find (see references/translation.md)
+   python3 $DJ/extract-text-pairs.py pairs.filled.json --check
+   python3 $DJ/apply-text-pairs.py <deck>/deck.json pairs.filled.json
+   ```
+3. **Re-render must keep the hybrid front-end** (letterbox bg CSS + fitText
+   overflow-fit + self-contained assets) — plain `render-deck.py` drops them.
+   Use the hybrid re-render wrapper (lives in pptx-to-deck, which owns those steps):
+   ```bash
+   python3 <pptx-to-deck>/assets/rerender-deck.py <deck>/deck.json <deck>/
+   ```
+   It re-renders + make_portable + post_process in one shot (skips LibreOffice; the
+   `bg/` + `input/` assets already exist). **fitText now fits overflow** (English ⟶
+   longer than CJK) — measures real `scrollWidth`, condenses (scaleX) or shrinks.
+- Always work on a `<deck>-<lang>/` COPY: A-flow re-render overwrites index.html
+  in place, so copy the run dir first to keep the source-language deck intact.
+
 ## BRANCH B — in-place on rendered index.html (lossy-backfill decks)
 Same primitives, but the FIND side is taken from the rendered HTML and the swap is
 applied to a copy of index.html (no re-render, so all bespoke CSS survives):
@@ -93,11 +128,15 @@ avatar frame): keep those and note them so a later run doesn't "re-fix" them. Th
 re-run. (Drop `--strict-fullwidth` only if a target audience genuinely wants CJK
 punctuation.)
 
-## Tools (all in `deck-json/`)
+## Tools (in `deck-json/`, except where noted)
 `sync-index-to-deck.py` (backfill) · `migrate-head-css-to-custom-css.py` (head CSS →
-custom_css) · `extract-text-pairs.py` (NEW — verbatim FIND pairs + `--check`) ·
-`apply-text-pairs.py` (REUSE — structure-safe swap) · `render-deck.py` (REUSE) ·
-`validate-deck.py` (REUSE) · `translation-qa.py` (NEW — parity / residual-cjk / overflow).
+custom_css) · `merge-canvas-lines.py` (NEW — cluster PDF-fragmented canvas runs into
+logical lines; canvas decks only) · `extract-text-pairs.py` (verbatim FIND pairs +
+`--check`; reads canvas runs too) · `apply-text-pairs.py` (structure-safe swap —
+`data.html` AND canvas `elements[].runs[].text`) · `render-deck.py` (REUSE) ·
+`<pptx-to-deck>/assets/rerender-deck.py` (NEW — hybrid canvas re-render = render +
+make_portable + post_process) · `validate-deck.py` (REUSE) · `translation-qa.py`
+(parity / residual-cjk / overflow).
 
 ## References
 - `../../references/translation.md` (glossary discipline, branch thresholds, iframe

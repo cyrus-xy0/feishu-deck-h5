@@ -2,11 +2,19 @@
 """apply-text-pairs.py — 安全的 "只换字、不动结构" text-swap (audit F-44).
 
 把一份 find/replace 对(通常由 text-swap workflow / agent 产出)程序化套进
-deck.json 的 per-slide `data.html`,**只做字符串替换、绝不让 LLM 重写 markup**
-—— 结构 / CSS / SVG / data-text-id 100% 不动。lift 一份外来 deck 后要把文案
-换成新客户时用:让 agent 只产出 `[{key, replacements:[{find,replace}]}]`,
-本工具负责确定性套用 + 报告未命中(常见未命中 = 源/产物间 <br>/emoji/空白
-归一化差异,需手查)。
+deck.json,**只做字符串替换、绝不让 LLM 重写 markup**:
+
+  · raw / schema 页 → per-slide `data.html` 子串替换(结构 / CSS / SVG /
+    data-text-id 100% 不动);
+  · canvas 页(PPTX/混合导入)→ `data.elements[].runs[].text` 按「整 run 精确
+    匹配(strip 后相等)」替换(几何 / id / 每个 run 的字号色重 100% 不动)。
+    extract-text-pairs.py 对 canvas 走 runs_from_value 抽 strip 后的 run 文本,
+    本工具按同一粒度套回 —— 两端对齐。翻译 canvas deck 前通常先跑
+    merge-canvas-lines.py 把 PDF 抽词拆碎的同行碎片合并成整逻辑行再抽译。
+
+lift 一份外来 deck 后要把文案换成新客户时用:让 agent 只产出
+`[{key, replacements:[{find,replace}]}]`,本工具负责确定性套用 + 报告未命中
+(raw 页常见未命中 = 源/产物间 <br>/emoji/空白归一化差异,需手查)。
 
 Pairs 文件格式 (JSON)：
     [
@@ -96,9 +104,33 @@ def main(argv=None) -> int:
         data = s.get("data") or {}
         h = data.get("html")
         if not isinstance(h, str):
-            # 非 raw 页没有 data.html — text-swap 对它们不适用,提示但不算未命中
+            elements = data.get("elements")
+            if isinstance(elements, list) and elements:
+                # canvas 页 — 文本在 elements[].runs[].text。按「整 run strip 后相等」
+                # 替换(extract-text-pairs 对 canvas 抽的就是 strip 后的 run 文本)。
+                # 只改 run["text"];id / 几何 / 其它每-run 样式字段一律不动。
+                for f, t in reps:
+                    total += 1
+                    n = 0
+                    for el in elements:
+                        if el.get("type") != "text":
+                            continue
+                        for run in el.get("runs") or []:
+                            txt = run.get("text", "")
+                            if isinstance(txt, str) and txt.strip() == f:
+                                run["text"] = t
+                                n += 1
+                    if n:
+                        hit += 1
+                        touched_keys.add(s["key"])
+                    else:
+                        miss += 1
+                        miss_list.append((s.get("key"), f[:40]))
+                s["data"] = data
+                continue
+            # 既无 data.html 也无 canvas elements — text-swap 不适用,提示
             for f, _t in reps:
-                miss_list.append((s.get("key"), f"(该页无 data.html, 跳过) {f[:30]}"))
+                miss_list.append((s.get("key"), f"(该页无 data.html/canvas, 跳过) {f[:30]}"))
                 total += 1
                 miss += 1
             continue

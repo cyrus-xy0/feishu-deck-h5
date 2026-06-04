@@ -317,8 +317,12 @@ def post_process(out_dir: Path, deck: dict) -> None:
         'addEventListener("hashchange",function(){setTimeout(fitText,300)});\n'
         '</script>')
     p = out_dir / "index.html"
-    h = p.read_text(encoding="utf-8").replace("</head>", inject + "</head>", 1)
-    p.write_text(h, encoding="utf-8")
+    h = p.read_text(encoding="utf-8")
+    # idempotent: re-running post_process on an already-enhanced index.html (without
+    # a fresh render in between) must not stack a second <style>/<script> block.
+    if "function fitText(" not in h:
+        h = h.replace("</head>", inject + "</head>", 1)
+        p.write_text(h, encoding="utf-8")
 
 
 # ── step 8 · 资源自包含打包（产物可移动/打包/发送，不依赖技能目录） ──────────────

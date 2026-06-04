@@ -38,6 +38,34 @@ Measured example (Starbucks×Lark "合并版 61 页"): 527k chars bespoke CSS, b
 migrate recovered 68% → parity FAIL → Branch B. Its in-place `index.en.html` (all CSS
 preserved) is the correct artifact and the Branch-B regression fixture.
 
+## Canvas / PPTX-import decks (Branch A-Canvas)
+A `.pptx` import (pptx-to-deck) is a `layout:"canvas"` deck: text is in
+`data.elements[].runs[].text`, not `data.html`. It is a Branch-A deck (deck.json IS
+the source of truth, round-trips by id), but with two canvas-specific hazards:
+
+- **PDF抽词碎片化** (hybrid pipeline). LibreOffice renders slides to PDF, then text is
+  extracted per PDF span — and one visual line is routinely split into many abutting,
+  separately-positioned single-glyph text elements, in non-reading element order. A
+  real measured deck: 912 CJK text elements, **54% ≤2 chars, 344 single glyphs**.
+  Per-fragment CJK→EN translation is impossible and each English word, dropped into a
+  narrow CJK-width box, overlaps its neighbour. **Fix = normalize before extract**:
+  `merge-canvas-lines.py` clusters by (size,color,font) → center-y band → x-adjacency
+  (gap ≤ `max(12, size*0.6)`) into one logical line on the leftmost host (widened),
+  deleting the siblings. It is idempotent and writes a `--review` sidecar. Verify the
+  review: dense multi-column pages mostly merge right; **text-over-video / negative-gap
+  scrambled pages may mis-merge — flag, don't trust silently.**
+- **Ground-truth repair**. Even after merge a few finds stay slightly broken (a missing
+  glyph). Give each fan-out worker its slide's **source-PPTX paragraph text** as context
+  (extract once with python-pptx: `shape.text_frame.paragraphs`), so it translates the
+  *intended* line, not the broken fragment.
+
+Then standard Branch-A: `apply-text-pairs.py` is canvas-aware (whole-run, strip-matched
+swap; geometry/id/style untouched). **Re-render via `pptx-to-deck/assets/rerender-deck.py`**
+(render + make_portable + post_process), NOT bare `render-deck.py` — the latter drops the
+letterbox bg CSS, the self-contained assets, and the `fitText` overflow-fit script that
+condenses/shrinks the (longer) English so it doesn't clip. Work on a `<deck>-<lang>/` copy
+(A re-render overwrites index.html in place).
+
 ## Command recipes
 Branch A (parity PASS):
 ```bash
