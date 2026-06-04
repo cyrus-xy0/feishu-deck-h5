@@ -121,7 +121,7 @@
     if (!ss) return true;
     const n = ss.ownerNode;
     if (n && n.getAttribute && n.getAttribute('data-source') === 'framework') return true;
-    if (ss.href && /feishu-deck(-patterns)?\.css/.test(ss.href)) return true;
+    if (ss.href && /(?:feishu-deck(?:-patterns)?|deck-edit-mode|extra-layouts)\.css/.test(ss.href)) return true;
     try { void ss.cssRules; } catch (e) { return true; }
     return false;
   };
@@ -4979,8 +4979,9 @@
         for (const entry of dead.slice(0, 20)) {
           const _why = (entry.reason === 'parse-error')
             ? '选择器解析失败(伪类 :is()/:has() 等写法非法)'
-            : '选择器运行时零匹配(很可能被前缀注入/lift 啃坏,'
-              + '如合法的 `.slide-frame.is-current` 被啃成非法的 `-frame.is-current`)';
+            : '选择器运行时零匹配:选择器非法,或(更常见)渲染器 per-slide scoper 把合法的 '
+              + '`.slide-frame.is-current` 祖先前缀错加成非法的 `-frame.is-current` —— '
+              + '若你的 is-current 锚定选择器本身合法,这是渲染 scoping 的 bug,按渲染问题报,别改你的 CSS';
           findings.push({
             rule: 'R-VIS-DEAD-ANIM', severity: 'error', slide_idx,
             selector: entry.selector, reason: entry.reason,
@@ -5140,8 +5141,9 @@
         for (const entry of dead.slice(0, 20)) {
           const _why = (entry.reason === 'parse-error')
             ? '选择器解析失败(伪类 :is()/:has() 等写法非法)'
-            : '选择器运行时零匹配(很可能被前缀注入/lift 啃坏,'
-              + '如合法的 `.slide-frame.is-current` 被啃成非法的 `-frame.is-current`)';
+            : '选择器运行时零匹配:选择器非法,或(更常见)渲染器 per-slide scoper 把合法的 '
+              + '`.slide-frame.is-current` 祖先前缀错加成非法的 `-frame.is-current` —— '
+              + '若你的 is-current 锚定选择器本身合法,这是渲染 scoping 的 bug,按渲染问题报,别改你的 CSS';
           const note = _DEAD_RULE_PROP_NOTE[entry.prop] || ['元素退回浏览器默认值', entry.prop || '?'];
           const _effect = note[0];
           const _label = note[1];
@@ -5301,13 +5303,38 @@
         }
       }
     });
+    // 宽松安全阀:每条规则 deck-wide 最多 40 条 finding —— 只挡病态洪泛(单规则数十上百条,
+    // 通常是同一缺陷全 deck 复发),正常 deck 远低于阈值、完全不受影响。封顶【非静默】:被截的
+    // 规则补一条 *-CAPPED 提示告知剩余条数,绝不悄悄藏结果(避免旧引擎那种静默 [:N] 截断)。
+    const PER_RULE_CAP = 40;
+    let outFindings = findings;
+    const ruleCounts = new Map();
+    for (const f of findings) ruleCounts.set(f.rule, (ruleCounts.get(f.rule) || 0) + 1);
+    if ([...ruleCounts.values()].some((n) => n > PER_RULE_CAP)) {
+      const kept = new Map();
+      const dropped = new Map();
+      outFindings = [];
+      for (const f of findings) {
+        const n = (kept.get(f.rule) || 0) + 1;
+        kept.set(f.rule, n);
+        if (n <= PER_RULE_CAP) outFindings.push(f);
+        else dropped.set(f.rule, (dropped.get(f.rule) || 0) + 1);
+      }
+      for (const [rid, extra] of dropped) {
+        outFindings.push({
+          rule: rid, severity: 'warn', slide_idx: 0,
+          message: `${rid}: 另有 +${extra} 处(deck-wide 超过 ${PER_RULE_CAP} 条已折叠)—— `
+            + '同一缺陷在全 deck 反复出现,修根因即可批量消除。',
+        });
+      }
+    }
     return {
       engine: 'audits.js',
       version: 1,
       rules: RULES.map((r) => r.id),
       scope: scopeSet ? [...scopeSet] : null,
       slides_total: slides.length,
-      findings,
+      findings: outFindings,
     };
   }
 
