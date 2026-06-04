@@ -304,12 +304,15 @@ def post_process(out_dir: Path, deck: dict) -> None:
         '.slide .el.tb .tb-inner{white-space:nowrap}\n' + "\n".join(rules) + '</style>\n'
         '<script>\n'
         'function fitText(){var c=document.querySelector(".slide-frame.is-current");'
-        'if(!c)return;c.querySelectorAll(".el.tb").forEach(function(el){'
-        'var i=el.querySelector(".tb-inner");if(!i||i.dataset.fit)return;'
-        'i.style.whiteSpace="nowrap";i.style.display="inline-block";'
-        'i.style.transformOrigin="left center";var n=i.getBoundingClientRect().width,'
-        'b=el.getBoundingClientRect().width;if(n>1&&b>1)'
-        'i.style.transform="scaleX("+(b/n)+")";i.dataset.fit="1";});}\n'
+        'if(!c)return;c.querySelectorAll(".el.tb .tb-inner").forEach(function(i){'
+        'if(i.dataset.fit)return;i.dataset.fit="1";i.style.whiteSpace="nowrap";'
+        # measure NATURAL content width (scrollWidth) vs the box (clientWidth):
+        # getBoundingClientRect is clipped to the box, so it never sees overflow.
+        'var n=i.scrollWidth,b=i.clientWidth;if(n<=b+1||b<1)return;'
+        'var r=b/n;i.style.transformOrigin="left center";'
+        # mild overflow -> condense width (scaleX); strong -> shrink proportionally
+        # (scale) so letterforms stay legible instead of getting crushed.
+        'i.style.transform=(r<0.72?"scale("+r.toFixed(4)+")":"scaleX("+r.toFixed(4)+")");});}\n'
         'addEventListener("load",function(){setTimeout(fitText,300)});'
         'addEventListener("hashchange",function(){setTimeout(fitText,300)});\n'
         '</script>')
