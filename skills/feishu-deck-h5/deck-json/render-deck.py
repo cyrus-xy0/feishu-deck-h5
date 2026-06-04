@@ -1560,6 +1560,8 @@ def _canvas_el_style(el, W, H):
 
 # anchor → flex vertical alignment for a text box
 _CANVAS_ANCHOR = {"top": "flex-start", "middle": "center", "bottom": "flex-end"}
+_CANVAS_TEXT_ALIGN = {"left": "left", "center": "center", "right": "right",
+                      "justify": "justify"}
 
 
 def _enrich_canvas(ctx, slide):
@@ -1597,22 +1599,72 @@ def _enrich_canvas(ctx, slide):
             spans = []
             for run in el.get("runs") or []:
                 weight = "700" if run.get("bold") else "400"
-                color = run.get("color", "#000")
-                rs = f"font-weight:{weight};color:{color}"
+                rs = f"font-weight:{weight}"
+                # omit color when the run has none, so a colorless run does not
+                # acquire a phantom color:#000 on round-trip (today-review).
+                if run.get("color"):
+                    rs += f";color:{html.escape(str(run['color']), quote=True)}"
                 if run.get("size") is not None:
                     rs += f";font-size:{_px2cq(run['size'], W)}cqw"
+                if run.get("font"):
+                    # per-run font-family (real PPTX typeface). The value is a
+                    # CSS family list ('"A", "B"'); escape it for the attribute.
+                    rs += f";font-family:{html.escape(str(run['font']), quote=True)}"
+                if run.get("grad"):
+                    # gradient TEXT: paint the gradient and clip it to the glyphs
+                    # (color stays as the non-supporting fallback). The value is
+                    # a CSS gradient; escape it for the attribute.
+                    g = html.escape(str(run["grad"]), quote=True)
+                    rs += (f";background-image:{g};-webkit-background-clip:text;"
+                           "background-clip:text;-webkit-text-fill-color:transparent")
                 spans.append(
                     f'<span style="{rs}">{_esc_br(run.get("text", ""))}</span>'
                 )
+            # Wrap the run spans in one inner block-level element. The box uses
+            # display:flex for vertical anchoring; a flex container blockifies its
+            # DIRECT children, so bare run <span>s would each be forced onto their
+            # own line (titles/multi-run frames collapse vertically). One block
+            # wrapper is the sole flex item; inside it the spans stay inline, so
+            # format-split runs flow + wrap normally and "\n"→<br> gives paragraph
+            # breaks. Paragraph alignment (algn) maps to the wrapper's text-align.
+            align = _CANVAS_TEXT_ALIGN.get(el.get("align"))
+            inner_style = "max-width:100%"
+            if align:
+                inner_style += f";text-align:{align}"
+            inner = (f'<div class="tb-inner" style="{inner_style}">'
+                     f'{"".join(spans)}</div>')
             parts.append(
                 f'          <div class="el tb" data-el-id="{eid}" '
-                f'style="{box_style}">{"".join(spans)}</div>'
+                f'style="{box_style}">{inner}</div>'
             )
         elif etype == "image":
-            # src kept verbatim so copy-assets / lift scan it.
-            src = el.get("src", "")
+            # src is normally a plain path (kept scannable for copy-assets /
+            # lift); escape it so a stray quote can't break out of the attribute
+            # and inject markup/handlers (today-review #9). Plain paths are
+            # unaffected (no &<>" to escape).
+            src = html.escape(str(el.get("src", "")), quote=True)
+            crop = el.get("crop")
+            if isinstance(crop, list) and len(crop) == 4:
+                # <a:srcRect> crop: show region x∈[l,1-r], y∈[t,1-b] stretched to
+                # the box (PowerPoint's behaviour). Clip with an overflow:hidden
+                # box and oversize+offset the img so the crop region fills it —
+                # otherwise object-fit:fill stretches the WHOLE image (wrong
+                # proportions for cropped pictures).
+                l, r, t, b = crop
+                vw, vh = 1 - l - r, 1 - t - b
+                if vw > 0.01 and vh > 0.01:
+                    iw, ih = 100 / vw, 100 / vh
+                    ix, iy = -l / vw * 100, -t / vh * 100
+                    parts.append(
+                        f'          <div class="el" data-el-id="{eid}" '
+                        f'style="{style};overflow:hidden">'
+                        f'<img loading="lazy" src="{src}" style="position:absolute;'
+                        f'width:{iw:.4f}%;height:{ih:.4f}%;'
+                        f'left:{ix:.4f}%;top:{iy:.4f}%;object-fit:fill"></div>'
+                    )
+                    continue
             parts.append(
-                f'          <img class="el" data-el-id="{eid}" '
+                f'          <img class="el" data-el-id="{eid}" loading="lazy" '
                 f'src="{src}" style="{style}">'
             )
         elif etype == "shape":
@@ -1632,6 +1684,11 @@ def _enrich_canvas(ctx, slide):
             # raw CSS escape-hatch (rotation/opacity/etc) appended last.
             if el.get("style"):
                 shape_style += f";{el['style']}"
+            # escape the assembled style for the attribute so a stray quote in
+            # any user field (fill/gradient/border/style) can't break out of
+            # style="…" and inject markup (today-review #9). Normal CSS values
+            # (#hex, rgba(), linear-gradient(), Npx) have no &<>" → no-op.
+            shape_style = html.escape(shape_style, quote=True)
             svg = el.get("svg")
             if svg:
                 # FREEFORM / custGeom / LINE: inline SVG sized to the box.
@@ -2057,7 +2114,21 @@ def main(argv=None) -> int:
         # copy-assets.py requires output under <repo>/runs/<ts>/output/
         # (SKILL.md WORKSPACE LAYOUT). For other paths (smoke tests in /tmp/),
         # skip with warning rather than fatal-fail.
-        if "/runs/" not in str(args.output_dir.resolve()):
+        #
+        # today-review #4: gate on the ACTUAL copy-assets precondition, not a
+        # bare "/runs/" substring. A path like runs/<deck-name>/ (e.g. the
+        # documented `build_pptx … runs/<deck-name>`) contains "/runs/" yet is
+        # NOT runs/<ts>/output/, so copy-assets.find_run_root() SystemExits and
+        # render-deck returned 5 on the documented happy path. Mirror
+        # copy-assets.py:find_run_root so misshapen /runs/ paths take the
+        # warn+skip (linked) branch instead of crashing.
+        _out = args.output_dir.resolve()
+        _canonical_run = any(
+            (p.name == "output" and p.parent.parent.parent.name == "runs")
+            or p.parent.parent.parent.name == "runs"
+            for p in [_out, *_out.parents]
+        )
+        if not _canonical_run:
             # FOOTGUN WARNING — output paths reference the skill via relative
             # paths that only resolve inside the repo. Moving / emailing this
             # HTML will break all CSS / JS / images. Use --inline for portable

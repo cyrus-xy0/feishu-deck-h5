@@ -184,9 +184,22 @@ def build_theme_map(prs) -> dict:
                 for m in members:
                     out[m] = hexc
                 _THEME_BY_NAME[tag] = hexc
-        # tx/bg aliases default-mapped to dk/lt (master clrMap default)
-        for alias, base in (("tx1", "dk1"), ("bg1", "lt1"),
-                            ("tx2", "dk2"), ("bg2", "lt2")):
+        # tx/bg aliases → resolve via the MASTER's ACTUAL <p:clrMap>, not the
+        # hardcoded default. A dark-themed master INVERTS these (clrMap
+        # tx1="lt1" bg1="dk1"); hardcoding tx1→dk1 made every inheritance-only
+        # title/body run resolve to dk1 (#000000 = invisible black on the dark
+        # slide). Reading the real clrMap makes tx1→lt1 (light) on dark decks,
+        # and is a no-op on normal light decks (clrMap == default).
+        _DEFAULT_CLRMAP = {"tx1": "dk1", "bg1": "lt1", "tx2": "dk2", "bg2": "lt2"}
+        clrmap = {}
+        try:
+            cm = master.element.find(qn("p:clrMap"))
+            if cm is not None:
+                clrmap = dict(cm.attrib)
+        except Exception:
+            pass
+        for alias in ("tx1", "bg1", "tx2", "bg2"):
+            base = clrmap.get(alias, _DEFAULT_CLRMAP[alias])
             if base in _THEME_BY_NAME:
                 _THEME_BY_NAME[alias] = _THEME_BY_NAME[base]
     except Exception:
@@ -213,6 +226,47 @@ def _xml_color_hex(node) -> Optional[str]:
     return None
 
 
+def _alpha_of(node) -> float:
+    """Opacity 0..1 from a DrawingML color node's resolved color child
+    (<a:srgbClr>/<a:schemeClr>/<a:sysClr>) <a:alpha val=N> (N in 1/1000 of a
+    percent). 1.0 (fully opaque) when absent. python-pptx never exposes this, so
+    a half-transparent scrim/glass panel would otherwise flatten to opaque and
+    cover the artwork beneath it."""
+    for tag in ("a:srgbClr", "a:schemeClr", "a:sysClr"):
+        c = node.find(qn(tag))
+        if c is not None:
+            a = c.find(qn("a:alpha"))
+            if a is not None and a.get("val") is not None:
+                try:
+                    return max(0.0, min(1.0, int(a.get("val")) / 100000.0))
+                except Exception:
+                    return 1.0
+            return 1.0
+    return 1.0
+
+
+def _hex_to_rgba(hexc: str, a: float) -> str:
+    h = hexc.lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r}, {g}, {b}, {a:.3f})"
+    except Exception:
+        return hexc
+
+
+def _css_color(node) -> Optional[str]:
+    """Resolve a DrawingML color child to a CSS color, carrying <a:alpha> as
+    rgba() so semi-transparent fills (scrims / glass panels) keep their
+    transparency. Plain hex when fully opaque."""
+    hexc = _xml_color_hex(node)
+    if not hexc:
+        return None
+    a = _alpha_of(node)
+    return hexc if a >= 0.999 else _hex_to_rgba(hexc, a)
+
+
 def gradient_css(shape) -> Optional[str]:
     """Parse a shape's <a:gradFill> into a CSS linear-gradient(), or None."""
     try:
@@ -227,7 +281,7 @@ def gradient_css(shape) -> Optional[str]:
             return None
         stops = []
         for gs in gs_lst.findall(qn("a:gs")):
-            col = _xml_color_hex(gs)
+            col = _css_color(gs)   # carries <a:alpha> as rgba() (soft-glow fades)
             if col:
                 stops.append((int(gs.get("pos", "0")) / 1000.0, col))
         if len(stops) < 2:
@@ -243,6 +297,95 @@ def gradient_css(shape) -> Optional[str]:
         return f"linear-gradient({ang_css}, {stop_str})"
     except Exception:
         return None
+
+
+_FONT_SCHEME: dict = {}
+_WEIGHT_SUFFIX = re.compile(
+    r"\s+(Light|Regular|Medium|DemiBold?|SemiBold?|Bold|Heavy|Black|Thin|"
+    r"ExtraLight|UltraLight|Normal|Book)$", re.I)
+
+
+def build_font_scheme(prs) -> None:
+    """Theme fontScheme → {'mj-lt','mn-lt','mj-ea','mn-ea'} so a run typeface that
+    is a theme reference (+mj-lt / +mn-ea) resolves to the real font name."""
+    _FONT_SCHEME.clear()
+    try:
+        master = prs.slide_masters[0]
+        theme_part = None
+        for rel in master.part.rels.values():
+            if "theme" in rel.reltype:
+                theme_part = rel.target_part
+                break
+        if theme_part is None:
+            return
+        root = etree.fromstring(theme_part.blob)
+        fs = root.find(f".//{qn('a:fontScheme')}")
+        if fs is None:
+            return
+        for which, tag in (("mj", "a:majorFont"), ("mn", "a:minorFont")):
+            fnode = fs.find(qn(tag))
+            if fnode is None:
+                continue
+            for sc, t in (("lt", "a:latin"), ("ea", "a:ea")):
+                node = fnode.find(qn(t))
+                if node is not None and node.get("typeface"):
+                    _FONT_SCHEME["%s-%s" % (which, sc)] = node.get("typeface")
+            for f in fnode.findall(qn("a:font")):   # CJK via script="Hans" (ea 常空)
+                if f.get("script") == "Hans" and f.get("typeface"):
+                    _FONT_SCHEME.setdefault("%s-ea" % which, f.get("typeface"))
+    except Exception:
+        pass
+
+
+def _resolve_theme_font(tf: str) -> str:
+    return _FONT_SCHEME.get(tf[1:], "") if tf and tf.startswith("+") else tf
+
+
+def _run_fonts(rPr) -> Optional[str]:
+    """CSS font-family value from a run's <a:latin>/<a:ea> typefaces — latin first
+    (ASCII/digits) then ea (CJK), mirroring PowerPoint's per-script font pick. The
+    weight-stripped family is appended so 'FZLanTingHeiPro_GB18030 Medium' also
+    matches the installed family 'FZLanTingHeiPro_GB18030'. None if unset."""
+    if rPr is None:
+        return None
+    fams: list = []
+    for tag in ("a:latin", "a:ea"):
+        node = rPr.find(qn(tag))
+        if node is None:
+            continue
+        tf = _resolve_theme_font(node.get("typeface") or "")
+        for cand in (tf, _WEIGHT_SUFFIX.sub("", tf)):
+            if cand and cand not in fams:
+                fams.append(cand)
+    return ", ".join('"%s"' % f for f in fams) if fams else None
+
+
+def _run_gradient_css(rPr) -> Optional[str]:
+    """Full CSS linear-gradient() from a run's <a:gradFill>, for gradient TEXT
+    (rendered via background-clip:text). None when the run has no gradient. The
+    flat first-stop color stays as the fallback in `color`."""
+    if rPr is None:
+        return None
+    gf = rPr.find(qn("a:gradFill"))
+    if gf is None:
+        return None
+    gs_lst = gf.find(qn("a:gsLst"))
+    if gs_lst is None:
+        return None
+    stops = []
+    for gs in gs_lst.findall(qn("a:gs")):
+        col = _css_color(gs)
+        if col:
+            stops.append((int(gs.get("pos", "0")) / 1000.0, col))
+    if len(stops) < 2:
+        return None
+    ang_css = "to bottom"
+    lin = gf.find(qn("a:lin"))
+    if lin is not None and lin.get("ang") is not None:
+        ang = (int(lin.get("ang")) / 60000.0 + 90) % 360
+        ang_css = f"{ang:.0f}deg"
+    return (f"linear-gradient({ang_css}, "
+            + ", ".join(f"{c} {p:.0f}%" for p, c in stops) + ")")
 
 
 # ── color helpers ─────────────────────────────────────────────────────────────
@@ -381,6 +524,195 @@ def _emu_to_px_pt(cv: Canvas, sz) -> Optional[float]:
         return None
 
 
+# ── text style inheritance (master txStyles + placeholder lstStyle) ─────────────
+# python-pptx exposes only what is written on the RUN (a:rPr). Size/color that a
+# slide inherits from the master's p:txStyles or a placeholder's lstStyle is
+# invisible to it → on this real deck 40% of runs lost color and 13% lost size,
+# rendering as 16px browser-black. This map + _resolve_run_style rebuild that
+# inheritance chain: run → paragraph defRPr → shape lstStyle[level] → master
+# txStyle[(placeholder-kind, level)] → theme tx1 default.
+_TXSTYLE: dict = {}
+
+
+def _defRPr_size_color(defRPr):
+    """(size_pt, css_color) from an <a:defRPr> node. size_pt from @sz (1/100 pt);
+    color from solidFill (alpha-aware) or first gradFill stop."""
+    sz = None
+    color = None
+    if defRPr is not None:
+        v = defRPr.get("sz")
+        if v:
+            try:
+                sz = int(v) / 100.0
+            except Exception:
+                pass
+        sf = defRPr.find(qn("a:solidFill"))
+        if sf is not None:
+            color = _css_color(sf)
+        else:
+            gf = defRPr.find(qn("a:gradFill"))
+            if gf is not None:
+                first = gf.find(f".//{qn('a:gs')}")
+                if first is not None:
+                    color = _css_color(first)
+    return sz, color
+
+
+def build_text_style_map(prs) -> None:
+    """Populate _TXSTYLE[(style, level)] = {size_pt, color} from the master's
+    p:txStyles (titleStyle / bodyStyle / otherStyle, levels 1..9)."""
+    _TXSTYLE.clear()
+    try:
+        master = prs.slide_masters[0]
+        txst = master.element.find(qn("p:txStyles"))
+        if txst is None:
+            return
+        for style, tag in (("title", "p:titleStyle"),
+                           ("body", "p:bodyStyle"),
+                           ("other", "p:otherStyle")):
+            st = txst.find(qn(tag))
+            if st is None:
+                continue
+            for lvl in range(9):
+                lvlpr = st.find(qn(f"a:lvl{lvl + 1}pPr"))
+                if lvlpr is None:
+                    continue
+                sz, color = _defRPr_size_color(lvlpr.find(qn("a:defRPr")))
+                _TXSTYLE[(style, lvl)] = {"size_pt": sz, "color": color}
+    except Exception:
+        pass
+
+
+# Per-slide layout-placeholder style: idx -> {level: {size_pt, color}}. The
+# slide-LAYOUT placeholder (matched by idx) overrides the master txStyle — this
+# deck's title is master-44pt but layout-26pt, so without this level the title
+# inherits 44pt and overflows its box. Set per slide in compose_slide.
+_CUR_LAYOUT_PH: dict = {}
+
+
+def set_layout_ph_map(slide) -> None:
+    _CUR_LAYOUT_PH.clear()
+    try:
+        for ph in slide.slide_layout.placeholders:
+            idx = ph.placeholder_format.idx
+            tb = ph.text_frame._txBody
+            levels: dict = {}
+            lst = tb.find(qn("a:lstStyle"))
+            if lst is not None:
+                for lvl in range(9):
+                    lp = lst.find(qn(f"a:lvl{lvl + 1}pPr"))
+                    if lp is not None:
+                        sz, color = _defRPr_size_color(lp.find(qn("a:defRPr")))
+                        if sz is not None or color:
+                            levels[lvl] = {"size_pt": sz, "color": color}
+            # fallback: a defRPr carried on the placeholder's first paragraph
+            if 0 not in levels:
+                d = tb.find(f".//{qn('a:defRPr')}")
+                if d is not None:
+                    sz, color = _defRPr_size_color(d)
+                    if sz is not None or color:
+                        levels[0] = {"size_pt": sz, "color": color}
+            if levels:
+                _CUR_LAYOUT_PH[idx] = levels
+    except Exception:
+        pass
+
+
+def _ph_style(shape) -> str:
+    """Which master txStyle bucket a shape inherits: title / body / other."""
+    try:
+        if not shape.is_placeholder:
+            return "other"
+        from pptx.enum.shapes import PP_PLACEHOLDER as PPP
+        t = shape.placeholder_format.type
+        if t in (PPP.TITLE, PPP.CENTER_TITLE):
+            return "title"
+        return "body"
+    except Exception:
+        return "other"
+
+
+def _resolve_run_style(r, p, shape, cv: Canvas):
+    """(size_px or None, css_color or None) for a run, resolving inheritance when
+    the run itself omits size/color (the 承重墙 fix)."""
+    rPr = r._r.find(qn("a:rPr"))
+    # Resolve the run's OWN color from the RAW rPr XML instead of python-pptx's
+    # r.font.color, for two reasons:
+    #   1. Reading r.font.color MUTATES the element — it replaces <a:gradFill>
+    #      with an empty <a:solidFill> — destroying gold-gradient text (titles /
+    #      big stat numbers / card captions) and dropping it to a default.
+    #   2. python-pptx's theme_color path is clrMap-BLIND: an explicit
+    #      schemeClr "tx1" resolves to dk1 (#000000, invisible black) instead of
+    #      the master's inverted lt1 (light) on dark-themed decks.
+    # _css_color routes through _scheme_name_hex/_THEME_BY_NAME (clrMap-aware)
+    # and carries <a:alpha> as rgba.
+    color = None
+    if rPr is not None:
+        sf = rPr.find(qn("a:solidFill"))
+        if sf is not None:
+            color = _css_color(sf)
+        if color is None:
+            gf = rPr.find(qn("a:gradFill"))
+            if gf is not None:
+                first = gf.find(f".//{qn('a:gs')}")
+                if first is not None:
+                    color = _css_color(first)
+    size = _emu_to_px_pt(cv, r.font.size)
+    if color is None:
+        color = rgb_hex(r.font.color)   # rare non-fill color paths
+    if size is not None and color is not None:
+        return size, color
+    try:
+        level = p.level or 0
+    except Exception:
+        level = 0
+    # paragraph defRPr, then the shape's own lstStyle for this level
+    cands = []
+    pPr = p._p.find(qn("a:pPr"))
+    if pPr is not None:
+        cands.append(pPr.find(qn("a:defRPr")))
+    lst = shape._element.find(f".//{qn('a:lstStyle')}")
+    if lst is not None:
+        lp = lst.find(qn(f"a:lvl{level + 1}pPr"))
+        if lp is not None:
+            cands.append(lp.find(qn("a:defRPr")))
+    for d in cands:
+        if d is None:
+            continue
+        s, c = _defRPr_size_color(d)
+        if size is None and s is not None:
+            size = cv.pt_to_px(s)
+        if color is None and c:
+            color = c
+    # slide-LAYOUT placeholder (by idx) — overrides the master (this deck's
+    # title is layout-26pt over master-44pt).
+    if (size is None or color is None):
+        try:
+            if shape.is_placeholder:
+                lvls = _CUR_LAYOUT_PH.get(shape.placeholder_format.idx, {})
+                st = lvls.get(level) or lvls.get(0)
+                if st:
+                    if size is None and st.get("size_pt") is not None:
+                        size = cv.pt_to_px(st["size_pt"])
+                    if color is None and st.get("color"):
+                        color = st["color"]
+        except Exception:
+            pass
+    # master txStyles by placeholder kind + level
+    if size is None or color is None:
+        kind = _ph_style(shape)
+        st = _TXSTYLE.get((kind, level)) or _TXSTYLE.get((kind, 0))
+        if st:
+            if size is None and st.get("size_pt") is not None:
+                size = cv.pt_to_px(st["size_pt"])
+            if color is None and st.get("color"):
+                color = st["color"]
+    # last resort: theme default text color (what PowerPoint paints by default)
+    if color is None:
+        color = _THEME_BY_NAME.get("tx1")
+    return size, color
+
+
 def text_runs(shape, cv: Canvas) -> list:
     """Flatten a text frame's paragraphs into a single runs[] list. Paragraph
     breaks and soft <a:br/> become a run whose text starts with '\\n' so the
@@ -402,12 +734,21 @@ def text_runs(shape, cv: Canvas) -> list:
                 run = {"text": txt}
                 if r.font.bold:
                     run["bold"] = True
-                col = rgb_hex(r.font.color)
+                # gradient TEXT: capture the full gradient from the raw rPr
+                # (before _resolve_run_style, which may touch font.color). The
+                # flat first-stop color is still resolved as the fallback.
+                _rPr = r._r.find(qn("a:rPr"))
+                grad = _run_gradient_css(_rPr)
+                font = _run_fonts(_rPr)
+                size, col = _resolve_run_style(r, p, shape, cv)
                 if col:
                     run["color"] = col
-                size = _emu_to_px_pt(cv, r.font.size)
                 if size is not None:
-                    run["size"] = size
+                    run["size"] = round(size, 1)
+                if grad:
+                    run["grad"] = grad
+                if font:
+                    run["font"] = font
                 para_runs.append(run)
             elif tag == qn("a:br"):
                 para_runs.append({"text": "\n"})
@@ -430,10 +771,33 @@ def text_runs(shape, cv: Canvas) -> list:
     return runs
 
 
+def _autofit_scale(shape) -> float:
+    """PowerPoint's stored shrink-to-fit factor: <a:bodyPr><a:normAutofit
+    fontScale=N> (N in 1/1000 %). A long title in a fixed box carries e.g.
+    fontScale=62500 (62.5%); without applying it the inherited base size
+    overflows the box and collides with the content below it. 1.0 if none."""
+    try:
+        bodyPr = shape.text_frame._txBody.find(qn("a:bodyPr"))
+        if bodyPr is not None:
+            na = bodyPr.find(qn("a:normAutofit"))
+            if na is not None and na.get("fontScale"):
+                return max(0.1, int(na.get("fontScale")) / 100000.0)
+    except Exception:
+        pass
+    return 1.0
+
+
 def text_element(shape, cv: Canvas, xf: Xf, eid: str) -> Optional[dict]:
     runs = text_runs(shape, cv)
     if not runs:
         return None
+    # apply PowerPoint's shrink-to-fit factor to the (now inheritance-resolved)
+    # run sizes so an autofit title doesn't overflow its box.
+    scale = _autofit_scale(shape)
+    if scale < 0.999:
+        for run in runs:
+            if run.get("size") is not None:
+                run["size"] = round(run["size"] * scale, 1)
     el = {"id": eid, "type": "text"}
     el.update(el_geom(cv, xf, shape))
     try:
@@ -449,6 +813,18 @@ def text_element(shape, cv: Canvas, xf: Xf, eid: str) -> Optional[dict]:
         if any(i is not None for i in insets):
             el["insets"] = [round(cv.px_size(int(i)), 1) if i is not None else 0
                             for i in insets]
+    except Exception:
+        pass
+    # paragraph horizontal alignment (first paragraph) → renderer maps it to the
+    # text wrapper's text-align. Only explicit algn here; inherited alignment is
+    # resolved by the style-inheritance pass (R1).
+    try:
+        from pptx.enum.text import PP_ALIGN
+        a = {PP_ALIGN.LEFT: "left", PP_ALIGN.CENTER: "center",
+             PP_ALIGN.RIGHT: "right", PP_ALIGN.JUSTIFY: "justify"}.get(
+            shape.text_frame.paragraphs[0].alignment)
+        if a:
+            el["align"] = a
     except Exception:
         pass
     el["runs"] = runs
@@ -483,15 +859,42 @@ def _border_obj(shape, cv: Canvas) -> Optional[dict]:
     return None
 
 
+_ROUNDED_PRESETS = {"roundRect", "round1Rect", "round2SameRect",
+                    "round2DiagRect", "roundRectCallout"}
+
+
+def _prst_adj(shape, gd_name: str = "adj") -> Optional[float]:
+    """The named preset-geometry adjust value as a fraction (0..1) from
+    <a:prstGeom><a:avLst><a:gd name=... fmla="val N">. None if absent."""
+    try:
+        sp_pr = shape._element.find(qn("p:spPr"))
+        prst = sp_pr.find(qn("a:prstGeom")) if sp_pr is not None else None
+        av = prst.find(qn("a:avLst")) if prst is not None else None
+        if av is None:
+            return None
+        for gd in av.findall(qn("a:gd")):
+            if gd.get("name") == gd_name:
+                fmla = gd.get("fmla", "")
+                if fmla.startswith("val "):
+                    return int(fmla.split()[1]) / 100000.0
+    except Exception:
+        pass
+    return None
+
+
 def _radius_px(shape, cv: Canvas) -> Optional[float]:
-    """Corner radius (px) for rounded rects; 50% sentinel handled by emit via
-    ellipse. Approximate: PPT roundRect adj defaults ~16.7% of the short side."""
+    """Corner radius (px) for rounded-rect presets, from the REAL adj value
+    (<a:gd name="adj">) rather than a hardcoded 16% (which over-rounded cards
+    ~3.5×). Radius = adj-fraction × short side; PPT's roundRect default is
+    16.667% when no adj is authored."""
     name = _preset_geom_name(shape)
-    if name == "roundRect":
+    if name in _ROUNDED_PRESETS:
         try:
             w = cv.px_size(emu(shape.width))
             h = cv.px_size(emu(shape.height))
-            return round(min(w, h) * 0.16, 1)
+            adj = _prst_adj(shape, "adj")
+            frac = adj if adj is not None else 0.16667
+            return round(min(w, h) * max(0.0, frac), 1)
         except Exception:
             return 14.0
     return None
@@ -509,9 +912,16 @@ def shape_appearance(shape, cv: Canvas) -> dict:
         from pptx.enum.dml import MSO_FILL
         fill = shape.fill
         if fill.type == MSO_FILL.SOLID:
-            hexc = rgb_hex(fill.fore_color)
-            if hexc:
-                out["fill"] = hexc
+            # read the solidFill node directly so <a:alpha> survives (a
+            # half-transparent压暗蒙版 / 玻璃面板 would otherwise flatten to
+            # opaque and盖死 the artwork below). schemeClr+alpha is invisible to
+            # python-pptx, hence the XML path; rgb_hex is the opaque fallback.
+            sp_pr = shape._element.find(qn("p:spPr"))
+            sf = sp_pr.find(qn("a:solidFill")) if sp_pr is not None else None
+            cssc = _css_color(sf) if sf is not None else None
+            out["fill"] = cssc or rgb_hex(fill.fore_color) or out.get("fill")
+            if not out.get("fill"):
+                out.pop("fill", None)
         elif fill.type == MSO_FILL.GRADIENT:
             grad = gradient_css(shape)
             if grad:
@@ -618,6 +1028,46 @@ def line_svg(shape, cv: Canvas) -> str:
             f'vector-effect="non-scaling-stroke"/>')
 
 
+def _pic_crop(shape):
+    """[l, r, t, b] crop fractions from a picture's <a:srcRect> (vals are 1/1000
+    of a percent; may be negative = padding). Visible region is x∈[l,1-r],
+    y∈[t,1-b]. None when absent/zero. Without this the full image is stretched
+    to the box (object-fit:fill) → wrong proportions for cropped pictures."""
+    try:
+        sr = shape._element.find(f".//{qn('a:srcRect')}")
+        if sr is None:
+            return None
+        def frac(k):
+            v = sr.get(k)
+            return round(int(v) / 100000.0, 5) if v is not None else 0.0
+        crop = [frac("l"), frac("r"), frac("t"), frac("b")]
+        return crop if any(crop) else None
+    except Exception:
+        return None
+
+
+def _media_poster_blob(shape):
+    """(blob, ext) of a video/audio's poster (cover) frame, or None. python-pptx
+    models a movie as a `Movie` with NO `.image`, so `shape.image` always raised
+    → every video fell back to a full-bleed #0B0F18 rect that covered the slide's
+    designed background. The poster IS an embedded image part: the shape's
+    `<p:pic>` carries an `<a:blip r:embed>` pointing at it."""
+    try:
+        blip = shape._element.find(f".//{qn('a:blip')}")
+        if blip is None:
+            return None
+        rId = blip.get(qn("r:embed"))
+        if not rId:
+            return None
+        part = shape.part.related_part(rId)
+        ct = (getattr(part, "content_type", "") or "").lower()
+        ext = ("jpg" if "jpeg" in ct or "jpg" in ct
+               else "gif" if "gif" in ct else "png")
+        return part.blob, ext
+    except Exception:
+        return None
+
+
 # ── per-shape → element dict(s) ────────────────────────────────────────────────
 def emit_shape(shape, cv: Canvas, xf: Xf, idgen: IdGen, input_dir: Path,
                img_counter: list) -> list:
@@ -643,23 +1093,26 @@ def emit_shape(shape, cv: Canvas, xf: Xf, idgen: IdGen, input_dir: Path,
             (input_dir / fname).write_bytes(img.blob)
             el = {"id": idgen.next(), "type": "image", "src": f"input/{fname}"}
             el.update(el_geom(cv, xf, shape))
+            crop = _pic_crop(shape)   # <a:srcRect> 裁剪,否则整图被 object-fit:fill 拉伸
+            if crop:
+                el["crop"] = crop
             out.append(el)
         except Exception:
             pass  # unreadable embedded image → silently drop (rare)
         return out
 
-    # MEDIA (video/audio) → poster image if present, else a poster placeholder.
+    # MEDIA (video/audio) → poster/cover frame if present, else a dark placeholder.
     if st == MSO_SHAPE_TYPE.MEDIA:
-        try:
-            img = shape.image  # poster/cover frame
+        poster = _media_poster_blob(shape)
+        if poster:
+            blob, ext = poster
             img_counter[0] += 1
-            ext = img.ext or "png"
             fname = f"media-{img_counter[0]:03d}.{ext}"
-            (input_dir / fname).write_bytes(img.blob)
+            (input_dir / fname).write_bytes(blob)
             el = {"id": idgen.next(), "type": "image", "src": f"input/{fname}"}
             el.update(el_geom(cv, xf, shape))
             out.append(el)
-        except Exception:
+        else:
             el = {"id": idgen.next(), "type": "shape", "fill": "#0B0F18",
                   "kind": "rect"}
             el.update(el_geom(cv, xf, shape))
@@ -770,12 +1223,32 @@ def _emit_table(shape, cv: Canvas, xf: Xf, idgen: IdGen) -> list:
 _DIAGRAM_NS = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
 
 
-def _shape_is_hard(shape) -> bool:
+# An OLE object occupying less than this fraction of the slide is a degenerate
+# remnant — e.g. a ~1px embedded-object stub left behind by an editor — NOT real
+# content. Without this guard a single invisible remnant condemns an otherwise
+# fully reconstructable page to an empty placeholder (real-deck regression: the
+# 香格里拉 deck lost slides 24/25 — title + text + 2 full-bleed photos — to one
+# 0.0000%-area OLE残骸 each).
+_OLE_MIN_AREA_FRAC = 0.005
+
+
+def _shape_is_hard(shape, cv: "Canvas | None" = None) -> bool:
     """True if a shape is structurally un-reconstructable: a live chart,
-    a SmartArt diagram, or an OLE object."""
+    a SmartArt diagram, or an OLE object. A sub-pixel OLE remnant (area below
+    `_OLE_MIN_AREA_FRAC` of the slide) is treated as NOT hard so it cannot
+    condemn a whole page."""
     st = shape.shape_type
-    if st in (MSO_SHAPE_TYPE.CHART, MSO_SHAPE_TYPE.EMBEDDED_OLE_OBJECT,
-              MSO_SHAPE_TYPE.LINKED_OLE_OBJECT):
+    if st in (MSO_SHAPE_TYPE.EMBEDDED_OLE_OBJECT, MSO_SHAPE_TYPE.LINKED_OLE_OBJECT):
+        if cv is not None:
+            try:
+                px_w = cv.px_size(emu(shape.width))
+                px_h = cv.px_size(emu(shape.height))
+                if (px_w * px_h) / (SLIDE_W * SLIDE_H) < _OLE_MIN_AREA_FRAC:
+                    return False
+            except Exception:
+                pass
+        return True
+    if st == MSO_SHAPE_TYPE.CHART:
         return True
     try:
         if getattr(shape, "has_chart", False):
@@ -794,12 +1267,13 @@ def _shape_is_hard(shape) -> bool:
     return False
 
 
-def _slide_is_hard(slide) -> bool:
+def _slide_is_hard(slide, cv: "Canvas | None" = None) -> bool:
     """A slide is un-reconstructable if ANY of its shapes is hard (chart/
-    SmartArt/OLE). Groups are recursed."""
+    SmartArt/OLE). Groups are recursed. `cv` enables the sub-pixel OLE-remnant
+    guard in `_shape_is_hard`."""
     def walk(shapes) -> bool:
         for sh in shapes:
-            if _shape_is_hard(sh):
+            if _shape_is_hard(sh, cv):
                 return True
             if sh.shape_type == MSO_SHAPE_TYPE.GROUP:
                 if walk(sh.shapes):
@@ -882,6 +1356,7 @@ def compose_slide(slide, idx: int, cv: Canvas, prs, input_dir: Path,
     """Build one `layout:"canvas"` slide dict (data.elements[])."""
     slide_no = idx + 1
     idgen = IdGen(slide_no)
+    set_layout_ph_map(slide)   # layout placeholder size/color overrides (per slide)
 
     # background as a backing shape so the slide isn't transparent.
     elements: list = []
@@ -971,6 +1446,9 @@ def main(argv=None) -> int:
     global _THEME
     _THEME = build_theme_map(prs)
     print(f"==> theme colors resolved: {len(_THEME)} members")
+    build_text_style_map(prs)
+    print(f"==> master text styles resolved: {len(_TXSTYLE)} (style,level) entries")
+    build_font_scheme(prs)
     cv = Canvas(prs.slide_width, prs.slide_height)
 
     print(f"==> {args.pptx.name}: {len(prs.slides)} slides, "
@@ -983,7 +1461,7 @@ def main(argv=None) -> int:
         if args.limit and idx >= args.limit:
             break
         slide_no = idx + 1
-        if _slide_is_hard(slide):
+        if _slide_is_hard(slide, cv):
             # live chart / SmartArt / OLE → placeholder + collect page number.
             unreconstructed.append(slide_no)
             deck_slides.append({

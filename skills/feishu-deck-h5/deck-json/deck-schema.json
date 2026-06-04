@@ -1182,6 +1182,7 @@
               "w":      { "type": "number", "description": "Width, px on canvas_w." },
               "h":      { "type": "number", "description": "Height, px on canvas_h." },
               "anchor": { "enum": ["top", "middle", "bottom"], "description": "Vertical text anchoring within the box. Optional." },
+              "align":  { "enum": ["left", "center", "right", "justify"], "description": "type=text only: horizontal paragraph alignment → text wrapper text-align. Optional." },
               "insets": { "type": "array", "items": { "type": "number" }, "description": "Text box padding [left, right, top, bottom] px. Optional." },
               "runs": {
                 "type": "array",
@@ -1193,12 +1194,15 @@
                   "properties": {
                     "text":  { "type": "string" },
                     "bold":  { "type": "boolean" },
-                    "color": { "type": "string", "description": "CSS color, e.g. '#1A1A1A'." },
-                    "size":  { "type": "number", "description": "Font size in px on canvas." }
+                    "color": { "type": "string", "description": "CSS color, e.g. '#1A1A1A'. For a gradient run this is the flat first-stop fallback." },
+                    "size":  { "type": "number", "description": "Font size in px on canvas." },
+                    "grad":  { "type": "string", "description": "Optional CSS gradient for gradient TEXT (rendered via background-clip:text); e.g. 'linear-gradient(45deg,#FFF 0%,#F7BE86 100%)'." },
+                    "font":  { "type": "string", "description": "Optional CSS font-family list from the run's real PPTX typeface (latin then ea), e.g. '\"TikTok Display\", \"FZLanTingHeiPro_GB18030\"'." }
                   }
                 }
               },
               "src":    { "type": "string", "description": "type=image only: real asset path (e.g. 'input/p1.jpg'). Kept verbatim so copy-assets / lift scan + copy it." },
+              "crop":   { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "type=image only: OOXML srcRect crop [l,r,t,b] as fractions (may be negative). Visible region x∈[l,1-r], y∈[t,1-b] is stretched to the box." },
               "fill":   { "type": "string", "description": "type=shape only: solid background CSS color (e.g. '#1A73E8')." },
               "radius": { "type": "number", "description": "type=shape only: border-radius px." },
               "kind":   { "type": "string", "description": "type=shape only: OOXML preset geometry name (e.g. 'rect','roundRect','ellipse'). Hint for the renderer; informational." },
