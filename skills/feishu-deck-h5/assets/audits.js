@@ -1024,6 +1024,87 @@
     },
 
     {
+      // R-VIS-FILL · 内容没填满可用画布 = "空洞" (2026-06-04).
+      // R-VIS-CANVAS-CENTER 查"内容并集有没有居中",但对【居中的稀疏内容】无能为力:
+      // justify-content:center 把空白对称地藏在上下,balance / canvas-center 都看着均衡 →
+      // 放行(正是世界坚果协会 deck 第一版"过了校验却空洞"的盲区)。这条补盲:复用同一套
+      // 内容并集(text+media 叶、非 absolute、可见、overflow 裁剪),量 contentH / 可用带高;
+      // < 阈值 → 内容太稀、撑不满版面。可用带 = [.header 底(无则 0)→ 1080]。hero / section
+      // 等极简版式由 isHeroLayout 豁免,data-allow-imbalance 显式豁免。warn(留白阈值主观)。
+      id: 'R-VIS-FILL',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout, scale, isHeroLayout } = ctx;
+        // 只查 raw 页:schema 版式(content/stats/flow/…)由框架版式约束填充+居中,且
+        // 既有 R-VIS-BALANCE / CANVAS-CENTER 已覆盖,本规则不二次猜测(否则误报正常 schema 页)。
+        if (layout !== 'raw') return [];
+        if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
+        const sr = slide.getBoundingClientRect();
+        const slideTop = sr.top;
+        const hdr = slide.querySelector(':scope > .header');
+        const hdrRendered = !!hdr && hdr.getClientRects().length > 0;
+        const hb = hdrRendered ? (hdr.getBoundingClientRect().bottom - slideTop) / scale : 0;
+        // 只量内容台(.raw-stage / .stage)里的东西 —— 框架 chrome(wordmark / pageno)在台
+        // 外、贴屏幕边,若混进并集会把内容撑到满高、把"空洞"伪装成"填满"。台内再排页脚。
+        const stageEl = slide.querySelector('.raw-stage')
+          || slide.querySelector(':scope > .stage') || slide;
+        let top = Infinity, bot = -Infinity, any = false;
+        stageEl.querySelectorAll('*').forEach((el) => {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          if (hdr && (el === hdr || hdr.contains(el))) return;
+          // 台内的页脚 / 页码 / 水印 / 品牌标也排掉(footnote 贴底,最坑)。
+          if (visHasAnyClass(el, ['foot', 'pageno', 'wordmark', 'logo', 'brand', 'watermark', 'copyright'])) return;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          if (cs.position === 'absolute' || cs.position === 'fixed') return;
+          const tag = el.tagName;
+          const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg'
+            || tag === 'CANVAS' || tag === 'VIDEO';
+          const isLeaf = el.children.length === 0;
+          // 带框的卡/盒(border/bg)也算"填了":卡片撑满高度即占了版面;卡内文字贴顶是
+          // 卡内对齐问题(R-VIS-CROWD/PANEL-TOP 管),不该让满高卡被本规则判成空洞。
+          const isFramed = visIsFramedBox(el) && !visIsMediaBox(el);
+          if (!hasOwnText(el) && !isMedia && !isLeaf && !isFramed) return;
+          const r = el.getBoundingClientRect();
+          if (r.width < 6 || r.height < 6) return;
+          // overflow 裁剪(同 canvas-center):被非可见溢出祖先裁掉的部分不计。
+          let vt = r.top, vb = r.bottom;
+          for (let p = el.parentElement; p && p !== slide; p = p.parentElement) {
+            if (getComputedStyle(p).overflowY !== 'visible') {
+              const pr = p.getBoundingClientRect();
+              if (pr.top > vt) vt = pr.top;
+              if (pr.bottom < vb) vb = pr.bottom;
+            }
+          }
+          if (vb - vt < 6) return;
+          const t = (vt - slideTop) / scale, b = (vb - slideTop) / scale;
+          if (t < top) top = t;
+          if (b > bot) bot = b;
+          any = true;
+        });
+        if (!any) return [];
+        const contentH = bot - top;
+        const bandH = 1080 - hb;
+        if (bandH <= 8) return [];
+        const fill = contentH / bandH;
+        const THRESHOLD = 0.52;
+        if (fill >= THRESHOLD) return [];
+        return [{
+          rule: 'R-VIS-FILL', severity: 'warn', slide_idx,
+          fill_pct: Math.round(fill * 100), content_h: Math.round(contentH),
+          band_h: Math.round(bandH), container_sel: shortSel(slide),
+          message:
+            `slide ${slide_idx} · 内容只填满可用画布的 ${Math.round(fill * 100)}% `
+            + `(内容高 ${Math.round(contentH)}px / 可用带 ${Math.round(bandH)}px,阈值 `
+            + `${Math.round(THRESHOLD * 100)}%) —— 页面偏空("空洞")。居中`
+            + '(justify-content:center)只会把空白对称藏在上下,balance/canvas-center 看着'
+            + '均衡所以漏报,这条专补。Fix: 放大主视觉 / 加支撑结构(轴 / 图例 / 数据点 / '
+            + '卡片)把版面填实,或收紧留白;确属极简设计意图用 `data-allow-imbalance`。',
+        }];
+      },
+    },
+
+    {
       // R-ESC-HTML · 被转义的 HTML 标签当可见文本漏出来 (步骤 3 第一批迁自
       // _validate_audits.py audit_escaped_html)。原版扫 slide 源 HTML 里的 `&lt;span`;
       // 渲染后 DOM 已把转义实体解码成可见文本 `<span` —— 等价、更准(只看真正渲染成
@@ -2067,13 +2148,22 @@
           if (HEADINGS.has(target.tag)) continue;
           const text = target.text;
           if (text.length < MIN_TARGET_LEN) continue;
-          // parent 链含 echo-intentional class → 跳过(子串匹配,与原版同)。
+          // parent 链含结构性列表/导航容器(agenda/toc/outline/section-list/…)→
+          // 整块本就是 enumerate 骨架,逐项 echo 是其本性,跳过(子串匹配,与原版同)。
           if (target.parents.some((p) => SKIP_PARENT_CLS.some((s) => (p || '').indexOf(s) >= 0))) continue;
           let cjkChars = 0;
           for (const c of text) if (isCjk(c)) cjkChars++;
           if (cjkChars < 4) continue;
           const tgtCls = (target.cls || '').toLowerCase();
           const parentCls = target.parents.join(' ').toLowerCase();
+          // echo-intentional opt-out: an author marks a leaf — or any ancestor —
+          // with class `echo-intentional` to declare a DELIBERATE closing / recap
+          // line that names earlier items on PURPOSE (rhetoric / call-to-action,
+          // not lazy redundancy). This contract was documented at the top of the
+          // loop since inception but never actually wired up (SKIP_PARENT_CLS only
+          // ever held structural list containers) — this is its real implementation.
+          if (tgtCls.indexOf('echo-intentional') >= 0
+              || parentCls.indexOf('echo-intentional') >= 0) continue;
           const looksLikeSummary = target.tag === 'p'
             || TARGET_INTENT.some((kw) => tgtCls.indexOf(kw) >= 0)
             || TARGET_INTENT.some((kw) => parentCls.indexOf(kw) >= 0);
@@ -3465,6 +3555,55 @@
             + 'unified positioning rule (`position:absolute; top:61px; '
             + 'left:73px; right:320px`) so title aligns with the master '
             + 'spec across all layouts.',
+        }];
+      },
+    },
+
+    {
+      // R-VIS-RAW-TITLE-POS · raw 内容页的 de-facto 标题不在标准基线 (2026-06-04).
+      // R-VIS-TITLE-POSITION 只量框架 `.header` 的 top(期望 61);raw 页没有 .header、标题
+      // 手写在 .raw-stage 里 → 那条规则没东西可量、静默放行,正是"标题偏下/缺失/顶部留空带"
+      // 一类问题的盲区(世界坚果协会 deck 第一版踩的就是这个:全 deck `.header` 出现 0 次)。
+      // 这条补盲,纯几何 name-free:找 de-facto 标题(slide 内最高的 own-text、非 absolute、
+      // font-size>=32 的醒目块,正文一般 <=28 不会被选),量它距 slide 顶的 top;>101px(明显
+      // 低于 61 基线 / 上方留了空带)→ warn。只查 layout=raw;有渲染 .header 的归
+      // R-VIS-TITLE-POSITION;hero / data-allow-imbalance 豁免。warn(de-facto 检测是启发式)。
+      id: 'R-VIS-RAW-TITLE-POS',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout, isHeroLayout } = ctx;
+        if (layout !== 'raw') return [];
+        if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
+        const hdr = slide.querySelector(':scope > .header');
+        if (hdr && hdr.getClientRects().length > 0) return [];   // 有框架标题 → 归 TITLE-POSITION
+        const sr = slide.getBoundingClientRect();
+        const scale = (sr.height / 1080) || 1;
+        let tEl = null, tTop = Infinity;
+        for (const el of slide.querySelectorAll('*')) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          if (!hasOwnText(el)) continue;
+          const cs = getComputedStyle(el);
+          if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+          if ((parseFloat(cs.fontSize) || 0) < 32) continue;        // 标题档,排除正文
+          const r = el.getBoundingClientRect();
+          if (r.width <= 40 || r.height <= 16) continue;
+          if (r.top < tTop) { tTop = r.top; tEl = el; }
+        }
+        if (!tEl) return [];   // 全页没有醒目标题块 → 留给 R-VIS-FILL / 人工
+        const titleTop = Math.round((tEl.getBoundingClientRect().top - sr.top) / scale);
+        const expectedTop = 61;
+        if (titleTop <= expectedTop + 40) return [];                 // <=101 视作在基线带内
+        return [{
+          rule: 'R-VIS-RAW-TITLE-POS', severity: 'warn', slide_idx, layout,
+          actual_top: titleTop, expected_top: expectedTop, title_sel: shortSel(tEl),
+          message:
+            `slide ${slide_idx} (layout \`raw\`) · de-facto 标题 \`${shortSel(tEl)}\` `
+            + `渲染在 top:${titleTop}px,远低于标准基线 ~${expectedTop}px —— 标题被下压 / `
+            + '上方留了一条空带(raw 页手写标题绕过了 R-VIS-TITLE-POSITION 的位置校验)。'
+            + 'Fix: 让标题顶到基线 —— stage `justify-content:flex-start` + stage top≈56px、'
+            + '标题作首个子节点,正文在其下用 flex 居中;确属无标题 / 居中大字的设计意图,'
+            + '用 `data-allow-imbalance` opt-out。',
         }];
       },
     },

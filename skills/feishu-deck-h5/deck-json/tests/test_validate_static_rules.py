@@ -338,6 +338,38 @@ def test_echo_summary_fires():
     assert "R-ECHO" in _all_codes(R_ECHO, slides)
 
 
+_ECHO_FIRING_BODY = (
+    '<div class="col"><span>研发提效</span></div>'
+    '<div class="col"><span>生产保质</span></div>'
+    '<div class="col"><span>营销升级</span></div>'
+    '<div class="col"><span>供应链强化</span></div>'
+    '<div class="col"><span>高效工作</span></div>'
+)
+
+
+def test_echo_intentional_optout_on_target_skips():
+    # Same echoing footer as test_echo_summary_fires, but the leaf carries class
+    # `echo-intentional` → the deliberate-recap opt-out skips it (a closing line
+    # that names earlier items on PURPOSE is rhetoric, not lazy redundancy).
+    # (2026-06-04: contract was documented in the rule comment but never wired up.)
+    body = _ECHO_FIRING_BODY + (
+        '<p class="footnote echo-intentional">已落地四十二场景,覆盖研发、生产、营销、供应链关键域</p>'
+    )
+    slides = [_slide("content-5up", body)]
+    assert "R-ECHO" not in _all_codes(R_ECHO, slides)
+
+
+def test_echo_intentional_optout_on_ancestor_skips():
+    # The opt-out is also honored on an ANCESTOR (the documented "parent 链含"
+    # form): wrapping the recap in an echo-intentional container skips it.
+    body = _ECHO_FIRING_BODY + (
+        '<div class="echo-intentional">'
+        '<p class="footnote">已落地四十二场景,覆盖研发、生产、营销、供应链关键域</p></div>'
+    )
+    slides = [_slide("content-5up", body)]
+    assert "R-ECHO" not in _all_codes(R_ECHO, slides)
+
+
 def test_echo_no_summary_no_fire():
     # Footer text shares no sibling prefixes -> no echo.
     body = (

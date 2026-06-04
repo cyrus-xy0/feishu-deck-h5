@@ -293,6 +293,20 @@ def _build_data_attrs(slide: dict) -> str:
         parts.append(f'data-title-style="{_esc_br(slide["title_style"])}"')
     if slide.get("logo_position"):
         parts.append(f'data-logo-position="{_esc_br(slide["logo_position"])}"')
+    # Slide-level visual-audit opt-outs → data-allow-<token> on .slide. This is the
+    # ONLY authoring channel for the three slide-scoped opt-outs the visual engine
+    # checks via slide.hasAttribute (imbalance / no-focal / title-gap); without it a
+    # raw/schema slide that is by-design parallel or asymmetric had no way to mark
+    # intent through deck.json. Allowlisted to those three (element-level opt-outs
+    # like body-floor/typescale are authored inline in data.html instead).
+    _ALLOW_TOKENS = ("imbalance", "no-focal", "title-gap")
+    for tok in slide.get("allow", []) or []:
+        if tok in _ALLOW_TOKENS:
+            parts.append(f'data-allow-{tok}')
+        else:
+            print(f"render-deck: WARNING — slide {slide.get('key','?')}: unknown "
+                  f"allow token '{tok}' (expected one of {_ALLOW_TOKENS}); skipped.",
+                  file=sys.stderr)
     if slide.get("lifted"):
         # Native slide lift: mark the slide so validate.py / visual-audit.js
         # downgrade its CONTENT-STYLE violations (R06 / R-WHITE-TEXT /
