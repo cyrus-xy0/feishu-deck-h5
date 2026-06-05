@@ -61,7 +61,7 @@ FAMILIES = [
                               'R-VIS-GUTTER', 'R-VIS-HERO-FLOOR',
                               'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-CANVAS-CENTER',
                               'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE',
-                              'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS']),
+                              'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS', 'R-VIS-RAW-TITLE-STACK']),
 ]
 
 CONTEXT_NOTES = {

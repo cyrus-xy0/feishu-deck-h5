@@ -973,6 +973,7 @@
     'R-VIS-DIM-TEXT': { coverage: 'universal', signal: 'dom' },
     'R-VIS-ORPHAN': { coverage: 'universal', signal: 'dom' },
     'R-VIS-TITLE-POSITION': { coverage: 'schema-only', signal: 'dom', optout: 'keyed on :scope>.header>.title-zh; raw title position covered by R-VIS-RAW-TITLE-POS twin' },
+    'R-VIS-RAW-TITLE-STACK': { coverage: 'raw-only', signal: 'dom', optout: 'layout!=="raw" early-return — name-free two-layer-title detector (R56 raw blind-spot), raw by design' },
     'R-VIS-RAW-TITLE-POS': { coverage: 'raw-only', signal: 'dom', optout: 'layout!=="raw" — the geometric raw twin of R-VIS-TITLE-POSITION' },
     'R-VIS-TITLE-GAP': { coverage: 'universal', signal: 'dom' },
     'R-VIS-CROWD': { coverage: 'universal', signal: 'dom' },
@@ -3901,6 +3902,68 @@
             + 'Fix: 让标题顶到基线 —— stage `justify-content:flex-start` + stage top≈56px、'
             + '标题作首个子节点,正文在其下用 flex 居中;确属无标题 / 居中大字的设计意图,'
             + '用 `data-allow-imbalance` opt-out。',
+        }];
+      },
+    },
+
+    {
+      // R-VIS-RAW-TITLE-STACK · raw 内容页"双层标题"(标题里折进/上叠了更小的 eyebrow/kicker)。
+      //   飞书 content 页是单行纯标题;R56 在框架 `.header .eyebrow` 上强制,但选择器钉死 .header
+      //   → 手写 raw 标题把 kicker 折成标题元素的小字首行(或叠在标题上方)时 R56 一条不报 ——
+      //   正是本仓库自己踩过的盲区(变化 0N 小字叠大标题)。本条 name-free 补盲:layout=raw 且
+      //   无框架 .header 时,取 de-facto 标题(最高 ≥36px own-text 非 absolute 可见块),若其子树里
+      //   有 own-text 叶 fontSize ≤24 且 ≤0.55×标题字号(= 折进去的 eyebrow,而非同号的 .hl/.q
+      //   强调)→ warn。hero / data-allow-imbalance / data-allow-title-stack 豁免。warn(启发式)。
+      //   复用 R-VIS-RAW-TITLE-POS 的 de-facto 标题几何;与之互补(那条查位置,这条查双层结构)。
+      id: 'R-VIS-RAW-TITLE-STACK',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout, isHeroLayout } = ctx;
+        if (layout !== 'raw') return [];
+        if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')
+            || slide.hasAttribute('data-allow-title-stack')) return [];
+        const hdr = slide.querySelector(':scope > .header');
+        if (hdr && hdr.getClientRects().length > 0) return [];   // 框架 header → R56 管
+        let tEl = null, tTop = Infinity;
+        for (const el of slide.querySelectorAll('*')) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          if (!hasOwnText(el)) continue;
+          const cs = getComputedStyle(el);
+          if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+          if ((parseFloat(cs.fontSize) || 0) < 36) continue;       // 标题档
+          const r = el.getBoundingClientRect();
+          if (r.width <= 40 || r.height <= 16) continue;
+          if (r.top < tTop) { tTop = r.top; tEl = el; }
+        }
+        if (!tEl) return [];
+        const titlePx = parseFloat(getComputedStyle(tEl).fontSize) || 0;
+        if (titlePx < 36) return [];
+        let kicker = null;
+        for (const d of tEl.querySelectorAll('*')) {
+          let own = '';
+          for (const n of d.childNodes) if (n.nodeType === 3) own += n.textContent;
+          own = own.trim();
+          if (own.length < 2) continue;                            // 实质小字,非空 span
+          const ds = getComputedStyle(d);
+          if (ds.display === 'none' || ds.visibility === 'hidden' || +ds.opacity === 0) continue;
+          const px = parseFloat(ds.fontSize) || 0;
+          if (px > 0 && px <= 24 && px <= titlePx * 0.55) { kicker = { el: d, px, text: own }; break; }
+        }
+        if (!kicker) return [];
+        const kt = kicker.text.length > 24 ? kicker.text.slice(0, 24) + '…' : kicker.text;
+        return [{
+          rule: 'R-VIS-RAW-TITLE-STACK', severity: 'warn', slide_idx, layout,
+          title_sel: shortSel(tEl), kicker_sel: shortSel(kicker.el),
+          kicker_px: Math.round(kicker.px), title_px: Math.round(titlePx),
+          message:
+            `slide ${slide_idx} (layout \`raw\`) · 双层标题 —— de-facto 标题 \`${shortSel(tEl)}\` `
+            + `(${Math.round(titlePx)}px) 里折进了更小的 eyebrow/kicker \`${shortSel(kicker.el)}\` `
+            + `(${Math.round(kicker.px)}px:"${kt}")。飞书 content 页是单行纯标题,R56 只在框架 `
+            + '`.header .eyebrow` 上强制、对手写 raw 标题静默放行 —— 这正是 raw 页绕过 R56 的盲区。'
+            + 'Fix: 把编号/eyebrow 并进同一行标题(同字号),或用框架 '
+            + '`<div class="header"><h2 class="title-zh">…</h2></div>` 让 R56 等守卫生效;'
+            + '确属设计意图的小字前缀 → 加 `data-allow-title-stack`。',
         }];
       },
     },

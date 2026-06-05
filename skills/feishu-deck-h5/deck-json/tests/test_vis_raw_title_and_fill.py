@@ -107,3 +107,39 @@ if __name__ == "__main__":
             failed += 1; print(f"FAIL  {fn.__name__}"); traceback.print_exc()
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+# ---- R-VIS-RAW-TITLE-STACK (two-layer title on bespoke raw — R56 blind-spot) ----
+_STACK_TITLE = ('<h2 style="font-size:48px;margin:0;color:#fff">'
+                '<span style="display:block;font-size:16px;color:#3C7FFF">变化 01 · NEW REFLEX</span>'
+                '这是手写的双层标题占一行</h2>')
+_FLAT_TITLE = ('<h2 style="font-size:48px;margin:0;color:#fff">'
+               '<span style="font-size:48px;color:#888">变化 02 · </span>这是单行标题没有叠层</h2>')
+
+
+def test_raw_title_stack_wired():
+    assert E.rule_in_engine("R-VIS-RAW-TITLE-STACK")
+
+
+def test_raw_title_stack_fires_on_folded_kicker():
+    # 48px title with a 16px block kicker folded inside → the exact two-layer bug
+    # R56 silently skips on bespoke raw.
+    hits = _run("R-VIS-RAW-TITLE-STACK", _slide("raw", _stage(56, _STACK_TITLE + _FILL_BODY)))
+    assert len(hits) >= 1, f"folded two-layer title not flagged: {hits}"
+
+
+def test_raw_title_stack_quiet_on_single_line():
+    # same-size prefix span (变化 02 · at 48px) = single-line title → no fire.
+    hits = _run("R-VIS-RAW-TITLE-STACK", _slide("raw", _stage(56, _FLAT_TITLE + _FILL_BODY)))
+    assert hits == [], f"single-line title false-positived: {hits}"
+
+
+def test_raw_title_stack_skips_schema_layout():
+    hits = _run("R-VIS-RAW-TITLE-STACK", _slide("content", _stage(56, _STACK_TITLE)))
+    assert hits == [], f"should skip non-raw layout: {hits}"
+
+
+def test_raw_title_stack_opt_out():
+    hits = _run("R-VIS-RAW-TITLE-STACK",
+                _slide("raw", _stage(56, _STACK_TITLE + _FILL_BODY), attrs='data-allow-title-stack'))
+    assert hits == [], f"data-allow-title-stack should suppress: {hits}"
