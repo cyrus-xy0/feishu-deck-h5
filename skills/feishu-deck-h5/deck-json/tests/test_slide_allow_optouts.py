@@ -48,6 +48,20 @@ def test_build_data_attrs_empty_when_no_allow():
     assert 'data-allow' not in m._build_data_attrs({"key": "s4"})
 
 
+def test_build_data_attrs_emits_data_hidden_for_hidden_true():
+    m = _load_render()
+    assert 'data-hidden' in m._build_data_attrs({"key": "h1", "hidden": True})
+
+
+def test_build_data_attrs_no_data_hidden_when_false_or_missing():
+    m = _load_render()
+    # hidden:false must NOT emit data-hidden (the renderer treats absence/false
+    # identically — a visible slide).
+    assert 'data-hidden' not in m._build_data_attrs({"key": "h2", "hidden": False})
+    # missing hidden key → visible → no attribute
+    assert 'data-hidden' not in m._build_data_attrs({"key": "h3"})
+
+
 def test_schema_accepts_allow_and_rejects_bad_token():
     try:
         import jsonschema

@@ -103,6 +103,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -150,7 +151,7 @@ def _probe(index_html: Path) -> dict:
     # (audits.js via run-audits.py's run_unified_engine) instead of the retired
     # V._visual_audit_js() bucket report. The engine returns flat findings whose
     # payload carries the SAME fields (slide_idx/selector/overflow_px/direction/
-    # recoverable for card-overflow; idx/h/w for overflow), so we just regroup
+    # recoverable for card-overflow; idx/deltaH/deltaW for overflow), so we just regroup
     # them back into the bucket shape this reflow stage consumes. The numbers
     # match check-only --visual because both call the same engine.
     import importlib.util
@@ -223,7 +224,13 @@ def _probe(index_html: Path) -> dict:
     for rec in records["overlap"]:
         errset[("R-OVERLAP", rec["slide_idx"])] += 1
     for rec in records["overflow"]:
-        ov = max(rec.get("h", 0) - 1080, rec.get("w", 0) - 1920)
+        # The unified engine's R-OVERFLOW finding carries deltaH/deltaW (already
+        # the overflow delta vs 1080/1920 — NOT raw h/w), so consume those
+        # directly. Reading rec['h']/['w'] (the retired bucket-report fields)
+        # always defaulted to 0 → ov stayed negative → R-OVERFLOW was NEVER
+        # added to errset, blinding the reflow regression gate to overflow it
+        # introduces (H6).
+        ov = max(rec.get("deltaH", 0), rec.get("deltaW", 0))
         if ov > OVERFLOW_ERR_PX:
             errset[("R-OVERFLOW", rec["idx"])] += 1
     return {"records": records, "errset": errset}
@@ -308,7 +315,11 @@ def _render(deck_json: Path, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, str(_HERE / "render-deck.py"),
            str(deck_json), str(out_dir) + "/", "--skip-validate-html"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    # C3: this render runs once PER reflow iteration into a throwaway temp dir;
+    # suppress render-deck's post-render auto-snapshot so mid-reflow intermediate
+    # state is never written into the deck's making-of log.
+    env = dict(os.environ, DECK_LOG_NO_AUTOSNAP="1")
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     index = out_dir / "index.html"
     if res.returncode != 0 or not index.is_file():
         sys.stderr.write(res.stdout + "\n" + res.stderr + "\n")

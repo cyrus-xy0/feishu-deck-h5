@@ -1650,9 +1650,18 @@ def _enrich_canvas(ctx, slide):
                     # CSS family list ('"A", "B"'); escape it for the attribute.
                     rs += f";font-family:{html.escape(str(run['font']), quote=True)}"
                 if run.get("grad"):
-                    # gradient TEXT: paint the gradient and clip it to the glyphs
-                    # (color stays as the non-supporting fallback). The value is
-                    # a CSS gradient; escape it for the attribute.
+                    # gradient TEXT: paint the gradient and clip it to the glyphs.
+                    # -webkit-text-fill-color:transparent makes the glyph fill
+                    # show the clipped gradient through it. BUT if a browser does
+                    # not support background-clip:text, the fill stays transparent
+                    # and the only thing keeping the text visible is the `color`
+                    # fallback. C7: when the run has a grad but NO color, that
+                    # fallback is missing → invisible (transparent) glyphs. Supply
+                    # a visible fallback color (default to currentColor / the box's
+                    # inherited color) BEFORE the fill-color override, so an
+                    # unsupported browser still shows readable text.
+                    if not run.get("color"):
+                        rs += ";color:currentColor"
                     g = html.escape(str(run["grad"]), quote=True)
                     rs += (f";background-image:{g};-webkit-background-clip:text;"
                            "background-clip:text;-webkit-text-fill-color:transparent")
@@ -1689,19 +1698,45 @@ def _enrich_canvas(ctx, slide):
                 # box and oversize+offset the img so the crop region fills it —
                 # otherwise object-fit:fill stretches the WHOLE image (wrong
                 # proportions for cropped pictures).
-                l, r, t, b = crop
-                vw, vh = 1 - l - r, 1 - t - b
-                if vw > 0.01 and vh > 0.01:
-                    iw, ih = 100 / vw, 100 / vh
-                    ix, iy = -l / vw * 100, -t / vh * 100
-                    parts.append(
-                        f'          <div class="el" data-el-id="{eid}" '
-                        f'style="{style};overflow:hidden">'
-                        f'<img loading="lazy" src="{src}" style="position:absolute;'
-                        f'width:{iw:.4f}%;height:{ih:.4f}%;'
-                        f'left:{ix:.4f}%;top:{iy:.4f}%;object-fit:fill"></div>'
-                    )
-                    continue
+                #
+                # C6: validate the crop fractions. PowerPoint srcRect insets are
+                # in [0,1) and the visible region must be positive. A negative
+                # inset (l/r/t/b < 0) means "OUTSET" (pad with empty space) which
+                # we don't model — clamp it to 0 so the math stays sane rather
+                # than producing a negative-size / NaN img. If the surviving
+                # visible region is degenerate (vw/vh ≤ a sub-1% sliver, or the
+                # values aren't finite numbers), the crop is unusable; WARN on
+                # stderr and fall through to the uncropped image instead of
+                # silently rendering the wrong (uncropped) image with no trace.
+                def _f(x):
+                    try:
+                        return float(x)
+                    except (TypeError, ValueError):
+                        return None
+                vals = [_f(x) for x in crop]
+                if any(v is None for v in vals):
+                    print(f"render-deck: WARNING — element '{eid}': crop {crop!r} "
+                          "has non-numeric values; ignoring crop (rendering "
+                          "uncropped image).", file=sys.stderr)
+                else:
+                    # clamp negative insets (unsupported outset) up to 0
+                    l, r, t, b = (max(0.0, v) for v in vals)
+                    vw, vh = 1 - l - r, 1 - t - b
+                    if vw > 0.01 and vh > 0.01:
+                        iw, ih = 100 / vw, 100 / vh
+                        ix, iy = -l / vw * 100, -t / vh * 100
+                        parts.append(
+                            f'          <div class="el" data-el-id="{eid}" '
+                            f'style="{style};overflow:hidden">'
+                            f'<img loading="lazy" src="{src}" style="position:absolute;'
+                            f'width:{iw:.4f}%;height:{ih:.4f}%;'
+                            f'left:{ix:.4f}%;top:{iy:.4f}%;object-fit:fill"></div>'
+                        )
+                        continue
+                    print(f"render-deck: WARNING — element '{eid}': crop {crop!r} "
+                          f"leaves a degenerate visible region (vw={vw:.4f}, "
+                          f"vh={vh:.4f}); ignoring crop (rendering uncropped image).",
+                          file=sys.stderr)
             parts.append(
                 f'          <img class="el" data-el-id="{eid}" loading="lazy" '
                 f'src="{src}" style="{style}">'
@@ -2134,6 +2169,10 @@ def main(argv=None) -> int:
                 "layout":      slide.get("layout"),
                 "variant":     slide.get("variant"),
                 "label":       slide.get("screen_label") or _derive_screen_label(slide),
+                # 隐藏页 flag (only emitted when true) so downstream tools
+                # (locate-slide) can show hidden state + the visible pager
+                # ordinal without re-parsing index.html.
+                **({"hidden": True} if slide.get("hidden") else {}),
                 "bytes":       len(slides_html[new_idx]),
                 "assets":      _scan_slide_assets(slides_html[new_idx]),
             }

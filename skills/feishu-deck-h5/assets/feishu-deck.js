@@ -531,7 +531,11 @@
     // projecting, embedding in an iframe (e.g. Miaoda), and signage. Pure
     // present-layer: works for any deck regardless of source model.
     function applyKioskChrome() {
-      ui.classList.toggle('is-kiosk', /(^|[#&/])(proj|bare|clean|kiosk)\b/i.test(location.hash || ''));
+      // Guard with (?![\w-]) instead of \b: \b treats '-' as a word boundary, so
+      // a valid slide-key hash like #proj-2026 / #clean-tech would wrongly trip
+      // kiosk mode and hide ALL nav chrome (M7). The keyword must be the WHOLE
+      // hash token (not followed by another word-char OR a hyphen).
+      ui.classList.toggle('is-kiosk', /(^|[#&/])(proj|bare|clean|kiosk)(?![\w-])/i.test(location.hash || ''));
     }
     window.addEventListener('hashchange', applyKioskChrome, { signal });
     applyKioskChrome();

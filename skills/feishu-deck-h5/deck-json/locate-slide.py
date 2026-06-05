@@ -60,6 +60,9 @@ def _load_index_from_html(src: Path):
         assets = sorted({a for a in refs
                          if not a.startswith(("http", "data:", "#", "..", "/"))})
         key = attr("data-slide-key")
+        # data-hidden may sit before OR after data-slide-key in the .slide tag;
+        # a bare boolean attribute (no `="..."`) so test for its presence.
+        hidden = bool(re.search(r'\bdata-hidden\b', tag))
         entries.append({
             "key":         key,
             "frame_index": i + 1,
@@ -68,6 +71,7 @@ def _load_index_from_html(src: Path):
             "label":       attr("data-screen-label") or (key or ""),
             "title":       "",
             "assets":      assets,
+            "hidden":      hidden,
         })
     return entries, ""
 
@@ -113,6 +117,7 @@ def _load_index(src: Path):
             "label":       s.get("screen_label") or _derive_label(s),
             "title":       s.get("data", {}).get("title", ""),
             "assets":      [],
+            "hidden":      bool(s.get("hidden")),
         })
     return entries, (data.get("deck") or {}).get("title", "")
 
@@ -150,11 +155,35 @@ def _match(entries, kind, val):
             or low in (e.get("title") or "").lower()]
 
 
+def _annotate_visible_ordinals(entries):
+    """Attach `visible_ordinal` to every entry: the on-screen pager number =
+    count of NON-hidden slides at-or-before this one (what feishu-deck.js'
+    visibleOrdinal shows). Hidden slides get visible_ordinal=None (they have no
+    own pager position — the pager skips them) and are rendered as '—'. Returns
+    True if ANY entry is hidden. frame_index/#N is unchanged: it still counts ALL
+    slides (incl. hidden), so hidden slides stay #N-reachable."""
+    any_hidden = False
+    seen_visible = 0
+    for e in entries:
+        if e.get("hidden"):
+            any_hidden = True
+            e["visible_ordinal"] = None
+        else:
+            seen_visible += 1
+            e["visible_ordinal"] = seen_visible
+    return any_hidden
+
+
 def _fmt(e: dict, verbose: bool) -> str:
     if "_missing" in e:
         return f"#{e['_missing']}  ✗ no such frame_index"
     lv = f"/{e['variant']}" if e.get("variant") else ""
-    line = (f"#{e['frame_index']}  key={e.get('key')}  "
+    # screen = the on-screen pager position (visible-only count). A hidden slide
+    # has no pager slot of its own → shows '—'; frame_index/#N still counts it.
+    vo = e.get("visible_ordinal")
+    screen = f"screen={vo}" if vo is not None else "screen=—"
+    hidden_tag = " [hidden]" if e.get("hidden") else ""
+    line = (f"#{e['frame_index']}  {screen}  key={e.get('key')}{hidden_tag}  "
             f"layout={e.get('layout')}{lv}  \"{e.get('label', '')}\"  "
             f"link=index.html#{e['frame_index']}")
     assets = e.get("assets") or []
@@ -177,11 +206,17 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     entries, _title = _load_index(args.src)
+    any_hidden = _annotate_visible_ordinals(entries)
     kind, val = _parse_query(args.query)
     res = _match(entries, kind, val)
     hits = [e for e in res if "_missing" not in e]
 
     if args.as_json:
+        # visible_ordinal + hidden ride along on each entry; the note is human
+        # context only, so emit it to stderr (keeps stdout pure JSON).
+        if any_hidden:
+            print("note: screen pager counts visible-only; #N/frame_index counts "
+                  "all slides incl. hidden", file=sys.stderr)
         print(json.dumps(hits, ensure_ascii=False, indent=2))
         return 0 if hits else 4
 
@@ -190,6 +225,9 @@ def main(argv=None) -> int:
         return 4
     for e in res:
         print(_fmt(e, args.verbose))
+    if any_hidden:
+        print("note: screen pager counts visible-only; #N/frame_index counts all "
+              "slides incl. hidden")
     return 0 if hits else 4
 
 
