@@ -335,7 +335,7 @@
     clone.querySelectorAll('.dragging, .drop-target, .drop-above, .drop-below').forEach((el) => {
       el.classList.remove('dragging', 'drop-target', 'drop-above', 'drop-below');
     });
-    clone.querySelectorAll('.edit-bar, .edit-toast, .edit-sidebar').forEach((el) => el.remove());
+    clone.querySelectorAll('.edit-bar, .edit-toast, .edit-sidebar, .fs-presenter').forEach((el) => el.remove());
     // `clone` is the <html> element; the deck-edit-mode class lives on <body>.
     // Strip it from BOTH so a deck saved while in edit mode never bakes the
     // class in — otherwise the blue dashed slide-frame outline + hidden present

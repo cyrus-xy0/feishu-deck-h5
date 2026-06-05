@@ -533,15 +533,48 @@ def _slide_open_tag(html: str, key: str) -> str | None:
 
 
 def run_surgical_sync(index_html_path: Path, deck_json_path: Path,
-                      do_hidden: bool, do_order: bool, dry_run: bool) -> int:
-    """Surgical: reconcile ONLY structural flags from the rendered index.html back
-    into deck.json — `hidden` (隐藏页, per-slide data-hidden) and/or slide ORDER
-    (the edit-mode drag-reorder). Touches nothing else (no raw conversion, no
-    inner-HTML diff). This is what the in-browser editor changes; run this to push
-    those changes to the deck.json source. Both can run together."""
+                      do_hidden: bool, do_order: bool, do_notes: bool, dry_run: bool) -> int:
+    """Surgical: reconcile ONLY structural fields from the rendered index.html back
+    into deck.json — `hidden` (隐藏页, per-slide data-hidden), slide ORDER (the
+    edit-mode drag-reorder), and/or speaker `notes` (口播稿, edited in the presenter
+    view, stored in the #fs-deck-notes island). Touches nothing else (no raw
+    conversion, no inner-HTML diff). This is what the in-browser editor changes;
+    run this to push those changes to the deck.json source. Any combination works."""
     html = index_html_path.read_text(encoding="utf-8")
     deck = json.loads(deck_json_path.read_text(encoding="utf-8"))
     changed = False
+
+    # --- speaker notes (口播稿) from the #fs-deck-notes island ---
+    if do_notes:
+        m = re.search(r'<script type="application/json" id="fs-deck-notes">(.*?)</script>',
+                      html, re.S)
+        html_notes = {}
+        if m:
+            try:
+                html_notes = json.loads(m.group(1).replace('<\\/', '</'))
+            except Exception:
+                html_notes = {}
+        n_changes = []
+        for slide in deck.get("slides", []):
+            key = slide.get("key")
+            if not key:
+                continue
+            new = html_notes.get(key) or None
+            cur = slide.get("notes") or None
+            if new == cur:
+                continue
+            n_changes.append((key, cur, new))
+            if not dry_run:
+                if new:
+                    slide["notes"] = new
+                else:
+                    slide.pop("notes", None)
+        print(f"[notes] island has {len(html_notes)} note(s)")
+        for key, cur, new in n_changes:
+            print(f"  {key}: notes {'set' if new else 'cleared'}")
+        if not n_changes:
+            print("  ✓ no notes drift.")
+        changed = changed or bool(n_changes)
 
     # --- hidden flag ---
     if do_hidden:
@@ -638,20 +671,24 @@ def main() -> int:
                     help="surgical: reconcile ONLY slide ORDER (the edit-mode "
                          "drag-reorder) from the HTML DOM order back into deck.json. "
                          "Touches nothing else. Combine with --hidden-only to sync both.")
+    ap.add_argument("--notes-only", action="store_true",
+                    help="surgical: reconcile ONLY speaker notes (口播稿) from the "
+                         "#fs-deck-notes island back into deck.json `notes`. Use after "
+                         "editing notes in the presenter view + 💾/⌘S. Combinable.")
     args = ap.parse_args()
 
     if not args.index_html.exists():
         print(f"sync-index-to-deck: {args.index_html} not found", file=sys.stderr)
         return 2
 
-    if args.hidden_only or args.order_only:
+    if args.hidden_only or args.order_only or args.notes_only:
         if not args.deck_json.exists():
-            print(f"sync-index-to-deck: --hidden-only/--order-only need an existing "
-                  f"{args.deck_json}", file=sys.stderr)
+            print(f"sync-index-to-deck: --hidden-only/--order-only/--notes-only need an "
+                  f"existing {args.deck_json}", file=sys.stderr)
             return 2
         return run_surgical_sync(args.index_html, args.deck_json,
                                  do_hidden=args.hidden_only, do_order=args.order_only,
-                                 dry_run=args.dry_run)
+                                 do_notes=args.notes_only, dry_run=args.dry_run)
 
     # BACKFILL: explicit flag, OR auto-engaged when the deck.json target doesn't
     # exist yet (a legacy HTML-only deck being operated on for the first time).

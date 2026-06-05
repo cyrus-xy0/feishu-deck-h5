@@ -3634,7 +3634,12 @@ body {
   background: #121726; border: 1px solid #2a3450; border-radius: 8px;
   padding: 12px 14px; font-size: 17px; line-height: 1.6; color: #fff;
   white-space: pre-wrap;
+  width: 100%; box-sizing: border-box; resize: none;   /* editable textarea */
+  font-family: inherit; outline: none;
 }
+.fs-presenter .pv-notes:focus { border-color: #3a86ff; }
+.fs-presenter .pv-save { background: #2a8c5a; }
+.fs-presenter .pv-save:hover { background: #24794d; }
 .fs-presenter .pv-bar {
   display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
 }

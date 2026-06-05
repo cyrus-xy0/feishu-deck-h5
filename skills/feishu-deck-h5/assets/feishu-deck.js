@@ -862,12 +862,25 @@
       if (e.key === LS_KEY && e.newValue) { try { onRemoteGoto(JSON.parse(e.newValue)); } catch (x) {} }
     }, { signal });
 
-    let pv = null, pvOpen = false, timerStart = 0, timerId = 0;
+    let pv = null, pvOpen = false, timerStart = 0, timerId = 0, pvKey = null;
 
     // nav hook called by goTo: mirror to the projector + refresh speaker view.
     window.__fsOnNav = (idx) => { broadcast(idx); if (pvOpen) renderPV(); };
 
     const curIdx = () => currentIdx(frames);
+
+    // Persist edited notes into the hidden island so a save (window.deckEdit.save
+    // / ⌘S) bakes them into the HTML, and `sync-index-to-deck.py --notes-only`
+    // can push them back to the deck.json `notes` field.
+    function writeNotesIsland() {
+      let isl = document.getElementById('fs-deck-notes');
+      if (!isl) {
+        isl = document.createElement('script');
+        isl.type = 'application/json'; isl.id = 'fs-deck-notes';
+        document.body.appendChild(isl);
+      }
+      isl.textContent = JSON.stringify(notes);
+    }
 
     // Live preview: clone the real .slide and scale it (no <img>, no raster).
     function thumbInto(box, slide) {
@@ -897,8 +910,10 @@
       thumbInto(pv.querySelector('.pv-cur'),  curSlide);
       thumbInto(pv.querySelector('.pv-next'), hasNext ? frames[ni].querySelector('.slide') : null);
       const key = curSlide && curSlide.dataset.slideKey;
-      pv.querySelector('.pv-notes').textContent =
-        (key && notes[key]) ? notes[key] : '（这一页没有备注）';
+      pvKey = key || null;
+      const ta = pv.querySelector('.pv-notes');
+      ta.value = (key && notes[key]) ? notes[key] : '';
+      ta.placeholder = '写这一页的讲稿…（自动存入页面;💾 或 ⌘S 保存到文件)';
       pv.querySelector('.pv-pos').textContent =
         visibleOrdinal(frames, ci) + ' / ' + visibleCount(frames);
       pv.querySelector('.pv-nextlabel').textContent = hasNext ? '下一页' : '（已是最后一页）';
@@ -916,7 +931,8 @@
         '<div class="pv-grid">' +
           '<div class="pv-col"><div class="pv-lab">当前</div><div class="pv-cur pv-box"></div></div>' +
           '<div class="pv-col"><div class="pv-lab pv-nextlabel">下一页</div><div class="pv-next pv-box"></div>' +
-            '<div class="pv-lab pv-notes-lab">备注</div><div class="pv-notes"></div></div>' +
+            '<div class="pv-lab pv-notes-lab">备注（可编辑）</div>' +
+            '<textarea class="pv-notes" spellcheck="false"></textarea></div>' +
         '</div>' +
         '<div class="pv-bar">' +
           '<button class="pv-btn pv-prev" type="button">‹ 上一页</button>' +
@@ -924,6 +940,7 @@
           '<button class="pv-btn pv-nextbtn" type="button">下一页 ›</button>' +
           '<span class="pv-timer">00:00</span>' +
           '<button class="pv-btn pv-reset" type="button" title="计时归零">↺</button>' +
+          '<button class="pv-btn pv-save" type="button" title="保存讲稿到当前 HTML 文件">💾 保存</button>' +
           '<button class="pv-btn pv-proj" type="button" title="打开放映窗(观众屏,自动跟随)">📺 放映窗</button>' +
           '<button class="pv-btn pv-exit" type="button" title="退出 (Esc / P)">✕ 退出</button>' +
         '</div>';
@@ -933,6 +950,22 @@
       pv.querySelector('.pv-proj').onclick    = openProjector;
       pv.querySelector('.pv-exit').onclick    = closePresenter;
       pv.querySelector('.pv-reset').onclick   = () => { timerStart = Date.now(); };
+      // edit notes → update in-memory map + the hidden island (so any save persists)
+      pv.querySelector('.pv-notes').addEventListener('input', function () {
+        if (!pvKey) return;
+        if (this.value) notes[pvKey] = this.value; else delete notes[pvKey];
+        writeNotesIsland();
+      });
+      // 💾 save → bake island into the HTML via the edit-mode FS-Access save.
+      pv.querySelector('.pv-save').onclick = () => {
+        writeNotesIsland();
+        if (window.deckEdit && typeof window.deckEdit.save === 'function') {
+          window.deckEdit.save();
+        } else {
+          alert('已写入页面。用编辑模式(E)的 ⌘S 保存到文件,'
+              + '或运行 sync-index-to-deck.py --notes-only 同步到 deck.json。');
+        }
+      };
     }
 
     function openPresenter() {
