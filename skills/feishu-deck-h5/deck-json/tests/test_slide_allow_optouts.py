@@ -73,10 +73,10 @@ def test_schema_accepts_allow_and_rejects_bad_token():
     # standalone-validate just the slide subschema against the root $defs
     base = {"$defs": schema["$defs"]}
     good = {**slide_def, **base}
-    jsonschema.validate({"key": "k", "layout": "raw", "allow": ["no-focal", "imbalance"]}, good)
+    jsonschema.validate({"key": "k", "layout": "raw", "data": {"html": "<div></div>"}, "allow": ["no-focal", "imbalance"]}, good)
     bad = False
     try:
-        jsonschema.validate({"key": "k", "layout": "raw", "allow": ["not-a-real-optout"]}, good)
+        jsonschema.validate({"key": "k", "layout": "raw", "data": {"html": "<div></div>"}, "allow": ["not-a-real-optout"]}, good)
     except jsonschema.ValidationError:
         bad = True
     assert bad, "schema must reject an unknown allow token"
