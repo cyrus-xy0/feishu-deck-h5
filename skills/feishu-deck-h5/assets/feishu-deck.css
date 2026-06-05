@@ -338,6 +338,13 @@ body {
 .deck-ui.is-idle .deck-progress { opacity: .35; }
 /* Hovering chrome cancels idle fade visually (the JS mousemove also fires) */
 .deck-ui .deck-controls:hover { opacity: 1 !important; }
+/* Kiosk / projection mode (URL hash #proj | #bare | #clean | #kiosk):
+   force-hide ALL chrome — page bar, controls, hint — and stay hidden
+   (unlike .is-idle, hover/mousemove never wakes it). For projection,
+   embedded iframes (e.g. Miaoda), and signage. Toggled by JS on hashchange. */
+.deck-ui.is-kiosk .deck-progress,
+.deck-ui.is-kiosk .deck-controls,
+.deck-ui.is-kiosk .nav-hint { display: none !important; }
 
 /* Mobile: shrink controls, remove hint */
 @media (max-width: 640px) {
@@ -365,6 +372,12 @@ body {
   width: 160px; height: 50px;          /* master 106.4 × 33.5 native × 1.5 */
   background: var(--fs-asset-logo) left center/contain no-repeat;
   text-indent: -9999px; overflow: hidden;
+  z-index: 20;                          /* brand chrome ABOVE flattened content.
+     .slide>* (line ~1838) puts every direct .slide child at z-index:1; the
+     wordmark declared none, so it tied content at 1 and a later full-bleed raw
+     child (layout:"raw") painted over it by DOM order = logo flash-then-gone.
+     20 sits in the chrome band 2–49: above content, below pager(50/60) &
+     mobile chrome(1001). cover/end overrides inherit this. */
 }
 /* Cover & End (封面 / 封底) — same colored logo, top-LEFT, larger */
 .slide[data-layout="cover"] .wordmark,
@@ -886,6 +899,70 @@ body {
 .slide .fs-claim-row.is-purple .fs-claim-row__icon { background: rgba(123,90,209,0.20); color: var(--fs-purple); }
 .slide .fs-claim-row.is-orange { border-color: rgba(254,127,0,0.40); background: rgba(254,127,0,0.05); }
 .slide .fs-claim-row.is-orange .fs-claim-row__icon { background: rgba(254,127,0,0.20); color: var(--fs-orange); }
+
+/* ============================================================================
+   UTILITY · .fs-titled-panel — bind a heading to its members in ONE panel
+   (added 2026-06-05, promoted from richness-primitives recipe / pg-27 fix).
+   USE when a heading LABELS a set (steps / criteria / KPIs / do-don't): the
+   title + items live in one tinted panel — header gets a divider, members are
+   internal divider-rows. Without it, a bare heading floats orphaned above a row
+   of equal-weight bordered cards and the group stops reading as one unit.
+   Pair it 等高 with a sibling visual (image / chart) via the row's
+   `align-items: stretch` so the two read as a balanced pair.
+
+   Structure:
+     <div class="fs-titled-panel is-teal">                <!-- accent variant -->
+       <div class="fs-titled-panel__head">
+         <h3 class="fs-titled-panel__title">三步算账</h3>
+         <span class="fs-titled-panel__tag">10 MIN</span>     <!-- optional -->
+       </div>
+       <div class="fs-titled-panel__rows">
+         <div class="fs-titled-panel__row">
+           <span class="fs-titled-panel__n">01</span>
+           <div><p class="fs-titled-panel__rt">看线上单量</p>
+                <p class="fs-titled-panel__rd">打开美团看竞品当日单量。</p></div>
+         </div>
+       </div>
+     </div>
+   Accents: .is-blue / .is-teal / .is-violet / .is-purple / .is-orange (default teal).
+   ============================================================================ */
+.slide .fs-titled-panel {
+  --tp-accent: var(--fs-teal);
+  display: flex; flex-direction: column; min-height: 0;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--tp-accent) 32%, transparent);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--tp-accent) 8%, transparent),
+    color-mix(in srgb, var(--tp-accent) 2%, transparent));
+  padding: 20px 26px;
+}
+.slide .fs-titled-panel__head {
+  display: flex; align-items: baseline; gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--tp-accent) 28%, transparent);
+}
+.slide .fs-titled-panel__title { font: 800 32px/1.2 var(--fs-font-cjk); color: #fff; margin: 0; }
+.slide .fs-titled-panel__tag {
+  font: 800 24px/1 var(--fs-font-latin); color: var(--tp-accent); letter-spacing: 0.04em;
+}
+.slide .fs-titled-panel__rows {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+  justify-content: space-between;
+}
+.slide .fs-titled-panel__row {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 16px;
+  align-items: start; padding: 18px 0;
+  border-top: 1px solid rgba(255,255,255,0.10);
+}
+.slide .fs-titled-panel__row:first-child { border-top: none; }
+.slide .fs-titled-panel__n  { font: 800 30px/1 var(--fs-font-latin); color: var(--tp-accent); }
+.slide .fs-titled-panel__rt { font: 800 26px/1.3 var(--fs-font-cjk); color: #fff; margin: 0 0 4px; }
+.slide .fs-titled-panel__rd { font: 500 24px/1.45 var(--fs-font-cjk); color: rgba(255,255,255,0.90); margin: 0; }
+.slide .fs-titled-panel.is-blue   { --tp-accent: var(--fs-blue); }
+.slide .fs-titled-panel.is-teal   { --tp-accent: var(--fs-teal); }
+.slide .fs-titled-panel.is-violet { --tp-accent: var(--fs-violet); }
+.slide .fs-titled-panel.is-purple { --tp-accent: var(--fs-purple); }
+.slide .fs-titled-panel.is-orange { --tp-accent: var(--fs-orange); }
 
 .slide[data-layout="content-2col"] .col-visual {
   border: 1px solid var(--fs-hairline); border-radius: 16px;
@@ -1698,6 +1775,102 @@ body {
 }
 /* content-2col 视觉列(图/iframe)防被 grid 行拉伸变形 */
 .slide[data-layout="content-2col"] > .stage > .grid { align-items: center; }
+
+/* 2026-06-05 · BF-GRIDFILL-SIBLING · the `flex:1 撑满` above silently assumes
+   the .grid is the SOLE body block in .stage. When the .stage ALSO holds a
+   sibling block — a footer anchor-band, a lede line, a disclaimer strip — the
+   grown .grid eats EVERY pixel of vertical slack: cards float dead-centre in an
+   over-tall grid and the sibling is shoved to the far edge, opening a big dead
+   band between them. Worse, the stage's own `justify-content:center` becomes a
+   no-op (flex:1 left it zero slack to distribute), so the intended
+   "group the blocks + centre the group" never happens. This is the
+   "为撑满屏幕把页脚顶到底" anti-pattern — filling the screen is NOT a goal; a
+   centred group with balanced top/bottom whitespace is.
+   Fix: the fill only makes sense for a lone grid. When the grid has siblings it
+   must take intrinsic height so the stage groups + centres all blocks together
+   (sparse → centred ≈596; dense → fills naturally — same as a lone grid, minus
+   the manufactured slack). Gate the fill to :only-child. Authors who genuinely
+   want a middle block to stretch (top+bottom anchored layouts) opt back in with
+   the explicit `.fs-fill` class below — consistent with .fs-card-fill /
+   .stage--tall. Specificity (0,5,0) > the (0,4,0) base rule, so it wins. */
+.slide[data-layout="content-2col"] > .stage > .grid:not(:only-child),
+.slide[data-layout="content-3up"]  > .stage > .grid:not(:only-child) {
+  flex: 0 0 auto;
+}
+
+/* Opt-in: a stage child that SHOULD stretch to fill remaining vertical space
+   (e.g. a middle block in an intentional top-quote → fill → bottom-disclaimer
+   layout, or a body that fills below a pinned title). `!important` so it beats
+   the :only-child gate above regardless of source order. */
+.slide > .stage > .fs-fill {
+  flex: 1 1 auto !important;
+  min-height: 0;
+}
+
+/* ============================================================================
+ *  SCREENSHOT TILE  ·  .shot-twin / .shot-col / .shot-pill / img.shot-img
+ *  2026-06-05 · codified from meeting-recap-ai (label-above) + ai-knows-you.
+ *  N FULL (un-cropped) product screenshots side by side, each with a pill label.
+ *
+ *  WHEN: show screenshots WHOLE, each topped (or footed) by a short pill label.
+ *  Distinct from story-case `.scene-frame` (feishu-deck-patterns.css), which
+ *  CROPS a documentary still via `background-size: cover` + overlay caption.
+ *  NOTE: lives in feishu-deck.css (the always-loaded core), NOT
+ *  feishu-deck-patterns.css — that file is only linked by story-case/one-pager
+ *  decks, so a pattern that must work everywhere belongs here.
+ *
+ *  WHY a real <img>, not a `background-size:contain` frame (this is the whole
+ *  point of the pattern). A contain image floats inside a FIXED-height frame, so
+ *  shots of different aspect ratios sit at different vertical offsets and the
+ *  gap between the *visible image* and its label differs column-to-column
+ *  (measured 14 vs 54px on the source page). The validator can't see it
+ *  (R-VIS-GUTTER measures DOM rects, not the floated background extent), and the
+ *  runtime `balanceColumns` fix (feishu-deck.js) only half-solves it — it
+ *  tightens the frame but then CENTRES each unit, so the labels end up
+ *  mis-aligned across columns. An <img> sizes to its own aspect ratio with NO
+ *  letterbox slack, and balanceColumns ignores it (it only touches
+ *  background-size:contain). So: top-align the columns → labels line up; the
+ *  pill↔image gap is the flex `gap` → identical for every aspect ratio; each
+ *  image is as tall as it needs to be (shorter shots simply end higher).
+ * ============================================================================ */
+.slide .shot-twin {
+  display: grid;
+  grid-template-columns: repeat(var(--shot-cols, 2), 1fr);
+  gap: 28px;
+  align-items: start;        /* top-align columns → pill labels line up across columns */
+  justify-items: center;
+}
+.slide .shot-col {
+  display: flex; flex-direction: column;
+  gap: 14px;                 /* THE label↔image gap — one constant, every aspect ratio */
+  align-items: center; min-width: 0;
+}
+.slide .shot-pill {
+  align-self: center;
+  padding: 10px 24px;
+  background: rgba(60,127,255,0.20);
+  border: 1px solid rgba(60,127,255,0.50);
+  border-radius: 999px;
+  font: 700 24px/1.2 var(--fs-font-cjk);
+  color: #fff;
+  letter-spacing: 0.005em;
+}
+.slide .shot-col.is-violet .shot-pill { background: rgba(159,111,241,0.20); border-color: rgba(159,111,241,0.50); }
+.slide .shot-col.is-teal   .shot-pill { background: rgba(51,214,192,0.18);  border-color: rgba(51,214,192,0.50); }
+.slide .shot-col.is-orange .shot-pill { background: rgba(254,127,0,0.18);   border-color: rgba(254,127,0,0.50); }
+
+.slide img.shot-img {
+  display: block;
+  max-width: 100%;
+  max-height: var(--shot-max-h, 740px);   /* floor for tall portraits; override per deck if the stage is shorter */
+  width: auto; height: auto;               /* scale to natural aspect ratio — no letterbox, no float */
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+}
+/* caption-BELOW variant: author the pill AFTER the image in markup and add this
+   class on the twin; bottom-align so the image bottoms (and the captions under
+   them) line up. */
+.slide .shot-twin--cap-below { align-items: end; }
 
 /* When timeline is .stage-wrapped, the .axis (still absolutely positioned
    relative to .slide) needs to align with the .nodes' new flow position.
@@ -3577,4 +3750,68 @@ body {
 .slide[data-layout="process"] .flow > .step {
   align-self: center;
   justify-content: center;
+}
+
+/* ============================================================================
+   Presenter mode (speaker view) — PowerPoint/Keynote-style. Built by
+   feishu-deck.js setupPresenter(); toggled with 'P'. Audience sees the deck
+   (this window behind the overlay, and/or the projector window); the presenter
+   sees current + next previews, notes, and a timer.
+   ============================================================================ */
+.fs-presenter {
+  position: fixed; inset: 0;
+  z-index: 2147483000;
+  display: none;                /* JS sets flex */
+  flex-direction: column;
+  background: #0b0e16;
+  color: #e6edf7;
+  padding: 20px 22px 14px;
+  gap: 14px;
+  font: 500 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.fs-presenter .pv-grid {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 18px;
+}
+.fs-presenter .pv-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.fs-presenter .pv-lab { font-size: 12px; color: #8b93ad; margin: 0 0 6px 2px; letter-spacing: .04em; }
+.fs-presenter .pv-notes-lab { margin-top: 14px; }
+.fs-presenter .pv-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+}
+.fs-presenter .pv-cur { box-shadow: 0 0 0 2px rgba(58,134,255,.55); }
+.fs-presenter .pv-embed { position: absolute; inset: 0; background: linear-gradient(135deg,#1a2238,#0c1222); }
+.fs-presenter .pv-notes {
+  flex: 1; min-height: 0; overflow-y: auto;
+  background: #121726; border: 1px solid #2a3450; border-radius: 8px;
+  padding: 12px 14px; font-size: 17px; line-height: 1.6; color: #fff;
+  white-space: pre-wrap;
+  width: 100%; box-sizing: border-box; resize: none;   /* editable textarea */
+  font-family: inherit; outline: none;
+}
+.fs-presenter .pv-notes:focus { border-color: #3a86ff; }
+.fs-presenter .pv-save { background: #2a8c5a; }
+.fs-presenter .pv-save:hover { background: #24794d; }
+.fs-presenter .pv-bar {
+  display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
+}
+.fs-presenter .pv-btn {
+  border: 0; border-radius: 999px; padding: 9px 16px; font-size: 15px; cursor: pointer;
+  background: rgba(255,255,255,.12); color: #fff;
+}
+.fs-presenter .pv-btn:hover { background: rgba(255,255,255,.2); }
+.fs-presenter .pv-proj { background: #3a86ff; }
+.fs-presenter .pv-proj:hover { background: #2f74e6; }
+.fs-presenter .pv-pos { font-size: 15px; color: #cfe0ff; min-width: 70px; text-align: center; }
+.fs-presenter .pv-timer {
+  font-size: 22px; font-variant-numeric: tabular-nums; color: #fff;
+  margin-left: 8px; min-width: 64px; text-align: center;
 }

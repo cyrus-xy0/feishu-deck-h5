@@ -150,7 +150,7 @@ Claude 会读 [INSTALL.md](INSTALL.md) 走标准安装流程(plugin marketplace 
 | 内容 | 文档 |
 |---|---|
 | 安装路径(marketplace / install.sh / 手动 clone） | [INSTALL.md](INSTALL.md) |
-| DeckJSON 流水线 + 13+3 layouts + 11 叙事模式 + UI/richness 原语 + 校验规则 | [SKILL.md](skills/feishu-deck-h5/SKILL.md) |
+| DeckJSON 流水线 + 13+3 layouts + 11 叙事模式 + UI/richness 原语 + 校验规则 | [总控 SKILL.md](skills/feishu-deck-h5/SKILL.md) + [subskills](skills/feishu-deck-h5/subskills/) |
 | 9-section 完整设计系统 | [DESIGN.md](DESIGN.md) |
 | 业务规则 | [BUSINESS_RULES.md](BUSINESS_RULES.md) |
 

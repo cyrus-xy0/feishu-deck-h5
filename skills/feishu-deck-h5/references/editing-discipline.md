@@ -7,6 +7,70 @@ These four failure modes recurred in the 2026-05-14 CTG run and burned
 30+ minutes of debug time each. Read this section BEFORE doing any
 delete-slide / insert-slide / reorder-slide / custom-layout work.
 
+## Editing Copy
+
+The correct path for copy changes is `deck.json` → rerender. Do not post-render
+edit `index.html` unless intentionally doing browser edit mode followed by
+round-trip recovery.
+
+Examples:
+
+```bash
+python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title "新标题"
+python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.cards.0.body "新正文"
+python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
+```
+
+The old `texts.md` / `apply-texts.py` sidecar flow is retired. Residual
+`data-text-id` attributes in old decks are harmless, but do not author new flows
+around them.
+
+### Browser edit mode (downstream reviewers)
+
+The rendered deck ships with a built-in client-side visual editor
+(`assets/edit-mode/deck-edit-mode.{css,js}`, default-on). For downstream
+reviewers who only need copy tweaks and don't have the CLI:
+
+- Press **E** in the browser to enter edit mode, click any text to edit it
+  in place, press **Esc** to exit, and **Cmd/Ctrl+S** to save.
+- This edits the rendered **`index.html`**, NOT `deck.json` — so it is exactly
+  the post-render drift the ROUND-TRIP INTEGRITY rule warns about. The change
+  lives only in `index.html` and will be destroyed by the next re-render, fork,
+  or downstream tool that reads `deck.json`.
+
+### Drift recovery — port browser edits back to deck.json
+
+If you (or a reviewer) made edits in browser edit mode, port them back into
+`deck.json` before delivery / fork / library ingest so re-render stays
+byte-identical:
+
+```bash
+python3 skills/feishu-deck-h5/deck-json/sync-index-to-deck.py \
+  runs/<ts>/output/index.html runs/<ts>/output/deck.json --dry-run
+# review the diff, then drop --dry-run to write it back
+python3 skills/feishu-deck-h5/deck-json/sync-index-to-deck.py \
+  runs/<ts>/output/index.html runs/<ts>/output/deck.json
+```
+
+`sync-index-to-deck.py` matches each `.slide` by `data-slide-key`, overwrites the
+matching slide's `data.html`, and (with `--force`) can downgrade template slides
+to `layout: raw` — lossy on structured fields, so prefer editing `deck.json`
+directly when you can. See `round-trip-integrity.md` for the full two-halves rule
+and fork/clone parity checks.
+
+### Stable `data-slide-key` is mandatory — no key, no locator, no slice
+
+Every `.slide` must have a stable semantic `data-slide-key`: unique within the
+deck, kebab-case, NOT positional (`slide-01` / `page-7`), and stable across
+reorder. Hand-authored / lifted HTML must add or preserve it before delivery or
+library ingest.
+
+The hazard chain: **无 key → 无 locator → 切片不可索引**. Without a stable key,
+`sync-index-to-deck.py` cannot find the matching slide (no locator), so
+browser edits cannot be ported back; and the slide-library cannot index the
+slice for reuse. A positional key looks stable until the first reorder, then
+silently points at the wrong slide.
+
 ### E1. Identifier sync on delete/insert — what's mandatory vs conditional
 
 A slide can carry up to three numeric identifiers, at different DOM levels:

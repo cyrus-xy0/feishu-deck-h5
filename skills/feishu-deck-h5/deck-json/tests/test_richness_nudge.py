@@ -1,28 +1,35 @@
-"""Unit tests for audit_visual_richness (R-VIS-NO-IMAGERY) — the design-quality
-nudge added 2026-05-29 from the quality benchmark (#1 gap: decks read visually
-flat / all text cards). Fast: imports validate.py directly, no render, no
-Playwright. Covers must-fire + must-not-fire + advisory-never-errors + sparse-skip.
+"""Unit tests for R-VIS-NO-IMAGERY — the design-quality nudge added 2026-05-29
+from the quality benchmark (#1 gap: decks read visually flat / all text cards).
+
+UNIFY-VALIDATE-ARCH step 4b: the rule now lives in the unified engine (rendered
+DOM); fixtures render headlessly and we read the warn_soft findings. Covers
+must-fire + must-not-fire + advisory-never-errors + sparse-skip. Chromium req.
+Note: each slide carries a UNIQUE data-slide-key so the multi-slide fixtures
+don't trip R-KEY duplicate (the old per-function call never saw sibling keys).
 """
 import sys
 import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-import validate as V  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import engine_helpers as E  # noqa: E402
+
+_KSEQ = iter(range(100000))
 
 
 def _slide(layout: str, body: str = "") -> str:
     return (
         f'<div class="slide-frame"><div class="slide" '
-        f'data-layout="{layout}" data-screen-label="x" data-slide-key="k">'
+        f'data-layout="{layout}" data-screen-label="x" '
+        f'data-slide-key="k{next(_KSEQ)}">'
         f"{body}</div></div>"
     )
 
 
 def _soft_codes(slides):
-    iss = V.Issues()
-    V.audit_visual_richness(slides, iss)
-    return [c for c, _ in iss.soft_warnings]
+    E.skip_if_no_engine()
+    return E.soft_codes("R-VIS-NO-IMAGERY", list(slides))
 
 
 def test_flat_deck_fires():
@@ -54,11 +61,11 @@ def test_image_or_background_counts_as_imagery():
 
 
 def test_advisory_never_a_hard_error():
-    iss = V.Issues()
-    V.audit_visual_richness(
-        [_slide("stats"), _slide("content-3up"), _slide("matrix-2x2")], iss
-    )
-    assert iss.errors == []  # only ever warn_soft, never err
+    E.skip_if_no_engine()
+    slides = [_slide("stats"), _slide("content-3up"), _slide("matrix-2x2")]
+    rno = [f for f in E.run(slides) if f.get("rule") == "R-VIS-NO-IMAGERY"]
+    assert all(f.get("severity") == "warn_soft" for f in rno), \
+        "R-VIS-NO-IMAGERY must only ever be a soft advisory, never err/warn"
 
 
 def test_sparse_layouts_skipped():

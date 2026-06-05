@@ -57,12 +57,19 @@ import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-import validate as V  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import validate as V  # noqa: E402,F401
+import engine_helpers as E  # noqa: E402
 
+# UNIFY-VALIDATE-ARCH step 4b: these gate rules now live ONLY in the unified
+# engine (audits.js, rendered DOM). The old `audit_*` source-scan calls are
+# replaced by an engine run filtered to the rule code. Aliases keep the call
+# sites readable; the `L1/L2/L4` rule emits each of L1/L2/L4 separately, so each
+# test passes its specific code. Requires Chromium (skips if unavailable).
+L1, L2, L4 = "L1", "L2", "L4"
+R_HIERARCHY, R_KEY, R05, R13 = "R-HIERARCHY", "R-KEY", "R05", "R13"
+R47, R48, R49, R56 = "R47", "R48", "R49", "R56"
 
-# --------------------------------------------------------------------------
-# helpers
-# --------------------------------------------------------------------------
 
 def _doc(head_style: str = "", body: str = "") -> str:
     """Minimal full HTML doc with one <style> block + a <body>."""
@@ -80,19 +87,15 @@ def _slide(layout: str, body: str = "", *, key: str = "k") -> str:
     )
 
 
-def _err_codes(fn, *args):
-    iss = V.Issues()
-    fn(*args, iss)
-    return [c for c, _ in iss.errors]
+def _err_codes(rule, html_or_slides):
+    E.skip_if_no_engine()
+    return E.err_codes(rule, html_or_slides)
 
 
-def _all_codes(fn, *args):
-    """errors + warnings + soft_warnings codes (some audits warn, some err)."""
-    iss = V.Issues()
-    fn(*args, iss)
-    return ([c for c, _ in iss.errors]
-            + [c for c, _ in iss.warnings]
-            + [c for c, _ in iss.soft_warnings])
+def _all_codes(rule, html_or_slides):
+    """errors + warnings + soft_warnings codes (some rules warn, some err)."""
+    E.skip_if_no_engine()
+    return E.all_codes(rule, html_or_slides)
 
 
 # ==========================================================================
@@ -106,19 +109,19 @@ def test_l1_missing_colored_logo_default_fires():
     # No `.slide .wordmark { background: var(--fs-asset-logo) }` rule at all
     # -> check_logo_default returns False -> L1.
     html = _doc(".slide .desc { font-size: 24px; }")
-    assert "L1" in _err_codes(V.audit_layout_integrity, html)
+    assert "L1" in _err_codes(L1, html)
 
 
 def test_l1_mono_default_fires():
     # The default wordmark points at the MONO asset -> not the colored default.
     html = _doc(".slide .wordmark { background: var(--fs-asset-logo-mono); }")
-    assert "L1" in _err_codes(V.audit_layout_integrity, html)
+    assert "L1" in _err_codes(L1, html)
 
 
 def test_l1_colored_logo_default_no_fire():
     # Default references var(--fs-asset-logo) (colored) -> compliant.
     html = _doc(".slide .wordmark { background: var(--fs-asset-logo); }")
-    assert "L1" not in _err_codes(V.audit_layout_integrity, html)
+    assert "L1" not in _err_codes(L1, html)
 
 
 # ==========================================================================
@@ -137,7 +140,7 @@ def test_l2_uncentered_short_layout_fires():
         + _slide("content-2col", '<div class="grid"></div>')
         + "</body></html>"
     )
-    assert "L2" in _err_codes(V.audit_layout_integrity, html)
+    assert "L2" in _err_codes(L2, html)
 
 
 def test_l2_centered_layout_no_fire():
@@ -150,7 +153,7 @@ def test_l2_centered_layout_no_fire():
         + _slide("content-2col", '<div class="grid"></div>')
         + "</body></html>"
     )
-    assert "L2" not in _err_codes(V.audit_layout_integrity, html)
+    assert "L2" not in _err_codes(L2, html)
 
 
 def test_l2_layout_absent_no_fire():
@@ -161,7 +164,7 @@ def test_l2_layout_absent_no_fire():
         "<html><head><style>.slide .desc { font-size: 24px; }</style></head>"
         "<body>" + _slide("cover") + "</body></html>"
     )
-    assert "L2" not in _err_codes(V.audit_layout_integrity, html)
+    assert "L2" not in _err_codes(L2, html)
 
 
 # ==========================================================================
@@ -175,7 +178,7 @@ def test_l4_two_col_attrs_fires():
         '.slide[data-layout="process"] .output .attrs '
         "{ grid-template-columns: 1fr 1fr; }"
     )
-    assert "L4" in _err_codes(V.audit_layout_integrity, html)
+    assert "L4" in _err_codes(L4, html)
 
 
 def test_l4_single_col_attrs_no_fire():
@@ -183,13 +186,13 @@ def test_l4_single_col_attrs_no_fire():
         '.slide[data-layout="process"] .output .attrs '
         "{ grid-template-columns: 1fr; }"
     )
-    assert "L4" not in _err_codes(V.audit_layout_integrity, html)
+    assert "L4" not in _err_codes(L4, html)
 
 
 def test_l4_no_output_panel_no_fire():
     # No process .output .attrs rule -> rule does not apply.
     html = _doc(".slide .desc { font-size: 24px; }")
-    assert "L4" not in _err_codes(V.audit_layout_integrity, html)
+    assert "L4" not in _err_codes(L4, html)
 
 
 # ==========================================================================
@@ -201,25 +204,25 @@ def test_l4_no_output_panel_no_fire():
 def test_hierarchy_oversized_meta_fires():
     # .source is a meta class; 28px > 24px body floor -> inverted hierarchy.
     html = _doc(".slide .source { font-size: 28px; }")
-    assert "R-HIERARCHY" in _all_codes(V.audit_hierarchy, html)
+    assert "R-HIERARCHY" in _all_codes(R_HIERARCHY, html)
 
 
 def test_hierarchy_meta_within_body_no_fire():
     # Same meta class at 16px (<= 24) -> correct hierarchy.
     html = _doc(".slide .source { font-size: 16px; }")
-    assert "R-HIERARCHY" not in _all_codes(V.audit_hierarchy, html)
+    assert "R-HIERARCHY" not in _all_codes(R_HIERARCHY, html)
 
 
 def test_hierarchy_column_label_exempt_no_fire():
     # .side-pill matches COLUMN_LABEL_RE -> it is a content label, not meta.
     html = _doc(".slide .side-pill { font-size: 28px; }")
-    assert "R-HIERARCHY" not in _all_codes(V.audit_hierarchy, html)
+    assert "R-HIERARCHY" not in _all_codes(R_HIERARCHY, html)
 
 
 def test_hierarchy_allow_meta_larger_exemption_no_fire():
     # /* allow:meta-larger */ opts the rule out (rare hero-owner case).
     html = _doc(".slide .owner { font-size: 28px; /* allow:meta-larger */ }")
-    assert "R-HIERARCHY" not in _all_codes(V.audit_hierarchy, html)
+    assert "R-HIERARCHY" not in _all_codes(R_HIERARCHY, html)
 
 
 # ==========================================================================
@@ -231,33 +234,33 @@ def test_rkey_missing_fires():
     # Slide-frame with a .slide but NO data-slide-key attribute.
     frame = ('<div class="slide-frame"><div class="slide" '
              'data-layout="stats" data-screen-label="x">body</div></div>')
-    assert "R-KEY" in _err_codes(V.audit_slide_keys, [frame])
+    assert "R-KEY" in _err_codes(R_KEY, [frame])
 
 
 def test_rkey_invalid_slug_fires():
     # Uppercase + underscore -> not kebab-case.
     slides = [_slide("stats", key="ARR_History")]
-    assert "R-KEY" in _err_codes(V.audit_slide_keys, slides)
+    assert "R-KEY" in _err_codes(R_KEY, slides)
 
 
 def test_rkey_duplicate_slug_fires():
     # Two slides share the same key -> not deck-internal unique.
     slides = [_slide("stats", key="arr-history"),
               _slide("stats", key="arr-history")]
-    assert "R-KEY" in _err_codes(V.audit_slide_keys, slides)
+    assert "R-KEY" in _err_codes(R_KEY, slides)
 
 
 def test_rkey_positional_slug_warns():
     # `slide-06` is positional -> warn (surfaced under all-codes), not silent.
     slides = [_slide("stats", key="slide-06")]
-    assert "R-KEY" in _all_codes(V.audit_slide_keys, slides)
+    assert "R-KEY" in _all_codes(R_KEY, slides)
 
 
 def test_rkey_valid_semantic_keys_no_fire():
     # Distinct semantic kebab-case slugs -> clean (no err, no warn).
     slides = [_slide("stats", key="arr-history"),
               _slide("stats", key="case-meiyijia")]
-    assert "R-KEY" not in _all_codes(V.audit_slide_keys, slides)
+    assert "R-KEY" not in _all_codes(R_KEY, slides)
 
 
 # ==========================================================================
@@ -268,22 +271,22 @@ def test_rkey_valid_semantic_keys_no_fire():
 
 def test_r05_exclamation_fires():
     html = "<html><body><div class='slide'><p>太棒了!</p></div></body></html>"
-    assert "R05" in _err_codes(V.audit_copy_rules, html)
+    assert "R05" in _err_codes(R05, html)
 
 
 def test_r05_ellipsis_fires():
     html = "<html><body><div class='slide'><p>未完待续...</p></div></body></html>"
-    assert "R05" in _err_codes(V.audit_copy_rules, html)
+    assert "R05" in _err_codes(R05, html)
 
 
 def test_r05_emoji_fires():
     html = "<html><body><div class='slide'><p>发布啦\U0001F680</p></div></body></html>"
-    assert "R05" in _err_codes(V.audit_copy_rules, html)
+    assert "R05" in _err_codes(R05, html)
 
 
 def test_r05_clean_copy_no_fire():
     html = "<html><body><div class='slide'><p>完整的一句话。</p></div></body></html>"
-    assert "R05" not in _err_codes(V.audit_copy_rules, html)
+    assert "R05" not in _err_codes(R05, html)
 
 
 def test_r05_svg_title_stripped_no_fire():
@@ -292,7 +295,7 @@ def test_r05_svg_title_stripped_no_fire():
     html = ("<html><body><div class='slide'>"
             "<svg><title>alert!</title></svg>正文内容。"
             "</div></body></html>")
-    assert "R05" not in _err_codes(V.audit_copy_rules, html)
+    assert "R05" not in _err_codes(R05, html)
 
 
 # ==========================================================================
@@ -303,18 +306,18 @@ def test_r05_svg_title_stripped_no_fire():
 def test_r13_br_in_title_fires():
     # `stats` is not a hero layout -> a <br> in the title is forbidden.
     slides = [_slide("stats", '<h2 class="title-zh">飞书企<br>业 AI</h2>')]
-    assert "R13" in _err_codes(V.audit_titles_one_line, slides)
+    assert "R13" in _err_codes(R13, slides)
 
 
 def test_r13_single_line_title_no_fire():
     slides = [_slide("stats", '<h2 class="title-zh">飞书企业 AI</h2>')]
-    assert "R13" not in _err_codes(V.audit_titles_one_line, slides)
+    assert "R13" not in _err_codes(R13, slides)
 
 
 def test_r13_hero_layout_br_allowed_no_fire():
     # cover is a HERO layout -> multi-line hero titles (with <br>) are allowed.
     slides = [_slide("cover", '<h2 class="title-zh">飞书企<br>业 AI</h2>')]
-    assert "R13" not in _err_codes(V.audit_titles_one_line, slides)
+    assert "R13" not in _err_codes(R13, slides)
 
 
 # ==========================================================================
@@ -329,7 +332,7 @@ def test_r47_structural_variant_missing_alignment_fires():
         '.slide[data-variant="wide"] .grid '
         "{ grid-template-columns: 1fr 1fr; }"
     )
-    assert "R47" in _all_codes(V.audit_variant_discipline, html)
+    assert "R47" in _all_codes(R47, html)
 
 
 def test_r47_structural_variant_with_alignment_no_fire():
@@ -339,21 +342,21 @@ def test_r47_structural_variant_with_alignment_no_fire():
         "{ display: grid; grid-template-columns: 1fr 1fr; "
         "align-items: center; justify-content: center; }"
     )
-    assert "R47" not in _all_codes(V.audit_variant_discipline, html)
+    assert "R47" not in _all_codes(R47, html)
 
 
 def test_r47_cosmetic_variant_no_fire():
     # Variant only changes color/padding -> no structural change -> exempt.
     html = _doc('.slide[data-variant="warm"] .card '
                 "{ color: #fff; padding: 24px; }")
-    assert "R47" not in _all_codes(V.audit_variant_discipline, html)
+    assert "R47" not in _all_codes(R47, html)
 
 
 def test_r47_pseudo_element_variant_no_fire():
     # ::before-targeting variant is decorative -> exempt even if structural.
     html = _doc('.slide[data-variant="x"] .arrow::before '
                 "{ display: flex; }")
-    assert "R47" not in _all_codes(V.audit_variant_discipline, html)
+    assert "R47" not in _all_codes(R47, html)
 
 
 # ==========================================================================
@@ -382,7 +385,7 @@ def _center_all_but(skip: str) -> str:
 def test_r48_missing_centering_fires():
     # All centerable layouts centered EXCEPT `stats` -> R48 fires for stats.
     html = _doc(_center_all_but("stats"))
-    assert "R48" in _err_codes(V.audit_default_centering, html)
+    assert "R48" in _err_codes(R48, html)
 
 
 def test_r48_all_centered_no_fire():
@@ -392,7 +395,7 @@ def test_r48_all_centered_no_fire():
         for lay in _CENTERABLE
     )
     html = _doc(rules)
-    assert "R48" not in _err_codes(V.audit_default_centering, html)
+    assert "R48" not in _err_codes(R48, html)
 
 
 # ==========================================================================
@@ -404,20 +407,20 @@ def test_r49_cyan_accent_fires():
     frame = ('<div class="slide-frame"><div class="slide" '
              'data-layout="stats" data-screen-label="x" data-slide-key="k" '
              'data-accent="cyan">body</div></div>')
-    assert "R49" in _err_codes(V.audit_no_cyan_accent, [frame])
+    assert "R49" in _err_codes(R49, [frame])
 
 
 def test_r49_brand_accent_no_fire():
     frame = ('<div class="slide-frame"><div class="slide" '
              'data-layout="stats" data-screen-label="x" data-slide-key="k" '
              'data-accent="blue">body</div></div>')
-    assert "R49" not in _err_codes(V.audit_no_cyan_accent, [frame])
+    assert "R49" not in _err_codes(R49, [frame])
 
 
 def test_r49_cyan_inline_highlight_no_fire():
     # cyan as an inline word highlight (.accent-text / .hl) — no data-accent.
     slides = [_slide("stats", '<span class="accent-text">关键词</span>')]
-    assert "R49" not in _err_codes(V.audit_no_cyan_accent, slides)
+    assert "R49" not in _err_codes(R49, slides)
 
 
 # ==========================================================================
@@ -429,13 +432,13 @@ def test_r56_eyebrow_in_header_fires():
     body = ('<div class="header"><div class="eyebrow">PRODUCT · X</div>'
             '<h2 class="title-zh">标题</h2></div>')
     slides = [_slide("stats", body)]
-    assert "R56" in _all_codes(V.audit_header_minimal, slides)
+    assert "R56" in _all_codes(R56, slides)
 
 
 def test_r56_title_only_header_no_fire():
     body = '<div class="header"><h2 class="title-zh">标题</h2></div>'
     slides = [_slide("stats", body)]
-    assert "R56" not in _all_codes(V.audit_header_minimal, slides)
+    assert "R56" not in _all_codes(R56, slides)
 
 
 def test_r56_hero_layout_skipped_no_fire():
@@ -443,7 +446,7 @@ def test_r56_hero_layout_skipped_no_fire():
     body = ('<div class="header"><div class="eyebrow">PRODUCT · X</div>'
             '<h2 class="title-zh">标题</h2></div>')
     slides = [_slide("cover", body)]
-    assert "R56" not in _all_codes(V.audit_header_minimal, slides)
+    assert "R56" not in _all_codes(R56, slides)
 
 
 if __name__ == "__main__":

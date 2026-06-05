@@ -4,8 +4,9 @@
 杜绝"规则三处维护、各自漂移"的硬闸门。规则只有一套源(validate 引擎),
 本脚本检查另外两份"附属清单"是否还跟引擎对齐:
 
-  ① 引擎全集  = validate.py / _validate_audits.py / _validate_common.py 里
-                所有 iss.err/warn/warn_soft 与 lev/_lev 第一参的规则码 (权威源)
+  ① 引擎全集  = 统一引擎 audits.js 的 `rule:` 字面量 + run-audits.py 的 runner
+                字节/源规则 (R-DOC-INTEGRITY / R-SELF-CONTAINED / perf) +
+                validate.py 适配层的 R-VISUAL 退化提示 (权威源, 单一规则源)
   ② FAMILIES  = check-only.py 的 FAMILIES 表 (--by-rule 工程师视图分组)
   ③ yaml      = business-rules.yaml 的业务文案 (逐页报告 / ingest 门禁)
 

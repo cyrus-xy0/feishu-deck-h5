@@ -106,6 +106,548 @@ def extract_slide_inner(html: str, slide_key: str) -> str | None:
     return inner_full.rstrip()
 
 
+# ---------------------------------------------------------------------------
+# canvas layout — by-id round-trip back into data.elements[].
+#
+# Mirrors render-deck.py _enrich_canvas. The render + by-id reverse-map logic
+# was prototyped & validated in /tmp/struct-proto (8/8: text/geometry/add/
+# delete/reorder lossless by data-el-id; only lossy case = multi-run inline
+# formatting flattened on edit). Productionized here.
+#
+# - text from <span>s → runs (no span structure left → single run);
+# - geometry cqw/cqh → px on canvas_w × canvas_h;
+# - a JSON element whose id is gone from the HTML = delete;
+# - an HTML data-el-id with no matching JSON element = add;
+# - DOM order of data-el-id = element order (reorder).
+# ---------------------------------------------------------------------------
+
+_STYLE_RE = re.compile(r'style="([^"]*)"')
+_SPAN_RE = re.compile(r'<span\b[^>]*style="([^"]*)"[^>]*>(.*?)</span>', re.S)
+_COLOR_RE = re.compile(r'color:\s*([^;]+)')
+
+
+def _canvas_geom_from_style(style: str, W: int, H: int) -> dict:
+    """cqw/cqh in an element's inline style → px geometry (1 decimal)."""
+    g = {}
+    for css_key, base, json_key in (("left", W, "x"), ("top", H, "y"),
+                                    ("width", W, "w"), ("height", H, "h")):
+        m = re.search(rf'{css_key}:\s*([\d.]+)cq[wh]', style)
+        if m:
+            g[json_key] = round(float(m.group(1)) / 100 * base, 1)
+    return g
+
+
+def _text_from_html(html_text: str) -> str:
+    """Inner HTML → plain run text. <br> → \\n FIRST (the renderer's _esc_br
+    emits run-internal newlines as <br>; reverse it so paragraph/soft breaks
+    survive the round-trip), then strip remaining tags and unescape entities."""
+    s = re.sub(r"<br\s*/?>", "\n", html_text, flags=re.I)
+    return _html_unescape(re.sub(r"<[^>]+>", "", s))
+
+
+def _runs_from_inner(inner: str) -> list:
+    """span inner → runs (per-run bold/color). No spans but text present →
+    single flattened run (documented lossy boundary on multi-run edit)."""
+    runs = []
+    for style, text in _SPAN_RE.findall(inner):
+        cm = _COLOR_RE.search(style)
+        run = {"text": _text_from_html(text)}
+        if "700" in style:
+            run["bold"] = True
+        if cm:
+            run["color"] = cm.group(1).strip()
+        runs.append(run)
+    if runs:
+        return runs
+    flat = _text_from_html(inner).strip()
+    if flat:
+        return [{"text": flat}]
+    return []
+
+
+def _collect_canvas_els(inner: str) -> "list[tuple[str, dict]]":
+    """Parse the slide's rendered .canvas inner for every [data-el-id] element.
+    Returns [(id, {tag, style, inner})] in DOM order. div / svg use depth-counted
+    inner; img is void. (svg = a FREEFORM/custGeom/LINE shape element.)"""
+    out = []
+    for tm in re.finditer(r'<(div|img|svg)\b[^>]*\bdata-el-id="([^"]+)"[^>]*>',
+                          inner):
+        tag, eid = tm.group(1), tm.group(2)
+        open_tag = inner[tm.start():tm.end()]
+        sm = _STYLE_RE.search(open_tag)
+        style = sm.group(1) if sm else ""
+        el_inner = ""
+        if tag in ("div", "svg"):
+            depth = 1
+            i = tm.end()
+            for mm in re.finditer(rf"<(/?){tag}\b", inner[i:]):
+                depth += -1 if mm.group(1) else 1
+                if depth == 0:
+                    el_inner = inner[i:i + mm.start()]
+                    break
+        out.append((eid, {"tag": tag, "style": style, "inner": el_inner}))
+    return out
+
+
+def sync_canvas_data(inner: str, data: dict) -> dict:
+    """Reverse-map rendered canvas inner → a new data dict (elements[] updated
+    by id). Returns a fresh dict; caller decides whether it differs."""
+    import copy as _copy
+    W = data.get("canvas_w") or 1920
+    H = data.get("canvas_h") or 1080
+    new = _copy.deepcopy(data)
+
+    found = _collect_canvas_els(inner)
+    by_id = {eid: h for eid, h in found}
+    order = {eid: i for i, (eid, _) in enumerate(found)}
+
+    elements = new.get("elements") or []
+    # 1) delete: JSON had it, HTML dropped it
+    elements = [e for e in elements if e.get("id") in by_id]
+    jmap = {e["id"]: e for e in elements}
+
+    for eid, h in found:
+        if eid not in jmap:
+            # 3) add: HTML has a new data-el-id. tag → type:
+            #   img → image, svg → shape (freeform/line), div → text.
+            if h["tag"] == "img":
+                etype = "image"
+            elif h["tag"] == "svg":
+                etype = "shape"
+            else:
+                etype = "text"
+            new_el = {"id": eid, "type": etype}
+            new_el.update(_canvas_geom_from_style(h["style"], W, H))
+            if etype == "text":
+                new_el["runs"] = _runs_from_inner(h["inner"])
+            jmap[eid] = new_el
+            elements.append(new_el)
+            continue
+        el = jmap[eid]
+        # 2) geometry write-back
+        el.update(_canvas_geom_from_style(h["style"], W, H))
+        if el.get("type") == "text":
+            runs = _runs_from_inner(h["inner"])
+            if runs:
+                el["runs"] = runs
+
+    # 4) reorder by DOM order
+    elements.sort(key=lambda e: order.get(e.get("id"), 1 << 30))
+    new["elements"] = elements
+    return new
+
+
+def _html_unescape(s: str) -> str:
+    import html as _h
+    return _h.unescape(s)
+
+
+# ---------------------------------------------------------------------------
+# backfill — create a deck.json FROM SCRATCH out of an index.html that has none.
+#
+# A LEGACY deck that is HTML-only (no deck.json) gets its `中间层` (deck.json
+# intermediate) backfilled by reverse-engineering the REAL rendered DOM — the
+# source code, which is more precise than any screenshot (DECKJSON-UNIFIED-
+# INTERMEDIATE-SPEC §5). NO images.
+#
+#   - Self-rendered feishu decks (every slide carries data-slide-key): EXACT.
+#     Each `.slide[data-slide-key="K"]` → one `raw` slide; inner = the same
+#     thing extract_slide_inner() returns on sync (wordmark + custom_css block
+#     stripped), so sync-index-to-deck on the same index.html is then a no-op.
+#   - FOREIGN HTML (no data-slide-key): best-effort. Each top-level `.slide`,
+#     else each direct <section>/page-container child, becomes one raw slide
+#     with a generated key. If unrecognizable → a single raw slide of <body>
+#     plus a warning. Never crashes.
+#
+# Backfilled slides are marked `lifted="backfill:<htmlstem>#<N>"` (imported
+# provenance) so the validator downgrades content-authoring rules for this
+# faithfully-carried content (data-lifted → _deck_all_imported / audit_copy_rules,
+# commit 1fb1f6e).
+# ---------------------------------------------------------------------------
+
+_SLIDE_OPEN_RE = re.compile(
+    r'<div class="slide(?:\s[^"]*)?"[^>]*\bdata-slide-key="([^"]+)"[^>]*>')
+
+
+def _slide_keys_in_dom_order(html: str) -> list:
+    """Every `.slide` data-slide-key in DOM order (self-rendered feishu deck)."""
+    return _SLIDE_OPEN_RE.findall(html)
+
+
+def _screen_label_for(html: str, slide_key: str) -> str | None:
+    """The data-screen-label attr on the slide open tag, if any."""
+    pat = (rf'<div class="slide(?:\s[^"]*)?"[^>]*'
+           rf'data-screen-label="([^"]*)"[^>]*data-slide-key="{re.escape(slide_key)}"'
+           rf'|<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="{re.escape(slide_key)}"'
+           rf'[^>]*data-screen-label="([^"]*)"')
+    m = re.search(pat, html)
+    if not m:
+        return None
+    return m.group(1) if m.group(1) is not None else m.group(2)
+
+
+def _extract_slide_custom_css(html: str, slide_key: str) -> str:
+    """Return the SCOPED CSS body of this slide's leading
+    `<style ... data-fs-custom-css>...</style>` block (render-deck injects it as
+    the first child of `.slide`, sourced from the deck.json `custom_css` field).
+
+    The body is ALREADY scoped to `.slide[data-slide-key="K"]`; scope_selectors
+    is idempotent on already-scoped selectors, so storing it verbatim back into
+    `custom_css` round-trips (re-render re-scopes → no change). Empty if none.
+    """
+    pat = rf'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="{re.escape(slide_key)}"[^>]*>'
+    m = re.search(pat, html)
+    if not m:
+        return ""
+    cc = re.match(
+        r'\s*<style[^>]*\bdata-fs-custom-css\b[^>]*>(.*?)</style>',
+        html[m.end():], re.S)
+    if not cc:
+        return ""
+    return cc.group(1).strip()
+
+
+def _make_key(seed: str, used: set, fallback_idx: int) -> str:
+    """Slugify `seed` into a schema-legal slide key (^[a-z][a-z0-9-]*$), unique
+    within `used`. Falls back to slide-<N> when nothing usable remains."""
+    s = re.sub(r"[^a-z0-9]+", "-", (seed or "").lower()).strip("-")
+    s = re.sub(r"-{2,}", "-", s)
+    if not s or not s[0].isalpha():
+        s = f"slide-{fallback_idx}"
+    base = s
+    n = 2
+    while s in used:
+        s = f"{base}-{n}"
+        n += 1
+    used.add(s)
+    return s
+
+
+def _strip_leading_wordmark(inner: str) -> str:
+    """Drop a leading `<div class="wordmark">…</div>` (raw/cover fragments carry
+    it; foreign HTML usually won't). Mirrors extract_slide_inner."""
+    wm = re.match(r'\s*<div class="wordmark"[^>]*>.*?</div>\s*', inner, re.S)
+    return inner[wm.end():] if wm else inner
+
+
+def _depth_extract_inner(html: str, open_match: re.Match, tag: str) -> str:
+    """Given a regex match on an opening `<tag ...>`, return its inner HTML by
+    depth-counting `<tag>`/`</tag>` (handles nesting)."""
+    i = open_match.end()
+    depth = 1
+    j = i
+    while depth > 0 and j < len(html):
+        nm = re.search(rf"<{tag}\b[^>]*>|</{tag}>", html[j:])
+        if not nm:
+            return html[i:]
+        depth += -1 if nm.group(0).startswith("</") else 1
+        j += nm.end()
+    return html[i: j - len(f"</{tag}>")]
+
+
+def _foreign_top_level_slides(html: str) -> list:
+    """Best-effort split of FOREIGN HTML (no data-slide-key) into raw slides.
+
+    Strategy, in order:
+      1. Top-level `<div class="slide ...">` (a foreign deck that uses the
+         `.slide` class but no data-slide-key) → each one a slide.
+      2. Else each `<section>` directly under <body> → each one a slide.
+      3. Else a single raw slide of the whole <body> inner (last resort).
+
+    Returns [(seed_label, inner_html)]. Order preserved. seed_label feeds key
+    generation (id/data-name/heading text → slug, else positional).
+    """
+    body = _body_inner(html)
+
+    def _seed(open_tag: str, inner: str) -> str:
+        mid = re.search(r'\bid="([^"]+)"', open_tag)
+        if mid:
+            return mid.group(1)
+        mname = re.search(r'\bdata-(?:name|slide|page)="([^"]+)"', open_tag)
+        if mname:
+            return mname.group(1)
+        mh = re.search(r"<h[1-3][^>]*>(.*?)</h[1-3]>", inner, re.S | re.I)
+        if mh:
+            return _text_from_html(mh.group(1))[:40]
+        return ""
+
+    # 1) foreign `.slide` divs (no data-slide-key, else the native path runs)
+    out = []
+    for om in re.finditer(r'<div class="slide(?:\s[^"]*)?"[^>]*>', body):
+        inner = _depth_extract_inner(body, om, "div")
+        out.append((_seed(om.group(0), inner), inner.strip()))
+    if out:
+        return out
+
+    # 2) <section> children
+    for om in re.finditer(r"<section\b[^>]*>", body):
+        inner = _depth_extract_inner(body, om, "section")
+        out.append((_seed(om.group(0), inner), inner.strip()))
+    if out:
+        return out
+
+    # 3) last resort: the whole body as one slide
+    return [("", body.strip())]
+
+
+def _body_inner(html: str) -> str:
+    m = re.search(r"<body\b[^>]*>(.*)</body>", html, re.S | re.I)
+    return m.group(1) if m else html
+
+
+def backfill_deck(index_html: str, html_stem: str) -> "tuple[dict, list]":
+    """Reverse-engineer a deck.json FROM SCRATCH out of an index.html.
+
+    Returns (deck_dict, warnings). Each slide is layout:raw, marked
+    lifted="backfill:<html_stem>#<N>". Self-rendered decks (data-slide-key) are
+    exact; foreign HTML is best-effort.
+    """
+    warnings = []
+    title = "Backfilled deck"
+    tm = re.search(r"<title[^>]*>(.*?)</title>", index_html, re.S | re.I)
+    if tm:
+        t = _text_from_html(tm.group(1)).strip()
+        if t:
+            title = t
+
+    slides = []
+    native_keys = _slide_keys_in_dom_order(index_html)
+
+    if native_keys:
+        # EXACT path — self-rendered feishu deck. Reuse extract_slide_inner so
+        # this is byte-identical to what a subsequent sync would compare against.
+        used = set()
+        for n, key in enumerate(native_keys, 1):
+            inner = extract_slide_inner(index_html, key)
+            if inner is None:
+                warnings.append(f"slide-key {key!r} matched in scan but inner "
+                                f"could not be extracted — skipped")
+                continue
+            # de-dupe collided keys (a malformed deck could repeat one); the
+            # schema needs unique keys for a clean sync round-trip.
+            ukey = key
+            if ukey in used:
+                ukey = _make_key(key, used, n)
+                warnings.append(f"duplicate data-slide-key {key!r} → renamed "
+                                f"{ukey!r} for uniqueness")
+            else:
+                used.add(ukey)
+            slide = {
+                "key": ukey,
+                "layout": "raw",
+                "lifted": f"backfill:{html_stem}#{n}",
+                "data": {"html": inner},
+            }
+            label = _screen_label_for(index_html, key)
+            if label:
+                slide["screen_label"] = label
+            cc = _extract_slide_custom_css(index_html, key)
+            if cc:
+                slide["custom_css"] = cc
+            slides.append(slide)
+    else:
+        # FOREIGN path — best-effort.
+        warnings.append("no data-slide-key found — FOREIGN HTML best-effort "
+                        "split (each slide = layout:raw, geometry/structure "
+                        "carried verbatim; review keys + per-slide split)")
+        parts = _foreign_top_level_slides(index_html)
+        if len(parts) == 1 and not parts[0][0]:
+            warnings.append("structure unrecognizable — emitted ONE raw slide "
+                            "of <body>; split it by hand if it should be many")
+        used = set()
+        for n, (seed, inner) in enumerate(parts, 1):
+            inner = _strip_leading_wordmark(inner).rstrip()
+            if not inner.strip():
+                continue
+            key = _make_key(seed, used, n)
+            slides.append({
+                "key": key,
+                "layout": "raw",
+                "lifted": f"backfill:{html_stem}#{n}",
+                "data": {"html": inner},
+            })
+
+    if not slides:
+        warnings.append("no slides could be reconstructed from index.html")
+
+    deck = {
+        "version": "1.0",
+        "deck": {"title": title},
+        "slides": slides,
+    }
+    return deck, warnings
+
+
+def run_backfill(index_html_path: Path, deck_json_path: Path,
+                 dry_run: bool = False) -> int:
+    """CLI handler: backfill a deck.json from an index.html that has none."""
+    index_html = index_html_path.read_text(encoding="utf-8")
+    deck, warnings = backfill_deck(index_html, deck_json_path.stem
+                                   if deck_json_path.stem != "deck"
+                                   else index_html_path.stem)
+
+    n = len(deck["slides"])
+    print(f"sync-index-to-deck --backfill: reconstructed {n} slide(s) "
+          f"from {index_html_path.name}")
+    native = bool(_slide_keys_in_dom_order(index_html))
+    print(f"  source: {'self-rendered (data-slide-key, EXACT)' if native else 'FOREIGN HTML (best-effort)'}")
+    for s in deck["slides"]:
+        cc = " +custom_css" if s.get("custom_css") else ""
+        print(f"    [raw] {s['key']}  ({len(s['data']['html'])} chars{cc})  "
+              f"lifted={s['lifted']}")
+    for w in warnings:
+        print(f"  ! {w}")
+
+    if n == 0:
+        print("  ✗ nothing reconstructed — refusing to write empty deck.json",
+              file=sys.stderr)
+        return 1
+
+    if dry_run:
+        print(f"\n  (--dry-run; {deck_json_path} NOT written.)")
+        return 0
+
+    if deck_json_path.exists():
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        bak = deck_json_path.with_suffix(f".json.bak-pre-backfill-{ts}")
+        shutil.copy2(deck_json_path, bak)
+        print(f"  ✓ backup: {bak.name}")
+
+    deck_json_path.write_text(
+        json.dumps(deck, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  ✓ wrote {deck_json_path}")
+    print(f"\nNext step: re-render to verify parity:")
+    print(f"  python3 {Path(__file__).parent.name}/render-deck.py \\")
+    print(f"    {deck_json_path}  {deck_json_path.parent}/")
+    return 0
+
+
+def _slide_open_tag(html: str, key: str) -> str | None:
+    """The full `<div class="slide..." ... data-slide-key="K" ...>` opening tag
+    (so we can inspect data-* on it). data-hidden may sit before OR after
+    data-slide-key — the `[^>]*` on both sides captures either."""
+    pat = (rf'<div class="slide(?:\s[^"]*)?"[^>]*'
+           rf'data-slide-key="{re.escape(key)}"[^>]*>')
+    m = re.search(pat, html)
+    return m.group(0) if m else None
+
+
+def run_surgical_sync(index_html_path: Path, deck_json_path: Path,
+                      do_hidden: bool, do_order: bool, do_notes: bool, dry_run: bool) -> int:
+    """Surgical: reconcile ONLY structural fields from the rendered index.html back
+    into deck.json — `hidden` (隐藏页, per-slide data-hidden), slide ORDER (the
+    edit-mode drag-reorder), and/or speaker `notes` (口播稿, edited in the presenter
+    view, stored in the #fs-deck-notes island). Touches nothing else (no raw
+    conversion, no inner-HTML diff). This is what the in-browser editor changes;
+    run this to push those changes to the deck.json source. Any combination works."""
+    html = index_html_path.read_text(encoding="utf-8")
+    deck = json.loads(deck_json_path.read_text(encoding="utf-8"))
+    changed = False
+
+    # --- speaker notes (口播稿) from the #fs-deck-notes island ---
+    if do_notes:
+        m = re.search(r'<script type="application/json" id="fs-deck-notes">(.*?)</script>',
+                      html, re.S)
+        html_notes = {}
+        if m:
+            try:
+                html_notes = json.loads(m.group(1).replace('<\\/', '</'))
+            except Exception:
+                html_notes = {}
+        n_changes = []
+        for slide in deck.get("slides", []):
+            key = slide.get("key")
+            if not key:
+                continue
+            new = html_notes.get(key) or None
+            cur = slide.get("notes") or None
+            if new == cur:
+                continue
+            n_changes.append((key, cur, new))
+            if not dry_run:
+                if new:
+                    slide["notes"] = new
+                else:
+                    slide.pop("notes", None)
+        print(f"[notes] island has {len(html_notes)} note(s)")
+        for key, cur, new in n_changes:
+            print(f"  {key}: notes {'set' if new else 'cleared'}")
+        if not n_changes:
+            print("  ✓ no notes drift.")
+        changed = changed or bool(n_changes)
+
+    # --- hidden flag ---
+    if do_hidden:
+        h_changes, missing = [], []
+        for slide in deck.get("slides", []):
+            key = slide.get("key")
+            if not key:
+                continue
+            tag = _slide_open_tag(html, key)
+            if tag is None:
+                missing.append(key)
+                continue
+            html_hidden = bool(re.search(r'\bdata-hidden\b', tag))
+            if html_hidden == bool(slide.get("hidden")):
+                continue
+            h_changes.append((key, bool(slide.get("hidden")), html_hidden))
+            if not dry_run:
+                if html_hidden:
+                    slide["hidden"] = True
+                else:
+                    slide.pop("hidden", None)   # clean-remove, no hidden:false residue
+        print(f"[hidden] scanned {len(deck.get('slides', []))} slides")
+        for key, old, new in h_changes:
+            print(f"  {key}: hidden {old} → {new}")
+        if missing:
+            print(f"  ⚠ {len(missing)} slide(s) not found in HTML (skipped): "
+                  f"{', '.join(missing[:8])}")
+        if not h_changes:
+            print("  ✓ no hidden-flag drift.")
+        changed = changed or bool(h_changes)
+
+    # --- slide order (drag-reorder) ---
+    if do_order:
+        dom_order = re.findall(
+            r'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="([^"]+)"', html)
+        deck_keys = [s.get("key") for s in deck.get("slides", []) if s.get("key")]
+        print(f"[order] HTML has {len(dom_order)} slides, deck.json has {len(deck_keys)}")
+        if not dom_order:
+            print("  ⚠ no data-slide-key in HTML — can't sync order (skipped).")
+        elif set(dom_order) != set(deck_keys):
+            only_html = set(dom_order) - set(deck_keys)
+            only_deck = set(deck_keys) - set(dom_order)
+            print(f"  ⚠ key sets differ (added/removed slides) — order NOT synced. "
+                  f"only-in-HTML: {sorted(only_html)[:5]}  only-in-deck: {sorted(only_deck)[:5]}")
+        elif dom_order == deck_keys:
+            print("  ✓ order already matches.")
+        else:
+            print(f"  reorder: {deck_keys}  →  {dom_order}")
+            if not dry_run:
+                order_idx = {k: i for i, k in enumerate(dom_order)}
+                deck["slides"].sort(key=lambda s: order_idx.get(s.get("key"), 1 << 30))
+            changed = True
+
+    if dry_run:
+        print(f"\n  (--dry-run; {deck_json_path} NOT written.)")
+        return 0
+    if not changed:
+        print("  ✓ deck.json already in sync — nothing written.")
+        return 0
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak = deck_json_path.with_suffix(f".json.bak-pre-sync-{ts}")
+    shutil.copy2(deck_json_path, bak)
+    print(f"  ✓ backup: {bak.name}")
+    deck_json_path.write_text(
+        json.dumps(deck, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  ✓ wrote {deck_json_path.name}")
+    print(f"\nNext step: re-render to apply:")
+    print(f"  python3 {Path(__file__).parent.name}/render-deck.py "
+          f"{deck_json_path}  {deck_json_path.parent}/")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("index_html", type=Path, help="path to rendered index.html")
@@ -115,14 +657,49 @@ def main() -> int:
                     help="report drift without writing")
     ap.add_argument("--force", action="store_true",
                     help="convert template-layout slides (cover/quote/etc) to raw")
+    ap.add_argument("--backfill", action="store_true",
+                    help="create deck.json FROM SCRATCH out of an index.html that "
+                         "has none (legacy HTML-only deck). Reverse-engineers the "
+                         "rendered DOM into raw slides marked lifted (imported "
+                         "provenance). Auto-engaged when deck.json is absent.")
+    ap.add_argument("--hidden-only", action="store_true",
+                    help="surgical: reconcile ONLY the `hidden` flag (隐藏页) from "
+                         "data-hidden in the HTML back into deck.json. Touches "
+                         "nothing else (no raw conversion). Use after the in-browser "
+                         "edit-mode eye toggle + ⌘S to push the change to the source.")
+    ap.add_argument("--order-only", action="store_true",
+                    help="surgical: reconcile ONLY slide ORDER (the edit-mode "
+                         "drag-reorder) from the HTML DOM order back into deck.json. "
+                         "Touches nothing else. Combine with --hidden-only to sync both.")
+    ap.add_argument("--notes-only", action="store_true",
+                    help="surgical: reconcile ONLY speaker notes (口播稿) from the "
+                         "#fs-deck-notes island back into deck.json `notes`. Use after "
+                         "editing notes in the presenter view + 💾/⌘S. Combinable.")
     args = ap.parse_args()
 
     if not args.index_html.exists():
         print(f"sync-index-to-deck: {args.index_html} not found", file=sys.stderr)
         return 2
-    if not args.deck_json.exists():
-        print(f"sync-index-to-deck: {args.deck_json} not found", file=sys.stderr)
-        return 2
+
+    if args.hidden_only or args.order_only or args.notes_only:
+        if not args.deck_json.exists():
+            print(f"sync-index-to-deck: --hidden-only/--order-only/--notes-only need an "
+                  f"existing {args.deck_json}", file=sys.stderr)
+            return 2
+        return run_surgical_sync(args.index_html, args.deck_json,
+                                 do_hidden=args.hidden_only, do_order=args.order_only,
+                                 do_notes=args.notes_only, dry_run=args.dry_run)
+
+    # BACKFILL: explicit flag, OR auto-engaged when the deck.json target doesn't
+    # exist yet (a legacy HTML-only deck being operated on for the first time).
+    # DECKJSON-UNIFIED-INTERMEDIATE-SPEC §5: backfill the 中间层 by reverse-
+    # engineering the real rendered DOM (NO screenshots).
+    if args.backfill or not args.deck_json.exists():
+        if args.slide_key:
+            print("sync-index-to-deck: --slide-key is not supported with backfill",
+                  file=sys.stderr)
+            return 2
+        return run_backfill(args.index_html, args.deck_json, dry_run=args.dry_run)
 
     index_html = args.index_html.read_text(encoding="utf-8")
     deck = json.loads(args.deck_json.read_text(encoding="utf-8"))
@@ -148,6 +725,23 @@ def main() -> int:
         cur_html = slide.get("data", {}).get("html", "") if cur_layout == "raw" else None
 
         # Decide what action is needed
+        if cur_layout == "canvas":
+            # Structured by-id round-trip: reverse the rendered positioned HTML
+            # back into data.elements[]. No raw-string capture and no layout
+            # switch — canvas stays canvas (deck.json is the source of truth).
+            cur_data = slide.get("data") or {}
+            new_data = sync_canvas_data(inner, cur_data)
+            if json.dumps(new_data, ensure_ascii=False, sort_keys=True) == \
+               json.dumps(cur_data, ensure_ascii=False, sort_keys=True):
+                continue  # no real drift
+            drift_count += 1
+            if not args.dry_run:
+                slide["data"] = new_data
+            old_n = len(cur_data.get("elements") or [])
+            new_n = len(new_data.get("elements") or [])
+            synced.append(("canvas", key, old_n, new_n))
+            continue
+
         if cur_layout == "raw":
             # Compare with normalization: asset-path rewrites from copy-assets.py
             # AND leading/trailing whitespace differences (some builder scripts
@@ -196,7 +790,12 @@ def main() -> int:
     if synced:
         print(f"  {'WOULD UPDATE' if args.dry_run else 'UPDATED'}: {len(synced)} slide(s)")
         for kind, key, old_size, new_size in synced:
-            delta = f"{old_size}→{new_size} chars" if kind == "raw" else f"new {new_size} chars"
+            if kind == "raw":
+                delta = f"{old_size}→{new_size} chars"
+            elif kind == "canvas":
+                delta = f"{old_size}→{new_size} elements"
+            else:
+                delta = f"new {new_size} chars"
             print(f"    [{kind:14s}] {key}  ({delta})")
     if skipped_template:
         print(f"  SKIPPED (template layout — use --force to convert): {len(skipped_template)}")

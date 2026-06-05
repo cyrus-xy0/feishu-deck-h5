@@ -5,6 +5,7 @@ phase-1c	5	R-VIS-BALANCE
 phase-1c	5	R-VIS-SLACK-FLEX
 phase-1c	8	R-FOCAL-CHECK
 phase-1c	8	R-VIS-CANVAS-CENTER
+phase-1c	8	R-VIS-DIM-TEXT
 phase-1c	9	R-VIS-BALANCE
 sample-deck	10	R-VIS-BALANCE
 sample-deck	10	R-VIS-CANVAS-CENTER

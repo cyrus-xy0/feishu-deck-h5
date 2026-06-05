@@ -13,33 +13,22 @@ import pathlib
 
 HERE = pathlib.Path(__file__).resolve()
 ASSETS = HERE.parents[2] / "assets"
-AUDIT = ASSETS / "visual-audit.js"
+sys.path.insert(0, str(HERE.parent))
+import engine_helpers as E  # noqa: E402
 
 
 def test_title_position_guard_wired():
-    """Static guard: the display:none skip must stay in the source."""
-    js = AUDIT.read_text(encoding="utf-8")
-    assert "headerRendered" in js, "headerRendered guard missing"
+    """Static guard: the display:none skip must stay in the engine source."""
+    js = E.audits_js_text()
+    assert E.rule_in_engine("R-VIS-TITLE-POSITION")
+    assert "headerRendered" in js, "headerRendered guard missing from audits.js"
     assert "getClientRects().length > 0" in js, \
-        "display:none test (getClientRects) missing"
+        "display:none test (getClientRects) missing from audits.js"
 
 
 def _run(html):
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return None
-    audit = AUDIT.read_text(encoding="utf-8")
-    try:
-        with sync_playwright() as p:
-            b = p.chromium.launch()
-            pg = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
-            pg.set_content(html); pg.wait_for_timeout(150)
-            rep = pg.evaluate("(" + audit + ")()")
-            b.close()
-    except Exception:
-        return None
-    return rep.get("title_position", [])
+    E.skip_if_no_engine()
+    return E.findings_for("R-VIS-TITLE-POSITION", html)
 
 
 def _slide(header_style):

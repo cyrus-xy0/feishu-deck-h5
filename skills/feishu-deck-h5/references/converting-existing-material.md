@@ -17,6 +17,23 @@ specifically called out before:
 - pre-existing watermarks / page numbers carried over
 - **silently compressing N source pages into ~M pages** (the "I'll distill 54 → 17 because it's tighter" failure)
 
+### Step -1 · Classify uploaded HTML role before conversion
+
+For HTML specifically, classify the file before applying the conversion rules:
+
+- **Source HTML**: the user says to reference, imitate, remake, recreate, learn
+  from, or use the HTML as material. This is a conversion/generation input. Run
+  Parser, then Designer, Renderer, and Validator. The output is a new deck.
+- **Target HTML**: the user says to modify, adjust, optimize, fix, replace copy,
+  tune style/layout, or continue from the current HTML. This is not a normal
+  source conversion. Import/analyze it into current-state artifacts first:
+  `source-dossier.json`, `DESIGN-PLAN.md`, `outline.json`, `deck.json`, and
+  `index.html`; mark them as `imported_existing_state`; then route to Editor.
+
+Only Source HTML enters the Replica vs Rewrite decision below. Target HTML edits
+must preserve the submitted file's current state unless the user explicitly asks
+to regenerate or redesign.
+
 ### Step 0 · Preserve the page count — DO NOT compress by default
 
 When the user hands you a source deck (PDF / PPT / HTML) and asks for a

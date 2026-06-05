@@ -418,12 +418,20 @@
     signal.addEventListener('abort', () => ro.disconnect());
     frames.forEach(scaleFrame);   // initial scale
 
+    // ---- Presenter mode (speaker view + projector-window follow) ----
+    setupPresenter(deck, frames, signal);
+
     // ---- Keyboard nav (present mode) + F = fullscreen (any mode) ----
     document.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTypingTarget(e.target)) return;
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault(); toggleFullscreen(); nudgeIdle(); return;
+      }
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        if (typeof window.__fsTogglePresenter === 'function') window.__fsTogglePresenter();
+        return;
       }
       if (deck.dataset.mode !== 'present') return;
       const cur = currentIdx(frames);
@@ -434,14 +442,14 @@
         // that map "advance" to Enter.
         case 'ArrowRight': case 'ArrowDown': case 'PageDown':
         case ' ': case 'Spacebar': case 'Enter':
-          e.preventDefault(); goTo(deck, frames, Math.min(cur + 1, frames.length - 1)); break;
+          e.preventDefault(); goTo(deck, frames, stepNext(frames, cur)); break;
         case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
         case 'Backspace':
-          e.preventDefault(); goTo(deck, frames, Math.max(cur - 1, 0)); break;
+          e.preventDefault(); goTo(deck, frames, stepPrev(frames, cur)); break;
         case 'Home':
-          e.preventDefault(); goTo(deck, frames, 0); break;
+          e.preventDefault(); goTo(deck, frames, firstVisible(frames)); break;
         case 'End':
-          e.preventDefault(); goTo(deck, frames, frames.length - 1); break;
+          e.preventDefault(); goTo(deck, frames, lastVisible(frames)); break;
         case 'Escape':
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
           break;
@@ -470,9 +478,7 @@
       if (Math.abs(e.deltaY) < 30) return;
       wheelLock = now;
       const cur = currentIdx(frames);
-      const next = e.deltaY > 0
-        ? Math.min(cur + 1, frames.length - 1)
-        : Math.max(cur - 1, 0);
+      const next = e.deltaY > 0 ? stepNext(frames, cur) : stepPrev(frames, cur);
       goTo(deck, frames, next);
     }, { signal, passive: true });
 
@@ -488,9 +494,7 @@
       touchStartY = null;
       if (Math.abs(dy) < 50) return;
       const cur = currentIdx(frames);
-      const next = dy < 0
-        ? Math.min(cur + 1, frames.length - 1)
-        : Math.max(cur - 1, 0);
+      const next = dy < 0 ? stepNext(frames, cur) : stepPrev(frames, cur);
       goTo(deck, frames, next);
     }, { signal, passive: true });
 
@@ -519,7 +523,22 @@
       return false;
     }
     window.addEventListener('hashchange', readHash, { signal });
-    if (!readHash()) goTo(deck, frames, 0, false);
+    if (!readHash()) goTo(deck, frames, firstVisible(frames), false);
+
+    // ---- Kiosk / projection mode — hash keyword force-hides all chrome ----
+    // #proj | #bare | #clean | #kiosk → page bar + controls + hint vanish and
+    // stay hidden (idle-fade still wakes on hover; kiosk does not). For
+    // projecting, embedding in an iframe (e.g. Miaoda), and signage. Pure
+    // present-layer: works for any deck regardless of source model.
+    function applyKioskChrome() {
+      // Guard with (?![\w-]) instead of \b: \b treats '-' as a word boundary, so
+      // a valid slide-key hash like #proj-2026 / #clean-tech would wrongly trip
+      // kiosk mode and hide ALL nav chrome (M7). The keyword must be the WHOLE
+      // hash token (not followed by another word-char OR a hyphen).
+      ui.classList.toggle('is-kiosk', /(^|[#&/])(proj|bare|clean|kiosk)(?![\w-])/i.test(location.hash || ''));
+    }
+    window.addEventListener('hashchange', applyKioskChrome, { signal });
+    applyKioskChrome();
     // Initial target is now visible via .is-current; disable the CSS
     // first-frame fallback so the cover cannot bleed through later fades.
     deck.setAttribute('data-js-ready', '');
@@ -604,10 +623,10 @@
     // scroll mode is auto-detected via viewport. Toggle button became redundant
     // and added noise to top-right corner where the brand logo sits.
     ui.querySelector('.ctl.prev').addEventListener('click', () => {
-      goTo(deck, frames, Math.max(0, currentIdx(frames) - 1));
+      goTo(deck, frames, stepPrev(frames, currentIdx(frames)));
     }, { signal });
     ui.querySelector('.ctl.next').addEventListener('click', () => {
-      goTo(deck, frames, Math.min(frames.length - 1, currentIdx(frames) + 1));
+      goTo(deck, frames, stepNext(frames, currentIdx(frames)));
     }, { signal });
     ui.querySelector('.ctl.fs').addEventListener('click', toggleFullscreen, { signal });
 
@@ -684,6 +703,44 @@
       if (frames[i].classList.contains('is-current')) return i;
     }
     return 0;
+  }
+
+  // ---- Hidden slides (隐藏页, PPT-style "hide slide") -----------------------
+  // A slide marked `hidden: true` in deck.json renders `data-hidden` on its
+  // `.slide` (durable — re-render keeps it). The slide stays in the DOM and is
+  // still reachable by a direct #N / #key hash and in scroll mode, but LINEAR
+  // present-mode navigation (→ / ← / space / wheel / swipe / prev-next) skips
+  // over it, and the page indicator counts only visible slides.
+  function isHidden(f) {
+    const s = f.querySelector('.slide');
+    return !!(s && s.hasAttribute('data-hidden'));
+  }
+  function stepNext(frames, cur) {            // next visible after cur (else stay)
+    for (let i = cur + 1; i < frames.length; i++) if (!isHidden(frames[i])) return i;
+    return cur;
+  }
+  function stepPrev(frames, cur) {            // prev visible before cur (else stay)
+    for (let i = cur - 1; i >= 0; i--) if (!isHidden(frames[i])) return i;
+    return cur;
+  }
+  function firstVisible(frames) {
+    for (let i = 0; i < frames.length; i++) if (!isHidden(frames[i])) return i;
+    return 0;
+  }
+  function lastVisible(frames) {
+    for (let i = frames.length - 1; i >= 0; i--) if (!isHidden(frames[i])) return i;
+    return frames.length - 1;
+  }
+  function visibleCount(frames) {
+    let n = 0; for (const f of frames) if (!isHidden(f)) n++; return n;
+  }
+  // 1-based position of `idx` among visible frames (visible frames at-or-before
+  // idx). A hidden current slide reports the count of visible frames before it,
+  // floored at 1, so the indicator never reads 0.
+  function visibleOrdinal(frames, idx) {
+    let n = 0;
+    for (let i = 0; i <= idx && i < frames.length; i++) if (!isHidden(frames[i])) n++;
+    return Math.max(1, n);
   }
 
   // Restart-on-enter for slide media (2026-05-24).
@@ -766,6 +823,232 @@
       if (location.hash !== newHash) history.replaceState(null, '', newHash);
     }
     updateUI(deck, frames);
+    if (typeof window.__fsOnNav === 'function') window.__fsOnNav(idx);  // presenter hook
+  }
+
+  // ============================================================
+  // Presenter mode (2026-06): PowerPoint/Keynote-style speaker view + a separate
+  // projector/audience window that follows the presenter's navigation.
+  //  · Speaker view: current + next-slide live previews (cloned .slide, scaled —
+  //    same technique as the editor thumbnails, no rasterization), per-slide
+  //    speaker notes (from deck.json `notes`, emitted as a hidden JSON island),
+  //    a timer, and prev/next.
+  //  · Projector window: window.open(...#proj) → clean kiosk view; follows nav
+  //    via BroadcastChannel (same-origin, no backend; localStorage fallback).
+  //  · Entry: 'P' toggles speaker view (no-op in the projector follower window).
+  // ============================================================
+  function setupPresenter(deck, frames, signal) {
+    let notes = {};
+    try {
+      const el = document.getElementById('fs-deck-notes');
+      if (el) notes = JSON.parse(el.textContent || '{}');
+    } catch (e) { notes = {}; }
+
+    // A projector window is opened by openProjector() with window.name
+    // 'fs-projector'. It FOLLOWS the leader's nav and never leads.
+    const isFollower = (window.name === 'fs-projector');
+
+    let chan = null;
+    try { chan = new BroadcastChannel('fs-deck-present'); } catch (e) { chan = null; }
+    const LS_KEY = 'fs-deck-present-goto';
+    function broadcast(idx) {
+      if (isFollower) return;
+      const msg = { type: 'goto', idx: idx, t: Date.now() };
+      if (chan) { try { chan.postMessage(msg); } catch (e) {} }
+      try { localStorage.setItem(LS_KEY, JSON.stringify(msg)); } catch (e) {}
+    }
+    function onRemoteGoto(msg) {
+      if (!isFollower || !msg || msg.type !== 'goto' || typeof msg.idx !== 'number') return;
+      if (frames[msg.idx]) goTo(deck, frames, msg.idx, false);
+    }
+    if (chan) chan.onmessage = (e) => onRemoteGoto(e.data);
+    window.addEventListener('storage', (e) => {
+      if (e.key === LS_KEY && e.newValue) { try { onRemoteGoto(JSON.parse(e.newValue)); } catch (x) {} }
+    }, { signal });
+
+    let pv = null, pvOpen = false, timerStart = 0, timerId = 0, pvKey = null, projWin = null;
+
+    // nav hook called by goTo: mirror to the projector + refresh speaker view.
+    window.__fsOnNav = (idx) => { broadcast(idx); if (pvOpen) renderPV(); };
+
+    const curIdx = () => currentIdx(frames);
+
+    // Persist edited notes into the hidden island so a save (window.deckEdit.save
+    // / ⌘S) bakes them into the HTML, and `sync-index-to-deck.py --notes-only`
+    // can push them back to the deck.json `notes` field.
+    function writeNotesIsland() {
+      let isl = document.getElementById('fs-deck-notes');
+      if (!isl) {
+        isl = document.createElement('script');
+        isl.type = 'application/json'; isl.id = 'fs-deck-notes';
+        document.body.appendChild(isl);
+      }
+      isl.textContent = JSON.stringify(notes);
+    }
+
+    // Live preview: clone the real .slide and scale it (no <img>, no raster).
+    function thumbInto(box, slide) {
+      if (!box) return;
+      box.textContent = '';
+      if (!slide) return;
+      const c = slide.cloneNode(true);
+      c.removeAttribute('id');
+      c.querySelectorAll('[id]').forEach((e) => e.removeAttribute('id'));
+      c.querySelectorAll('[contenteditable]').forEach((e) => e.removeAttribute('contenteditable'));
+      c.querySelectorAll('iframe, video').forEach((e) => {
+        const ph = document.createElement('div'); ph.className = 'pv-embed'; e.replaceWith(ph);
+      });
+      c.style.cssText = 'position:absolute;top:0;left:0;margin:0;width:1920px;height:1080px;' +
+                        'transform-origin:top left;pointer-events:none;';
+      box.appendChild(c);
+      const w = box.clientWidth || 480;
+      c.style.transform = 'scale(' + (w / 1920) + ')';
+    }
+
+    function renderPV() {
+      if (!pv) return;
+      const ci = curIdx();
+      const ni = stepNext(frames, ci);
+      const curSlide = frames[ci] && frames[ci].querySelector('.slide');
+      const hasNext = ni !== ci;
+      thumbInto(pv.querySelector('.pv-cur'),  curSlide);
+      thumbInto(pv.querySelector('.pv-next'), hasNext ? frames[ni].querySelector('.slide') : null);
+      const key = curSlide && curSlide.dataset.slideKey;
+      pvKey = key || null;
+      const ta = pv.querySelector('.pv-notes');
+      ta.value = (key && notes[key]) ? notes[key] : '';
+      ta.placeholder = '写这一页的讲稿…（自动存入页面;💾 或 ⌘S 保存到文件)';
+      pv.querySelector('.pv-pos').textContent =
+        visibleOrdinal(frames, ci) + ' / ' + visibleCount(frames);
+      pv.querySelector('.pv-nextlabel').textContent = hasNext ? '下一页' : '（已是最后一页）';
+    }
+
+    function fmtTime(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60), r = s % 60;
+      return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    function buildPV() {
+      pv = document.createElement('div');
+      pv.className = 'fs-presenter';
+      pv.innerHTML =
+        '<div class="pv-grid">' +
+          '<div class="pv-col"><div class="pv-lab">当前</div><div class="pv-cur pv-box"></div></div>' +
+          '<div class="pv-col"><div class="pv-lab pv-nextlabel">下一页</div><div class="pv-next pv-box"></div>' +
+            '<div class="pv-lab pv-notes-lab">备注（可编辑）</div>' +
+            '<textarea class="pv-notes" spellcheck="false"></textarea></div>' +
+        '</div>' +
+        '<div class="pv-bar">' +
+          '<button class="pv-btn pv-prev" type="button">‹ 上一页</button>' +
+          '<span class="pv-pos">1 / 1</span>' +
+          '<button class="pv-btn pv-nextbtn" type="button">下一页 ›</button>' +
+          '<span class="pv-timer">00:00</span>' +
+          '<button class="pv-btn pv-reset" type="button" title="计时归零">↺</button>' +
+          '<button class="pv-btn pv-save" type="button" title="保存讲稿到当前 HTML 文件">💾 保存</button>' +
+          '<button class="pv-btn pv-proj" type="button" title="打开放映窗(观众屏,自动跟随)">📺 放映窗</button>' +
+          '<button class="pv-btn pv-exit" type="button" title="退出 (Esc / P)">✕ 退出</button>' +
+        '</div>';
+      document.body.appendChild(pv);
+      pv.querySelector('.pv-prev').onclick    = () => goTo(deck, frames, stepPrev(frames, curIdx()));
+      pv.querySelector('.pv-nextbtn').onclick = () => goTo(deck, frames, stepNext(frames, curIdx()));
+      pv.querySelector('.pv-proj').onclick    = openProjector;
+      pv.querySelector('.pv-exit').onclick    = closePresenter;
+      pv.querySelector('.pv-reset').onclick   = () => { timerStart = Date.now(); };
+      // edit notes → update in-memory map + the hidden island (so any save persists)
+      pv.querySelector('.pv-notes').addEventListener('input', function () {
+        if (!pvKey) return;
+        if (this.value) notes[pvKey] = this.value; else delete notes[pvKey];
+        writeNotesIsland();
+      });
+      // 💾 save → bake island into the HTML via the edit-mode FS-Access save.
+      pv.querySelector('.pv-save').onclick = () => {
+        writeNotesIsland();
+        if (window.deckEdit && typeof window.deckEdit.save === 'function') {
+          window.deckEdit.save();
+        } else {
+          alert('已写入页面。用编辑模式(E)的 ⌘S 保存到文件,'
+              + '或运行 sync-index-to-deck.py --notes-only 同步到 deck.json。');
+        }
+      };
+    }
+
+    function openPresenter() {
+      if (pvOpen) return;
+      if (!pv) buildPV();
+      pv.style.display = 'flex';
+      pvOpen = true;
+      if (!timerStart) timerStart = Date.now();
+      timerId = setInterval(() => {
+        const t = pv && pv.querySelector('.pv-timer');
+        if (t) t.textContent = fmtTime(Date.now() - timerStart);
+      }, 1000);
+      requestAnimationFrame(renderPV);   // ensure boxes have width before scaling
+    }
+    function closePresenter() {
+      if (!pvOpen) return;
+      pvOpen = false;
+      if (pv) pv.style.display = 'none';
+      clearInterval(timerId);
+      closeProjector();   // exiting the presenter dismisses the projector it spawned — no orphan
+    }
+    window.__fsTogglePresenter = isFollower
+      ? function () {}
+      : function () { pvOpen ? closePresenter() : openPresenter(); };
+
+    function projAlive() { try { return !!projWin && !projWin.closed; } catch (e) { return false; } }
+    function updateProjBtn() {
+      const btn = pv && pv.querySelector('.pv-proj');
+      if (btn) btn.textContent = projAlive() ? '📺 关闭放映窗' : '📺 放映窗';
+    }
+    function closeProjector() {
+      if (projAlive()) { try { projWin.close(); } catch (e) {} }
+      projWin = null;
+      updateProjBtn();
+    }
+    // 📺 toggles the audience/projector window. The handle is KEPT (it used to be
+    // discarded) so the deck can actually close it — otherwise the #proj kiosk
+    // window orphaned in the background with no way to dismiss it ("关不掉的窗口").
+    function openProjector() {
+      if (projAlive()) { closeProjector(); return; }      // already open → close (clear dismiss path)
+      const url = location.pathname + location.search + '#proj';
+      projWin = window.open(url, 'fs-projector', 'width=1280,height=760');
+      updateProjBtn();
+      setTimeout(() => broadcast(curIdx()), 400);   // land the new window on our slide
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && pvOpen) { e.preventDefault(); closePresenter(); }
+    }, { signal });
+
+    signal.addEventListener('abort', () => {
+      clearInterval(timerId);
+      closeProjector();
+      if (chan) { try { chan.close(); } catch (e) {} }
+      window.__fsOnNav = null;
+      window.__fsTogglePresenter = null;
+    });
+    // Close the projector if the whole tab/window goes away — never leave an orphan behind.
+    window.addEventListener('beforeunload', () => { if (!isFollower) closeProjector(); }, { signal });
+
+    // The projector itself (#proj follower) is a chrome-less kiosk window, so it had
+    // no in-page way to close — give it its own dismiss button. Lives ON body (not
+    // inside .deck-ui), so the `.is-kiosk` chrome-hide does not touch it; it is the
+    // last-resort exit for an orphaned audience window.
+    if (isFollower) {
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '✕ 关闭放映窗';
+      x.setAttribute('aria-label', '关闭放映窗');
+      x.style.cssText =
+        'position:fixed;top:12px;right:12px;z-index:2147483600;padding:8px 14px;' +
+        'border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(8,12,24,.72);' +
+        'color:#fff;font:600 14px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;' +
+        'cursor:pointer;opacity:.2;transition:opacity .2s;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
+      x.addEventListener('mouseenter', () => { x.style.opacity = '1'; });
+      x.addEventListener('mouseleave', () => { x.style.opacity = '.2'; });
+      x.addEventListener('click', () => { try { window.close(); } catch (e) {} });
+      document.body.appendChild(x);
+    }
   }
 
   function buildUI() {
@@ -789,7 +1072,7 @@
           '<svg class="i-exit"  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="nav-hint">← →   翻页  ·  F 全屏</div>';
+      '<div class="nav-hint">← →&nbsp;翻页&nbsp; ·&nbsp; F&nbsp;全屏&nbsp; ·&nbsp; P&nbsp;演示者&nbsp; ·&nbsp; E&nbsp;编辑</div>';
     return ui;
   }
 
@@ -797,13 +1080,16 @@
     const ui = document.querySelector('.deck-ui');
     if (!ui) return;
     const cur = currentIdx(frames);
-    const total = frames.length;
+    // Indicator counts only VISIBLE slides (hidden 隐藏页 are skipped in the
+    // show), so "3 / 12" matches what the audience actually pages through.
+    const total = visibleCount(frames);
+    const pos   = visibleOrdinal(frames, cur);
     const isPresent = deck.dataset.mode === 'present';
     const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
 
-    ui.querySelector('.cur').textContent   = pad(cur + 1);
+    ui.querySelector('.cur').textContent   = pad(pos);
     ui.querySelector('.total').textContent = pad(total);
-    const pct = total > 0 ? ((cur + 1) / total) * 100 : 0;
+    const pct = total > 0 ? (pos / total) * 100 : 0;
     ui.querySelector('.deck-progress .bar').style.width = pct + '%';
     ui.querySelector('.ctl.fs .i-enter').style.display = isFullscreen ? 'none'  : 'block';
     ui.querySelector('.ctl.fs .i-exit').style.display  = isFullscreen ? 'block' : 'none';

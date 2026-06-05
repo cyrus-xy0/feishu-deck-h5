@@ -85,17 +85,23 @@ def test_inline_linked_is_shared():
 
 
 def test_check_only_runs_full_audit_registry():
-    """F-08: check-only runs the SAME static audit set as validate.py — both
-    iterate V.STATIC_AUDITS, so they can't diverge (check-only used to silently
-    skip 6 audits)."""
-    assert len(V.STATIC_AUDITS) >= 31
-    fns = {fn.__name__ for fn, _ in V.STATIC_AUDITS}
-    for name in ('audit_lift_style_lost', 'audit_undefined_css_vars',
-                 'audit_bullet_dash', 'audit_empty_header_zone',
-                 'audit_list_echo', 'audit_visual_richness'):
-        assert name in fns  # the 6 that check-only historically skipped
+    """F-08 → UNIFY-VALIDATE step 4b: check-only and validate.py can no longer run
+    DIFFERENT rule sets because there is now ONE rule source — the unified engine.
+    Both fold the engine's findings in via the SAME shared entry point
+    (V.run_unified_audits); the old STATIC_AUDITS / run_static_audits dual
+    registry is retired, so the F-08 drift class is structurally impossible.
+    Guard the new single-source wiring at the source level (no Chromium)."""
     src = (ASSETS / "check-only.py").read_text(encoding="utf-8")
-    assert "run_static_audits(V.STATIC_AUDITS" in src  # dispatches via registry
+    assert "run_unified_audits(" in src, \
+        "check-only must fold findings via the shared V.run_unified_audits"
+    # the legacy dual-registry call must be gone
+    assert "run_static_audits(" not in src and "STATIC_AUDITS" not in src
+    # the 6 audits check-only historically skipped are now ALL in the single
+    # engine source (so default review mode can never under-report them again).
+    js = (ASSETS / "audits.js").read_text(encoding="utf-8")
+    for rule in ("R-VIS-LIFT-STYLE-LOST", "R-CSSVAR", "R-BULLET-DASH",
+                 "R-EMPTY-HEADER-ZONE", "R-ECHO", "R-VIS-NO-IMAGERY"):
+        assert ("'" + rule + "'") in js, f"{rule} missing from the unified engine"
 
 
 def test_all_emitted_codes_documented_in_families():

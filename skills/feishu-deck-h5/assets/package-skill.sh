@@ -75,7 +75,6 @@ RSYNC_EXCLUDES=(
   --exclude='.feishu-deck-h5-workspace/'
   --exclude='.feishu-deck-h5-preflight-cache'
   --exclude='*.bak*'
-  --exclude='pptx-to-html/example/'
   --exclude='.venv/'
   --exclude='venv/'
   --exclude='*.pyc'
@@ -107,8 +106,6 @@ names = set(os.environ["EXCL"].split(":"))
 def ignore(dirpath, entries):
     skip = {e for e in entries
             if e in names or ".bak" in e or e == ".feishu-deck-h5-preflight-cache"}
-    if os.path.basename(dirpath) == "pptx-to-html" and "example" in entries:
-        skip.add("example")
     return skip
 try:
     shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True, symlinks=True)

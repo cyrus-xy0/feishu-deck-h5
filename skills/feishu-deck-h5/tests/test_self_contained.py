@@ -5,21 +5,27 @@ page-anim leak — vanishes on republish, left behind on lift) but must NOT flag
 the renderer's co-located `<style data-fs-custom-css>` inside .slide, nor the
 inlined framework stylesheet. It is a NON-escalating advisory (warn_soft).
 """
+import importlib.util
 import pathlib
 import sys
 
 ASSETS = pathlib.Path(__file__).resolve().parents[1] / "assets"
 sys.path.insert(0, str(ASSETS))
 
-import _validate_common as C  # noqa: E402
-import _validate_audits as A  # noqa: E402
+# UNIFY-VALIDATE-ARCH step 4b: R-SELF-CONTAINED is a runner SOURCE-BYTE rule (it
+# reads the raw HTML, not a rendered DOM — head/deck <style> leaks). Its
+# implementation moved from the retired _validate_audits.py to run-audits.py
+# (audit_self_contained_bytes), a pure byte-level function — still no Chromium.
+_spec = importlib.util.spec_from_file_location(
+    "run_audits_sc", ASSETS / "run-audits.py")
+_RA = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_RA)
 
 
 def _run(html):
-    iss = C.Issues()
-    A.audit_self_contained(html, iss)
-    codes = [c for c, _ in iss.soft_warnings]
-    hard = [c for c, _ in iss.errors] + [c for c, _ in iss.warnings]
+    findings = _RA.audit_self_contained_bytes(html)
+    codes = [f["rule"] for f in findings if f["severity"] == "warn_soft"]
+    hard = [f["rule"] for f in findings if f["severity"] in ("error", "warn")]
     return codes, hard
 
 

@@ -103,6 +103,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -146,7 +147,14 @@ def _probe(index_html: Path) -> dict:
         }
     Uses validate's exact audit JS + present-mode setup so the numbers match
     what check-only --visual reports."""
-    import validate as V          # local import; assets already on sys.path
+    # UNIFY-VALIDATE-ARCH step 4b: source geometry from the SINGLE unified engine
+    # (audits.js via run-audits.py's run_unified_engine) instead of the retired
+    # V._visual_audit_js() bucket report. The engine returns flat findings whose
+    # payload carries the SAME fields (slide_idx/selector/overflow_px/direction/
+    # recoverable for card-overflow; idx/deltaH/deltaW for overflow), so we just regroup
+    # them back into the bucket shape this reflow stage consumes. The numbers
+    # match check-only --visual because both call the same engine.
+    import importlib.util
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -155,6 +163,29 @@ def _probe(index_html: Path) -> dict:
               file=sys.stderr)
         raise SystemExit(2)
 
+    _ra_spec = importlib.util.spec_from_file_location(
+        "run_audits_reflow", Path(__file__).resolve().parents[0].parent
+        / "assets" / "run-audits.py")
+    _RA = importlib.util.module_from_spec(_ra_spec)
+    _ra_spec.loader.exec_module(_RA)
+    try:
+        result = _RA.run_unified_engine(index_html, None, dom_rules=True)
+    except _RA.EngineUnavailable as e:
+        print(f"reconcile-reflow: unified engine could not run ({e}). "
+              "`pip install playwright && python -m playwright install chromium`",
+              file=sys.stderr)
+        raise SystemExit(2)
+
+    findings = result.get("findings", [])
+    records = {
+        "card_overflow": [f for f in findings if f["rule"] == "R-VIS-CARD-OVERFLOW"],
+        "overlap":       [f for f in findings if f["rule"] == "R-OVERLAP"],
+        "overflow":      [f for f in findings if f["rule"] == "R-OVERFLOW"],
+    }
+
+    # Per-slide canvas room for every card_overflow box, in ONE extra browser
+    # pass (kept separate from the engine eval), so the reflow stage can judge
+    # GROW-OK without re-deriving geometry.
     url = index_html.resolve().as_uri()
     with sync_playwright() as pw:
         b = pw.chromium.launch(headless=True)
@@ -165,17 +196,8 @@ def _probe(index_html: Path) -> dict:
             if (d) d.setAttribute('data-mode', 'present');
         }""")
         page.wait_for_timeout(200)
-        report = page.evaluate(V._visual_audit_js())
-        # Per-slide canvas room for every card_overflow box, in ONE extra pass,
-        # so the reflow stage can judge GROW-OK without a second browser launch.
-        room = page.evaluate(_ROOM_JS, report.get("card_overflow", []))
+        room = page.evaluate(_ROOM_JS, records["card_overflow"])
         b.close()
-
-    records = {
-        "card_overflow": report.get("card_overflow", []),
-        "overlap":       report.get("overlap", []),
-        "overflow":      report.get("overflow", []),
-    }
     # attach measured room back onto each card_overflow record by (slide,selector)
     room_by_key = {(r["slide_idx"], r["selector"]): r for r in room}
     for rec in records["card_overflow"]:
@@ -202,7 +224,13 @@ def _probe(index_html: Path) -> dict:
     for rec in records["overlap"]:
         errset[("R-OVERLAP", rec["slide_idx"])] += 1
     for rec in records["overflow"]:
-        ov = max(rec.get("h", 0) - 1080, rec.get("w", 0) - 1920)
+        # The unified engine's R-OVERFLOW finding carries deltaH/deltaW (already
+        # the overflow delta vs 1080/1920 — NOT raw h/w), so consume those
+        # directly. Reading rec['h']/['w'] (the retired bucket-report fields)
+        # always defaulted to 0 → ov stayed negative → R-OVERFLOW was NEVER
+        # added to errset, blinding the reflow regression gate to overflow it
+        # introduces (H6).
+        ov = max(rec.get("deltaH", 0), rec.get("deltaW", 0))
         if ov > OVERFLOW_ERR_PX:
             errset[("R-OVERFLOW", rec["idx"])] += 1
     return {"records": records, "errset": errset}
@@ -287,7 +315,11 @@ def _render(deck_json: Path, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, str(_HERE / "render-deck.py"),
            str(deck_json), str(out_dir) + "/", "--skip-validate-html"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    # C3: this render runs once PER reflow iteration into a throwaway temp dir;
+    # suppress render-deck's post-render auto-snapshot so mid-reflow intermediate
+    # state is never written into the deck's making-of log.
+    env = dict(os.environ, DECK_LOG_NO_AUTOSNAP="1")
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     index = out_dir / "index.html"
     if res.returncode != 0 or not index.is_file():
         sys.stderr.write(res.stdout + "\n" + res.stderr + "\n")

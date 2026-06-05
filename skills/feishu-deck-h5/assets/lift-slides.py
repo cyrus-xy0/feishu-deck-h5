@@ -988,6 +988,24 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
     dst_deck_json = Path(dst_deck_json).resolve()
     output_dir = Path(output_dir).resolve() if output_dir else dst_deck_json.parent
 
+    # Fail fast on a bad DEST path BEFORE the expensive source read below. A
+    # RELATIVE dst under the symlinked skill root (e.g. CWD
+    # ~/.claude/skills/feishu-deck-h5 → real .../Github/feishu-deck-h5/skills/
+    # feishu-deck-h5) resolves to a non-existent runs/ that does not match where
+    # new-run.sh actually created the run — the write then dies with a cryptic
+    # FileNotFoundError AFTER parsing the whole (possibly 100s-of-MB) source.
+    # We never auto-create the parent: a missing parent means a wrong path, not
+    # an intent to scatter a run somewhere new. Pass the ABSOLUTE run path that
+    # new-run.sh printed.
+    if not dst_deck_json.parent.is_dir():
+        print(
+            f"\n✗ DEST parent dir does not exist: {dst_deck_json.parent}\n"
+            f"   You likely passed a RELATIVE path under the symlinked skill root.\n"
+            f"   Re-run with the ABSOLUTE run path new-run.sh printed, e.g.\n"
+            f"   .../runs/<ts>-<slug>/output/deck.json (and the same dir as OUTPUT_DIR).",
+            file=sys.stderr)
+        sys.exit(3)
+
     src_dir = src_html_path.parent
     src_input_dir = src_dir / "input"
     src_proto_dir = src_dir / "prototypes"

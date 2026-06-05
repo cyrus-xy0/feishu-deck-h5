@@ -8,34 +8,19 @@ import pathlib
 
 HERE = pathlib.Path(__file__).resolve()
 ASSETS = HERE.parents[2] / "assets"
-AUDIT = ASSETS / "visual-audit.js"
-VALIDATE = ASSETS / "validate.py"
+sys.path.insert(0, str(HERE.parent))
+import engine_helpers as E  # noqa: E402
 DOC = HERE.parents[2] / "references" / "validator-rules.md"
 
 
 def test_gutter_wired():
-    js = AUDIT.read_text(encoding="utf-8")
-    assert "gutter: []" in js and "out.gutter.push" in js
-    assert "report.get('gutter'" in VALIDATE.read_text(encoding="utf-8")
+    assert E.rule_in_engine("R-VIS-GUTTER")
     assert "R-VIS-GUTTER" in DOC.read_text(encoding="utf-8")
 
 
 def _run(html):
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return None
-    audit = AUDIT.read_text(encoding="utf-8")
-    try:
-        with sync_playwright() as p:
-            b = p.chromium.launch()
-            pg = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
-            pg.set_content(html); pg.wait_for_timeout(150)
-            rep = pg.evaluate("(" + audit + ")()")
-            b.close()
-    except Exception:
-        return None
-    return [g for g in rep.get("gutter", []) if g["kind"] == "gutter"]
+    E.skip_if_no_engine()
+    return E.findings_for("R-VIS-GUTTER", html, kind="gutter")
 
 
 def _row(m1, m2):

@@ -13,15 +13,19 @@ import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-import validate as V  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import validate as V  # noqa: E402  (kept for V.extract_slides in the example test)
+import engine_helpers as E  # noqa: E402
+
+# UNIFY-VALIDATE-ARCH step 4b: R-LANG now lives in the unified engine (rendered
+# DOM). `_codes` renders the slide fragments and returns R-LANG findings (the rule
+# is warn-severity, so warn + warn_soft are both reported). Requires Chromium.
 
 
 def _codes(slides):
     """Run R-LANG over the given slide fragments (zh-only mode, no meta)."""
-    html = "<html><head></head><body>" + "".join(slides) + "</body></html>"
-    iss = V.Issues()
-    V.audit_language_policy(html, slides, iss)
-    return [c for c, _ in iss.warnings]
+    E.skip_if_no_engine()
+    return E.all_codes("R-LANG", list(slides))
 
 
 def _slide(layout, body):
@@ -123,11 +127,12 @@ def test_bundled_layout_proposal_has_no_r_lang():
     example = ASSETS.parent / "examples" / "_layout-proposal.html"
     if not example.is_file():
         return  # example not present in this checkout — skip
-    html = example.read_text(encoding="utf-8")
-    slides = V.extract_slides(html)
-    iss = V.Issues()
-    V.audit_language_policy(html, slides, iss)
-    rlang = [m for c, m in iss.warnings if c == "R-LANG"]
+    E.skip_if_no_engine()
+    # Run the unified engine against the real rendered example file (not the
+    # fragment wrapper) — same single rule source, just a real deck.
+    findings = E._ENGINE.run_unified_engine(example, None, dom_rules=True)
+    rlang = [f["message"] for f in findings.get("findings", [])
+             if f.get("rule") == "R-LANG"]
     assert rlang == [], f"unexpected R-LANG on bundled example: {rlang}"
 
 

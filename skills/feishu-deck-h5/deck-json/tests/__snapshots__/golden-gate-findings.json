@@ -1,0 +1,64 @@
+{
+  "R-VIS-BALANCE": {
+    "counts": {
+      "warn": 1
+    },
+    "slides": [
+      1
+    ]
+  },
+  "R-VIS-CANVAS-CENTER": {
+    "counts": {
+      "warn": 3
+    },
+    "slides": [
+      1,
+      2,
+      3
+    ]
+  },
+  "R-VIS-FILL": {
+    "counts": {
+      "warn": 3
+    },
+    "slides": [
+      1,
+      2,
+      3
+    ]
+  },
+  "R-VIS-RAW-TITLE-POS": {
+    "counts": {
+      "warn": 3
+    },
+    "slides": [
+      1,
+      2,
+      3
+    ]
+  },
+  "R-WHITE-TEXT": {
+    "counts": {
+      "warn": 1
+    },
+    "slides": [
+      2
+    ]
+  },
+  "R10": {
+    "counts": {
+      "warn": 1
+    },
+    "slides": [
+      1
+    ]
+  },
+  "R38": {
+    "counts": {
+      "error": 1
+    },
+    "slides": [
+      3
+    ]
+  }
+}

@@ -21,10 +21,10 @@
 #
 # Why bootstrap exists: harnesses like Mira mount the skill read-only into
 # /opt or similar. We can't write runs/<ts>/{input,output}/ next to assets/
-# in that case. Instead we mirror the skill (minus runs/, caches, *.bak, and
-# the heavy pptx example corpus) into $PWD/.feishu-deck-h5-workspace (override
-# via FS_DECK_WORKSPACE env var), and tell the agent to cd there. All relative
-# paths inside the skill (CSS link, template lookups, render.py) keep working.
+# in that case. Instead we mirror the skill (minus runs/, caches, and *.bak)
+# into $PWD/.feishu-deck-h5-workspace (override via FS_DECK_WORKSPACE env var),
+# and tell the agent to cd there. All relative paths inside the skill (CSS link,
+# template lookups, render.py) keep working.
 #
 # The mirror uses the fastest tool available and falls back to python3, which
 # the skill already hard-requires to render — so it never hard-depends on
@@ -72,7 +72,8 @@ REQUIRED=(
   "assets/feishu-deck.css"
   "assets/feishu-deck.js"
   "assets/validate.py"
-  "assets/visual-audit.js"
+  "assets/audits.js"
+  "assets/run-audits.py"
   "assets/lark-logo.png"
   "assets/lark-cover-bg.jpg"
   "_body.partial.html"
@@ -122,9 +123,10 @@ if ! ( touch "$PROBE" 2>/dev/null && rm -f "$PROBE" 2>/dev/null ); then
   # fall back to python3 (guaranteed present — the skill can't render without
   # it). This removes the old hard dependency on rsync. Excludes keep the
   # mirror lean: runs/ (user outputs, preserved if already there), VCS/cache
-  # cruft, editor noise, *.bak snapshots, and the 689 MB pptx example corpus —
-  # none are needed to RENDER a deck, and copying them on every RO bootstrap
-  # was a real perf/timeout risk on slim cloud images.
+  # cruft, editor noise, and *.bak snapshots — none are needed to RENDER a deck.
+  # (The heavy pptx example corpus is no longer here to exclude: it moved to the
+  # sibling skills/pptx-to-deck/, which lives OUTSIDE SKILL_ROOT and is never
+  # mirrored, so the old corpus-exclude was dropped.)
   MIRROR_OK=0
   MIRROR_TOOL=""
   if command -v rsync >/dev/null 2>&1; then
@@ -135,7 +137,6 @@ if ! ( touch "$PROBE" 2>/dev/null && rm -f "$PROBE" 2>/dev/null ); then
         --exclude='.pytest_cache' \
         --exclude='.DS_Store' \
         --exclude='*.bak*' \
-        --exclude='pptx-to-html/example/' \
         "$SKILL_ROOT/" "$WORKSPACE/" 2>/dev/null; then
       MIRROR_OK=1; MIRROR_TOOL="rsync"
     fi
@@ -147,9 +148,6 @@ src, dst = os.environ["SRC"], os.environ["DST"]
 NAMES = {".git", "__pycache__", ".pytest_cache", ".DS_Store", "runs"}
 def ignore(dirpath, names):
     skip = {n for n in names if n in NAMES or ".bak" in n}
-    # drop the heavy pptx example corpus (689 MB of slide images)
-    if os.path.basename(dirpath) == "pptx-to-html" and "example" in names:
-        skip.add("example")
     return skip
 try:
     shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True, symlinks=True)
@@ -288,18 +286,18 @@ if command -v git >/dev/null 2>&1 && [ -d "$SKILL_ROOT/.git" ]; then
   fi
 fi
 
-# ---- Check 6: visual-audit.js syntax (gate before Playwright runs) ----
-# 2026-05-24 · audit JS was extracted from validate.py r"""...""" string.
-# Catch syntax errors at preflight time, not 30s later inside Chromium.
-# `node --check` is a parse-only check (no execution), takes ~50ms.
-# Skip silently if node isn't installed — the audit still works via
-# Playwright (which has its own JS engine), the gate is just a nice-to-have.
+# ---- Check 6: audits.js syntax (gate before Playwright runs) ----
+# UNIFY-VALIDATE-ARCH step 4: the SINGLE rule source is assets/audits.js (the
+# old visual-audit.js was retired). Catch syntax errors at preflight time, not
+# 30s later inside Chromium. `node --check` is a parse-only check (no execution),
+# takes ~50ms. Skip silently if node isn't installed — the engine still parses
+# via Playwright (its own JS engine), the gate is just a nice-to-have.
 if command -v node >/dev/null 2>&1; then
-  if ! node --check "$SKILL_ROOT/assets/visual-audit.js" >/dev/null 2>&1; then
-    echo "PREFLIGHT FAIL · exit 4 · visual-audit.js has JS syntax errors"
+  if ! node --check "$SKILL_ROOT/assets/audits.js" >/dev/null 2>&1; then
+    echo "PREFLIGHT FAIL · exit 4 · audits.js has JS syntax errors"
     echo
     echo "  Run for details:"
-    echo "    node --check $SKILL_ROOT/assets/visual-audit.js"
+    echo "    node --check $SKILL_ROOT/assets/audits.js"
     echo
     exit 4
   fi

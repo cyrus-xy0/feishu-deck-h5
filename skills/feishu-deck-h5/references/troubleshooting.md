@@ -13,6 +13,8 @@
 | Stats column rule on first column      | Default CSS leaks                                    | First column has `border-left:0` already — check overrides. |
 | Two accents on one slide               | Forgot to set `data-accent` on slide level           | Set `data-accent="teal"` on the `.slide` element only. |
 | Quote glow too strong                  | Custom background overrides `--fs-grad-glow-blue`    | Don't override `.slide[data-layout="quote"]` background. |
+| `lift-slides.py` dies `FileNotFoundError` writing DEST (doubled `skills/feishu-deck-h5/runs/...`) | RELATIVE dst resolved against the symlinked skill root, not where `new-run.sh` made the run | Pass the ABSOLUTE run path `new-run.sh` printed for src, DEST `deck.json`, and OUTPUT_DIR. (Tool now fails fast with this hint before parsing the source.) |
+| Lifted slide: many `R-VIS-DEAD-RULE` errors, layout collapsed to vertical | `--shake` recovered the source's per-key head CSS, which included shared-stylesheet cruft targeting elements absent on this slide | Confirm it's source cruft (grep source for key+selector), then prune only rules whose leaf selector matches no body element; keep the framework layout block. |
 
 ---
 

@@ -182,16 +182,64 @@ body.deck-edit-mode .deck[data-mode="scroll"] {
   background: rgba(60, 127, 255, 0.30); border-radius: 3px;
 }
 .es-item {
-  display: grid;
-  grid-template-columns: 30px 1fr;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
   cursor: grab;
   border-left: 3px solid transparent;
   transition: background 0.12s, border-color 0.12s;
   user-select: none;
 }
+/* header row: number · label · eye */
+.es-row {
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+/* live slide thumbnail (PPT/Keynote-style preview) */
+.es-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #04081b;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10);
+  transition: box-shadow 0.12s, opacity 0.12s;
+}
+.es-item.is-active .es-thumb { box-shadow: 0 0 0 2px var(--fs-blue, #3C7FFF); }
+.es-item.es-hidden .es-thumb { opacity: 0.4; }
+.es-thumb .es-thumb-embed {
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, #1a2238, #0c1222);
+}
+/* 隐藏页 eye toggle — appears per slide in the edit sidebar. */
+/* Hide/show toggle — a clean monochrome line icon (eye / eye-off), matching the
+ * deck-ui control icons. PPT/Keynote-style: subtle, no color, just an outline. */
+.es-eye {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  opacity: 0;                    /* hidden until you hover the row (keeps list clean) */
+  transition: opacity 0.12s, color 0.12s;
+}
+.es-item:hover .es-eye { opacity: 1; }
+.es-eye:hover { color: #fff; }
+.es-eye .i-eye-off { display: none; }
+/* A hidden slide (PPT-style): row dimmed, slide number struck, eye-off icon shown
+ * and kept visible even without hover so you can see which slides are skipped. */
+.es-item.es-hidden .es-num { opacity: 0.4; text-decoration: line-through; }
+.es-item.es-hidden .es-label { opacity: 0.45; }
+.es-item.es-hidden .es-eye { opacity: 1; color: rgba(255, 255, 255, 0.7); }
+.es-item.es-hidden .es-eye .i-eye     { display: none; }
+.es-item.es-hidden .es-eye .i-eye-off { display: inline; }
 .es-item:hover {
   background: rgba(60, 127, 255, 0.10);
   border-left-color: rgba(60, 127, 255, 0.45);

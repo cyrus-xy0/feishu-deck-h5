@@ -13,18 +13,23 @@ document AS A WHOLE: (1) .deck opened AND closed (no mid-deck truncation),
 (2) present-mode runtime present (linked src OR inlined runtime fingerprint),
 (3) document ends with </body> and </html>.
 
-Static — no Chromium needed.
+UNIFY-VALIDATE-ARCH step 4b: R-DOC-INTEGRITY is a runner SOURCE-BYTE rule (it
+MUST read the raw index.html bytes — the browser auto-closes tags, so a rendered
+DOM is always balanced). The tests render via engine_helpers with verbatim=True
+(the exact fragment bytes are written to index.html, NO wrapping) so truncation
+is detectable. R-DOM stays a rendered-DOM rule and is correctly BLIND to byte
+truncation (the gap this rule closes). Requires Chromium.
 """
-import re
 import sys
 import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-from _validate_common import Issues                       # noqa: E402
-from _validate_audits import (                            # noqa: E402
-    audit_doc_integrity, audit_dom_integrity, _AUTOBALANCE_SIG,
-)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import engine_helpers as E  # noqa: E402
+
+# The auto-balance fingerprint the engine recognizes as an inlined runtime.
+_AUTOBALANCE_SIG = "function balanceSlide(slide)"
 
 # A minimal but COMPLETE deck: .deck open+close, a runtime script (carries the
 # `is-current` toggle the present-mode runtime sets — version-independent
@@ -41,10 +46,15 @@ def _healthy(body_runtime=_RUNTIME, end='</body></html>'):
             + body_runtime + end)
 
 
+def _doc_msgs(html):
+    """R-DOC-INTEGRITY messages (the runner reads raw bytes → verbatim=True)."""
+    E.skip_if_no_engine()
+    return [f["message"] for f in E.run(html, verbatim=True)
+            if f.get("rule") == "R-DOC-INTEGRITY"]
+
+
 def _run(html):
-    i = Issues()
-    audit_doc_integrity(html, i)
-    return [c for c, _ in i.errors]
+    return ["R-DOC-INTEGRITY"] * len(_doc_msgs(html))
 
 
 def test_healthy_deck_passes():
@@ -84,14 +94,15 @@ def test_truncated_tail_errors():
 
 
 def test_truncated_tail_is_the_GAP_rdom_is_blind():
-    # The exact gap: R-DOM returns CLEAN on a doc with no </body>, but
-    # R-DOC-INTEGRITY catches it. Guards against regressing the regression.
+    # The exact gap: R-DOM returns CLEAN on a doc with no </body> (the rendered
+    # DOM is always balanced — the browser auto-closes tags), but R-DOC-INTEGRITY
+    # (raw bytes) catches it. Guards against regressing the regression.
     broken = ('<html><body><div class="deck">'
               '<div class="slide-frame"><div class="slide">hi</div></div>')
-    i = Issues()
-    audit_dom_integrity(broken, i)
-    assert (i.errors == [] and i.warnings == []), \
-        "R-DOM is expected to be blind here (returns early on missing </body>)"
+    E.skip_if_no_engine()
+    rdom = [f for f in E.run(broken, verbatim=True) if f.get("rule") == "R-DOM"]
+    assert rdom == [], \
+        "R-DOM is expected to be blind here (rendered DOM is auto-balanced)"
     assert "R-DOC-INTEGRITY" in _run(broken), "R-DOC-INTEGRITY must close the gap"
 
 
@@ -104,16 +115,15 @@ def test_deck_opened_but_unclosed_errors():
     errs = _run(broken)
     assert "R-DOC-INTEGRITY" in errs, "unclosed .deck must error"
     # specifically the div-balance invariant
-    i = Issues(); audit_doc_integrity(broken, i)
-    assert any('opens vs' in m for c, m in i.errors), "must report div open/close imbalance"
+    assert any('opens vs' in m for m in _doc_msgs(broken)), \
+        "must report div open/close imbalance"
 
 
 # ---- (c) missing ONLY the runtime script ----
 
 def test_missing_only_runtime_errors_once():
     broken = _healthy(body_runtime='')   # closes intact, runtime gone
-    i = Issues(); audit_doc_integrity(broken, i)
-    msgs = [m for c, m in i.errors]
+    msgs = _doc_msgs(broken)
     assert len(msgs) == 1, "only the runtime-absent invariant should fire"
     assert 'runtime is ABSENT' in msgs[0]
 
@@ -122,8 +132,7 @@ def test_missing_only_runtime_errors_once():
 
 def test_missing_end_tags_errors():
     broken = _healthy(end='')   # .deck closed + runtime present, but no </body></html>
-    i = Issues(); audit_doc_integrity(broken, i)
-    msgs = [m for c, m in i.errors]
+    msgs = _doc_msgs(broken)
     assert len(msgs) == 1 and 'truncated at the end' in msgs[0], \
         "only the end-of-doc invariant should fire"
 

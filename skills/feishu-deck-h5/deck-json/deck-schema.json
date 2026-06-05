@@ -101,6 +101,12 @@
           "uniqueItems": true,
           "description": "Atmospheric decoration tokens. Space-stacked at render time."
         },
+        "allow": {
+          "type": "array",
+          "items": { "enum": ["imbalance", "no-focal", "title-gap"] },
+          "uniqueItems": true,
+          "description": "Slide-level visual-audit opt-outs, emitted as `data-allow-<token>` on the `.slide` element. The ONLY authoring channel for the three slide-scoped opt-outs the visual engine checks via `slide.hasAttribute`: `imbalance` (R-VIS-BALANCE / CROWD / PANEL-TOP / CANVAS-CENTER — by-design asymmetry/whitespace), `no-focal` (R-FOCAL-CHECK — by-design N-way parallel/equal-weight comparison with no single hero), `title-gap` (R-VIS-TITLE-GAP — bespoke header-less title+subtitle spacing). Use ONLY when the design is genuinely intentional; it is a documented exception, not a silence button. Element-level opt-outs (data-allow-body-floor / typescale / drop-shadow / peer-size …) are authored inline in `data.html`, NOT here."
+        },
         "language_override": {
           "enum": ["zh-only", "zh-en"],
           "description": "Override deck.language for this slide only."
@@ -121,9 +127,13 @@
           "enum": ["front", "back"],
           "description": "Per-slide override of deck.logo_position. See deck_meta.logo_position."
         },
+        "hidden": {
+          "type": "boolean",
+          "description": "隐藏页 (PPT-style 'hide slide'). The slide IS still rendered (gets data-hidden) and stays reachable by a direct #N/#key hash and in scroll mode, but the runtime SKIPS it in linear present-mode navigation (→/←/space/wheel/swipe/prev-next) and excludes it from the page count. For appendix/backup/draft/'skip for this audience' slides you want to keep but not walk through. Durable — re-render/publish keep it. Toggle with `deck-cli hide/unhide KEY`. Distinct from `_disabled` (which means 'this slide errors' and is dropped from render entirely)."
+        },
         "_disabled": {
           "type": "boolean",
-          "description": "If true, renderer skips this slide entirely. Escape hatch for 'this slide errors, let the rest render'. SKILL.md Troubleshooting section."
+          "description": "If true, renderer skips this slide entirely (not rendered at all). Escape hatch for 'this slide errors, let the rest render'. SKILL.md Troubleshooting section. To keep a slide in the deck but skip it during the show, use the author-facing `hidden` field instead."
         },
         "_orig_layout": {
           "type": "string",
@@ -150,6 +160,7 @@
         { "if": { "properties": { "layout": { "const": "end" } },        "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_end" } } } },
         { "if": { "properties": { "layout": { "const": "replica" } },    "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_replica" } },    "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "raw" } },        "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_raw" } },        "required": ["data"] } },
+        { "if": { "properties": { "layout": { "const": "canvas" } },     "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_canvas" } },     "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "iframe-embed" } }, "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_iframe_embed" } }, "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "logo-wall" } },  "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_logo_wall" } },  "required": ["data"] } },
         { "if": { "properties": { "layout": { "const": "arch-stack" } }, "required": ["layout"] }, "then": { "properties": { "data": { "$ref": "#/$defs/data_arch_stack" } }, "required": ["data"] } },
@@ -335,9 +346,9 @@
         "logo-wall", "arch-stack", "chart",
         "iframe-embed",
         "end",
-        "replica", "raw"
+        "replica", "raw", "canvas"
       ],
-      "description": "13 base layouts (content/stats/flow are multi-variant) + 2 specials (replica/raw). iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide."
+      "description": "13 base layouts (content/stats/flow are multi-variant) + 3 specials (replica/raw/canvas). iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide. canvas = absolutely-positioned structured elements (the PPTX → structured-JSON intermediate; see DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3)."
     },
 
     "accent_enum": {
@@ -1153,6 +1164,73 @@
         "iframe_title": { "type": "string", "description": "iframe `title` attr for a11y. Defaults to data.title when omitted." },
         "hint":         { "type": "string", "description": "Bottom-right pill caption, e.g. '报告可滚动查阅'. Omit / empty to hide the pill." },
         "zoom":         { "type": "number", "minimum": 0.5, "maximum": 2.5, "description": "Optional content scaling. 1.0 = native (default); >1 enlarges (use when embedded text is hard to read at slide scale); <1 shrinks (use when prototype is wider than the iframe). Implemented via CSS transform + width/height compensation, so the iframe always fills its container regardless of zoom." }
+      }
+    },
+
+    "data_canvas": {
+      "description": "canvas layout — a slide as a structured list of absolutely-positioned elements (text boxes / images / shapes), NOT an HTML blob and NOT an image. This is the PPTX → structured-JSON intermediate (DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3). Geometry is px on a canvas_w × canvas_h plane (default 1920×1080); the renderer converts to cqw/cqh. Each element carries a stable `id` that is the round-trip anchor for sync-index-to-deck.py. placeholder:true marks a page that couldn't be reconstructed (live chart / SmartArt / OLE) — rendered as a '本页待重做 · 源第 N 页' notice.",
+      "type": "object",
+      "required": ["elements"],
+      "additionalProperties": false,
+      "properties": {
+        "canvas_w":    { "type": "integer", "default": 1920, "description": "Canvas width in px the element geometry is expressed against." },
+        "canvas_h":    { "type": "integer", "default": 1080, "description": "Canvas height in px the element geometry is expressed against." },
+        "placeholder": { "type": "boolean", "default": false, "description": "If true the page could not be reconstructed; renderer shows a '待重做' notice instead of elements." },
+        "source_page": { "type": "integer", "description": "Original page number in the source PPTX/PDF (for traceability + the placeholder notice)." },
+        "elements": {
+          "type": "array",
+          "description": "Absolutely-positioned elements. Empty allowed when placeholder:true.",
+          "items": {
+            "type": "object",
+            "required": ["id", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "id":     { "type": "string", "minLength": 1, "description": "Stable element id; the by-id round-trip anchor (rendered as data-el-id). Must be unique within the slide." },
+              "type":   { "enum": ["text", "image", "shape"] },
+              "x":      { "type": "number", "description": "Left, px on canvas_w." },
+              "y":      { "type": "number", "description": "Top, px on canvas_h." },
+              "w":      { "type": "number", "description": "Width, px on canvas_w." },
+              "h":      { "type": "number", "description": "Height, px on canvas_h." },
+              "anchor": { "enum": ["top", "middle", "bottom"], "description": "Vertical text anchoring within the box. Optional." },
+              "align":  { "enum": ["left", "center", "right", "justify"], "description": "type=text only: horizontal paragraph alignment → text wrapper text-align. Optional." },
+              "insets": { "type": "array", "items": { "type": "number" }, "description": "Text box padding [left, right, top, bottom] px. Optional." },
+              "runs": {
+                "type": "array",
+                "description": "type=text only: inline runs. Multi-run preserves per-run bold/color; editing the box's text in the browser may flatten to a single run (documented lossy boundary).",
+                "items": {
+                  "type": "object",
+                  "required": ["text"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "text":  { "type": "string" },
+                    "bold":  { "type": "boolean" },
+                    "color": { "type": "string", "description": "CSS color, e.g. '#1A1A1A'. For a gradient run this is the flat first-stop fallback." },
+                    "size":  { "type": "number", "description": "Font size in px on canvas." },
+                    "grad":  { "type": "string", "description": "Optional CSS gradient for gradient TEXT (rendered via background-clip:text); e.g. 'linear-gradient(45deg,#FFF 0%,#F7BE86 100%)'." },
+                    "font":  { "type": "string", "description": "Optional CSS font-family list from the run's real PPTX typeface (latin then ea), e.g. '\"TikTok Display\", \"FZLanTingHeiPro_GB18030\"'." }
+                  }
+                }
+              },
+              "src":    { "type": "string", "description": "type=image only: real asset path (e.g. 'input/p1.jpg'). Kept verbatim so copy-assets / lift scan + copy it." },
+              "crop":   { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "type=image only: OOXML srcRect crop [l,r,t,b] as fractions (may be negative). Visible region x∈[l,1-r], y∈[t,1-b] is stretched to the box." },
+              "fill":   { "type": "string", "description": "type=shape only: solid background CSS color (e.g. '#1A73E8')." },
+              "radius": { "type": "number", "description": "type=shape only: border-radius px." },
+              "kind":   { "type": "string", "description": "type=shape only: OOXML preset geometry name (e.g. 'rect','roundRect','ellipse'). Hint for the renderer; informational." },
+              "gradient": { "type": "string", "description": "type=shape only: a full CSS gradient value (e.g. 'linear-gradient(135deg, #A 0%, #B 100%)') applied as background. Used when the fill is a gradient (16% of real shapes)." },
+              "border": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "type=shape only: outline. color is a CSS color, width is px.",
+                "properties": {
+                  "color": { "type": "string" },
+                  "width": { "type": "number" }
+                }
+              },
+              "svg":    { "type": "string", "description": "type=shape only: an inline SVG body (path/line markup) for FREEFORM/custGeom and LINE shapes the box CSS can't express. Rendered inside an <svg> sized to the element box (viewBox 0 0 100 100, preserveAspectRatio=none)." },
+              "style":  { "type": "string", "description": "type=shape only: a raw CSS string escape-hatch appended to the element style for appearance that doesn't map to fill/gradient/border/radius (e.g. rotation, opacity)." }
+            }
+          }
+        }
       }
     }
   }

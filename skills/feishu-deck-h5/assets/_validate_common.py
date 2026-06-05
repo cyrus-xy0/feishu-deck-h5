@@ -2,12 +2,25 @@
 """
 feishu-deck-h5  ·  validator SHARED KERNEL (_validate_common)
 
-The clean-DAG base layer of the validator (F-10 module split). Holds the
-`Issues` collector, slide extraction, the DOM text-leaf walker, and ALL the
-module-level constants / compiled regexes / helpers that ≥1 audit shares.
+The shared KERNEL of the validator. Holds the `Issues` collector, slide
+extraction, the DOM text-leaf walker, the type-token ladder, and ALL the
+module-level constants / compiled regexes / helpers that validate.py imports
+(`from _validate_common import *`).
 
-Imports nothing from validate.py or _validate_audits.py — it is the bottom of
-the DAG (_validate_common ← _validate_audits ← validate).
+NOTE on run-audits.py (drift caveat): run-audits.py does NOT import this module.
+It is loaded via importlib from a hyphenated filename and runs in several harness
+contexts where adding a sibling-dir import would be fragile, so it keeps its OWN
+"逐字对应" (verbatim-mirrored) copies of the byte/source helpers it needs
+(`_STYLE_BLOCK_RE`, `_iter_style_blocks`, `_SLIDE_FRAME_OPEN_RE`, the slide-key /
+escaped-tag / structure / import-provenance regexes, etc.). Those copies are
+INTENTIONAL mirrors kept in lock-step by hand; a drift test asserts the mirrored
+constants match the canonical ones here. Treat any divergence as a bug.
+
+UNIFY-VALIDATE-ARCH step 4: the old `_validate_audits` audit module was retired
+(its rules moved to the unified engine — audits.js on the rendered DOM, plus the
+runner byte/source rules in run-audits.py). This module imports nothing from
+validate.py — it stays the bottom of the DAG (_validate_common ← validate.py;
+run-audits.py mirrors rather than imports, see above).
 """
 
 from __future__ import annotations

@@ -66,6 +66,26 @@ VALIDATE_DECK = HERE / "validate-deck.py"
 VALIDATE_HTML = ASSETS_DIR / "validate.py"
 COPY_ASSETS   = ASSETS_DIR / "copy-assets.py"
 
+# Single-source the run-root precondition: reuse copy-assets.find_run_root so the
+# render-deck pre-check can't drift from the copier's real rule. It did drift —
+# an inline reimplementation used loop var `p` with `p.parent.parent.parent`
+# (3 hops up), whereas find_run_root uses var `parent` with the same dotted
+# expression meaning only 2 hops; so the canonical runs/<ts>/output/ layout was
+# wrongly rejected and copy-assets got skipped on the happy path. Importing the
+# real predicate (copy-assets.py is import-safe; main() is __main__-guarded)
+# keeps the two in lockstep, same spirit as the _story_case_fit single-source.
+def _load_find_run_root():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_copy_assets_runroot", COPY_ASSETS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.find_run_root
+
+try:
+    _find_run_root = _load_find_run_root()
+except Exception:
+    _find_run_root = None
+
 # Phase 4 / post-review-medium-6: there's now ONE pathway for \n→<br>.
 # Every {{ field }} substitution goes through _esc_br (see render_template
 # sub_safe). Templates use {{ title }} not {{{ title }}}, so user text gets
@@ -178,7 +198,20 @@ def show_story_case_accents(data: dict, slide_key: str) -> None:
 
 
 def relpath_from_to(src_dir: Path, dst_dir: Path) -> str:
-    return os.path.relpath(dst_dir, start=src_dir).replace(os.sep, "/")
+    # Canonicalize BOTH ends before diffing. `dst_dir` (ASSETS_DIR/TEMPLATES_DIR)
+    # is derived from Path(__file__).resolve(), so it is already realpath'd —
+    # but `src_dir` is the user-supplied output dir, which may carry a different
+    # spelling of a case-insensitive segment (e.g. cwd `…/Github/…` vs the
+    # on-disk canonical `…/GitHub/…`) or an unresolved symlink. Without
+    # normalizing, os.path.relpath treats the mismatched segment as a divergence
+    # and walks all the way up to the nearest *string*-common ancestor, emitting
+    # a long, non-portable `../../../../GitHub/…skills/…` ref that copy-assets'
+    # `(\.\./)+skills/feishu-deck-h5/` rewrite regex can't match → assets never
+    # get localized. realpath on both sides collapses the segment to one casing
+    # so the short canonical `../../../skills/feishu-deck-h5/…` ref is emitted.
+    src = os.path.realpath(src_dir)
+    dst = os.path.realpath(dst_dir)
+    return os.path.relpath(dst, start=src).replace(os.sep, "/")
 
 
 def render_template(template: str, data: dict) -> str:
@@ -260,6 +293,20 @@ def _build_data_attrs(slide: dict) -> str:
         parts.append(f'data-title-style="{_esc_br(slide["title_style"])}"')
     if slide.get("logo_position"):
         parts.append(f'data-logo-position="{_esc_br(slide["logo_position"])}"')
+    # Slide-level visual-audit opt-outs → data-allow-<token> on .slide. This is the
+    # ONLY authoring channel for the three slide-scoped opt-outs the visual engine
+    # checks via slide.hasAttribute (imbalance / no-focal / title-gap); without it a
+    # raw/schema slide that is by-design parallel or asymmetric had no way to mark
+    # intent through deck.json. Allowlisted to those three (element-level opt-outs
+    # like body-floor/typescale are authored inline in data.html instead).
+    _ALLOW_TOKENS = ("imbalance", "no-focal", "title-gap")
+    for tok in slide.get("allow", []) or []:
+        if tok in _ALLOW_TOKENS:
+            parts.append(f'data-allow-{tok}')
+        else:
+            print(f"render-deck: WARNING — slide {slide.get('key','?')}: unknown "
+                  f"allow token '{tok}' (expected one of {_ALLOW_TOKENS}); skipped.",
+                  file=sys.stderr)
     if slide.get("lifted"):
         # Native slide lift: mark the slide so validate.py / visual-audit.js
         # downgrade its CONTENT-STYLE violations (R06 / R-WHITE-TEXT /
@@ -267,6 +314,11 @@ def _build_data_attrs(slide: dict) -> str:
         # overflow rules stay full severity. Value = source ref string.
         val = slide["lifted"] if isinstance(slide["lifted"], str) else "1"
         parts.append(f'data-lifted="{_esc_br(val)}"')
+    if slide.get("hidden"):
+        # 隐藏页 (PPT-style hide): the slide is still rendered + reachable by a
+        # direct #N/#key hash and in scroll mode, but feishu-deck.js skips it in
+        # linear present-mode navigation and excludes it from the page count.
+        parts.append("data-hidden")
     return " ".join(parts)
 
 
@@ -1516,6 +1568,220 @@ def _enrich_raw(ctx, slide):
     ctx["effective_layout"] = slide.get("_orig_layout") or "raw"
 
 
+# ---------------------------------------------------------------------------
+# canvas — structured absolutely-positioned elements → positioned HTML.
+# This is the PPTX → structured-JSON intermediate (SPEC §3/§4). The render +
+# by-id round-trip logic was prototyped & validated in /tmp/struct-proto
+# (8/8: text/geometry/add/delete/reorder lossless by data-el-id; only lossy
+# case = multi-run inline formatting flattened on edit). Productionized here.
+# Geometry is px-on-canvas; emitted as cqw/cqh so the slide scales with its
+# container query. sync-index-to-deck.py reverses this back into elements[].
+# ---------------------------------------------------------------------------
+
+def _px2cq(v, base):
+    """px-on-canvas → cq% (3 decimals). cqw for x/w (base=canvas_w),
+    cqh for y/h (base=canvas_h)."""
+    try:
+        return round(float(v) / float(base) * 100, 3)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def _canvas_el_style(el, W, H):
+    """Absolute geometry for one element as cqw/cqh (no px in the HTML)."""
+    parts = ["position:absolute"]
+    if "x" in el: parts.append(f'left:{_px2cq(el["x"], W)}cqw')
+    if "y" in el: parts.append(f'top:{_px2cq(el["y"], H)}cqh')
+    if "w" in el: parts.append(f'width:{_px2cq(el["w"], W)}cqw')
+    if "h" in el: parts.append(f'height:{_px2cq(el["h"], H)}cqh')
+    return ";".join(parts)
+
+
+# anchor → flex vertical alignment for a text box
+_CANVAS_ANCHOR = {"top": "flex-start", "middle": "center", "bottom": "flex-end"}
+_CANVAS_TEXT_ALIGN = {"left": "left", "center": "center", "right": "right",
+                      "justify": "justify"}
+
+
+def _enrich_canvas(ctx, slide):
+    data = slide.get("data") or {}
+    W = data.get("canvas_w") or 1920
+    H = data.get("canvas_h") or 1080
+
+    # Unreconstructable page → a centered "待重做" notice (SPEC §10.1).
+    if data.get("placeholder"):
+        src = data.get("source_page")
+        src_txt = f" · 源第 {src} 页" if src is not None else ""
+        ctx["elements_html"] = (
+            '          <div class="canvas-placeholder" '
+            'style="position:absolute;inset:0;display:flex;align-items:center;'
+            'justify-content:center;text-align:center">'
+            f'本页待重做{src_txt}</div>'
+        )
+        return
+
+    parts = []
+    for el in data.get("elements") or []:
+        eid = el.get("id", "")
+        etype = el.get("type")
+        style = _canvas_el_style(el, W, H)
+        if etype == "text":
+            # vertical anchoring + per-run spans (font-weight from bold, color)
+            anchor = _CANVAS_ANCHOR.get(el.get("anchor"))
+            box_style = style
+            if anchor:
+                box_style += f";display:flex;flex-direction:column;justify-content:{anchor}"
+            insets = el.get("insets")
+            if isinstance(insets, list) and len(insets) == 4:
+                l, r, t, b = insets
+                box_style += f";padding:{t}px {r}px {b}px {l}px"
+            spans = []
+            for run in el.get("runs") or []:
+                weight = "700" if run.get("bold") else "400"
+                rs = f"font-weight:{weight}"
+                # omit color when the run has none, so a colorless run does not
+                # acquire a phantom color:#000 on round-trip (today-review).
+                if run.get("color"):
+                    rs += f";color:{html.escape(str(run['color']), quote=True)}"
+                if run.get("size") is not None:
+                    rs += f";font-size:{_px2cq(run['size'], W)}cqw"
+                if run.get("font"):
+                    # per-run font-family (real PPTX typeface). The value is a
+                    # CSS family list ('"A", "B"'); escape it for the attribute.
+                    rs += f";font-family:{html.escape(str(run['font']), quote=True)}"
+                if run.get("grad"):
+                    # gradient TEXT: paint the gradient and clip it to the glyphs.
+                    # -webkit-text-fill-color:transparent makes the glyph fill
+                    # show the clipped gradient through it. BUT if a browser does
+                    # not support background-clip:text, the fill stays transparent
+                    # and the only thing keeping the text visible is the `color`
+                    # fallback. C7: when the run has a grad but NO color, that
+                    # fallback is missing → invisible (transparent) glyphs. Supply
+                    # a visible fallback color (default to currentColor / the box's
+                    # inherited color) BEFORE the fill-color override, so an
+                    # unsupported browser still shows readable text.
+                    if not run.get("color"):
+                        rs += ";color:currentColor"
+                    g = html.escape(str(run["grad"]), quote=True)
+                    rs += (f";background-image:{g};-webkit-background-clip:text;"
+                           "background-clip:text;-webkit-text-fill-color:transparent")
+                spans.append(
+                    f'<span style="{rs}">{_esc_br(run.get("text", ""))}</span>'
+                )
+            # Wrap the run spans in one inner block-level element. The box uses
+            # display:flex for vertical anchoring; a flex container blockifies its
+            # DIRECT children, so bare run <span>s would each be forced onto their
+            # own line (titles/multi-run frames collapse vertically). One block
+            # wrapper is the sole flex item; inside it the spans stay inline, so
+            # format-split runs flow + wrap normally and "\n"→<br> gives paragraph
+            # breaks. Paragraph alignment (algn) maps to the wrapper's text-align.
+            align = _CANVAS_TEXT_ALIGN.get(el.get("align"))
+            inner_style = "max-width:100%"
+            if align:
+                inner_style += f";text-align:{align}"
+            inner = (f'<div class="tb-inner" style="{inner_style}">'
+                     f'{"".join(spans)}</div>')
+            parts.append(
+                f'          <div class="el tb" data-el-id="{eid}" '
+                f'style="{box_style}">{inner}</div>'
+            )
+        elif etype == "image":
+            # src is normally a plain path (kept scannable for copy-assets /
+            # lift); escape it so a stray quote can't break out of the attribute
+            # and inject markup/handlers (today-review #9). Plain paths are
+            # unaffected (no &<>" to escape).
+            src = html.escape(str(el.get("src", "")), quote=True)
+            crop = el.get("crop")
+            if isinstance(crop, list) and len(crop) == 4:
+                # <a:srcRect> crop: show region x∈[l,1-r], y∈[t,1-b] stretched to
+                # the box (PowerPoint's behaviour). Clip with an overflow:hidden
+                # box and oversize+offset the img so the crop region fills it —
+                # otherwise object-fit:fill stretches the WHOLE image (wrong
+                # proportions for cropped pictures).
+                #
+                # C6: validate the crop fractions. PowerPoint srcRect insets are
+                # in [0,1) and the visible region must be positive. A negative
+                # inset (l/r/t/b < 0) means "OUTSET" (pad with empty space) which
+                # we don't model — clamp it to 0 so the math stays sane rather
+                # than producing a negative-size / NaN img. If the surviving
+                # visible region is degenerate (vw/vh ≤ a sub-1% sliver, or the
+                # values aren't finite numbers), the crop is unusable; WARN on
+                # stderr and fall through to the uncropped image instead of
+                # silently rendering the wrong (uncropped) image with no trace.
+                def _f(x):
+                    try:
+                        return float(x)
+                    except (TypeError, ValueError):
+                        return None
+                vals = [_f(x) for x in crop]
+                if any(v is None for v in vals):
+                    print(f"render-deck: WARNING — element '{eid}': crop {crop!r} "
+                          "has non-numeric values; ignoring crop (rendering "
+                          "uncropped image).", file=sys.stderr)
+                else:
+                    # clamp negative insets (unsupported outset) up to 0
+                    l, r, t, b = (max(0.0, v) for v in vals)
+                    vw, vh = 1 - l - r, 1 - t - b
+                    if vw > 0.01 and vh > 0.01:
+                        iw, ih = 100 / vw, 100 / vh
+                        ix, iy = -l / vw * 100, -t / vh * 100
+                        parts.append(
+                            f'          <div class="el" data-el-id="{eid}" '
+                            f'style="{style};overflow:hidden">'
+                            f'<img loading="lazy" src="{src}" style="position:absolute;'
+                            f'width:{iw:.4f}%;height:{ih:.4f}%;'
+                            f'left:{ix:.4f}%;top:{iy:.4f}%;object-fit:fill"></div>'
+                        )
+                        continue
+                    print(f"render-deck: WARNING — element '{eid}': crop {crop!r} "
+                          f"leaves a degenerate visible region (vw={vw:.4f}, "
+                          f"vh={vh:.4f}); ignoring crop (rendering uncropped image).",
+                          file=sys.stderr)
+            parts.append(
+                f'          <img class="el" data-el-id="{eid}" loading="lazy" '
+                f'src="{src}" style="{style}">'
+            )
+        elif etype == "shape":
+            shape_style = style
+            # appearance: gradient takes precedence over solid fill (a shape
+            # carries one or the other); border / radius are additive.
+            if el.get("gradient"):
+                shape_style += f";background:{el['gradient']}"
+            elif el.get("fill"):
+                shape_style += f";background:{el['fill']}"
+            border = el.get("border")
+            if isinstance(border, dict) and border.get("width"):
+                bc = border.get("color", "#888")
+                shape_style += f";border:{border['width']}px solid {bc}"
+            if el.get("radius") is not None:
+                shape_style += f";border-radius:{el['radius']}px"
+            # raw CSS escape-hatch (rotation/opacity/etc) appended last.
+            if el.get("style"):
+                shape_style += f";{el['style']}"
+            # escape the assembled style for the attribute so a stray quote in
+            # any user field (fill/gradient/border/style) can't break out of
+            # style="…" and inject markup (today-review #9). Normal CSS values
+            # (#hex, rgba(), linear-gradient(), Npx) have no &<>" → no-op.
+            shape_style = html.escape(shape_style, quote=True)
+            svg = el.get("svg")
+            if svg:
+                # FREEFORM / custGeom / LINE: inline SVG sized to the box.
+                # viewBox 0..100 + preserveAspectRatio:none → path coords are
+                # normalized 0..100 percentages of the element box.
+                parts.append(
+                    f'          <svg class="el shape" data-el-id="{eid}" '
+                    f'style="{shape_style};overflow:visible" '
+                    f'viewBox="0 0 100 100" preserveAspectRatio="none">'
+                    f'{svg}</svg>'
+                )
+            else:
+                parts.append(
+                    f'          <div class="el shape" data-el-id="{eid}" '
+                    f'style="{shape_style}"></div>'
+                )
+    ctx["elements_html"] = "\n".join(parts)
+
+
 ENRICHERS = {
     ("cover",   None):           _enrich_cover,
     ("agenda",  None):           _enrich_agenda,
@@ -1543,6 +1809,7 @@ ENRICHERS = {
     ("end",     None):           _enrich_end,
     ("replica", None):           _enrich_replica,
     ("raw",     None):           _enrich_raw,
+    ("canvas",  None):           _enrich_canvas,
     ("iframe-embed", None):      _enrich_iframe_embed,
 }
 
@@ -1643,6 +1910,61 @@ def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
 # Main render
 # ---------------------------------------------------------------------------
 
+def _maybe_auto_snapshot(out_html) -> None:
+    """渲染成功后,给开着制作日志(log/)的 deck 自动拍一版 deck-log snapshot。
+
+    为什么放这里(代码)而不是 harness hook:render-deck.py 是 SKILL 硬闸
+    「deck 必须走 render-deck.py」的必经路径,焊在这里 → 全用户、全 harness
+    (含无 hook 机制的 Mira / cron / headless)、每次 render 都自动记,不靠任何人自觉。
+    与 `deck-log init` 焊进 new-run.sh 是同一思路。
+
+    范围 gate:只在 deck 已 init 过制作日志(run 根下有 log/)时才拍 —— 临时转换 /
+    pptx 中间产物(没 log/)一概不碰。停录用 ~/.claude/deck-log.off 或
+    env DECK_LOG_NO_AUTOSNAP=1。
+
+    铁律:这段绝不能让 render 失败 —— 任何缺失 / 异常 / 超时只安静跳过,不动 return 0。
+    """
+    try:
+        out_html = Path(out_html).resolve()
+        run_root = out_html.parent.parent          # .../runs/<slug>/output/index.html → run 根
+        # 全局 / 旁路闸门先判(对 init 和 snapshot 都适用)
+        if os.environ.get("DECK_LOG_NO_AUTOSNAP"):  # 显式旁路
+            return
+        if os.environ.get("DECK_LOG_AUTOSNAP") == "1":  # 防递归:snapshot 子进程内的 render 不再二次拍
+            return
+        if (Path(os.path.expanduser("~")) / ".claude" / "deck-log.off").exists():
+            return
+        deck_log = Path(__file__).resolve().parent.parent / "log-tool" / "deck-log.py"
+        if not deck_log.exists():                   # 纯 main 没带 deck-log → 静默跳过
+            return
+        env = dict(os.environ, DECK_LOG_AUTOSNAP="1")
+        # 自动补 init(2026-06-05):真实生产 run 若还没 log/,先建骨架再拍。堵住
+        # 「继承 / 复制 / lift 来的 run 没走 new-run.sh → auto-snapshot 闸门(有 log/ 才拍)
+        # 永不触发 → 整份 deck 静默不记」的漏。new-run.sh 的 init 只是入口之一;render 是
+        # 每份 deck 的必经卡口 —— 在这兜底,run 不管怎么建的都有日志。仍排除临时转换 /
+        # pptx 中间产物:它们不落在标准 runs/<slug>/ 布局下,gate 照旧放它们过。
+        if not (run_root / "log").is_dir():
+            if run_root.parent.name != "runs":      # 非标准 run(临时 / 中间产物)→ 保持原意,不碰
+                return
+            subprocess.run(
+                [sys.executable, str(deck_log), "init", str(run_root),
+                 "--title", run_root.name],
+                capture_output=True, text=True, timeout=60, env=env)
+            if not (run_root / "log").is_dir():     # init 没成(没装依赖 / 异常)→ 别硬拍
+                return
+            print(f"\n[deck-log] 自动补建制作日志(此 run 未走 new-run.sh)→ {run_root.name}/log/")
+        r = subprocess.run(
+            [sys.executable, str(deck_log), "snapshot", str(run_root),
+             "--label", "auto · post-render"],
+            capture_output=True, text=True, timeout=120, env=env)
+        first = (r.stdout.strip().splitlines() or [""])[0] if r.stdout else ""
+        if r.returncode == 0 and first:
+            print(f"\n[deck-log] {first}")
+        # 失败(没装 Playwright / snapshot 内部报错)就安静 —— 不报错、不拖垮 render
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="render-deck.py",
@@ -1731,15 +2053,22 @@ def main(argv=None) -> int:
     asset_path = relpath_from_to(args.output_dir, ASSETS_DIR)
 
     # 4. Render each slide
-    # Skip slides with `_disabled: true` (escape hatch for "this slide errors,
-    # let the rest of the deck render so I can keep working"). SKILL.md
-    # promises this; the renderer must honor it. Skipped slides don't count
-    # toward `total` (page numbers stay sane).
+    # Skip ONLY slides marked `_disabled: true` (escape hatch for "this slide
+    # errors, let the rest of the deck render so I can keep working"). SKILL.md
+    # promises this. `hidden: true` slides ARE rendered (they get data-hidden and
+    # the runtime skips them in present-mode 翻页 — 隐藏页, PPT-style hide), so
+    # they stay reachable by direct #hash / scroll mode. _disabled slides don't
+    # count toward `total` (page numbers stay sane).
     active_slides = [(i, s) for i, s in enumerate(deck["slides"])
                      if not s.get("_disabled")]
     n_skipped = len(deck["slides"]) - len(active_slides)
     if n_skipped > 0:
         print(f"  ⚠ skipped {n_skipped} slide(s) marked _disabled: true",
+              file=sys.stderr)
+    n_hidden = sum(1 for _, s in active_slides if s.get("hidden"))
+    if n_hidden > 0:
+        print(f"  ℹ {n_hidden} hidden slide(s) (隐藏页) rendered but skipped in "
+              f"present-mode 翻页 (still reachable by direct #hash / scroll)",
               file=sys.stderr)
     slides_html = []
     total = len(active_slides)
@@ -1815,6 +2144,17 @@ def main(argv=None) -> int:
         deck_data_attrs_parts.append(f' data-logo-position="{deck["deck"]["logo_position"]}"')
     deck_data_attrs = "".join(deck_data_attrs_parts)
 
+    # Speaker notes island: a hidden JSON map {slide-key → notes} the presenter
+    # mode reads at runtime. `notes` is NOT rendered into the slide (deck-schema
+    # says so) — this island is display:none and only the presenter view shows it.
+    notes_map = {s["key"]: s["notes"] for _, s in active_slides
+                 if s.get("key") and isinstance(s.get("notes"), str) and s["notes"].strip()}
+    notes_json = (
+        '\n  <script type="application/json" id="fs-deck-notes">'
+        + json.dumps(notes_map, ensure_ascii=False).replace("</", "<\\/")
+        + "</script>"
+    ) if notes_map else ""   # empty → zero extra bytes for note-less decks
+
     final = render_template(shell_tpl.read_text(encoding="utf-8"), {
         "title":                      deck["deck"]["title"],
         "asset_path":                 asset_path,
@@ -1823,6 +2163,7 @@ def main(argv=None) -> int:
         "language":                   deck["deck"].get("language", "zh-only"),
         "slides_html":                "\n".join(slides_html),
         "deck_data_attrs":            deck_data_attrs,
+        "notes_json":                 notes_json,
     })
 
     out_html = args.output_dir / "index.html"
@@ -1842,6 +2183,10 @@ def main(argv=None) -> int:
                 "layout":      slide.get("layout"),
                 "variant":     slide.get("variant"),
                 "label":       slide.get("screen_label") or _derive_screen_label(slide),
+                # 隐藏页 flag (only emitted when true) so downstream tools
+                # (locate-slide) can show hidden state + the visible pager
+                # ordinal without re-parsing index.html.
+                **({"hidden": True} if slide.get("hidden") else {}),
                 "bytes":       len(slides_html[new_idx]),
                 "assets":      _scan_slide_assets(slides_html[new_idx]),
             }
@@ -1921,7 +2266,29 @@ def main(argv=None) -> int:
         # copy-assets.py requires output under <repo>/runs/<ts>/output/
         # (SKILL.md WORKSPACE LAYOUT). For other paths (smoke tests in /tmp/),
         # skip with warning rather than fatal-fail.
-        if "/runs/" not in str(args.output_dir.resolve()):
+        #
+        # today-review #4: gate on the ACTUAL copy-assets precondition, not a
+        # bare "/runs/" substring. A path like runs/<deck-name>/ (e.g. the
+        # documented `build_pptx … runs/<deck-name>`) contains "/runs/" yet is
+        # NOT runs/<ts>/output/, so copy-assets.find_run_root() SystemExits and
+        # render-deck returned 5 on the documented happy path. Reuse
+        # copy-assets.find_run_root directly so this pre-check matches the
+        # copier's real rule exactly (an inline reimplementation drifted by one
+        # .parent hop and rejected the canonical layout). Fallback below mirrors
+        # find_run_root with the correct 2-hop test only if the import failed.
+        _out = args.output_dir.resolve()
+        if _find_run_root is not None:
+            try:
+                _find_run_root(_out)
+                _canonical_run = True
+            except SystemExit:
+                _canonical_run = False
+        else:
+            _canonical_run = any(
+                p.parent.parent.name == "runs"
+                for p in [_out, *_out.parents]
+            )
+        if not _canonical_run:
             # FOOTGUN WARNING — output paths reference the skill via relative
             # paths that only resolve inside the repo. Moving / emailing this
             # HTML will break all CSS / JS / images. Use --inline for portable
@@ -1966,6 +2333,10 @@ def main(argv=None) -> int:
         print("\nACCENT 复核 (1 秒目测,被高亮的词是该突出的吗?)")
         for s in sc_slides:
             show_story_case_accents(s.get("data", {}), s.get("key", "?"))
+
+    # 渲染全部成功后:若这份 deck 开着制作日志(log/ 存在)就自动拍一版 making-of。
+    # 纯代码实现、不依赖任何 harness hook —— 每个用户 / 每种 harness / 每次 render 都生效。
+    _maybe_auto_snapshot(out_html)
     return 0
 
 
@@ -1996,14 +2367,21 @@ def inline_html(out_html: Path, deck: dict) -> None:
             lambda u: f"url({_resolve_bg(css_path, u.group(1))})",
             css,
         )
-        return f"<style>{css}</style>"
+        # data-source="framework": the audit engine (audits.js sheetIsFramework)
+        # classifies provenance by this attr. In LINKED mode framework CSS is
+        # recognized by its href; once inlined the href is gone, so without this
+        # attr the inlined framework master-spec rules (soft-white
+        # /* allow:white-opacity */ etc.) get misclassified as AUTHOR and fire
+        # false R-WHITE-TEXT positives. Everything _inline_stylesheet inlines is a
+        # framework <link> (per-page author CSS is already inline custom_css).
+        return f'<style data-source="framework">{css}</style>'
 
     def _inline_script(m):
         src = m.group(1)
         js_path = (out_html.parent / src).resolve()
         if not js_path.is_file():
             return m.group(0)
-        return f"<script>{js_path.read_text(encoding='utf-8')}</script>"
+        return f'<script data-source="framework">{js_path.read_text(encoding="utf-8")}</script>'
 
     # Order matters: stylesheet first (cheap), then script, then bg images
     html_text = re.sub(

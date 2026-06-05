@@ -9,13 +9,26 @@ import pathlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
-import validate as V  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import validate as V  # noqa: E402  (kept: _media_query_matches / _strip_nested_at_rules
+                      #              are kernel helpers in _validate_common, still exported)
+import engine_helpers as E  # noqa: E402
+
+# UNIFY-VALIDATE-ARCH step 4b: the R06 *integration* tests now exercise the
+# unified engine (which renders at the fixed 1920×1080 viewport, so CSSOM already
+# resolves @media exactly the way the old _media_query_matches did). The
+# _media_query_matches / _strip_nested_at_rules UNIT tests below keep calling the
+# kernel helpers directly — those live in _validate_common (NOT _validate_audits)
+# and survive the dual-registry retirement.
 
 
-def _codes(html, fn):
-    iss = V.Issues()
-    fn(html, iss)
-    return [c for c, _ in iss.errors + iss.warnings]
+def _codes(html, rule):
+    """error + warning codes for `rule` from one engine run (legacy _codes
+    returned errors+warnings; the engine run is filtered to the rule code)."""
+    E.skip_if_no_engine()
+    findings = E.run(html)
+    return [f["rule"] for f in findings
+            if f.get("rule") == rule and f.get("severity") in ("error", "warn")]
 
 
 def _body(inner):
@@ -53,18 +66,18 @@ def test_mq_comma_is_or():
 # ---- integration: R06 floor inside @media ----
 def test_r06_fires_inside_active_media():
     html = _body('<style>@media screen { .slide .body { font-size: 18px } }</style>')
-    assert 'R06' in _codes(html, V.audit_font_sizes)
+    assert 'R06' in _codes(html, 'R06')
 
 
 def test_r06_not_fired_inside_responsive_media():
     html = _body('<style>@media (max-width: 768px) { .slide .body { font-size: 18px } }</style>')
-    assert 'R06' not in _codes(html, V.audit_font_sizes)
+    assert 'R06' not in _codes(html, 'R06')
 
 
 def test_top_level_violation_still_fires():
     # control: the same violation outside any @media still fires (no regression)
     html = _body('<style>.slide .body { font-size: 18px }</style>')
-    assert 'R06' in _codes(html, V.audit_font_sizes)
+    assert 'R06' in _codes(html, 'R06')
 
 
 def test_keyframes_still_dropped():

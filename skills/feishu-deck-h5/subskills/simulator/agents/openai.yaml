@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feishu Deck H5 Simulator"
+  short_description: "Rehearse audience reactions and pitch objections."
+  default_prompt: "Use $feishu-deck-h5-simulator to rehearse how this deck may land with the audience."

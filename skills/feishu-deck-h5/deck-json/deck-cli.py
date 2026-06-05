@@ -321,6 +321,54 @@ VARIANT_DATA_FIELDS = {
 }
 
 
+def _set_hidden(deck: dict, keys, value: bool) -> tuple[int, dict | None]:
+    """Shared body for hide/unhide: set `hidden` on each slide by key. A hidden
+    slide (隐藏页) is still rendered + reachable by direct #hash / scroll, but the
+    runtime skips it in present-mode 翻页 and drops it from the page count.
+    Re-render to apply. Idempotent; reports per-key old→new."""
+    changed = False
+    for key in keys:
+        try:
+            idx = find_slide_index(deck, key)
+        except KeyError as e:
+            print(f"deck-cli: {e}", file=sys.stderr); return 1, None
+        old = bool(deck["slides"][idx].get("hidden", False))
+        if value:
+            deck["slides"][idx]["hidden"] = True
+        else:
+            deck["slides"][idx].pop("hidden", None)   # clear, don't leave hidden:false
+        print(f"  slides[{idx}] (key={key}) hidden: {old} → {value}")
+        changed = changed or (old != value)
+    if not changed:
+        print("  (no change — re-render not needed)")
+    return 0, deck
+
+
+def cmd_hide(deck: dict, args) -> tuple[int, dict | None]:
+    return _set_hidden(deck, args.keys, True)
+
+
+def cmd_unhide(deck: dict, args) -> tuple[int, dict | None]:
+    return _set_hidden(deck, args.keys, False)
+
+
+def cmd_set_notes(deck: dict, args) -> tuple[int, dict | None]:
+    """Set (or clear, with empty text) a slide's speaker notes (口播稿) by key.
+    Rendered into the hidden `#fs-deck-notes` island and shown in the presenter
+    view (P). By key — survives reorder, unlike `set slides.N.notes`."""
+    try:
+        idx = find_slide_index(deck, args.key)
+    except KeyError as e:
+        print(f"deck-cli: {e}", file=sys.stderr); return 1, None
+    old = deck["slides"][idx].get("notes", "<unset>")
+    if args.text == "":
+        deck["slides"][idx].pop("notes", None)
+    else:
+        deck["slides"][idx]["notes"] = args.text
+    print(f"  slides[{idx}] (key={args.key}) notes: {old!r} → {args.text!r}")
+    return 0, deck
+
+
 def cmd_set_variant(deck: dict, args) -> tuple[int, dict | None]:
     try:
         idx = find_slide_index(deck, args.key)
@@ -499,7 +547,14 @@ def _strip_text_ids(obj):
 def _slide_asset_text(slide: dict) -> str:
     """Concatenate all string values in a slide (custom_css + every string in
     `data`, recursively) so asset references can be scanned without JSON-escape
-    noise."""
+    noise.
+
+    The recursive `data` walk INCLUDES a `canvas` slide's
+    `data.elements[].src` (each image element stores its path there, e.g.
+    `input/img-001.jpg`) — so the `input/<file>` regex in _copy_slide_assets
+    picks up canvas images for free, same as a raw slide's data.html refs. See
+    _canvas_element_srcs for the explicit, name-free collector used as a belt-
+    and-braces second pass for any non-`input/` element src form."""
     parts: list[str] = []
     cc = slide.get("custom_css")
     if isinstance(cc, str):
@@ -519,13 +574,61 @@ def _slide_asset_text(slide: dict) -> str:
     return "\n".join(parts)
 
 
+def _canvas_element_srcs(slide: dict) -> list[str]:
+    """Explicit collector for a `canvas` slide's image element sources:
+    `data.elements[].src` (and nested group children, if any future emitter
+    adds them). Returns the raw `src` strings in document order, de-duplicated.
+
+    A PPTX-imported `canvas` slide stores image paths ONLY here — not in
+    data.html (there is none) — so paste/lift must scan elements[].src to carry
+    the images. The generic `input/` text scan already catches the common
+    `src:"input/<file>"` form; this collector makes the contract explicit and
+    also surfaces bare/relative element srcs (`scene.png`, `./img.jpg`) that the
+    deck-local media pass copies."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def walk(elements):
+        if not isinstance(elements, list):
+            return
+        for el in elements:
+            if not isinstance(el, dict):
+                continue
+            src = el.get("src")
+            if isinstance(src, str) and src.strip() and src not in seen:
+                seen.add(src)
+                out.append(src.strip())
+            # tolerate a future grouped form: elements with nested children
+            for child_key in ("elements", "children"):
+                if isinstance(el.get(child_key), list):
+                    walk(el[child_key])
+
+    data = slide.get("data")
+    if isinstance(data, dict):
+        walk(data.get("elements"))
+    return out
+
+
 def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     """Copy a pasted slide's referenced LOCAL assets from the source deck dir to
     the destination deck dir, preserving deck-relative paths (`input/<file>`,
     `prototypes/<slug>/`). Skill-relative (`../../../skills/...`) and shared-pool
     refs resolve identically in both decks, so they need no copy. Returns a
-    report dict {input, prototypes, missing}."""
+    report dict {input, prototypes, missing}.
+
+    CANVAS slides store image paths in `data.elements[].src` (NOT in data.html —
+    there is none). The `input/` text scan below already catches the common
+    `src:"input/<file>"` form because _slide_asset_text walks `data` recursively;
+    the explicit `_canvas_element_srcs` pass folds those srcs into the SAME text
+    buffer so the contract is name-free and obvious, and any bare/relative
+    element src (`scene.png`) falls through to the deck-local media pass."""
     text = _slide_asset_text(slide)
+    # Belt-and-braces: explicitly append every canvas `data.elements[].src` to the
+    # scanned text so a canvas slide's images are guaranteed to be seen by the
+    # input/ + deck-local passes below (DECKJSON-UNIFIED-INTERMEDIATE-SPEC §7).
+    canvas_srcs = _canvas_element_srcs(slide)
+    if canvas_srcs:
+        text = text + "\n" + "\n".join(canvas_srcs)
     copied = {"input": [], "prototypes": [], "local": [], "missing": []}
     for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "input" / fname
@@ -878,8 +981,17 @@ def main(argv=None) -> int:
     sp = sub.add_parser("set-decor", help="set slide decor tokens (comma-sep)")
     sp.add_argument("key"); sp.add_argument("tokens")
 
+    sp = sub.add_parser("set-notes", help="set/clear a slide's speaker notes (口播稿, shown in presenter view P)")
+    sp.add_argument("key"); sp.add_argument("text", help='note text (empty string "" clears it)')
+
     sp = sub.add_parser("set-variant", help="change variant of content/stats/flow slide")
     sp.add_argument("key"); sp.add_argument("variant")
+
+    sp = sub.add_parser("hide", help="隐藏页: skip slide(s) in present-mode 翻页 (still rendered + reachable by #hash/scroll)")
+    sp.add_argument("keys", nargs="+", help="one or more slide keys")
+
+    sp = sub.add_parser("unhide", help="un-hide slide(s) by key (re-render to apply)")
+    sp.add_argument("keys", nargs="+", help="one or more slide keys")
 
     sp = sub.add_parser("reorder", help="move slide by position (1-indexed)")
     sp.add_argument("from_pos", type=int); sp.add_argument("to_pos", type=int)
@@ -915,6 +1027,25 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
 
+    # 无感自动 backfill (spec §10 decision 3): paste into a LEGACY HTML-only deck
+    # (no deck.json, but a sibling index.html) → reverse-build the deck.json 中间层
+    # from the rendered DOM FIRST (each .slide → raw, lossless, no screenshots),
+    # so the paste then runs against a real deck.json. Only for `paste` — other
+    # commands keep the explicit "deck not found" error.
+    if args.cmd == "paste" and not args.deck.exists():
+        _sib = args.deck.parent / "index.html"
+        if _sib.exists():
+            import subprocess
+            _sync = Path(__file__).resolve().parent / "sync-index-to-deck.py"
+            print(f"deck-cli: dest has no deck.json — auto-backfilling from {_sib} "
+                  "before paste (legacy HTML deck)", file=sys.stderr)
+            _r = subprocess.run([sys.executable, str(_sync), str(_sib), str(args.deck)],
+                                capture_output=True, text=True)
+            if _r.returncode != 0 or not args.deck.exists():
+                print(f"deck-cli: auto-backfill failed:\n{_r.stderr or _r.stdout}",
+                      file=sys.stderr)
+                return 2
+
     # Load deck (capture mtime for the optimistic-lock check on write-back)
     try:
         deck_mtime = args.deck.stat().st_mtime
@@ -937,7 +1068,10 @@ def main(argv=None) -> int:
         "set":         cmd_set,
         "set-accent":  cmd_set_accent,
         "set-decor":   cmd_set_decor,
+        "set-notes":   cmd_set_notes,
         "set-variant": cmd_set_variant,
+        "hide":        cmd_hide,
+        "unhide":      cmd_unhide,
         "reorder":     cmd_reorder,
         "move-key":    cmd_move_key,
         "insert":      cmd_insert,
