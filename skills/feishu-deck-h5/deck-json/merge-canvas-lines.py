@@ -48,8 +48,16 @@ def _el_text(el) -> str:
 
 
 def _sig(run) -> tuple:
-    """Style signature shared by fragments of one line: size + color + font."""
-    return (round(float(run.get("size", 0))), run.get("color"), run.get("font"))
+    """Style signature shared by fragments of one line: size + color + font + grad.
+
+    grad (gradient-text fill) is part of the signature (C7): two fragments that
+    differ ONLY in grad are different logical runs and must not be merged into one
+    line (that would erase one fragment's gradient onto the host's solid/other grad).
+    grad may be a dict — normalize to a stable hashable key for grouping."""
+    grad = run.get("grad")
+    if isinstance(grad, (dict, list)):
+        grad = json.dumps(grad, sort_keys=True, ensure_ascii=False)
+    return (round(float(run.get("size", 0))), run.get("color"), run.get("font"), grad)
 
 
 def merge_slide(slide, gap_scale: float, y_tol_scale: float) -> list:
@@ -63,7 +71,7 @@ def merge_slide(slide, gap_scale: float, y_tol_scale: float) -> list:
     for e in els:
         groups[_sig(e["runs"][0])].append(e)
 
-    for (size, _color, _font), gels in groups.items():
+    for (size, _color, _font, _grad), gels in groups.items():
         y_tol = max(8.0, size * y_tol_scale)
         gap_max = max(12.0, size * gap_scale)
         # band by center-y
@@ -157,10 +165,16 @@ def main(argv=None) -> int:
           f"(删除 {n_dropped} 个碎片元素)"
           + (" [dry-run, 未写盘]" if args.dry_run else ""))
 
-    if args.review and not args.dry_run and n_merged > 0:
+    # L7: write the --review sidecar even under --dry-run (the natural preflight:
+    # `--dry-run --review` to inspect what WOULD merge without touching the deck).
+    # The old `not args.dry_run` condition silently produced no file in that case.
+    if args.review and n_merged > 0:
         args.review.write_text(
             json.dumps(review, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"  ✓ 合并清单 → {args.review}")
+        print(f"  ✓ 合并清单 → {args.review}"
+              + (" [dry-run]" if args.dry_run else ""))
+    elif args.review and n_merged == 0:
+        print(f"  (无可合并条目, 未写 --review {args.review})")
 
     if args.dry_run or n_merged == 0:
         if n_merged == 0:

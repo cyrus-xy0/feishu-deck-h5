@@ -43,12 +43,37 @@ class RunExtractor(HTMLParser):
     """Collect CJK-bearing visible runs: text nodes (not in script/style),
     translatable attribute values, and CSS content: strings inside <style>."""
     def __init__(self):
+        # convert_charrefs=False ON PURPOSE (H4): apply-text-pairs matches finds
+        # against the RAW data.html via h.count(f), so an emitted find must be a
+        # contiguous substring of the RAW html — entities and all. We therefore
+        # accumulate each text node's literal characters AND its entity/char refs in
+        # their ORIGINAL source form (&amp;, &#39; …) into one buffer, flushed at any
+        # tag boundary. With convert_charrefs=True the parser would decode `&amp;`→`&`
+        # so the find `研发 & 测试` would NOT substring-match the raw `研发 &amp; 测试`
+        # and apply would report it unmatched. With the default split-on-entity
+        # behaviour each fragment around the entity would be a separate (broken) find.
         super().__init__(convert_charrefs=False)
         self.runs: list[str] = []
         self._skip_depth = 0   # inside <script>
         self._in_style = False
+        self._buf: list[str] = []   # current contiguous text node (raw refs kept)
+
+    def _flush_text(self):
+        raw = "".join(self._buf)
+        self._buf = []
+        if not raw:
+            return
+        if self._in_style:
+            for m in CONTENT_RE.finditer(raw):
+                if CJK.search(m.group(2)):
+                    self._add(m.group(2).strip())
+            return
+        s = raw.strip()
+        if s and CJK.search(s):
+            self._add(s)
 
     def handle_starttag(self, tag, attrs):
+        self._flush_text()
         if tag == "script":
             self._skip_depth += 1
         if tag == "style":
@@ -58,11 +83,13 @@ class RunExtractor(HTMLParser):
                 self._add(val.strip())
 
     def handle_startendtag(self, tag, attrs):
+        self._flush_text()
         for name, val in attrs:
             if name in TRANSLATABLE_ATTRS and val and CJK.search(val):
                 self._add(val.strip())
 
     def handle_endtag(self, tag):
+        self._flush_text()
         if tag == "script" and self._skip_depth:
             self._skip_depth -= 1
         if tag == "style":
@@ -71,14 +98,22 @@ class RunExtractor(HTMLParser):
     def handle_data(self, data):
         if self._skip_depth:
             return
-        if self._in_style:
-            for m in CONTENT_RE.finditer(data):
-                if CJK.search(m.group(2)):
-                    self._add(m.group(2).strip())
+        self._buf.append(data)
+
+    def handle_entityref(self, name):
+        # keep the entity in its raw source form so the find substring-matches raw html
+        if self._skip_depth:
             return
-        s = data.strip()
-        if s and CJK.search(s):
-            self._add(s)
+        self._buf.append(f"&{name};")
+
+    def handle_charref(self, name):
+        if self._skip_depth:
+            return
+        self._buf.append(f"&#{name};")
+
+    def close(self):
+        super().close()
+        self._flush_text()
 
     def _add(self, s):
         # collapse internal runs of whitespace to match how they sit in the html?
@@ -92,6 +127,7 @@ def runs_from_html(html: str) -> list[str]:
     p = RunExtractor()
     try:
         p.feed(html)
+        p.close()   # flush the trailing text buffer (last node before EOF)
     except Exception:
         # malformed fragment — fall back to a coarse text-between-tags scan
         for m in re.finditer(r'>([^<]+)<', html):
@@ -102,20 +138,36 @@ def runs_from_html(html: str) -> list[str]:
     return sorted(set(p.runs), key=len, reverse=True)
 
 
-def runs_from_value(v) -> list[str]:
-    """For non-raw slides: pull CJK strings out of nested data values."""
+def runs_from_canvas(data: dict) -> list[str]:
+    """For canvas (PPTX/hybrid-import) slides: pull CJK run text ONLY from
+    data['elements'][i]['text']==... text-element runs.
+
+    Restricted on purpose (M5): we do NOT walk the whole data dict — that scraped
+    CJK out of image src paths, element ids, geometry and metadata, none of which
+    apply-text-pairs ever swaps (it only edits run['text']). Those non-text strings
+    became finds that could never match → false "untranslated" noise.
+
+    Each run's stripped text is emitted VERBATIM as a SINGLE find regardless of any
+    '<' it contains (H4): apply-text-pairs canvas branch compares `run.text.strip()
+    == find`, so the find must be exactly the run's stripped text. Never route a
+    canvas run through the HTML parser (that would fragment `营收<去年 同比` around
+    the '<' so nothing matches on apply)."""
     out = []
-    def walk(x):
-        if isinstance(x, str):
-            if CJK.search(x):
-                # a data field may itself be html-ish; reuse the html extractor
-                got = runs_from_html(x) if "<" in x else ([x.strip()] if CJK.search(x) else [])
-                out.extend(got)
-        elif isinstance(x, list):
-            for i in x: walk(i)
-        elif isinstance(x, dict):
-            for i in x.values(): walk(i)
-    walk(v)
+    elements = data.get("elements")
+    if not isinstance(elements, list):
+        return out
+    for e in elements:
+        if not isinstance(e, dict) or e.get("type") != "text":
+            continue
+        for run in e.get("runs") or []:
+            if not isinstance(run, dict):
+                continue
+            txt = run.get("text", "")
+            if not isinstance(txt, str):
+                continue
+            s = txt.strip()
+            if s and CJK.search(s):
+                out.append(s)
     # dedupe, longest-first
     seen, uniq = set(), []
     for s in sorted(out, key=len, reverse=True):
@@ -136,7 +188,7 @@ def extract(deck_path: Path, only=None):
         if html:
             runs = runs_from_html(html)
         else:
-            runs = runs_from_value(data)
+            runs = runs_from_canvas(data)
         if runs:
             result.append({"key": key,
                            "replacements": [{"find": r, "replace": ""} for r in runs]})

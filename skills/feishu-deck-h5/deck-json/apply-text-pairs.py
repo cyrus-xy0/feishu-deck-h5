@@ -8,7 +8,7 @@ deck.json,**只做字符串替换、绝不让 LLM 重写 markup**:
     data-text-id 100% 不动);
   · canvas 页(PPTX/混合导入)→ `data.elements[].runs[].text` 按「整 run 精确
     匹配(strip 后相等)」替换(几何 / id / 每个 run 的字号色重 100% 不动)。
-    extract-text-pairs.py 对 canvas 走 runs_from_value 抽 strip 后的 run 文本,
+    extract-text-pairs.py 对 canvas 走 runs_from_canvas 抽 strip 后的 run 文本,
     本工具按同一粒度套回 —— 两端对齐。翻译 canvas deck 前通常先跑
     merge-canvas-lines.py 把 PDF 抽词拆碎的同行碎片合并成整逻辑行再抽译。
 
@@ -94,6 +94,11 @@ def main(argv=None) -> int:
 
     total = hit = miss = 0
     miss_list: list[tuple[str, str]] = []
+    # C8: finds that matched NOTHING on a CANVAS slide get an explicit,
+    # separately-listed warning — the most common cause is a phrase split across
+    # multiple format runs (PowerPoint format-split), which the per-run matcher
+    # cannot match by design. The operator must hand-resolve these.
+    canvas_miss_list: list[tuple[str, str]] = []
     touched_keys: set[str] = set()
     seen_keys = {s.get("key") for s in deck.get("slides", [])}
 
@@ -126,6 +131,7 @@ def main(argv=None) -> int:
                     else:
                         miss += 1
                         miss_list.append((s.get("key"), f[:40]))
+                        canvas_miss_list.append((s.get("key"), f[:40]))
                 s["data"] = data
                 continue
             # 既无 data.html 也无 canvas elements — text-swap 不适用,提示
@@ -161,6 +167,17 @@ def main(argv=None) -> int:
             print(f"    [{k}] {f}")
         if len(miss_list) > 40:
             print(f"    … 还有 {len(miss_list) - 40} 条")
+    if canvas_miss_list:
+        # C8: per-run-match limitation. A canvas find matches ONLY when it equals a
+        # SINGLE run's stripped text; a phrase split across multiple format runs
+        # (PowerPoint format-split) can never match and must be hand-resolved
+        # (or pre-merged where same-style with merge-canvas-lines.py).
+        print(f"  ⚠ {len(canvas_miss_list)} canvas find(s) matched NO run — likely a phrase "
+              "split across multiple FORMAT runs (per-run match limitation); hand-resolve these:")
+        for k, f in canvas_miss_list[:40]:
+            print(f"    [{k}] {f!r}")
+        if len(canvas_miss_list) > 40:
+            print(f"    … 还有 {len(canvas_miss_list) - 40} 条")
 
     if args.dry_run:
         return 5 if miss else 0

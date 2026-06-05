@@ -73,6 +73,16 @@ extra facts change the flow — handle both or the output is garbage:
    python3 $DJ/extract-text-pairs.py pairs.filled.json --check
    python3 $DJ/apply-text-pairs.py <deck>/deck.json pairs.filled.json
    ```
+   > **Per-run match limitation (known, by design).** A canvas find matches only
+   > when it equals ONE run's stripped text. A phrase split across multiple
+   > **format runs** within the same text element (e.g. PowerPoint bolds/colors a
+   > sub-span, producing `["营收 ", "<去年", " 同比"]`) can NOT be matched by
+   > `apply-text-pairs` — `merge-canvas-lines` only consolidates *same-style*
+   > fragments, not format-split runs. `apply-text-pairs` emits an explicit
+   > **"canvas find(s) matched NO run"** warning listing every such unmatched find;
+   > hand-resolve those (edit `data.elements[].runs[].text` directly, splitting the
+   > replacement across the same runs). This is intentional — we are NOT doing
+   > cross-run fuzzy matching (it would risk mangling per-run styling).
 3. **Re-render must keep the hybrid front-end** (letterbox bg CSS + fitText
    overflow-fit + self-contained assets) — plain `render-deck.py` drops them.
    Use the hybrid re-render wrapper (lives in pptx-to-deck, which owns those steps):

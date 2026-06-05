@@ -34,6 +34,30 @@ CJK = IDEO  # parity/overflow only care about ideographs
 
 
 # ---------------------------------------------------------------- residual-cjk
+def _mask_nonvisible(l: str) -> str:
+    """Blank out the BODIES of non-visible tokens on a line (keeping length / the
+    rest of the line) so residual-cjk scans only user-visible text. Replaces:
+      · href/src/data-* URL attribute VALUES (incl. file:// asset paths)
+      · url(...) CSS bodies
+      · font-family declarations
+      · a trailing `// ...` line-comment segment (and full `//`-only lines)
+    H5: this is per-TOKEN masking, NOT a whole-line skip — visible Chinese sharing
+    a line with a https:// link or inline font-family is still caught."""
+    s = l
+    # attribute values that hold non-visible refs (src, href, and data-*-src/url/href)
+    s = re.sub(r'\b(?:src|href|srcset|data-[\w-]*(?:src|url|href|path))\s*=\s*'
+               r'(["\'])(.*?)\1', r'\1\1', s, flags=re.I)
+    # CSS url(...) bodies
+    s = re.sub(r'url\(\s*(["\']?)(.*?)\1\s*\)', r'url()', s, flags=re.I)
+    # font-family declaration value (up to ; or } or end of line)
+    s = re.sub(r'font-family\s*:[^;}\n]*', 'font-family:', s, flags=re.I)
+    # trailing `// ...` line comment (require whitespace or line-start before //,
+    # so `https://` is NOT treated as a comment — its value was already masked above
+    # when it sat in an attribute; a bare https:// in visible text stays scanned)
+    s = re.sub(r'(^|\s)//.*$', r'\1', s)
+    return s
+
+
 def cmd_residual(args):
     bad = 0
     # blank out block-comment BODIES (multi-line /* */ and <!-- -->) while keeping
@@ -51,11 +75,19 @@ def cmd_residual(args):
             has_ideo, has_fw = IDEO.search(l), FW.search(l)
             if not (has_ideo or has_fw):
                 continue
-            if re.search(r'//', l):                                  continue  # line comment
-            if re.search(r'^\s*\*', l):                              continue  # jsdoc cont.
-            if re.search(r'url\(|src=|\.png|\.jpg|\.jpeg|\.webp|font-family|FZ|方正', l): continue
-            if re.search(r'[.#][\w-]*[㐀-䶿一-鿿]', l):                continue  # css selector token .k-角色
-            if re.search(r'class="[^"]*[㐀-䶿一-鿿]', l):               continue  # load-bearing CJK class hook
+            # H5: do NOT skip the whole line when a non-visible token is present —
+            # a line can carry BOTH a https:// link / inline font-family AND visible
+            # untranslated Chinese. Blank out only the non-visible token BODIES, then
+            # re-scan what remains. (Old code did `continue` and reported such lines
+            # CLEAN, hiding real misses.)
+            scan = _mask_nonvisible(l)
+            if re.search(r'[.#][\w-]*[㐀-䶿一-鿿]', scan):     # css selector token .k-角色
+                scan = re.sub(r'[.#][\w-]*[㐀-䶿一-鿿][\w㐀-䶿一-鿿-]*', ' ', scan)
+            if re.search(r'class="[^"]*[㐀-䶿一-鿿]', scan):    # load-bearing CJK class hook
+                scan = re.sub(r'class="[^"]*"', ' ', scan)
+            has_ideo, has_fw = IDEO.search(scan), FW.search(scan)
+            if not (has_ideo or has_fw):
+                continue
             if has_ideo:
                 suspects.append((i, l.strip()[:90]))
             elif has_fw:
@@ -93,12 +125,29 @@ def cmd_parity(args):
     c0, s0, f0 = _css_stats(src)
     c1, s1, f1 = _css_stats(rt)
     css_ratio = (c1 / c0) if c0 else 1.0
-    sel_ratio = (s1 / s0) if s0 else 1.0
     thr = args.css_threshold
-    ok = css_ratio >= thr and sel_ratio >= thr and f0 == f1
+    # M6: when the SOURCE has zero per-slide selectors (s0==0) the selector
+    # criterion is DISABLED — do NOT silently default sel_ratio=1.0 (that always
+    # passed it, collapsing the A/B decision onto css_ratio+frames without saying
+    # so). Drop the selector criterion EXPLICITLY and warn.
+    if s0:
+        sel_ratio = s1 / s0
+        sel_ok = sel_ratio >= thr
+        sel_disabled = False
+    else:
+        sel_ratio = None
+        sel_ok = True            # cannot evaluate → don't block, but be loud
+        sel_disabled = True
+    ok = css_ratio >= thr and sel_ok and f0 == f1
     print(f"source   : css={c0} chars | slide-key selectors={s0} | frames={f0}")
     print(f"roundtrip: css={c1} chars | slide-key selectors={s1} | frames={f1}")
-    print(f"ratios   : css={css_ratio:.2f} selectors={sel_ratio:.2f} (threshold {thr}) | frames match={f0==f1}")
+    if sel_disabled:
+        print("⚠️  per-slide selectors NOT found in source (s0=0) — selector criterion "
+              "DISABLED; deciding on css_ratio + frames only (broaden the selector "
+              "regex if your decks use a different per-slide hook).")
+        print(f"ratios   : css={css_ratio:.2f} selectors=n/a (threshold {thr}) | frames match={f0==f1}")
+    else:
+        print(f"ratios   : css={css_ratio:.2f} selectors={sel_ratio:.2f} (threshold {thr}) | frames match={f0==f1}")
     branch = "A" if ok else "B"
     if ok:
         print("PASS ✅ — deck.json round-trips cleanly. Use BRANCH A (deck.json).")
