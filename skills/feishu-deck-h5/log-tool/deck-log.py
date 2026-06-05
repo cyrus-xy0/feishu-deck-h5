@@ -278,6 +278,29 @@ def _relevant_transcripts(log_dir: Path, sess: dict) -> list[Path]:
     return found
 
 
+def _deck_hits(tp: Path, tokens: list[str]) -> int:
+    """transcript 文件里 deck token(目录名/标题)出现总次数 —— 这份会话对本 deck 的
+    相关强度。真做这 deck 的会话命中数远高于"顺带提了一两次"的无关会话。"""
+    if not tokens:
+        return 0
+    try:
+        text = tp.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return 0
+    return sum(text.count(tok) for tok in tokens)
+
+
+def _dominant_transcript(transcripts: list[Path], tokens: list[str]) -> Path | None:
+    """本 deck 主导的那个 transcript = deck token 命中最多的 —— 它就是真做这份 deck
+    的会话(deck 目录/标题在它的工具调用里反复出现)。render 对它保留活跃期内的*全部*
+    真回合(含"边做边讨论但没逐字提 deck 名"的回合);对其余次要 transcript 才逐回合
+    token 过滤。解决:做 deck 时穿插的纯讨论回合(校验逻辑、规范问题…)本属制作过程,
+    却因没触及 deck 文件被 turn 级过滤误删,使 making-of 的输入/回复不全。"""
+    if not transcripts:
+        return None
+    return max(transcripts, key=lambda tp: _deck_hits(tp, tokens))
+
+
 def _is_real_prompt(text: str) -> bool:
     t = text.lstrip()
     return bool(t) and not t.startswith(_CMD_PREFIXES)
@@ -657,8 +680,26 @@ def _merge_events_and_turns(log_dir: Path, allow_transcript: bool = True) -> lis
     if allow_transcript and not OFF_SWITCH.exists():
         start = sess.get("start_ts")
         tokens = _deck_tokens(log_dir, sess)
-        for tp in _relevant_transcripts(log_dir, sess):
-            turns.extend(extract_turns(str(tp), start, tokens))
+        rels = _relevant_transcripts(log_dir, sess)
+        primary = _dominant_transcript(rels, tokens)
+        prim_hits = _deck_hits(primary, tokens) if primary else 0
+        # 主会话活跃期上界 = 最后一个 version(render)事件 + 30min 宽限:避免把同一会话里
+        # 这份 deck 收尾之后、转去做别的 deck 的回合也收进来。没 version 时不设上界。
+        vts = [_ts_epoch(e.get("ts")) for e in events if e.get("t") == "version"]
+        until = (max(vts) + 1800) if vts else float("inf")
+        for tp in rels:
+            if tp == primary:
+                # 主会话:保留 start_ts 之后、活跃期内的全部真回合(含纯讨论回合)——
+                # turn 级 token 过滤只对次要会话用,挡别 deck / 无关会话。
+                turns.extend(t for t in extract_turns(str(tp), start, None)
+                             if _ts_epoch(t.get("ts")) <= until)
+            else:
+                # 次要会话:只在它对本 deck 有实质相关(命中 ≥ 主会话 10% 且 ≥2)时才采,
+                # 挡掉"只是顺带提过一两次本 deck 路径"的无关会话(如别 session 并发查看);
+                # 采时仍逐回合 token 过滤。
+                if _deck_hits(tp, tokens) < max(2, 0.1 * prim_hits):
+                    continue
+                turns.extend(extract_turns(str(tp), start, tokens))
         # 跨多个 transcript 合并后按时间重排 + 全局重新编号(各文件内部从 1 起,合并后会撞号)
         turns.sort(key=lambda e: _ts_epoch(e.get("ts")))
         for i, t in enumerate(turns, 1):
