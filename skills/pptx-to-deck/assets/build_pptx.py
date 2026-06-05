@@ -62,6 +62,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from lxml import etree
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
@@ -593,7 +594,13 @@ _CUR_LAYOUT_PH: dict = {}
 def set_layout_ph_map(slide) -> None:
     _CUR_LAYOUT_PH.clear()
     try:
-        for ph in slide.slide_layout.placeholders:
+        layout_phs = slide.slide_layout.placeholders
+    except Exception:
+        return
+    for ph in layout_phs:
+        # per-placeholder isolation: one malformed placeholder must NOT abort
+        # override extraction for the rest of the slide's placeholders.
+        try:
             idx = ph.placeholder_format.idx
             tb = ph.text_frame._txBody
             levels: dict = {}
@@ -614,8 +621,8 @@ def set_layout_ph_map(slide) -> None:
                         levels[0] = {"size_pt": sz, "color": color}
             if levels:
                 _CUR_LAYOUT_PH[idx] = levels
-    except Exception:
-        pass
+        except Exception:
+            continue
 
 
 def _ph_style(shape) -> str:

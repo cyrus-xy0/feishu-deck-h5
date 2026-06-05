@@ -33,9 +33,31 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml.ns import qn
 
+# Reuse build_pptx's group-composition transform + canvas so BOTH the
+# "remove from bg" side (strip_for_bg) and the "overlay" side
+# (extract_original_images) measure picture geometry in the SAME composed-px
+# space and apply the SAME full-bleed threshold → removed-set == overlaid-set
+# exactly (no silent content loss, no double-render ghosting). See M4 / L6.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_pptx import Xf as _BpXf, Canvas as _BpCanvas, emu as _bp_emu  # noqa: E402
+
 CANVAS_W, CANVAS_H = 1920, 1080
 _SUBSET_PREFIX = re.compile(r"^[A-Z]{6}\+")          # 子集字体名前缀 ABCDEF+
 _FONT_FALLBACK = '"PingFang SC", "Microsoft YaHei", sans-serif'
+
+# ── SINGLE SOURCE OF TRUTH for the full-bleed (decoration backdrop) test ─────
+# A picture this large is treated as a full-bleed decoration backdrop: it STAYS
+# in the LibreOffice background and is NOT overlaid. Anything smaller is content
+# (photo / mockup / logo): it is REMOVED from the bg and re-overlaid from the
+# original blob. Measured in COMPOSED canvas px (group transform applied) on
+# both sides — identical thresholds keep the two decisions in lockstep.
+_FULL_BLEED_MIN_W_PX = 1880
+_FULL_BLEED_MIN_H_PX = 1040
+
+
+def _is_full_bleed_px(w_px: float, h_px: float) -> bool:
+    """The one predicate both sides use, in composed canvas px."""
+    return w_px >= _FULL_BLEED_MIN_W_PX and h_px >= _FULL_BLEED_MIN_H_PX
 
 
 # ── locate tools ────────────────────────────────────────────────────────────
@@ -64,20 +86,33 @@ def _default_renderer() -> Path:
 
 
 # ── step 1 · strip text + content pictures (background = decoration only) ────
-def _is_content_pic(sh, slide_w: int, slide_h: int) -> bool:
+def _is_content_pic(sh, xf, cv) -> bool:
     """A PICTURE that is foreground content (photo / mockup / logo) — to be
     REMOVED from the background and re-overlaid from the original blob (lossless,
     sharp, no ghost). Full-bleed pictures (decoration backdrop) and vector
-    WMF/EMF (browser can't render the raw blob) are kept in the LibreOffice bg."""
+    WMF/EMF (browser can't render the raw blob) are kept in the LibreOffice bg.
+
+    `xf` is the composed group transform for this shape's container and `cv` the
+    slide→canvas Canvas, so geometry is measured in the SAME composed-px space
+    extract_original_images uses (it reads build_pptx's composed deck.json), and
+    the SAME _is_full_bleed_px threshold decides both sides — so the picture
+    REMOVED here is exactly the picture OVERLAID there (M4 no-loss / L6 no-ghost)."""
     if sh.shape_type != MSO_SHAPE_TYPE.PICTURE:
         return False
     try:
+        # touch .image (and .blob) so an unreadable embedded picture — which
+        # build_pptx would silently drop and thus NEVER overlay — is also NOT
+        # removed from the bg here (else M4 silent loss). WMF/EMF: browser can't
+        # render the raw blob → keep in the LibreOffice bg.
         if (sh.image.ext or "").lower() in ("wmf", "emf"):
             return False
+        _ = sh.image.blob
     except Exception:
         return False
-    full_bleed = sh.width >= slide_w * 0.95 and sh.height >= slide_h * 0.95
-    return not full_bleed
+    # composed canvas px (group transform applied) — matches build_pptx el_geom
+    w_px = cv.px_size(xf.w(_bp_emu(sh.width)))
+    h_px = cv.px_size(xf.h(_bp_emu(sh.height)))
+    return not _is_full_bleed_px(w_px, h_px)
 
 
 def strip_for_bg(src: Path, dst: Path) -> None:
@@ -85,24 +120,26 @@ def strip_for_bg(src: Path, dst: Path) -> None:
     decoration-only background (gradients/glow/shapes/full-bleed images/WMF),
     leaving holes where photos go. Originals are overlaid later — so no ghost."""
     prs = Presentation(str(src))
-    sw, sh_ = prs.slide_width, prs.slide_height
+    cv = _BpCanvas(prs.slide_width, prs.slide_height)
 
-    def process(shapes):
+    def process(shapes, xf):
         drop = []
         for sh in shapes:
             if sh.shape_type == MSO_SHAPE_TYPE.GROUP:
-                process(sh.shapes)
+                # recurse with the composed child transform (mirrors build_pptx
+                # group flattening) so nested pictures are measured in slide px.
+                process(sh.shapes, xf.enter_group(sh))
             elif sh.has_text_frame:
                 for r in sh.text_frame._txBody.iter(qn("a:r")):
                     t = r.find(qn("a:t"))
                     if t is not None:
                         t.text = ""
-            if _is_content_pic(sh, sw, sh_):
+            if _is_content_pic(sh, xf, cv):
                 drop.append(sh)
         for sh in drop:
             sh._element.getparent().remove(sh._element)
     for slide in prs.slides:
-        process(slide.shapes)
+        process(slide.shapes, _BpXf())
     prs.save(str(dst))
 
 
@@ -134,7 +171,9 @@ def extract_original_images(pptx: Path, work: Path, out: Path, renderer: Path,
             if not src.startswith("input/"):
                 continue
             ext = src.rsplit(".", 1)[-1].lower()
-            full_bleed = e.get("w", 0) >= 1880 and e.get("h", 0) >= 1040
+            # SAME composed-px geometry (build_pptx el_geom) + SAME predicate as
+            # _is_content_pic → overlaid-set == removed-set (M4 / L6).
+            full_bleed = _is_full_bleed_px(e.get("w", 0), e.get("h", 0))
             if ext in ("wmf", "emf") or full_bleed:
                 continue                    # 留给 LibreOffice 背景
             srcf = bp_out / src
@@ -289,7 +328,7 @@ def build_deck(n_pages: int, texts: dict[int, list], images: dict[int, list],
     return {"version": "1.0", "deck": {"title": title}, "slides": slides}
 
 
-# ── step 7 · post-process: letterbox bg + nowrap + scaleX fit + hide progress ─
+# ── step 7 · post-process: letterbox bg + single-line fit + hide progress ────
 def post_process(out_dir: Path, deck: dict) -> None:
     rules = []
     for s in deck["slides"]:
@@ -299,13 +338,28 @@ def post_process(out_dir: Path, deck: dict) -> None:
             rules.append('.deck[data-mode="present"] .slide-frame:has(> '
                          '.slide[data-slide-key="%s"]){background:#000 url("%s") '
                          'center/cover no-repeat}' % (s["key"], bg["src"]))
+    # NOTE C4: no blanket `.tb-inner{white-space:nowrap}` rule. Forcing nowrap on
+    # EVERY box collapsed legitimately multi-line / <br> / wrapping boxes into one
+    # line, which scaleX then crushed. We only nowrap+fit GENUINELY single-line
+    # boxes at runtime (see fitText); multi-line boxes keep render-deck.py's
+    # normal wrapping / <br> paragraph breaks.
     inject = (
         '<style>.deck-ui .deck-progress{display:none!important}\n'
-        '.slide .el.tb .tb-inner{white-space:nowrap}\n' + "\n".join(rules) + '</style>\n'
+        + "\n".join(rules) + '</style>\n'
         '<script>\n'
         'function fitText(){var c=document.querySelector(".slide-frame.is-current");'
         'if(!c)return;c.querySelectorAll(".el.tb .tb-inner").forEach(function(i){'
-        'if(i.dataset.fit)return;i.dataset.fit="1";i.style.whiteSpace="nowrap";'
+        'if(i.dataset.fit)return;i.dataset.fit="1";'
+        # C4: a box is genuinely single-line only if it has no <br>/<p> paragraph
+        # break AND its content doesn't wrap onto extra lines at its natural
+        # (wrapping) width. Probe by measuring the rendered line count BEFORE we
+        # touch white-space: if scrollHeight exceeds ~1.5 line-heights, it's
+        # multi-line — leave normal wrapping, don't nowrap, don't crush.
+        'if(i.querySelector("br,p")){return;}'
+        'var lh=parseFloat(getComputedStyle(i).lineHeight)||0;'
+        'if(lh&&i.scrollHeight>lh*1.5){return;}'   # naturally wraps → multi-line
+        # single-line box → nowrap, then fit horizontally if it overflows.
+        'i.style.whiteSpace="nowrap";'
         # measure NATURAL content width (scrollWidth) vs the box (clientWidth):
         # getBoundingClientRect is clipped to the box, so it never sees overflow.
         'var n=i.scrollWidth,b=i.clientWidth;if(n<=b+1||b<1)return;'
@@ -466,9 +520,13 @@ def main(argv=None) -> int:
 
         print("==> [7/8] 渲染 HTML (render-deck.py)")
         render = args.renderer / "deck-json/render-deck.py"
+        # C3: this is an INTERNAL render — suppress render-deck.py's auto-snapshot
+        # so the hybrid build doesn't trip a deck-log making-of snapshot.
+        render_env = {**os.environ, "DECK_LOG_NO_AUTOSNAP": "1"}
         subprocess.run([sys.executable, str(render), str(out / "deck.json"), str(out),
                         "--skip-copy-assets", "--skip-validate-html"],
-                       check=True, capture_output=True, text=True, timeout=600)
+                       check=True, capture_output=True, text=True, timeout=600,
+                       env=render_env)
 
         print("==> [8/8] 资源自包含打包 (框架→assets/) + 前端增强")
         make_portable(out, args.renderer)
