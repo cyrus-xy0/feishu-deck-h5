@@ -866,7 +866,7 @@
       if (e.key === LS_KEY && e.newValue) { try { onRemoteGoto(JSON.parse(e.newValue)); } catch (x) {} }
     }, { signal });
 
-    let pv = null, pvOpen = false, timerStart = 0, timerId = 0, pvKey = null;
+    let pv = null, pvOpen = false, timerStart = 0, timerId = 0, pvKey = null, projWin = null;
 
     // nav hook called by goTo: mirror to the projector + refresh speaker view.
     window.__fsOnNav = (idx) => { broadcast(idx); if (pvOpen) renderPV(); };
@@ -989,14 +989,30 @@
       pvOpen = false;
       if (pv) pv.style.display = 'none';
       clearInterval(timerId);
+      closeProjector();   // exiting the presenter dismisses the projector it spawned — no orphan
     }
     window.__fsTogglePresenter = isFollower
       ? function () {}
       : function () { pvOpen ? closePresenter() : openPresenter(); };
 
+    function projAlive() { try { return !!projWin && !projWin.closed; } catch (e) { return false; } }
+    function updateProjBtn() {
+      const btn = pv && pv.querySelector('.pv-proj');
+      if (btn) btn.textContent = projAlive() ? '📺 关闭放映窗' : '📺 放映窗';
+    }
+    function closeProjector() {
+      if (projAlive()) { try { projWin.close(); } catch (e) {} }
+      projWin = null;
+      updateProjBtn();
+    }
+    // 📺 toggles the audience/projector window. The handle is KEPT (it used to be
+    // discarded) so the deck can actually close it — otherwise the #proj kiosk
+    // window orphaned in the background with no way to dismiss it ("关不掉的窗口").
     function openProjector() {
+      if (projAlive()) { closeProjector(); return; }      // already open → close (clear dismiss path)
       const url = location.pathname + location.search + '#proj';
-      window.open(url, 'fs-projector', 'width=1280,height=760');
+      projWin = window.open(url, 'fs-projector', 'width=1280,height=760');
+      updateProjBtn();
       setTimeout(() => broadcast(curIdx()), 400);   // land the new window on our slide
     }
 
@@ -1006,10 +1022,33 @@
 
     signal.addEventListener('abort', () => {
       clearInterval(timerId);
+      closeProjector();
       if (chan) { try { chan.close(); } catch (e) {} }
       window.__fsOnNav = null;
       window.__fsTogglePresenter = null;
     });
+    // Close the projector if the whole tab/window goes away — never leave an orphan behind.
+    window.addEventListener('beforeunload', () => { if (!isFollower) closeProjector(); }, { signal });
+
+    // The projector itself (#proj follower) is a chrome-less kiosk window, so it had
+    // no in-page way to close — give it its own dismiss button. Lives ON body (not
+    // inside .deck-ui), so the `.is-kiosk` chrome-hide does not touch it; it is the
+    // last-resort exit for an orphaned audience window.
+    if (isFollower) {
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '✕ 关闭放映窗';
+      x.setAttribute('aria-label', '关闭放映窗');
+      x.style.cssText =
+        'position:fixed;top:12px;right:12px;z-index:2147483600;padding:8px 14px;' +
+        'border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(8,12,24,.72);' +
+        'color:#fff;font:600 14px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;' +
+        'cursor:pointer;opacity:.2;transition:opacity .2s;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
+      x.addEventListener('mouseenter', () => { x.style.opacity = '1'; });
+      x.addEventListener('mouseleave', () => { x.style.opacity = '.2'; });
+      x.addEventListener('click', () => { try { window.close(); } catch (e) {} });
+      document.body.appendChild(x);
+    }
   }
 
   function buildUI() {
