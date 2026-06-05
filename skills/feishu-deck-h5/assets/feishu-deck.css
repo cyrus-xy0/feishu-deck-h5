@@ -900,6 +900,70 @@ body {
 .slide .fs-claim-row.is-orange { border-color: rgba(254,127,0,0.40); background: rgba(254,127,0,0.05); }
 .slide .fs-claim-row.is-orange .fs-claim-row__icon { background: rgba(254,127,0,0.20); color: var(--fs-orange); }
 
+/* ============================================================================
+   UTILITY · .fs-titled-panel — bind a heading to its members in ONE panel
+   (added 2026-06-05, promoted from richness-primitives recipe / pg-27 fix).
+   USE when a heading LABELS a set (steps / criteria / KPIs / do-don't): the
+   title + items live in one tinted panel — header gets a divider, members are
+   internal divider-rows. Without it, a bare heading floats orphaned above a row
+   of equal-weight bordered cards and the group stops reading as one unit.
+   Pair it 等高 with a sibling visual (image / chart) via the row's
+   `align-items: stretch` so the two read as a balanced pair.
+
+   Structure:
+     <div class="fs-titled-panel is-teal">                <!-- accent variant -->
+       <div class="fs-titled-panel__head">
+         <h3 class="fs-titled-panel__title">三步算账</h3>
+         <span class="fs-titled-panel__tag">10 MIN</span>     <!-- optional -->
+       </div>
+       <div class="fs-titled-panel__rows">
+         <div class="fs-titled-panel__row">
+           <span class="fs-titled-panel__n">01</span>
+           <div><p class="fs-titled-panel__rt">看线上单量</p>
+                <p class="fs-titled-panel__rd">打开美团看竞品当日单量。</p></div>
+         </div>
+       </div>
+     </div>
+   Accents: .is-blue / .is-teal / .is-violet / .is-purple / .is-orange (default teal).
+   ============================================================================ */
+.slide .fs-titled-panel {
+  --tp-accent: var(--fs-teal);
+  display: flex; flex-direction: column; min-height: 0;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--tp-accent) 32%, transparent);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--tp-accent) 8%, transparent),
+    color-mix(in srgb, var(--tp-accent) 2%, transparent));
+  padding: 20px 26px;
+}
+.slide .fs-titled-panel__head {
+  display: flex; align-items: baseline; gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--tp-accent) 28%, transparent);
+}
+.slide .fs-titled-panel__title { font: 800 32px/1.2 var(--fs-font-cjk); color: #fff; margin: 0; }
+.slide .fs-titled-panel__tag {
+  font: 800 24px/1 var(--fs-font-latin); color: var(--tp-accent); letter-spacing: 0.04em;
+}
+.slide .fs-titled-panel__rows {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+  justify-content: space-between;
+}
+.slide .fs-titled-panel__row {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 16px;
+  align-items: start; padding: 18px 0;
+  border-top: 1px solid rgba(255,255,255,0.10);
+}
+.slide .fs-titled-panel__row:first-child { border-top: none; }
+.slide .fs-titled-panel__n  { font: 800 30px/1 var(--fs-font-latin); color: var(--tp-accent); }
+.slide .fs-titled-panel__rt { font: 800 26px/1.3 var(--fs-font-cjk); color: #fff; margin: 0 0 4px; }
+.slide .fs-titled-panel__rd { font: 500 24px/1.45 var(--fs-font-cjk); color: rgba(255,255,255,0.90); margin: 0; }
+.slide .fs-titled-panel.is-blue   { --tp-accent: var(--fs-blue); }
+.slide .fs-titled-panel.is-teal   { --tp-accent: var(--fs-teal); }
+.slide .fs-titled-panel.is-violet { --tp-accent: var(--fs-violet); }
+.slide .fs-titled-panel.is-purple { --tp-accent: var(--fs-purple); }
+.slide .fs-titled-panel.is-orange { --tp-accent: var(--fs-orange); }
+
 .slide[data-layout="content-2col"] .col-visual {
   border: 1px solid var(--fs-hairline); border-radius: 16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));

@@ -181,39 +181,25 @@ the chevron. No markup change.
   </div>
 </div>
 
-<!-- titled-panel — a heading that LABELS a set (steps / criteria / metrics)
-     must be BOUND to its members inside ONE container. Otherwise the heading
-     floats as an orphaned (N+1)th element above a row of equal-weight bordered
-     cards, and the group stops reading as "one thing" (real failure mode, pg-27
-     of a康师傅 deck). Fix: one tinted/bordered panel; header gets a divider;
-     members become INTERNAL divider-rows — drop the per-card borders so they
-     read as rows-under-a-title, not N independent peers. Scope the CSS to the
-     slide-key (these are raw-slide class names, shown generic here). -->
-<div class="titled-panel">
-  <div class="tp-head">
-    <h3 class="tp-title">专家督导的<span class="hl">「三步算账」</span></h3>
-    <span class="tp-tag">10 MIN</span>
+<!-- titled-panel — bind a heading to its members in ONE panel. FRAMEWORK CLASS
+     (.fs-titled-panel, feishu-deck.css) — no per-slide CSS needed. Use when a
+     heading LABELS a set (steps / criteria / KPIs): title + items in one tinted
+     panel (header divider + internal divider-rows) so the group reads as one
+     unit. Without it the heading floats orphaned above a row of equal-weight
+     bordered cards (real failure mode, pg-27 of a 康师傅 deck). Recolor with
+     .is-blue / .is-violet / .is-purple / .is-orange (default teal). Pair it 等高
+     with a sibling visual (image / chart) via the row's `align-items: stretch`. -->
+<div class="fs-titled-panel is-teal">
+  <div class="fs-titled-panel__head">
+    <h3 class="fs-titled-panel__title">专家督导的<span class="hl">「三步算账」</span></h3>
+    <span class="fs-titled-panel__tag">10 MIN</span>
   </div>
-  <div class="tp-rows">
-    <div class="tp-row"><span class="n">01</span><div><p class="t">看线上单量</p><p class="d">打开美团,直接看竞品当日单量。</p></div></div>
-    <div class="tp-row"><span class="n">02</span><div><p class="t">问外卖小哥</p><p class="d">买瓶水,问"今天送了多少单"——拿到内单号。</p></div></div>
-    <div class="tp-row"><span class="n">03</span><div><p class="t">倒推算账</p><p class="d">内单号还原真实单量 × 客单价 = 竞品营业额。</p></div></div>
+  <div class="fs-titled-panel__rows">
+    <div class="fs-titled-panel__row"><span class="fs-titled-panel__n">01</span><div><p class="fs-titled-panel__rt">看线上单量</p><p class="fs-titled-panel__rd">打开美团,直接看竞品当日单量。</p></div></div>
+    <div class="fs-titled-panel__row"><span class="fs-titled-panel__n">02</span><div><p class="fs-titled-panel__rt">问外卖小哥</p><p class="fs-titled-panel__rd">买瓶水,问"今天送了多少单"——拿到内单号。</p></div></div>
+    <div class="fs-titled-panel__row"><span class="fs-titled-panel__n">03</span><div><p class="fs-titled-panel__rt">倒推算账</p><p class="fs-titled-panel__rd">内单号还原真实单量 × 客单价 = 竞品营业额。</p></div></div>
   </div>
 </div>
-<style>
-/* the panel binds title + rows into one unit; pair it 等高 with the sibling
-   visual (image / chart) via the row's align-items:stretch */
-.SLIDEKEY .titled-panel{display:flex;flex-direction:column;border-radius:18px;
-  border:1px solid rgba(51,214,192,.32);
-  background:linear-gradient(135deg,rgba(51,214,192,.08),rgba(51,214,192,.02));
-  padding:20px 26px}
-.SLIDEKEY .tp-head{display:flex;align-items:baseline;gap:14px;
-  padding-bottom:16px;border-bottom:1px solid rgba(51,214,192,.28)}
-.SLIDEKEY .tp-rows{display:flex;flex-direction:column;flex:1;justify-content:space-between}
-.SLIDEKEY .tp-row{display:grid;grid-template-columns:50px 1fr;column-gap:16px;
-  align-items:start;padding:18px 0;border-top:1px solid rgba(255,255,255,.10)}
-.SLIDEKEY .tp-row:first-child{border-top:none}
-</style>
 
 <!-- grid-bg — DO NOT add by default. The 飞书 master content background
      (lark-content-bg.jpg via --fs-asset-content-bg) already provides the
@@ -231,11 +217,13 @@ sits above a row of **individually-bordered sibling cards** — each card has eq
 visual weight, so they read as N independent peers and the heading floats as an
 orphaned (N+1)th element. The "labeled group" never coheres.
 
-**Fix (canonical above — `titled-panel`):** put the heading *and* the members in
-**one** tinted/bordered panel; give the header a bottom divider; demote the
-members to **internal divider-rows** (drop the per-card borders). Pair the panel
-等高 with its sibling visual (image / chart) via the row's `align-items: stretch`
-so the two blocks read as a balanced pair, not a tall panel beside a short image.
+**Fix (canonical above — framework class `.fs-titled-panel`, no per-slide CSS):**
+put the heading *and* the members in **one** tinted/bordered panel; the header
+gets a bottom divider; the members are **internal divider-rows** (no per-card
+borders). Recolor with `.is-blue / .is-violet / .is-purple / .is-orange` (default
+teal). Pair the panel 等高 with its sibling visual (image / chart) via the row's
+`align-items: stretch` so the two blocks read as a balanced pair, not a tall
+panel beside a short image.
 
 This is a **Gestalt / altitude judgment the validator does not gate** — like
 title-position, hollow-centre and focal-point, it is an aesthetic call no rule
