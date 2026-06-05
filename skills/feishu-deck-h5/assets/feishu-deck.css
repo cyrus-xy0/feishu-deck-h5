@@ -1712,6 +1712,102 @@ body {
 /* content-2col 视觉列(图/iframe)防被 grid 行拉伸变形 */
 .slide[data-layout="content-2col"] > .stage > .grid { align-items: center; }
 
+/* 2026-06-05 · BF-GRIDFILL-SIBLING · the `flex:1 撑满` above silently assumes
+   the .grid is the SOLE body block in .stage. When the .stage ALSO holds a
+   sibling block — a footer anchor-band, a lede line, a disclaimer strip — the
+   grown .grid eats EVERY pixel of vertical slack: cards float dead-centre in an
+   over-tall grid and the sibling is shoved to the far edge, opening a big dead
+   band between them. Worse, the stage's own `justify-content:center` becomes a
+   no-op (flex:1 left it zero slack to distribute), so the intended
+   "group the blocks + centre the group" never happens. This is the
+   "为撑满屏幕把页脚顶到底" anti-pattern — filling the screen is NOT a goal; a
+   centred group with balanced top/bottom whitespace is.
+   Fix: the fill only makes sense for a lone grid. When the grid has siblings it
+   must take intrinsic height so the stage groups + centres all blocks together
+   (sparse → centred ≈596; dense → fills naturally — same as a lone grid, minus
+   the manufactured slack). Gate the fill to :only-child. Authors who genuinely
+   want a middle block to stretch (top+bottom anchored layouts) opt back in with
+   the explicit `.fs-fill` class below — consistent with .fs-card-fill /
+   .stage--tall. Specificity (0,5,0) > the (0,4,0) base rule, so it wins. */
+.slide[data-layout="content-2col"] > .stage > .grid:not(:only-child),
+.slide[data-layout="content-3up"]  > .stage > .grid:not(:only-child) {
+  flex: 0 0 auto;
+}
+
+/* Opt-in: a stage child that SHOULD stretch to fill remaining vertical space
+   (e.g. a middle block in an intentional top-quote → fill → bottom-disclaimer
+   layout, or a body that fills below a pinned title). `!important` so it beats
+   the :only-child gate above regardless of source order. */
+.slide > .stage > .fs-fill {
+  flex: 1 1 auto !important;
+  min-height: 0;
+}
+
+/* ============================================================================
+ *  SCREENSHOT TILE  ·  .shot-twin / .shot-col / .shot-pill / img.shot-img
+ *  2026-06-05 · codified from meeting-recap-ai (label-above) + ai-knows-you.
+ *  N FULL (un-cropped) product screenshots side by side, each with a pill label.
+ *
+ *  WHEN: show screenshots WHOLE, each topped (or footed) by a short pill label.
+ *  Distinct from story-case `.scene-frame` (feishu-deck-patterns.css), which
+ *  CROPS a documentary still via `background-size: cover` + overlay caption.
+ *  NOTE: lives in feishu-deck.css (the always-loaded core), NOT
+ *  feishu-deck-patterns.css — that file is only linked by story-case/one-pager
+ *  decks, so a pattern that must work everywhere belongs here.
+ *
+ *  WHY a real <img>, not a `background-size:contain` frame (this is the whole
+ *  point of the pattern). A contain image floats inside a FIXED-height frame, so
+ *  shots of different aspect ratios sit at different vertical offsets and the
+ *  gap between the *visible image* and its label differs column-to-column
+ *  (measured 14 vs 54px on the source page). The validator can't see it
+ *  (R-VIS-GUTTER measures DOM rects, not the floated background extent), and the
+ *  runtime `balanceColumns` fix (feishu-deck.js) only half-solves it — it
+ *  tightens the frame but then CENTRES each unit, so the labels end up
+ *  mis-aligned across columns. An <img> sizes to its own aspect ratio with NO
+ *  letterbox slack, and balanceColumns ignores it (it only touches
+ *  background-size:contain). So: top-align the columns → labels line up; the
+ *  pill↔image gap is the flex `gap` → identical for every aspect ratio; each
+ *  image is as tall as it needs to be (shorter shots simply end higher).
+ * ============================================================================ */
+.slide .shot-twin {
+  display: grid;
+  grid-template-columns: repeat(var(--shot-cols, 2), 1fr);
+  gap: 28px;
+  align-items: start;        /* top-align columns → pill labels line up across columns */
+  justify-items: center;
+}
+.slide .shot-col {
+  display: flex; flex-direction: column;
+  gap: 14px;                 /* THE label↔image gap — one constant, every aspect ratio */
+  align-items: center; min-width: 0;
+}
+.slide .shot-pill {
+  align-self: center;
+  padding: 10px 24px;
+  background: rgba(60,127,255,0.20);
+  border: 1px solid rgba(60,127,255,0.50);
+  border-radius: 999px;
+  font: 700 24px/1.2 var(--fs-font-cjk);
+  color: #fff;
+  letter-spacing: 0.005em;
+}
+.slide .shot-col.is-violet .shot-pill { background: rgba(159,111,241,0.20); border-color: rgba(159,111,241,0.50); }
+.slide .shot-col.is-teal   .shot-pill { background: rgba(51,214,192,0.18);  border-color: rgba(51,214,192,0.50); }
+.slide .shot-col.is-orange .shot-pill { background: rgba(254,127,0,0.18);   border-color: rgba(254,127,0,0.50); }
+
+.slide img.shot-img {
+  display: block;
+  max-width: 100%;
+  max-height: var(--shot-max-h, 740px);   /* floor for tall portraits; override per deck if the stage is shorter */
+  width: auto; height: auto;               /* scale to natural aspect ratio — no letterbox, no float */
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+}
+/* caption-BELOW variant: author the pill AFTER the image in markup and add this
+   class on the twin; bottom-align so the image bottoms (and the captions under
+   them) line up. */
+.slide .shot-twin--cap-below { align-items: end; }
+
 /* When timeline is .stage-wrapped, the .axis (still absolutely positioned
    relative to .slide) needs to align with the .nodes' new flow position.
    The .stage centers content vertically in y=220..970 (mid ≈ 595). The

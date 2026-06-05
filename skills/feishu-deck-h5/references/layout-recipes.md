@@ -448,6 +448,56 @@ deliberately. Don't strip that. The rule is: **only layouts with a fixed
 content shape (3-up, 2-col, etc.) center; layouts with a stretched flow
 (pipeline, timeline, process) fill.**
 
+### When the grid shares the stage with a sibling block (strap / footer / lede)
+
+This is the single most common way the "dead band" bug reappears, so it has a
+framework guard (`BF-GRIDFILL-SIBLING`, 2026-06-05) — but author it right and
+the guard never has to fire.
+
+Since 2026-05-31 the framework gives a lone `content-3up` / `content-2col`
+`.grid` `flex: 1` so it fills the [title-bottom → bottom] band (sparse →
+`align-content:center` centers ≈596; dense → fills). **That fill is only
+correct when the grid is the SOLE body block in `.stage`.** The moment the
+stage also holds a sibling — a bottom anchor-band / strap, a lede line above
+the cards, a disclaimer footer — `flex: 1` on the grid swallows every pixel of
+vertical slack: the cards float dead-centre in an over-tall grid and the
+sibling is shoved to the far edge, opening a large empty band between them.
+Worse, the stage's own `justify-content: center` becomes a no-op (no slack left
+to distribute), so "group the blocks + centre the group" never happens. This is
+the **"为撑满屏幕把页脚顶到底"** anti-pattern — *filling the screen is not a
+goal*; a centred group with balanced top/bottom whitespace is.
+
+The framework now gates the fill to `:only-child`, so a grid WITH a sibling is
+content-sized automatically and the stage groups + centres all blocks. You do
+not need to do anything for the common case — just let the stage hold the grid
+plus its strap/footer:
+
+```html
+<div class="stage">              <!-- justify-content:center, gap:28 -->
+  <div class="grid">…3 cards…</div>   <!-- content-sized (NOT flex:1) -->
+  <div class="anchor-band">…closing strap…</div>
+</div>
+```
+
+Opt back into filling **only** for an intentional top→fill→bottom anchored
+layout (e.g. a quote pinned top, a body that should stretch, a disclaimer
+pinned bottom). Add the explicit `fs-fill` class to the block that should
+stretch — consistent with `.fs-card-fill` / `.stage--tall`:
+
+```html
+<div class="stage">
+  <p class="top-quote">…</p>
+  <div class="grid fs-fill">…cards stretch to fill the middle…</div>
+  <p class="disclaimer">…pinned to the floor…</p>
+</div>
+```
+
+The validator already catches the un-opted-in case: **`R-VIS-SLACK-FLEX`**
+flags a `flex:1` child that is over-tall (content < box) and prescribes exactly
+this fix (drop `flex:1` → content-sized + parent `justify-content:center`, or
+declare intent). If you see it, the answer is almost always "group + centre",
+not "stretch".
+
 ### Mechanical audit (extends Rule L2)
 
 ```python
@@ -777,4 +827,46 @@ If you write a custom layout, follow these patterns. If a slide overflows in
 practice, run through this list before tweaking pixel values.
 
 ---
+
+## Screenshot tile (`.shot-twin` / `.shot-col` / `.shot-pill` / `img.shot-img`)
+
+For showing N FULL product screenshots side by side, each with a short pill
+label. Codified 2026-06-05 from `meeting-recap-ai` + `ai-knows-you`. Lives in
+**feishu-deck.css** (the always-loaded core). Distinct from story-case
+`.scene-frame`, which CROPS a documentary still (`background-size: cover` +
+overlay caption); a screenshot must be shown WHOLE.
+
+```html
+<div class="stage">
+  <div class="shot-twin">
+    <div class="shot-col">
+      <span class="shot-pill">近 1 年的会议文档及会议发言</span>
+      <img class="shot-img" src="input/会议发言.png" alt="近一年周会文档及发言">
+    </div>
+    <div class="shot-col is-violet">
+      <span class="shot-pill">会议相关的待办及评论</span>
+      <img class="shot-img" src="input/待办评论.png" alt="会议待办及评论">
+    </div>
+  </div>
+</div>
+```
+
+- Use a **real `<img>`**, NOT a `background-size:contain` frame. A contain image
+  floats inside a fixed-height frame, so shots of different aspect ratios sit at
+  different offsets and the label↔image gap differs column-to-column (the trap on
+  the source page: 14px vs 54px). The validator can't see it (it measures DOM
+  rects, not the floated background extent), and the runtime `balanceColumns` fix
+  only half-solves it (tightens the frame but then centres each unit → labels
+  mis-align). An `<img>` sizes to its own aspect ratio with no letterbox slack.
+- The tile gives **aligned labels + identical gaps** for free: `.shot-twin` is
+  `align-items: start` (top-aligns columns → labels line up); the pill↔image gap
+  is the flex `gap` (one constant, every aspect ratio); each image is exactly as
+  tall as it needs to be (a wider/shorter shot simply ends higher). The whole
+  group is content-height and the stage centres it.
+- Pill colour variants on the column: `is-violet` / `is-teal` / `is-orange`.
+  Columns: `--shot-cols` (default 2). Tall portraits: cap height with
+  `--shot-max-h` (default 740px) if the stage is shorter than usual.
+- Captions BELOW the image instead of above: author the pill AFTER the `<img>`
+  and add `shot-twin--cap-below` on the twin (bottom-aligns so image bottoms +
+  captions line up).
 
