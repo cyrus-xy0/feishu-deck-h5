@@ -1927,8 +1927,7 @@ def _maybe_auto_snapshot(out_html) -> None:
     try:
         out_html = Path(out_html).resolve()
         run_root = out_html.parent.parent          # .../runs/<slug>/output/index.html → run 根
-        if not (run_root / "log").is_dir():        # 没开制作日志 → 不强建、不打扰
-            return
+        # 全局 / 旁路闸门先判(对 init 和 snapshot 都适用)
         if os.environ.get("DECK_LOG_NO_AUTOSNAP"):  # 显式旁路
             return
         if os.environ.get("DECK_LOG_AUTOSNAP") == "1":  # 防递归:snapshot 子进程内的 render 不再二次拍
@@ -1939,6 +1938,21 @@ def _maybe_auto_snapshot(out_html) -> None:
         if not deck_log.exists():                   # 纯 main 没带 deck-log → 静默跳过
             return
         env = dict(os.environ, DECK_LOG_AUTOSNAP="1")
+        # 自动补 init(2026-06-05):真实生产 run 若还没 log/,先建骨架再拍。堵住
+        # 「继承 / 复制 / lift 来的 run 没走 new-run.sh → auto-snapshot 闸门(有 log/ 才拍)
+        # 永不触发 → 整份 deck 静默不记」的漏。new-run.sh 的 init 只是入口之一;render 是
+        # 每份 deck 的必经卡口 —— 在这兜底,run 不管怎么建的都有日志。仍排除临时转换 /
+        # pptx 中间产物:它们不落在标准 runs/<slug>/ 布局下,gate 照旧放它们过。
+        if not (run_root / "log").is_dir():
+            if run_root.parent.name != "runs":      # 非标准 run(临时 / 中间产物)→ 保持原意,不碰
+                return
+            subprocess.run(
+                [sys.executable, str(deck_log), "init", str(run_root),
+                 "--title", run_root.name],
+                capture_output=True, text=True, timeout=60, env=env)
+            if not (run_root / "log").is_dir():     # init 没成(没装依赖 / 异常)→ 别硬拍
+                return
+            print(f"\n[deck-log] 自动补建制作日志(此 run 未走 new-run.sh)→ {run_root.name}/log/")
         r = subprocess.run(
             [sys.executable, str(deck_log), "snapshot", str(run_root),
              "--label", "auto · post-render"],
