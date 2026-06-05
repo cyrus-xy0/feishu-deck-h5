@@ -352,6 +352,23 @@ def cmd_unhide(deck: dict, args) -> tuple[int, dict | None]:
     return _set_hidden(deck, args.keys, False)
 
 
+def cmd_set_notes(deck: dict, args) -> tuple[int, dict | None]:
+    """Set (or clear, with empty text) a slide's speaker notes (口播稿) by key.
+    Rendered into the hidden `#fs-deck-notes` island and shown in the presenter
+    view (P). By key — survives reorder, unlike `set slides.N.notes`."""
+    try:
+        idx = find_slide_index(deck, args.key)
+    except KeyError as e:
+        print(f"deck-cli: {e}", file=sys.stderr); return 1, None
+    old = deck["slides"][idx].get("notes", "<unset>")
+    if args.text == "":
+        deck["slides"][idx].pop("notes", None)
+    else:
+        deck["slides"][idx]["notes"] = args.text
+    print(f"  slides[{idx}] (key={args.key}) notes: {old!r} → {args.text!r}")
+    return 0, deck
+
+
 def cmd_set_variant(deck: dict, args) -> tuple[int, dict | None]:
     try:
         idx = find_slide_index(deck, args.key)
@@ -964,6 +981,9 @@ def main(argv=None) -> int:
     sp = sub.add_parser("set-decor", help="set slide decor tokens (comma-sep)")
     sp.add_argument("key"); sp.add_argument("tokens")
 
+    sp = sub.add_parser("set-notes", help="set/clear a slide's speaker notes (口播稿, shown in presenter view P)")
+    sp.add_argument("key"); sp.add_argument("text", help='note text (empty string "" clears it)')
+
     sp = sub.add_parser("set-variant", help="change variant of content/stats/flow slide")
     sp.add_argument("key"); sp.add_argument("variant")
 
@@ -1048,6 +1068,7 @@ def main(argv=None) -> int:
         "set":         cmd_set,
         "set-accent":  cmd_set_accent,
         "set-decor":   cmd_set_decor,
+        "set-notes":   cmd_set_notes,
         "set-variant": cmd_set_variant,
         "hide":        cmd_hide,
         "unhide":      cmd_unhide,

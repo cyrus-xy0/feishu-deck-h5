@@ -36,6 +36,7 @@ Every **destructive** command (`delete`) requires interactive confirmation OR `-
 | `set PATH VALUE` | generic dotted-path set. VALUE auto-typed via JSON (int/bool/list/null/string) |
 | `set-accent KEY COLOR` | `slide.accent = COLOR` (blue/teal/violet/purple/orange — not cyan per R49) |
 | `set-decor KEY TOKENS` | `slide.decor = TOKENS` comma-separated (e.g. `blue-glow,grain`) |
+| `set-notes KEY TEXT` | set the slide's **speaker notes** (口播稿, shown in presenter view `P`). `""` clears. By key — survives reorder |
 | `set-variant KEY VARIANT` | for `content`/`stats`/`flow` — switches variant AND **drops data fields incompatible with the new variant** (interactive confirm; `--yes` to skip) |
 | `hide KEY [KEY…]` | **隐藏页** (PPT-style): set `slide.hidden = true` — still rendered + reachable by `#hash`/scroll, but the runtime skips it in present-mode 翻页 and drops it from the page count. Re-render to apply. Accepts multiple keys |
 | `unhide KEY [KEY…]` | clear `slide.hidden` (clean-removes the field) so it rejoins the linear show. Re-render to apply |

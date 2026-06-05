@@ -996,7 +996,7 @@
           '<svg class="i-exit"  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="nav-hint">← →   翻页  ·  F 全屏</div>';
+      '<div class="nav-hint">← →&nbsp;翻页&nbsp; ·&nbsp; F&nbsp;全屏&nbsp; ·&nbsp; P&nbsp;演示者&nbsp; ·&nbsp; E&nbsp;编辑</div>';
     return ui;
   }
 
