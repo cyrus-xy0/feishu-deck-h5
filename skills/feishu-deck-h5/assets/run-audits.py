@@ -175,6 +175,33 @@ PERF_BASE64_WARN_KB = 100
 PERF_BASE64_ERROR_KB = 250
 PERF_BLUR_MAX_PX = 10
 
+# BYTE_RULE_META — coverage contract for the runner-level source-byte rules
+# (UNIFY-VALIDATE-ARCH §coverage, PR3). This is the BYTE half of the unified rule
+# surface; the DOM half is RULE_META in audits.js. Together they make EVERY rule —
+# whether it runs as a computed-DOM check in the headless browser or a source-byte
+# check here in the runner — carry an explicit coverage declaration, so "covers
+# raw + schema by default" is machine-enforced across BOTH physical engines, not
+# just the DOM one. These are all name-free source/byte scans (they key on bytes,
+# never on framework class names) → coverage 'universal' (fire on raw and schema
+# alike). Enforced by deck-json/tests/test_byte_rule_contract.py: every rule code
+# the byte functions emit must be declared here with signal 'bytes'.
+BYTE_RULE_META = {
+    "R-DOC-INTEGRITY":  {"coverage": "universal", "signal": "bytes"},
+    "R-DOM":            {"coverage": "universal", "signal": "bytes"},   # over-close byte half (under-close/struct DOM half in audits.js)
+    "R-SELF-CONTAINED": {"coverage": "universal", "signal": "bytes"},
+    "R-KEY":            {"coverage": "universal", "signal": "bytes"},   # no-browser path (DOM half in audits.js)
+    "R-ESC-HTML":       {"coverage": "universal", "signal": "bytes"},
+    "R02":              {"coverage": "universal", "signal": "bytes"},
+    "R05":              {"coverage": "universal", "signal": "bytes"},
+    "R07":              {"coverage": "universal", "signal": "bytes"},
+    "P50": {"coverage": "universal", "signal": "bytes"},
+    "P51": {"coverage": "universal", "signal": "bytes"},
+    "P52": {"coverage": "universal", "signal": "bytes"},
+    "P53": {"coverage": "universal", "signal": "bytes"},
+    "P54": {"coverage": "universal", "signal": "bytes"},
+    "P55": {"coverage": "universal", "signal": "bytes"},
+}
+
 # R-DOC-INTEGRITY / R-AUTOBALANCE 共用的 auto-balance runtime 指纹(逐字对应 _AUTOBALANCE_SIG)。
 _AUTOBALANCE_SIG = "function balanceSlide(slide)"
 
