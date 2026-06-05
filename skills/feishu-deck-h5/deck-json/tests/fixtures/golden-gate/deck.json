@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "deck": {
+    "title": "Golden Gate Fixture",
+    "author": "test",
+    "date": "2026.06.05",
+    "customer_slug": "golden-gate",
+    "language": "zh-only",
+    "mode": "rewrite"
+  },
+  "slides": [
+    {
+      "key": "off-palette-hex",
+      "layout": "raw",
+      "screen_label": "01",
+      "data": {
+        "html": "<div class=\"stage\" style=\"position:absolute;top:200px;left:80px;right:80px;bottom:80px\"><h2 style=\"font-size:48px;margin:0\">品牌色之外的十六进制</h2><div class=\"card\" style=\"color:#c00000;font-size:24px;margin-top:40px\">这里用了非品牌色 #c00000 的文字内容块,用来触发 R10。</div></div>"
+      }
+    },
+    {
+      "key": "soft-white-inline",
+      "layout": "raw",
+      "screen_label": "02",
+      "data": {
+        "html": "<div class=\"stage\" style=\"position:absolute;top:200px;left:80px;right:80px;bottom:80px\"><h2 style=\"font-size:48px;margin:0\">低透明白字</h2><div style=\"font-size:24px;color:rgba(255,255,255,0.6);margin-top:40px\">这是一段低透明度的白色正文,投影后会发灰,用来触发 R-WHITE-TEXT。</div></div>"
+      }
+    },
+    {
+      "key": "bad-decor",
+      "layout": "raw",
+      "screen_label": "03",
+      "data": {
+        "html": "<div class=\"stage\" style=\"position:absolute;top:200px;left:80px;right:80px;bottom:80px\"><h2 style=\"font-size:48px;margin:0\">坏的装饰令牌</h2><div data-decor=\"not-a-real-token\" style=\"font-size:24px;margin-top:40px\">用一个不在 ship list 里的 data-decor 令牌触发 R38。</div></div>"
+      }
+    }
+  ]
+}

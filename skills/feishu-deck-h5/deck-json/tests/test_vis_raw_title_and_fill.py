@@ -45,32 +45,24 @@ def test_raw_title_wired():
 def test_raw_title_fires_when_title_too_low():
     # stage starts at 240 → de-facto title renders ~240px, far below the 61 baseline.
     hits = _run("R-VIS-RAW-TITLE-POS", _slide("raw", _stage(240, _TITLE + _FILL_BODY)))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert len(hits) >= 1, f"low raw title not flagged: {hits}"
 
 
 def test_raw_title_quiet_at_baseline():
     # stage at 56 → title ~56px, within the baseline band.
     hits = _run("R-VIS-RAW-TITLE-POS", _slide("raw", _stage(56, _TITLE + _FILL_BODY)))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"baseline raw title false-positived: {hits}"
 
 
 def test_raw_title_skips_schema_layout():
     # schema layouts have framework headers → R-VIS-TITLE-POSITION owns them, not this.
     hits = _run("R-VIS-RAW-TITLE-POS", _slide("content", _stage(240, _TITLE)))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"should skip non-raw layout: {hits}"
 
 
 def test_raw_title_optout_silences():
     hits = _run("R-VIS-RAW-TITLE-POS",
                 _slide("raw", _stage(240, _TITLE + _FILL_BODY), attrs="data-allow-imbalance"))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"data-allow-imbalance should silence: {hits}"
 
 
@@ -83,32 +75,24 @@ def test_fill_fires_on_sparse_raw_page():
     # title + one short line at the top, the rest of the stage is void → low fill.
     body = _TITLE + '<p style="font-size:24px;margin:0">只有一行小内容,下面全是空。</p>'
     hits = _run("R-VIS-FILL", _slide("raw", _stage(56, body)))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert len(hits) >= 1, f"sparse raw page not flagged as empty: {hits}"
 
 
 def test_fill_quiet_when_framed_card_fills():
     # a full-height framed card fills the stage → not empty (even if its text tops).
     hits = _run("R-VIS-FILL", _slide("raw", _stage(56, _TITLE + _FILL_BODY)))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"full framed card false-positived as empty: {hits}"
 
 
 def test_fill_skips_schema_layout():
     body = _TITLE + '<p style="font-size:24px;margin:0">只有一行。</p>'
     hits = _run("R-VIS-FILL", _slide("content", _stage(56, body)))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"should skip non-raw layout: {hits}"
 
 
 def test_fill_optout_silences():
     body = _TITLE + '<p style="font-size:24px;margin:0">只有一行。</p>'
     hits = _run("R-VIS-FILL", _slide("raw", _stage(56, body), attrs="data-allow-imbalance"))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"data-allow-imbalance should silence: {hits}"
 
 

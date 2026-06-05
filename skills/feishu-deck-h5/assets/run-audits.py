@@ -142,15 +142,32 @@ def _load_deck_json(base_dir):
 #  字节/文件系统检查;它们 emit 进【同一个】 findings 列表(同 schema:rule/severity/
 #  slide_idx/message),输出与 audits.js 规则完全统一。
 #
-#  本批三条(步骤 3 最终结构批,逐字移植自 _validate_audits.py):
+#  这里分两组:
+#
+#  (A) 两条路径都跑(runner_source_byte_findings;dom_rules True/False 皆执行 —— 浏览器
+#      看不到忠实结果,audits.js 不发或方向不同,不会双报):
 #    · R-DOC-INTEGRITY(audit_doc_integrity, F-85):整文档源字节完整性 —— .deck 闭合 /
 #      运行时存在 / </body></html> 截断。【必须】读原始字节:浏览器自动闭合标签,DOM
-#      看不到截断(spec 明确)。
+#      看不到截断(spec 明确)。invariant-1 抓【under-close】(opens>closes)。
+#    · R-DOM(audit_dom_balance_bytes):invariant-3 = <body> <div> 开/闭【over-close】
+#      平衡(多余 </div>)。旧 audit_dom_integrity 三条不变量迁移只保留 1&2 到 audits.js
+#      (slide-frame 嵌套 / 每帧恰一 .slide),丢了 invariant-3 —— 浏览器自动补全后渲染
+#      DOM 永远平衡,DOM 看不到 → 必须读源字节、且两路径都跑。只报 over-close(R-DOC-
+#      INTEGRITY 已抓 under-close,方向互补不重复)。
 #    · R-SELF-CONTAINED(audit_self_contained):head/deck 级 <style> 命中 per-slide 选择器
 #      的泄漏。原版是纯源文本 + slide-frame 字符跨度匹配(_slide_frame_spans);留 runner
 #      读源 = 与 Python 零漂移(避开 runner 注入的 framework <style> 污染 DOM <style> 集)。
 #    · perf(audit_perf, P50–P55):字节/体积预算(inline base64 体积、blur 半径、RO/listener
 #      计数、contain/will-change 提示)—— 全是源字节/源文本检查,与渲染无关 → runner。
+#
+#  (B) 只在 NO-BROWSER 路径跑(runner_no_browser_text_findings;仅 dom_rules=False —— 这些
+#      rule code audits.js 已在渲染后 DOM 上覆盖,--visual 路径跑这套会双报,故此路径专用):
+#    · R-KEY(audit_slide_keys_bytes)/ R-ESC-HTML(audit_escaped_html_bytes)/
+#      R02 + R07(audit_structure_bytes,R07 对 canvas/imported 豁免,parity with audits.js)/
+#      R05(audit_copy_bytes,IMPORTED deck 降 warn_soft)。
+#    H1 恢复:迁移后默认 --no-visual 闸(render-deck 默认门 + write-hook)曾只剩 R-DOC-INTEGRITY
+#    /R-SELF-CONTAINED/perf,丢了 ~34 条源文本审计 —— 把"真正只关源字节"的几条搬回字节路径,
+#    让无 Chromium 的默认门重获真实静态强制。
 # ===========================================================================
 
 # perf 阈值(逐字对应 _validate_audits.py PERF_BASE64_WARN_KB / ERROR_KB / BLUR_MAX_PX)。
@@ -393,6 +410,328 @@ def audit_perf_bytes(html):
     return findings
 
 
+# ===========================================================================
+#  NO-BROWSER SOURCE-TEXT RULES (run ONLY when dom_rules=False)
+#  ---------------------------------------------------------------------------
+#  H1 restore (UNIFY-VALIDATE-ARCH follow-up): the unified engine's DEFAULT
+#  --no-visual gate (validate.py's run_unified_audits(dom_rules=False), used by
+#  render-deck.py's default gate + the write-hook) used to run ONLY R-DOC-
+#  INTEGRITY / R-SELF-CONTAINED / perf — it had LOST the ~34 source-text audits
+#  that ran unconditionally pre-migration. The genuinely source-text-only rules
+#  below are restored into the no-browser BYTE path so that gate regains real
+#  enforcement WITHOUT Chromium.
+#
+#  CRITICAL — NO DOUBLE-EMIT: these run ONLY when dom_rules=False. When
+#  dom_rules=True (the --visual path), audits.js already evaluates the SAME rule
+#  codes (R-KEY / R-ESC-HTML / R02 / R07 / R05) against the rendered DOM, so the
+#  byte path must stay silent there or every finding would appear twice. They are
+#  wired into runner_no_browser_text_findings(), which run_unified_engine only
+#  calls on the dom_rules=False branch.
+#
+#  Rules (逐字移植自 _validate_audits.py @ git 076dc44):
+#    · R-KEY      ← audit_slide_keys      (duplicate / missing / invalid / positional key)
+#    · R-ESC-HTML ← audit_escaped_html    (literal escaped markup &lt;span …&gt; in text)
+#    · R02 / R07  ← audit_structure       (per-frame data-layout + data-screen-label + .wordmark)
+#                   — R07 (missing .wordmark) EXEMPT for canvas slides
+#                     (data-layout="canvas") + imported decks (<meta fs-deck-origin
+#                     =imported>), MIRRORING the audits.js R07 exemption (canvas
+#                     dropped its .wordmark in commit 941f781, so without the
+#                     exemption every PPTX-import/canvas deck would fail R07 on
+#                     every slide at the --visual/ingest/publish gate).
+#    · R05        ← audit_copy_rules      (emoji / '!' / '…' / '???' in slide copy;
+#                     IMPORTED deck downgrades err→warn_soft)
+#  (R-DOM div-balance — the over-close direction R-DOC-INTEGRITY misses — runs in
+#   BOTH paths; see audit_dom_balance_bytes below.)
+# ===========================================================================
+
+# R-KEY 源工具(逐字对应 _validate_audits.py audit_slide_keys 内的局部正则)。
+_SLIDE_OPEN_RE = re.compile(r'<div\s+(?=[^>]*\bclass="(?:[^"]*\s)?slide(?:\s[^"]*)?")[^>]*>', re.S)
+_KEY_SLUG_RE = re.compile(r'data-slide-key="([^"]*)"')
+_KEY_VALID_SLUG_RE = re.compile(r'^[a-z][a-z0-9-]*$')   # MUST match deck-schema.json key pattern
+_KEY_POSITIONAL_RE = re.compile(r'^(slide|page|section|frame)-?\d+$')
+
+# R-ESC-HTML 源工具(逐字对应 _validate_audits.py _ESC_TAGS / _ESCAPED_TAG_RE)。
+_ESC_TAGS = (r'span|b|i|em|strong|div|p|br|h[1-6]|ul|ol|li|a|svg|img|'
+             r'small|sup|sub|mark|code')
+_ESCAPED_TAG_RE = re.compile(
+    r'&lt;/?(?:' + _ESC_TAGS + r')\s*/?&gt;'               # (A) <br> </span> <b> <br/>
+    r'|&lt;(?:' + _ESC_TAGS + r')\s+[a-zA-Z][\w-]*\s*=',   # (B) <span class= / <a href=
+    re.I)
+
+# R02/R07 + R05 provenance 工具(逐字对应 _validate_audits.py _slide_is_lifted /
+# _deck_imported / _deck_all_imported)。canvas/imported 检测与 audits.js 的 UI1/R07
+# 豁免同源(isCanvas = data-layout="canvas";imported = deck 级 fs-deck-origin=imported)。
+_DECK_IMPORTED_META_RE = re.compile(
+    r'<meta\s+name=["\']fs-deck-origin["\']\s+content=["\']imported["\']')
+_LIFTED_SLIDE_RE = re.compile(r'<div class="slide(?:\s[^"]*)?"[^>]*>')
+
+
+def _extract_slide_frames(html):
+    """Per-slide HTML strings, one per <div class="slide-frame">…(end-of-frame).
+    逐字镜像 _validate_common.extract_slides:body 内剥 comment/script,再按 slide-frame
+    开标签 split。R-KEY / R02 / R07 逐帧扫源字节用它(与渲染后 querySelectorAll('.slide') 等价)。"""
+    body_m = re.search(r"<body[^>]*>(.*)</body>", html, re.S)
+    if not body_m:
+        return []
+    body = body_m.group(1)
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+    body = re.sub(r"<script[^>]*>.*?</script>", "", body, flags=re.S)
+    parts = _SLIDE_FRAME_OPEN_RE.split(body)
+    return parts[1:]   # discard preamble before first slide-frame
+
+
+def _frame_attr(fr, name):
+    """data-<name> value in a slide-frame chunk(逐字对应 _validate_common.slide_attr)。"""
+    m = re.search(rf'data-{name}="([^"]+)"', fr)
+    return m.group(1) if m else None
+
+
+def _slide_is_lifted_bytes(fr):
+    """True if a slide-frame chunk carries data-lifted(逐字对应 _slide_is_lifted)。"""
+    return "data-lifted" in fr
+
+
+def _deck_imported_bytes(html):
+    """True if deck stamps <meta name="fs-deck-origin" content="imported">
+    (逐字对应 _deck_imported)。R07 豁免 + R05 降级共用;与 audits.js deckOriginImported 同源。"""
+    return bool(_DECK_IMPORTED_META_RE.search(html))
+
+
+def _deck_all_imported_bytes(html, frames=None):
+    """True if EVERY .slide is imported/lifted, OR deck stamps origin=imported
+    (逐字对应 _deck_all_imported)。R05 deck-wide 降级 scope 用(与 audits.js deckAllImported 同源)。"""
+    if _deck_imported_bytes(html):
+        return True
+    frames = _extract_slide_frames(html) if frames is None else frames
+    if not frames:
+        return False
+    return all(_slide_is_lifted_bytes(fr) for fr in frames)
+
+
+def audit_slide_keys_bytes(html):
+    """R-KEY(err/warn)— 每个 .slide 必带唯一、kebab-case、语义的 data-slide-key。
+    逐字移植 _validate_audits.py audit_slide_keys(在源字节上跑;NO-BROWSER 路径专用,
+    audits.js 的 R-KEY 已覆盖 --visual 路径)。空/非法 slug、重复 = err;positional = warn
+    (lifted 页降 warn_soft);缺 key = err。返回统一 findings(slide_idx=0,与原版逐帧 'slide N'
+    文案对齐)。"""
+    findings = []
+
+    def err(msg):
+        findings.append({"rule": "R-KEY", "severity": "error", "slide_idx": 0,
+                         "message": msg})
+
+    def warn(msg):
+        findings.append({"rule": "R-KEY", "severity": "warn", "slide_idx": 0,
+                         "message": msg})
+
+    def warn_soft(msg):
+        findings.append({"rule": "R-KEY", "severity": "warn_soft", "slide_idx": 0,
+                         "message": msg})
+
+    frames = _extract_slide_frames(html)
+    seen = {}        # slug -> first slide index it appeared in
+    missing = []
+    for i, fr in enumerate(frames, 1):
+        m = _KEY_SLUG_RE.search(fr)
+        if not m:
+            missing.append(i)
+            continue
+        slug = m.group(1)
+        if not slug:
+            err(f'slide {i}: data-slide-key is empty. '
+                'Set a semantic kebab-case slug (e.g. "arr-history", "cover", '
+                '"case-meiyijia"). Required by feishu-slide-library locator.')
+            continue
+        if not _KEY_VALID_SLUG_RE.match(slug):
+            err(f'slide {i}: data-slide-key="{slug}" is not valid kebab-case. '
+                'Use lowercase letters, digits, and `-` only; must start with '
+                'an alphanumeric. Example: "arr-history" not "ARR_History".')
+            continue
+        if _KEY_POSITIONAL_RE.match(slug):
+            if _slide_is_lifted_bytes(fr):
+                warn_soft(
+                    f'slide {i}: data-slide-key="{slug}" is positional — '
+                    'IMPORTED/lifted slide (key carried from source ordering); '
+                    'soft advisory, rename to a semantic slug if you keep it.')
+            else:
+                warn(
+                    f'slide {i}: data-slide-key="{slug}" is positional — it '
+                    'breaks when slides reorder. Use a semantic slug naming '
+                    'what the slide is ABOUT (e.g. "arr-history" instead of '
+                    '"slide-06").')
+        if slug in seen:
+            err(f'slide {i}: data-slide-key="{slug}" already used by '
+                f'slide {seen[slug]}. Slugs must be deck-internal unique. '
+                'Pick a different semantic slug or add a suffix '
+                f'(e.g. "{slug}-v2").')
+        else:
+            seen[slug] = i
+    if missing:
+        err(f'{len(missing)} slide(s) missing data-slide-key '
+            f'(slide indices: {", ".join(map(str, missing[:5]))}'
+            f'{", …" if len(missing) > 5 else ""}). '
+            'Every .slide must carry a semantic kebab-case slug so the '
+            'feishu-slide-library skill can index it. Add '
+            '`data-slide-key="<slug>"` next to data-screen-label.')
+    return findings
+
+
+def audit_escaped_html_bytes(html):
+    """R-ESC-HTML(err)— 文本里出现被转义的 HTML 标签(如 `&lt;span class=…`)。
+    逐字移植 _validate_audits.py audit_escaped_html(源字节;NO-BROWSER 专用,audits.js 已覆盖
+    --visual)。逐帧剥 style/script 后扫 _ESCAPED_TAG_RE;命中即 err。返回统一 findings。"""
+    findings = []
+    for i, fr in enumerate(_extract_slide_frames(html), 1):
+        scan = re.sub(r"<style\b[^>]*>.*?</style>", "", fr, flags=re.S | re.I)
+        scan = re.sub(r"<script\b[^>]*>.*?</script>", "", scan, flags=re.S | re.I)
+        hits = _ESCAPED_TAG_RE.findall(scan)
+        if not hits:
+            continue
+        sample = hits[0].replace("&lt;", "<").replace("&gt;", ">")
+        findings.append({
+            "rule": "R-ESC-HTML", "severity": "error", "slide_idx": 0,
+            "message":
+                f'slide {i}: 文本里出现被转义的 HTML 标签(如 `{sample}…`)。'
+                '裸 HTML 进了 schema 的转义文本字段(content/3up 等的 lede / body / '
+                'title 走 `{{ field }}`,会被 _esc_br 转义),所以原样显示成"乱码"。'
+                '修法:把这页改成 `layout: raw` 自己控 markup(行内高亮 / svg 都放这),'
+                '或去掉标签改用该字段支持的强调方式;换行用 \\n(渲染器会转 <br>),'
+                '不要写字面 <br>。raw 页 / `{{{ raw }}}` 字段输出的是真标签、不会变 '
+                '&lt;,因此不会被本规则误报。',
+        })
+    return findings
+
+
+def audit_structure_bytes(html):
+    """R02 / R07(err)— 每帧必有 data-layout + data-screen-label + .wordmark。
+    逐字移植 _validate_audits.py audit_structure 的可逐帧部分(R13 单行标题留在 audits.js)。
+    NO-BROWSER 专用,audits.js 的 R02-R07-STRUCTURE 已覆盖 --visual 路径。
+
+    ⚠️ R07 豁免 parity:缺 .wordmark 对 canvas 帧(data-layout="canvas")与 imported deck
+    (deck 级 <meta fs-deck-origin=imported>)豁免 —— 与 audits.js R07 / UI1 用的同一
+    isCanvas / imported 检测同源。941f781 删掉了 canvas 模板的 .wordmark(canvas 成了唯一
+    无 wordmark 的片段),不豁免的话每份 PPTX 导入 / canvas deck 会在 --visual/ingest/publish
+    闸上每帧 R07 误报。返回统一 findings。"""
+    findings = []
+    imported = _deck_imported_bytes(html)   # deck 级 fs-deck-origin=imported(同 audits.js deckOriginImported)
+    for i, fr in enumerate(_extract_slide_frames(html), 1):
+        layout = _frame_attr(fr, "layout")
+        label = _frame_attr(fr, "screen-label")
+        if not layout:
+            findings.append({"rule": "R02", "severity": "error", "slide_idx": 0,
+                             "message": f"slide {i}: missing data-layout"})
+        if not label:
+            findings.append({"rule": "R02", "severity": "error", "slide_idx": 0,
+                             "message": f"slide {i}: missing data-screen-label"})
+        if 'class="wordmark' not in fr:
+            is_canvas = (layout == "canvas")   # 同 audits.js R07/UI1 的 isCanvas
+            if is_canvas or imported:
+                continue                       # R07 豁免:canvas / imported(parity with audits.js)
+            # 文案与 Python 逐字对齐:layout 为空 → slide_attr 返回 None → f-string 渲染 `None`。
+            layout_repr = layout if layout else "None"
+            findings.append({"rule": "R07", "severity": "error", "slide_idx": 0,
+                             "message":
+                                 f"slide {i} ({layout_repr}): missing .wordmark"})
+    return findings
+
+
+def audit_copy_bytes(html):
+    """R05(err / IMPORTED→warn_soft)— slide 文本里禁 emoji / '!' / '…' / '???'。
+    逐字移植 _validate_audits.py audit_copy_rules(源字节;NO-BROWSER 专用,audits.js 已覆盖
+    --visual)。剥 script/style/svg + 标签后扫文本;IMPORTED deck(全 lifted / origin=imported)
+    降 warn_soft。返回统一 findings。"""
+    findings = []
+    body_m = re.search(r"<body[^>]*>(.*)</body>", html, re.S)
+    if not body_m:
+        return findings
+    body = re.sub(r"<script.*?</script>", "", body_m.group(1), flags=re.S)
+    body = re.sub(r"<style.*?</style>", "", body, flags=re.S)
+    body = re.sub(r"<svg.*?</svg>", "", body, flags=re.S | re.I)
+    text = re.sub(r"<[^>]+>", " ", body)
+
+    imported = _deck_all_imported_bytes(html)
+    note = (" — IMPORTED deck (verbatim-carried content); downgraded to "
+            "WARNING, you choose whether to clean up the source text"
+            if imported else "")
+    sev = "warn_soft" if imported else "error"
+
+    def lev(msg):
+        findings.append({"rule": "R05", "severity": sev, "slide_idx": 0,
+                         "message": msg + note})
+
+    emoji_re = re.compile(
+        r"[\U0001F300-\U0001FAFF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF]")
+    if emoji_re.search(text):
+        lev("emoji detected in slide text")
+    if "!" in text or "！" in text:
+        lev("exclamation '!' / '！' detected in slide text")
+    if "…" in text or "..." in text:
+        lev("ellipsis '…' / '...' detected in slide text")
+    if "???" in text or "？？？" in text:
+        lev("'???' detected in slide text")
+    return findings
+
+
+def audit_dom_balance_bytes(html):
+    """R-DOM(err)— <body> 内 <div> 开/闭【over-close】平衡(extra </div>)。
+    R-DOM invariant-3 的【源字节】实现(C1a parity 补漏):旧 audit_dom_integrity 有三条不变量,
+    迁移只保留 1&2(slide-frame 嵌套 / 每帧恰一 .slide,都在 audits.js 渲染后 DOM 上跑);
+    invariant-3 = 整 <body> <div> 开/闭平衡 —— 浏览器会自动补全标签,渲染后 DOM 永远平衡,DOM
+    看不到 → 必须读源字节,且在 BOTH dom_rules 路径都跑(audits.js 那条 R-DOM 永远查不到)。
+
+    与既有检查清晰分工、不重复:
+      · R-DOC-INTEGRITY invariant-1 已抓【under-close】(div_opens > div_closes,即 .deck
+        开了没闭 / mid-deck 截断),且仅对【有 .deck 的真 deck】;
+      · 本规则只在【net over-close】(div_closes > div_opens,即多一个 </div>)时 emit R-DOM
+        —— 这是 R-DOC-INTEGRITY 永不触发的方向(它只查 opens>closes),所以无双报;且对
+        【有无 .deck 均查】(片段也能有杂散 </div>)。
+    opt-out:body 含 `allow:dom-integrity`(与旧 audit_dom_integrity 同 opt-out 串)。"""
+    findings = []
+    body_m = re.search(r"<body[^>]*>(.*)</body>", html, re.S)
+    if not body_m:
+        return findings
+    body = body_m.group(1)
+    if "allow:dom-integrity" in body:
+        return findings
+    # 剥 comment/script/style(它们里的伪标签会污染计数;与旧 audit_dom_integrity 同序)。
+    scan = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+    scan = re.sub(r"<script[^>]*>.*?</script>", "", scan, flags=re.S | re.I)
+    scan = re.sub(r"<style[^>]*>.*?</style>", "", scan, flags=re.S | re.I)
+    div_opens = len(re.findall(r"<div\b", scan, re.I))
+    div_closes = len(re.findall(r"</div\s*>", scan, re.I))
+    # 只报 over-close(多 </div>);under-close 归 R-DOC-INTEGRITY,避免双报(见 docstring)。
+    if div_closes > div_opens:
+        delta = div_closes - div_opens
+        findings.append({
+            "rule": "R-DOM", "severity": "error", "slide_idx": 0,
+            "message":
+                f'div balance in <body>: {div_opens} opens vs {div_closes} '
+                f'closes (−{delta}) — {delta} extra </div>. A stray closing tag '
+                'closes the DOM tree prematurely / leaks across boundaries, so '
+                'later content escapes its intended container in the browser. '
+                'Locate the extra </div> — every regex/sed/manual edit is a '
+                'prime suspect. Re-render via render-deck.py rather than '
+                'hand-splicing the deck shell.',
+        })
+    return findings
+
+
+def runner_no_browser_text_findings(html):
+    """NO-BROWSER source-text rules — run ONLY on the dom_rules=False path.
+    These rule codes (R-KEY / R-ESC-HTML / R02 / R07 / R05) are ALSO emitted by
+    audits.js on the rendered DOM (the --visual path), so they MUST NOT run when
+    dom_rules=True or every finding would double-emit. run_unified_engine calls
+    this ONLY on the no-Chromium branch (H1 restore). Order mirrors the old
+    STATIC_AUDITS registration (cosmetic). R-DOM div-balance is NOT here — it runs
+    in BOTH paths via runner_source_byte_findings (the DOM rule can't cover it)."""
+    out = []
+    out.extend(audit_structure_bytes(html))    # R02 / R07
+    out.extend(audit_copy_bytes(html))         # R05
+    out.extend(audit_slide_keys_bytes(html))   # R-KEY
+    out.extend(audit_escaped_html_bytes(html)) # R-ESC-HTML
+    return out
+
+
 def _inline_linked_text(html_text, base_dir):
     """把 <link rel=stylesheet> / <script src> 的【本地框架文件】读盘内联进 HTML 文本
     (<style data-source="framework"> / <script data-source="framework">)。逐字镜像
@@ -443,15 +782,25 @@ def _inline_linked_text(html_text, base_dir):
 
 
 def runner_source_byte_findings(html, base_dir):
-    """跑全部 runner 层源字节/文件系统检查,合并成统一 findings(同 schema)。
+    """跑【两条路径都要】的 runner 层源字节/文件系统检查,合并成统一 findings(同 schema)。
     与 audits.js 规则同列表、同字段 → 报告层无需区分来源。顺序:R-DOC-INTEGRITY →
-    R-SELF-CONTAINED → perf(与 STATIC_AUDITS 注册顺序对齐,纯 cosmetic)。
+    R-DOM(div over-close balance)→ R-SELF-CONTAINED → perf(与 STATIC_AUDITS 注册顺序
+    对齐,纯 cosmetic)。
+
+    这些规则在 dom_rules True/False 两条路径都跑:它们读的是浏览器看不到忠实结果的源字节
+    (截断 / 多余 </div> / head <style> 泄漏 / 体积预算),与渲染后 DOM 无关、不会与 audits.js
+    双报(audits.js 不发这些 code,或发的是不同方向:R-DOM 那条在 audits.js 是 slide-frame
+    嵌套/每帧恰一 .slide 的 DOM 结构,与本处 over-close div 平衡分工互补)。
 
     `html` = 原始 index.html 字节(R-DOC-INTEGRITY 必须读 raw 抓截断;R-SELF-CONTAINED
     在 raw 上框架是 <link> 天然排除 = 与 Python 等价)。perf 在【内联框架后】文本上跑,
-    与 validate.py(run_static_audits 前已 inline_linked)同源,零漂移。"""
+    与 validate.py(run_static_audits 前已 inline_linked)同源,零漂移。
+
+    注:NO-BROWSER 源文本规则(R-KEY / R-ESC-HTML / R02 / R07 / R05)不在此 —— 它们与
+    audits.js 重叠,只在 dom_rules=False 路径单独跑(见 runner_no_browser_text_findings)。"""
     out = []
     out.extend(audit_doc_integrity_bytes(html))
+    out.extend(audit_dom_balance_bytes(html))   # R-DOM invariant-3:over-close(两路径都跑)
     out.extend(audit_self_contained_bytes(html))
     out.extend(audit_perf_bytes(_inline_linked_text(html, base_dir)))
     return out
@@ -476,16 +825,25 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
     Composition:
       · DOM/geometry rules (audits.js) — need a headless browser. Run when
         `dom_rules=True` (the default / `--visual` path).
-      · runner-level SOURCE-BYTE / file-system checks (R-DOC-INTEGRITY /
-        R-SELF-CONTAINED / perf P50-P55) — read raw index.html bytes, NO
-        browser. ALWAYS run (so `--no-visual` still enforces the byte-level
-        invariants without Chromium).
+      · runner-level SOURCE-BYTE / file-system checks ALWAYS run on BOTH paths
+        (read raw index.html bytes, NO browser): R-DOC-INTEGRITY (truncation),
+        R-DOM div over-close balance, R-SELF-CONTAINED (head/deck <style> leak),
+        perf P50-P55. These are things the browser auto-repairs so the rendered
+        DOM can't see faithfully — see runner_source_byte_findings.
+      · NO-BROWSER source-text rules (R-KEY / R-ESC-HTML / R02 / R07 / R05) run
+        ONLY on the dom_rules=False path (H1 restore). On dom_rules=True the SAME
+        rule codes are evaluated by audits.js against the rendered DOM, so the
+        byte versions stay silent there to avoid double-emit — see
+        runner_no_browser_text_findings.
 
     `dom_rules=False` is the `--no-visual` / no-Chromium path: skip the browser
-    entirely, return ONLY the runner byte/source findings. Geometry & DOM-text
-    rules (R-VIS-*, R06/R20/R10/R-DOM/…) are NOT evaluated in that mode — they
-    require a rendered DOM (see UNIFY-VALIDATE-ARCH §1). Callers must surface
-    this so it is never a silent half-check.
+    entirely, return the runner byte/source findings PLUS the no-browser
+    source-text rules (R-KEY / R-ESC-HTML / R02 / R07 / R05) so the default gate +
+    write-hook regain real static enforcement without Chromium. Geometry / pure
+    DOM-text rules (R-VIS-*, R06/R20/R10/R-OVERFLOW/… and the audits.js R-DOM
+    nesting invariants) are NOT evaluated in that mode — they require a rendered
+    DOM (see UNIFY-VALIDATE-ARCH §1). Callers must surface this so it is never a
+    silent half-check.
 
     Raises EngineUnavailable when dom_rules=True but playwright is missing or
     the render/eval fails — the caller decides whether that is fatal (run-audits
@@ -504,15 +862,24 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             runner_rules.append(f["rule"])
 
     if not dom_rules:
-        # NO-CHROMIUM path: byte/source rules only. Stable result shape so the
-        # caller maps it uniformly with the full-engine path.
+        # NO-CHROMIUM path: byte/source rules + the no-browser source-text rules
+        # (R-KEY / R-ESC-HTML / R02 / R07 / R05). The latter run ONLY here (H1
+        # restore) — on the --visual path audits.js owns the same codes against
+        # the rendered DOM, so running them here too would double-emit. Stable
+        # result shape so the caller maps it uniformly with the full-engine path.
+        text_findings = runner_no_browser_text_findings(raw_html)
+        all_findings = runner_findings + text_findings
+        rules = list(runner_rules)
+        for f in text_findings:
+            if f["rule"] not in rules:
+                rules.append(f["rule"])
         return {
             "engine": "audits.js",
             "version": None,
-            "rules": runner_rules,
+            "rules": rules,
             "scope": list(scope) if scope else None,
             "slides_total": None,
-            "findings": runner_findings,
+            "findings": all_findings,
             "dom_rules": False,
         }
 

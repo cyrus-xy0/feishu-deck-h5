@@ -89,8 +89,12 @@ from _validate_common import (
 # the test suite depend on.
 #
 # DEPENDENCY: the engine is DOM/browser-based → validate.py now needs playwright
-# for its DEFAULT (full) path. `--no-visual` runs ONLY the no-browser byte/source
-# rules (see main()); it is documented as a partial check, never a silent green.
+# for its DEFAULT (full) path. `--no-visual` runs the no-browser checks: the
+# byte/source rules (R-DOC-INTEGRITY / R-DOM over-close / R-SELF-CONTAINED / perf)
+# PLUS the restored no-browser SOURCE-TEXT rules (R-KEY / R-ESC-HTML / R02 / R07 /
+# R05) — real static enforcement without Chromium. It is still a PARTIAL check
+# (geometry / pure DOM-text rules don't run), documented as such, never a silent
+# green.
 import importlib.util as _importlib_util
 
 _RUN_AUDITS_PATH = Path(__file__).resolve().parent / 'run-audits.py'
@@ -141,9 +145,12 @@ def run_unified_audits(path, iss, *, dom_rules=True, scope=None,
     dom_rules=True  → full engine: render in headless Chromium + audits.js
                       (geometry / DOM-text / structure rules) PLUS runner
                       byte/source rules. Requires playwright.
-    dom_rules=False → `--no-visual`: NO browser; only the runner byte/source
-                      rules (R-DOC-INTEGRITY / R-SELF-CONTAINED / perf). The
-                      DOM/geometry rules do NOT run — documented partial check.
+    dom_rules=False → `--no-visual`: NO browser. Runs the runner byte/source
+                      rules (R-DOC-INTEGRITY / R-DOM over-close / R-SELF-CONTAINED
+                      / perf) PLUS the no-browser source-text rules (R-KEY /
+                      R-ESC-HTML / R02 / R07 / R05). Geometry / pure DOM-text
+                      rules (R-VIS-*, R06/R20/R10/R-OVERFLOW/…) do NOT run —
+                      documented partial check.
 
     Mirrors the old run_visual_audits failure semantics: an INABILITY to render
     (playwright missing / Chromium launch flake / nav timeout) is an environment
@@ -367,9 +374,13 @@ def main():
     #     byte/source rules. Needs playwright; degrades to byte/source-only +
     #     advisory if Chromium is unavailable (never blocks a good deck on a CI
     #     hiccup; never a silent green either).
-    #   · `--no-visual`: byte/source rules ONLY (no browser). A documented
-    #     PARTIAL check — the DOM/geometry rules (R-VIS-*, R06/R20/R10/R-DOM/…)
-    #     do not run. Use only where Chromium is unavailable.
+    #   · `--no-visual`: NO browser. Runs the byte/source rules (R-DOC-INTEGRITY
+    #     / R-DOM over-close / R-SELF-CONTAINED / perf) PLUS the restored
+    #     no-browser source-text rules (R-KEY / R-ESC-HTML / R02 / R07 / R05) — so
+    #     this default-gate / write-hook path keeps real static enforcement. Still
+    #     a documented PARTIAL check: the geometry / pure DOM-text rules (R-VIS-*,
+    #     R06/R20/R10/R-OVERFLOW and the audits.js R-DOM nesting invariants) do
+    #     NOT run. Use where Chromium is unavailable.
     try:
         run_unified_audits(path, iss, dom_rules=args.visual,
                            want_screenshots=args.screenshots)

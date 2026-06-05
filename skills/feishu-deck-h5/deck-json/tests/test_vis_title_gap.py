@@ -36,15 +36,11 @@ def _slide(stage_top):
 
 def test_title_gap_fires_when_content_crowds_title():
     hits = _run(_slide(120))   # content top ~120, header bottom ~114 → gap ~6 < 24
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert len(hits) >= 1, f"content 6px below title not flagged: {hits}"
 
 
 def test_title_gap_quiet_with_normal_spacing():
     hits = _run(_slide(300))   # content top 300, gap ~186 → fine
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"false positive on normal title spacing: {hits}"
 
 
@@ -72,8 +68,6 @@ def test_title_gap_quiet_with_raw_title_subtitle():
              + '<div style="margin-top:220px;width:600px;height:200px;'
                'font-size:24px">正文内容区块</div>')
     hits = _run(_raw_slide(inner))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"false positive: folded title+subtitle band fired: {hits}"
 
 
@@ -81,16 +75,12 @@ def test_title_gap_still_fires_on_raw_crowd_without_subtitle():
     # OVER-SUPPRESSION GUARD: a tall block hugging the title (no subtitle) is real
     # crowding and must still fire after the subtitle-folding fix.
     hits = _run(_raw_slide(_RAW_TITLE + _RAW_CROWD))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert len(hits) >= 1, f"real raw crowd (no subtitle) should still fire: {hits}"
 
 
 def test_title_gap_opt_out_silences():
     # The data-allow-title-gap escape hatch silences the rule even on real crowding.
     hits = _run(_raw_slide(_RAW_TITLE + _RAW_CROWD, attrs="data-allow-title-gap"))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"data-allow-title-gap should silence the rule: {hits}"
 
 
@@ -109,8 +99,6 @@ def test_title_gap_quiet_on_decorative_label_with_graphic():
         '<div style="margin-top:60px;width:600px;height:200px;font-size:24px">真正的内容区块</div>'
     )
     hits = _run(_raw_slide(inner))
-    if hits is None:
-        import pytest; pytest.skip("Chromium/Playwright unavailable")
     assert hits == [], f"decorative label+graphic must not fire title-gap: {hits}"
 
 

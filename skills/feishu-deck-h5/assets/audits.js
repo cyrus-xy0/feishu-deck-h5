@@ -1144,11 +1144,16 @@
       // audit_no_drop_shadows)。原版扫 `.slide…{ box-shadow }` CSS 规则;渲染后改成
       // 遍历 .slide 下元素(含 ::before/::after)的 computed box-shadow,逐层判定:
       // inset / glow-ring(0 0 0)豁免,有偏移/模糊 = 真投影。
-      // 原 CSS 注释 opt-out `/* allow:drop-shadow */` 在 computed 里看不到(注释不进
-      // 样式),改为:① 框架里有 sanctioned depth shadow 的元素类(每个在框架 CSS 里都带
-      // `/* allow:drop-shadow */`:ui-window/phone-frame/desktop-frame/browser-frame/
-      // app-frame 是 UI-mock 窗体,scene-frame 是 story-case 纪实影像框
-      // feishu-deck-patterns.css)豁免 ② `data-allow-drop-shadow` 属性 opt-out(就近祖先链)。
+      // 原 CSS 注释 opt-out `/* allow:drop-shadow */`:① 框架里有 sanctioned depth shadow
+      // 的元素类(每个在框架 CSS 里都带 `/* allow:drop-shadow */`:ui-window/phone-frame/
+      // desktop-frame/browser-frame/app-frame 是 UI-mock 窗体,scene-frame 是 story-case
+      // 纪实影像框 feishu-deck-patterns.css)豁免 ② `data-allow-drop-shadow` 属性 opt-out
+      // (就近祖先链) ③ **R12 parity restore**:作者 `<style>` 规则块里写 `/* allow:drop-shadow */`
+      // 的注释 opt-out。computed 里看不到注释,但 R20 已有的「读 <style> textContent + 注释容忍
+      // 拆规则」机制(iterStyleBlocks/iterCssRules)能拿到含注释的规则源 —— 复用它收集所有带
+      // marker 的选择器,元素 .matches() 命中任一即豁免。与 R20 的 /* allow:typescale */ /
+      // R-WHITE-TEXT 的 /* allow:white-opacity */ 同一约定(迁移时被砍掉,只剩 data-* 属性,
+      // 与 R20 不一致 → 这里恢复)。
       id: 'R12',
       severity: 'warn',
       evaluate(slide, ctx) {
@@ -1156,11 +1161,37 @@
         const UI_MOCK = ['ui-window', 'phone-frame', 'desktop-frame', 'browser-frame', 'app-frame', 'scene-frame'];
         const findings = [];
         const flaggedSel = new Set();   // 同一 selector(短选择器)一页只报一次,降噪
+        // /* allow:drop-shadow */ 注释 opt-out:从作者 <style> 收集所有 marker 规则的选择器
+        // (R20 同套 textContent 扫描 + 注释容忍拆规则)。deck 级算一次,缓存到 window。
+        let dsExemptSelectors;
+        if (typeof window !== 'undefined' && window.__R12_DS_EXEMPT__) {
+          dsExemptSelectors = window.__R12_DS_EXEMPT__;
+        } else {
+          dsExemptSelectors = [];
+          for (const { css } of iterStyleBlocks(false)) {     // 作者 CSS,排除框架
+            for (const { selector, body } of iterCssRules(css)) {
+              if (body.indexOf('allow:drop-shadow') < 0) continue;
+              for (const s of selector.split(',')) {
+                const n = s.trim();
+                if (n) dsExemptSelectors.push(n);
+              }
+            }
+          }
+          if (typeof window !== 'undefined') window.__R12_DS_EXEMPT__ = dsExemptSelectors;
+        }
+        const dsCommentExempt = (el) => {
+          for (const sel of dsExemptSelectors) {
+            try { if (el.matches && el.matches(sel)) return true; }
+            catch (e) { /* 选择器本环境无法解析 → 跳过 */ }
+          }
+          return false;
+        };
         const all = [slide, ...slide.querySelectorAll('*')];
         for (const el of all) {
           if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
           const chain = classChain(el, slide);
           if (chain.some((c) => UI_MOCK.includes(c))) continue;          // UI-mock 窗体豁免
+          if (dsCommentExempt(el)) continue;                             // /* allow:drop-shadow */ 注释豁免
           let optOut = false;
           for (let p = el; p && p !== slide.parentElement; p = p.parentElement) {
             if (p.hasAttribute && p.hasAttribute('data-allow-drop-shadow')) { optOut = true; break; }
@@ -1280,9 +1311,11 @@
       evaluate(slide, ctx) {
         const { slide_idx } = ctx;
         const authorRules = collectAuthorSoftWhiteRules();
-        if (!authorRules.length) return [];
         const findings = [];
         const flaggedSel = new Set();
+        // NB: do NOT early-return when authorRules is empty — the inline style=""
+        // second pass below must still run (a deck may carry inline soft-white with
+        // no offending author CSS rule at all). The CSS-rule loop simply no-ops.
         for (const ar of authorRules) {
           let matched;
           try { matched = slide.querySelectorAll(ar.selectorText); }
@@ -1317,6 +1350,42 @@
             color: cs.color,
             message:
               `slide ${slide_idx}: soft-white text on \`${sel}\` — \`${cs.color}\`. ` +
+              'Content text on dark slides must be `#fff` or `rgba(255,255,255,1)`. ' +
+              'Low-opacity white reads as gray when projected. Use other levers ' +
+              'for hierarchy (font-weight, font-size, background tone, border dim). ' +
+              'Opt out with data-allow-white-opacity if this is a deliberate ' +
+              'chrome exception.',
+          });
+        }
+        // inline style="" 第二遍(parity:原版 audit_white_text 在扫作者 CSS 规则之外
+        // 还扫 markup 里 `style="...color:rgba(255,255,255,<1)"` 的 inline 声明 —— 迁移时
+        // 漏掉,inline soft-white 静默漏报)。镜像 R06 的 inline 分支:遍历 slide 全体元素读
+        // el.getAttribute('style'),命中低透纯白即报。沿用同套 opt-out:
+        //   · data-allow-white-opacity(就近祖先链)豁免;
+        //   · inline 自带 font-size<=14 → chrome floor 豁免(与规则级 FS_PX_RE<=14 一致)。
+        // 用 "<inline>" 当 container_sel 锚定(原版 inline 命中无 selector 上下文)。
+        for (const el of [slide, ...slide.querySelectorAll('*')]) {
+          const tag = el.tagName;
+          if (tag === 'STYLE' || tag === 'SCRIPT') continue;
+          const styleAttr = el.getAttribute && el.getAttribute('style');
+          if (!styleAttr) continue;
+          if (!SOFT_WHITE_DECL_RE.test(styleAttr)) continue;
+          const fsM = FS_PX_RE.exec(styleAttr);
+          if (fsM && parseInt(fsM[1], 10) <= 14) continue;   // inline chrome floor 豁免
+          let optOut = false;
+          for (let p = el; p && p !== slide.parentElement; p = p.parentElement) {
+            if (p.hasAttribute && p.hasAttribute('data-allow-white-opacity')) { optOut = true; break; }
+          }
+          if (optOut) continue;
+          const cs = getComputedStyle(el);
+          findings.push({
+            rule: 'R-WHITE-TEXT',
+            severity: 'warn',
+            slide_idx,
+            container_sel: '<inline>',
+            color: cs.color,
+            message:
+              `slide ${slide_idx}: soft-white text on \`<inline>\` (${shortSel(el)}) — \`${cs.color}\`. ` +
               'Content text on dark slides must be `#fff` or `rgba(255,255,255,1)`. ' +
               'Low-opacity white reads as gray when projected. Use other levers ' +
               'for hierarchy (font-weight, font-size, background tone, border dim). ' +
@@ -1428,9 +1497,21 @@
 
         const HEX_RE = /#([0-9A-Fa-f]{3,6})\b/g;
         const counts = {};
+        const tally = (str) => {
+          if (!str) return;
+          const v = str.replace(/data:[^"'\s)]+/g, '');
+          let m;
+          HEX_RE.lastIndex = 0;
+          while ((m = HEX_RE.exec(v))) {
+            const h = m[1].toLowerCase();
+            if (ALLOWED_HEX.has(h)) continue;
+            counts[h] = (counts[h] || 0) + 1;
+          }
+        };
         // 遍历所有 slide 里元素的 inline style(markup 写死的 hex 都在这);svg 内部 / style /
         // script 跳过(原版 strip svg/style/script)。保险起见对 style 值剥掉 data: 段
         // (base64 里的 #xxx 假阳)。
+        const inlineSeen = new Set();   // (slide, el) 已计过 inline → 序列化扫描时去重
         for (const sl of slides) {
           const walker = [sl, ...sl.querySelectorAll('*')];
           for (const el of walker) {
@@ -1446,15 +1527,29 @@
             if (inSvg) continue;
             const styleAttr = el.getAttribute && el.getAttribute('style');
             if (!styleAttr) continue;
-            const v = styleAttr.replace(/data:[^"'\s)]+/g, '');
-            let m;
-            HEX_RE.lastIndex = 0;
-            while ((m = HEX_RE.exec(v))) {
-              const h = m[1].toLowerCase();
-              if (ALLOWED_HEX.has(h)) continue;
-              counts[h] = (counts[h] || 0) + 1;
-            }
+            inlineSeen.add(el);
+            tally(styleAttr);
           }
+          // parity restore:原版 audit_hex_palette 扫【整个 <body> markup】(剥
+          // script/style/svg/data:),不只是 inline style —— 文本节点 / 属性里写死的
+          // #hex(如 `<text fill="#c00">` 之外的内容、`data-color="#abc"`、纯文本提到色号)
+          // 迁移时漏掉,只剩 inline style 一路 → 大量 off-palette hex 静默漏报。
+          // 这里对 slide 的 serialized outerHTML 同款 strip(<script>/<style>/<svg>/data:)后
+          // 再扫,与上面的 inline 扫描 DE-DUPE:已在 inline 计过的元素其 style 属性会随
+          // outerHTML 再次出现,故先把这些元素的 style 值从序列化串里挖掉,避免双计。
+          let markup = slideOuterHTML(sl);
+          markup = markup
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<svg[\s\S]*?<\/svg>/gi, '');
+          // 把已 inline 计过的 style="…" 整段移除(去重,防双报)。
+          for (const el of inlineSeen) {
+            const sa = el.getAttribute && el.getAttribute('style');
+            if (!sa) continue;
+            // 移除该确切 style 值出现处(简单字面替换,够用)。
+            markup = markup.split(sa).join('');
+          }
+          tally(markup);
         }
         const extras = Object.keys(counts);
         if (!extras.length) return [];
@@ -1620,19 +1715,26 @@
 
     {
       // R38 · data-decor token 必须来自 ship list。(步骤 3 第二批迁自
-      // _validate_audits.py audit_data_decor)。原版读 slide 的 data-decor 属性、空格拆分,
-      // 任一 token 不在 ALLOWED_DECOR 即报 err。渲染后等价 = 读 .slide[data-decor]。
+      // _validate_audits.py audit_data_decor)。原版 `audit_data_decor` 用
+      // `slide_attr(fr, 'decor')` 在【整帧 markup】里找 data-decor(不限于 .slide 根元素),
+      // 渲染后等价 = .slide 自身 + 后代 querySelectorAll('[data-decor]') 全验
+      // (parity restore:之前只读 slide.getAttribute('data-decor') → 挂在 stage / 装饰子
+      // 元素上的 data-decor 拼错时静默漏报)。任一 token 不在 ALLOWED_DECOR 即报 err。
       id: 'R38',
       severity: 'error',
       evaluate(slide, ctx) {
         const { slide_idx } = ctx;
-        const decor = slide.getAttribute('data-decor');
-        if (!decor) return [];
         const findings = [];
         // 与 Python `sorted(ALLOWED_DECOR)` 的 repr 完全一致(单引号、', ' 分隔、[] 包裹)。
         const allowedRepr = '[' + [...ALLOWED_DECOR].sort().map((t) => `'${t}'`).join(', ') + ']';
-        for (const token of decor.split(/\s+/).filter(Boolean)) {
-          if (!ALLOWED_DECOR.has(token)) {
+        const seen = new Set();   // 同一 token 一帧只报一次,降噪
+        for (const el of [slide, ...slide.querySelectorAll('[data-decor]')]) {
+          const decor = el.getAttribute && el.getAttribute('data-decor');
+          if (!decor) continue;
+          for (const token of decor.split(/\s+/).filter(Boolean)) {
+            if (ALLOWED_DECOR.has(token)) continue;
+            if (seen.has(token)) continue;
+            seen.add(token);
             findings.push({
               rule: 'R38',
               severity: 'error',
@@ -2159,9 +2261,12 @@
           // echo-intentional opt-out: an author marks a leaf — or any ancestor —
           // with class `echo-intentional` to declare a DELIBERATE closing / recap
           // line that names earlier items on PURPOSE (rhetoric / call-to-action,
-          // not lazy redundancy). This contract was documented at the top of the
-          // loop since inception but never actually wired up (SKIP_PARENT_CLS only
-          // ever held structural list containers) — this is its real implementation.
+          // not lazy redundancy).
+          // NOTE (corrected): this opt-out is NEW — it was ADDED during the
+          // Python→audits.js migration. It did NOT exist in the old engine
+          // (_validate_audits.py audit_redundant_echo had NO echo-intentional
+          // escape hatch; SKIP_PARENT_CLS only ever held structural list
+          // containers). Documented in references/validator-rules.md (R-ECHO row).
           if (tgtCls.indexOf('echo-intentional') >= 0
               || parentCls.indexOf('echo-intentional') >= 0) continue;
           const looksLikeSummary = target.tag === 'p'
@@ -2647,7 +2752,16 @@
             message: `slide ${slide_idx}: missing data-screen-label`,
           });
         }
-        if (!slideHasWordmark(slide)) {
+        // R07 (missing .wordmark) EXEMPTION for canvas slides + imported decks.
+        // 941f781 removed the canvas template's .wordmark (canvas is now the ONLY
+        // fragment shipped without one), so without this carve-out every
+        // PPTX-imported / canvas deck fails R07 on EVERY slide at the
+        // --visual / ingest / publish gate. Reuse the SAME isCanvas / isImported
+        // detection the UI1 rule uses (layout === 'canvas' / deckOriginImported()).
+        // The data-layout / data-screen-label R02 checks above stay unconditional.
+        const r07IsCanvas = (layout === 'canvas');
+        const r07Imported = deckOriginImported();
+        if (!r07IsCanvas && !r07Imported && !slideHasWordmark(slide)) {
           // 文案与 Python 逐字对齐:layout 为空 → 原版 f-string 渲染 `None`(slide_attr 返回 None)。
           const layoutRepr = layout ? layout : 'None';
           findings.push({
@@ -2923,6 +3037,14 @@
           if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
           const cs = getComputedStyle(el);
           if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          // L4 / coverage-boundary note (deliberate): position:absolute|fixed elements
+          // are EXCLUDED here per VISUAL-AUDIT-SETTLED-STATE-SPEC §2A — they are decorative
+          // (glow / drift) layers meant to bleed past the canvas and be clipped by
+          // `.slide { overflow:hidden }`, so counting them produced false ERRORs. The
+          // tradeoff (coverage boundary): genuine ABSOLUTELY-POSITIONED *content* that
+          // overflows the canvas is NOT caught by R-OVERFLOW. That is intentional; if it
+          // ever needs catching it belongs to a dedicated abspos-content rule
+          // (cf. R-VIS-BAND-COLLIDE for absolute content bands), not a relaxation here.
           if (cs.position === 'absolute' || cs.position === 'fixed') return;  // 装饰/glow,bleed by design
           const tag = el.tagName;
           const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg'
@@ -3083,6 +3205,12 @@
         // descendant — or el's own direct text — actually extends past el's box on
         // `axis` ('y'|'x'). When el has NO absolute|fixed descendant the scroll metric
         // is already trustworthy → returns true (preserves existing behavior).
+        // L4 / coverage-boundary note (deliberate): this carve-out trusts that
+        // absolute|fixed descendants are decorations. The tradeoff is that genuine
+        // ABSOLUTELY-POSITIONED *content* overflowing its card is NOT flagged as a
+        // card overflow — same intentional abspos-decoration exclusion as R-OVERFLOW
+        // above. Catching abspos content collisions is R-VIS-BAND-COLLIDE / R-OVERLAP's
+        // job, not this rule's, so we do not relax the guard here.
         const _cardRealOverflow = (el, axis) => {
           const all = [...el.querySelectorAll('*')];
           const hasAbs = all.some((d) => {
@@ -3637,7 +3765,6 @@
         const headerRendered = !!header && header.getClientRects().length > 0;
         let tgTitleRect = null, tgTitleSel = null, tgContentTop = Infinity;
         let tgBandBottom = null;   // bottom of the title band (title, or title+subtitle)
-        let tgSubtitleProtected = false;  // a subtitle sits under the title → title can't be crowded
         const tgStage = slide.querySelector(':scope > .stage');
         if (headerRendered && tgStage) {
           tgTitleRect = header.getBoundingClientRect();
@@ -3656,7 +3783,14 @@
           }
         } else if (!header) {
           const sr = slide.getBoundingClientRect();
-          let tEl = null, tTop = Infinity;
+          // Collect ALL qualifying title candidates (top 40% of slide, ≥24px own-text)
+          // sorted top→bottom — NOT just the single topmost. The same-row-peer guard
+          // below then skips ONLY a candidate that is a column-row anchor (it shares
+          // its row with a similar-size peer) and falls through to the next candidate,
+          // instead of bailing the WHOLE slide. That way a genuine page title sitting
+          // ABOVE a row of column anchors is still checked for crowding (N2 fix: the
+          // old `return []` silenced every other crowded title on the slide).
+          const titleCandidates = [];
           for (const el of slide.querySelectorAll('*')) {
             if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
             if (!hasOwnText(el)) continue;
@@ -3667,7 +3801,34 @@
             const r = el.getBoundingClientRect();
             if (r.width <= 40 || r.height <= 16) continue;
             if ((r.top - sr.top) > sr.height * 0.4) continue;
-            if (r.top < tTop) { tTop = r.top; tEl = el; }
+            titleCandidates.push(el);
+          }
+          titleCandidates.sort((a, b) =>
+            a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+          // Pick the topmost candidate that is NOT a column-row anchor. A column anchor
+          // shares its row with another similar-size text block (e.g. `GPT之前 /
+          // GPT时代 / Agent时代`, product-pane headers): treating a column's own content
+          // as "crowding a column heading" is a false positive, so skip THAT candidate
+          // and try the next (a real page title is alone on its top row).
+          let tEl = null;
+          for (const cand of titleCandidates) {
+            const candRect = cand.getBoundingClientRect();
+            const candFs = parseFloat(getComputedStyle(cand).fontSize) || 0;
+            let candHasPeer = false;
+            for (const el of slide.querySelectorAll('*')) {
+              if (el === cand || cand.contains(el) || el.contains(cand)) continue;
+              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+              if (!hasOwnText(el)) continue;
+              const cs = getComputedStyle(el);
+              if (cs.position === 'absolute' || cs.position === 'fixed') continue;
+              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+              const fs = parseFloat(cs.fontSize) || 0;
+              if (!(candFs > 0 && fs >= candFs * 0.75 && fs <= candFs * 1.25)) continue;
+              const r = el.getBoundingClientRect();
+              if (r.width <= 40 || r.height <= 16) continue;
+              if (Math.abs(r.top - candRect.top) < candRect.height * 0.6) { candHasPeer = true; break; }
+            }
+            if (!candHasPeer) { tEl = cand; break; }   // first non-column-anchor title → protect this one
           }
           if (tEl) {
             tgTitleRect = tEl.getBoundingClientRect();
@@ -3684,29 +3845,9 @@
             // is excluded from the content scan. A tall/large block right under the
             // title is NOT a subtitle and still fires (real crowding).
             const titleFs = parseFloat(getComputedStyle(tEl).fontSize) || 0;
-            // Multi-column-header guard: if the picked "title" shares its row with
-            // another similar-size text block, it is NOT the page title but one of a
-            // ROW of column anchors (e.g. `GPT之前 / GPT时代 / Agent时代`, or product
-            // pane headers). Treating a column's own content as "crowding a column
-            // heading" is a false positive — and on a slide whose real page title is
-            // rendered as chrome (not inside the stage) there is no title here to
-            // protect at all. Bail. Pure geometry, name-free: a real page title is
-            // alone on its top row; column anchors are not.
-            let sameRowPeer = false;
-            for (const el of slide.querySelectorAll('*')) {
-              if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
-              if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
-              if (!hasOwnText(el)) continue;
-              const cs = getComputedStyle(el);
-              if (cs.position === 'absolute' || cs.position === 'fixed') continue;
-              if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
-              const fs = parseFloat(cs.fontSize) || 0;
-              if (!(titleFs > 0 && fs >= titleFs * 0.75 && fs <= titleFs * 1.25)) continue;
-              const r = el.getBoundingClientRect();
-              if (r.width <= 40 || r.height <= 16) continue;
-              if (Math.abs(r.top - tgTitleRect.top) < tgTitleRect.height * 0.6) { sameRowPeer = true; break; }
-            }
-            if (sameRowPeer) return [];
+            // (Column-row-anchor guard is now done during candidate selection above —
+            //  `tEl` is already the topmost title that does NOT share its row with a
+            //  similar-size peer, so the old slide-wide `return []` bail is gone: N2.)
             // Subtitle-folding: a bespoke title is frequently followed immediately by
             // its OWN subtitle (smaller font, ~single line, a few px below). That
             // subtitle is part of the title group, NOT content crowding the title.
@@ -3725,11 +3866,11 @@
               if (r.top < tgTitleRect.bottom - 2) continue;            // must sit below title
               const fs = parseFloat(cs.fontSize) || 0;
               const isSubtitle = fs > 0 && fs < titleFs
-                && r.height <= fs * 2.0                                // ~single line (fs & height share scale)
+                && r.height <= fs * 2.0 * _scale                       // ~single line — rect height is SCALED (getBoundingClientRect), fs is UNSCALED computed px, so multiply the fs budget by _scale to compare like-for-like (same fix the sibling-distance test already applies below)
                 && (r.top - tgTitleRect.bottom) < 24 * _scale;         // hugging the title
               if (isSubtitle && r.top < subTop) { subTop = r.top; subEl = el; }
             }
-            if (subEl) { tgBandBottom = subEl.getBoundingClientRect().bottom; tgSubtitleProtected = true; }
+            if (subEl) { tgBandBottom = subEl.getBoundingClientRect().bottom; }  // fold subtitle into the band; body floor still measured from this band bottom (M2)
             for (const el of slide.querySelectorAll('*')) {
               if (el === tEl || tEl.contains(el) || el.contains(tEl)) continue;
               if (subEl && (el === subEl || subEl.contains(el) || el.contains(subEl))) continue;
@@ -3756,12 +3897,16 @@
           return [];
         }
         const gap = (tgContentTop - tgBandBottom) / _scale;
-        // Floor: 24px breathing room below the title band. BUT when a subtitle was
-        // folded into the band, the title is already protected by the subtitle
-        // beneath it — a deliberate, sub-24px layout gap between that head and the
-        // body is by design, not crowding (false-positived P5/P8). With a subtitle
-        // present only a real OVERLAP (gap < 0) means content is colliding upward.
-        const floor = tgSubtitleProtected ? 0 : 24;
+        // Floor: 24px breathing room below the title band. When a subtitle is folded
+        // into the band, `tgBandBottom` is the SUBTITLE bottom (the title is already
+        // protected by the subtitle beneath it), so the gap is measured from the
+        // subtitle band — but the BODY still must keep ~24px below that band, not 0.
+        // M2 fix: the old `floor = 0` for folded subtitles silenced real 0–24px body
+        // crowding under the subtitle (the title was protected, but the body could
+        // jam right up against the subtitle and never fire). Keeping floor=24 measured
+        // from the subtitle band bottom protects BOTH the title (via the band) and the
+        // subtitle band's own breathing room.
+        const floor = 24;
         if (gap >= floor) return [];
         const gapPx = Math.round(gap);
         // validate.py: _lev = err if gap_px<12 else warn(逐字搬)。

@@ -60,7 +60,8 @@ FAMILIES = [
                               'R-VIS-CROWD', 'R-VIS-PANEL-TOP', 'R-VIS-TITLE-GAP', 'R-VIS-PEER-SIZE',
                               'R-VIS-GUTTER', 'R-VIS-HERO-FLOOR',
                               'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-CANVAS-CENTER',
-                              'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE']),
+                              'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE',
+                              'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS']),
 ]
 
 CONTEXT_NOTES = {

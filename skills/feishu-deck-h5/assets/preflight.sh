@@ -21,10 +21,10 @@
 #
 # Why bootstrap exists: harnesses like Mira mount the skill read-only into
 # /opt or similar. We can't write runs/<ts>/{input,output}/ next to assets/
-# in that case. Instead we mirror the skill (minus runs/, caches, *.bak, and
-# the heavy pptx example corpus) into $PWD/.feishu-deck-h5-workspace (override
-# via FS_DECK_WORKSPACE env var), and tell the agent to cd there. All relative
-# paths inside the skill (CSS link, template lookups, render.py) keep working.
+# in that case. Instead we mirror the skill (minus runs/, caches, and *.bak)
+# into $PWD/.feishu-deck-h5-workspace (override via FS_DECK_WORKSPACE env var),
+# and tell the agent to cd there. All relative paths inside the skill (CSS link,
+# template lookups, render.py) keep working.
 #
 # The mirror uses the fastest tool available and falls back to python3, which
 # the skill already hard-requires to render — so it never hard-depends on
@@ -123,9 +123,10 @@ if ! ( touch "$PROBE" 2>/dev/null && rm -f "$PROBE" 2>/dev/null ); then
   # fall back to python3 (guaranteed present — the skill can't render without
   # it). This removes the old hard dependency on rsync. Excludes keep the
   # mirror lean: runs/ (user outputs, preserved if already there), VCS/cache
-  # cruft, editor noise, *.bak snapshots, and the 689 MB pptx example corpus —
-  # none are needed to RENDER a deck, and copying them on every RO bootstrap
-  # was a real perf/timeout risk on slim cloud images.
+  # cruft, editor noise, and *.bak snapshots — none are needed to RENDER a deck.
+  # (The heavy pptx example corpus is no longer here to exclude: it moved to the
+  # sibling skills/pptx-to-deck/, which lives OUTSIDE SKILL_ROOT and is never
+  # mirrored, so the old corpus-exclude was dropped.)
   MIRROR_OK=0
   MIRROR_TOOL=""
   if command -v rsync >/dev/null 2>&1; then
