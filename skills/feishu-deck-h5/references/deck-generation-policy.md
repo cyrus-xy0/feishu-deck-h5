@@ -161,6 +161,85 @@ No eyebrow above, no subtitle below, no inner wrapper, and no inline page number
 Hero layouts such as cover/image-text/end own their own title patterns and are the
 exception. Validator R56 enforces this, but authors should construct it correctly.
 
+### This applies to `layout: "raw"` pages too — use the framework header, not a bespoke one
+
+A raw content page MUST author its title with **this exact framework structure**
+(`<div class="header"><h2 class="title-zh">…</h2></div>`), NOT a hand-invented
+`.r-head` / `.r-title` / `.raw-stage` header. The framework already positions
+`.slide[data-layout="raw"] .header` at the master baseline (top:61, see
+`feishu-deck.css`), so you get correct placement for free and — critically — the
+whole **header-guard family engages**. Those guards key off `.header` / `.title-zh`
+and **silently skip any raw page that uses custom header classes**:
+
+| Guard | What it enforces | Selector it needs |
+|---|---|---|
+| **R56** | title-only header (no eyebrow / no subtitle stacked above/below the title) | `.header .eyebrow` |
+| **R-VIS-TITLE-POSITION** | title sits at the master baseline (~top:61) | `:scope > .header > h2.title-zh` |
+| **R-EMPTY-HEADER-ZONE** | header band isn't left visually empty | `:scope > .header` |
+| **R-VIS-TITLE-GAP** | body doesn't crowd/overlap the title | `.header` + `.stage` |
+
+The only raw fallback, **R-VIS-RAW-TITLE-POS**, is a name-free heuristic that just
+measures the top of the tallest ≥32px text block — it catches a title pushed *down*
+but does **not** catch a two-layer header (eyebrow stacked above the title), because
+folding a kicker into the same `h2` keeps the measured element-top at the baseline.
+That is exactly how a "飞书 不合规的双层标题" slips through: invent `.r-head` +
+a kicker line, pass the geometry check, ship a non-compliant header.
+
+**Rules for raw content pages:**
+
+- Title is a **single line**: `<h2 class="title-zh">…</h2>` inside `.header`.
+  Section numbers (`变化 03 · …`) go **inline in that one line**, never as a second
+  stacked line above it.
+- Do not invent `.r-head` / `.r-title`. Reuse `.header` / `.title-zh` so the guards
+  above actually run. Restyle emphasis spans as `.header .hl` / `.header .q`, etc.
+- A validator firing (e.g. R-VIS-RAW-TITLE-POS) is a **design signal, not a red
+  light to silence**: fix the structural cause (remove the extra layer / use the
+  framework header), do not relocate the box or add an opt-out just to pass.
+
+### Other schema-keyed checks that raw can bypass
+
+Several card/column checks early-return unless the page uses framework class names.
+If a raw page hand-rolls its own card/column classes, these **skip silently** —
+reuse the framework names (or accept they won't audit your bespoke boxes):
+
+| Check | Needs class | Effect on raw with custom names |
+|---|---|---|
+| R-VIS-CARD-OVERFLOW / R-VIS-CARD-MIN-HEIGHT-SPARSE | `.card` | card overflow / min-height not audited |
+| R-VIS-LABEL-FLOOR (card-label floor) | `.card` / `.col` | in-card label size floor not enforced |
+| R-VIS-PEER-SIZE / R-VIS-ALIGN (card pass) | `.card` / `.col` | peer-size & alignment checks skip |
+
+Universal checks (font-tier R-VIS-TIER, body-floor, overflow/overlap geometry,
+canvas-center, CSS-var, language R-LANG, focal, dead-rule, DOM order) are
+name-free and **do** run on raw — those you cannot dodge by renaming.
+
+## Text Color & Contrast
+
+Base ink is pure `#fff` on the dark canvas. **Content text must stay bright** —
+use `var(--fs-text)` (or `#fff`). Build hierarchy from **font-weight, font-size,
+background tone, and accent color — never from text opacity.** Low-opacity white
+reads as washed-out grey when projected.
+
+- Body / list / description / summary / card copy → `var(--fs-text)`.
+- Secondary lines → still `var(--fs-text)`, differentiated by weight/size, not by
+  dimming.
+- The dim tokens `--fs-text-72 / -65 / -40` are for **chrome only** (footnote,
+  source, axis tick, eyebrow, page number, placeholder). `--fs-text-40` in
+  particular is the dimmest chrome tier — never put sentence-like content on it.
+- **Never write a literal `rgba(255,255,255,<1)` for text color.** Use the tokens.
+  A raw soft-white literal trips **R-WHITE-TEXT**; if you genuinely need a soft
+  chrome exception, add `data-allow-white-opacity` on the element.
+
+Two validators enforce this, and they are complementary — do not rely on only one:
+
+| Rule | Mechanism | Catches |
+|---|---|---|
+| **R-WHITE-TEXT** | scans **author CSS source** for literal `rgba(255,255,255,<1)` text | hand-written soft-white literals |
+| **R-VIS-DIM-TEXT** | reads **computed DOM** color (token/inherit resolved); flags ≥8-char near-grey body text with effective brightness < 0.5 | soft-white delivered via `var(--fs-text-40)` etc. — the gap R-WHITE-TEXT can't see through. Brand-accent (blue/orange/violet) text is exempt (saturated, intentional). Opt out a deliberate dim note with `data-allow-dim-text`. |
+
+The failure mode this prevents: a deck that pipes content through `--fs-text-40`
+passes the CSS-source scan (it sees a token, not a literal) yet projects as
+illegible grey. Author bright, dim only true chrome.
+
 ## Performance Budget
 
 Keep decks lean. Validator `audit_perf` enforces P50-P55:

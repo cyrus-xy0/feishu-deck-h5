@@ -51,7 +51,7 @@ FAMILIES = [
     ('演示模式 / 运行时',    ['R29-32']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
     ('视觉 (Playwright)',    ['R-OVERFLOW', 'R-OVERLAP', 'R-VIS-TIER', 'R-VIS-HIER',
-                              'R-VIS-LABEL-FLOOR', 'R-VIS-BODY-FLOOR',
+                              'R-VIS-LABEL-FLOOR', 'R-VIS-BODY-FLOOR', 'R-VIS-DIM-TEXT',
                               'R-VIS-ABSPOS-DUAL-ANCHOR',
                               'R-VIS-CARD-OVERFLOW', 'R-VIS-OPT-OUT-ABUSE',
                               'R-VIS-TITLE-POSITION', 'R-VIS-ORPHAN', 'R-VISUAL',

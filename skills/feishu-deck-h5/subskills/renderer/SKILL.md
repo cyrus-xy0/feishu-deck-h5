@@ -73,6 +73,13 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
 - For raw slides, prefer `fs-` component classes and narrative patterns from the
   references before inventing ad-hoc CSS. If the raw page is only a plain card
   list, use `content/3up` or `content/blocks` instead.
+- For a raw **content page title**, use the framework header verbatim —
+  `<div class="header"><h2 class="title-zh">…</h2></div>`, title-only, single line
+  (section number inline). Do NOT invent `.r-head` / `.r-title`: the header guards
+  (R56 title-only, R-VIS-TITLE-POSITION, R-EMPTY-HEADER-ZONE, R-VIS-TITLE-GAP) only
+  fire on `.header`/`.title-zh` and silently skip a custom raw header. See
+  `references/deck-generation-policy.md` → "Content Header Rule" for the full gap
+  list of schema-only checks raw can bypass.
 - Do not use emoji or hand-drawn approximations for official Feishu product icons.
   Use the official asset pool described in `assets-and-files.md`.
 

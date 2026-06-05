@@ -927,6 +927,93 @@
   // ==========================================================================
   //  规则注册表 —— 唯一规则源。新增规则 = 往这里加一个 (slide, ctx) => findings。
   // ==========================================================================
+  // ==========================================================================
+  //  RULE_META · 覆盖契约登记表 (UNIFY-VALIDATE-ARCH §coverage, 2026-06-05)
+  //  每条规则声明: coverage(universal|schema-only|raw-only|partial|stub) + signal
+  //  (dom|css-source|text|bytes)。assertRuleContract() 强制:① RULES 每条都在此登记;
+  //  ② coverage:'schema-only'|'raw-only'|'stub' 必须带 optout 辩护(为何不是 universal /
+  //  raw 兜底计划)。新规则【默认 universal】(name-free,raw+schema 同覆盖);收窄要在此交
+  //  可审查的税。测试 deck-json/tests/test_rule_contract.py 在 CI 阻断未登记/未辩护的规则。
+  const RULE_META = {
+    'R-VIS-CANVAS-CENTER': { coverage: 'schema-only', signal: 'dom', optout: 'geometry needs framework .header; raw twin via [data-role=header] TODO (PR2)' },
+    'R-VIS-FILL': { coverage: 'raw-only', signal: 'dom', optout: 'layout!=="raw" early-return — name-free fill check, raw by design' },
+    'R-ESC-HTML': { coverage: 'universal', signal: 'text' },
+    'R12': { coverage: 'universal', signal: 'dom' },
+    'R49': { coverage: 'universal', signal: 'dom' },
+    'R-BULLET-DASH': { coverage: 'universal', signal: 'dom' },
+    'R-WHITE-TEXT': { coverage: 'schema-only', signal: 'css-source', optout: 'css-source scan requires selector .slide/.card/.col; computed-DOM twin = R-VIS-DIM-TEXT' },
+    'R-CSSVAR': { coverage: 'partial', signal: 'css-source', optout: 'deck-level css-source scan; name-free but single-shot' },
+    'R10': { coverage: 'universal', signal: 'css-source' },
+    'R-KEY': { coverage: 'universal', signal: 'dom' },
+    'R07': { coverage: 'schema-only', signal: 'dom', optout: 'targets framework .wordmark.is-mono (auto-injected); only meaningful when .wordmark reused' },
+    'R13': { coverage: 'universal', signal: 'dom' },
+    'R38': { coverage: 'universal', signal: 'dom' },
+    'R-LANG': { coverage: 'universal', signal: 'text' },
+    'R06': { coverage: 'universal', signal: 'css-source' },
+    'R20': { coverage: 'universal', signal: 'css-source' },
+    'R-HIERARCHY': { coverage: 'schema-only', signal: 'css-source', optout: 'META_CLASS_RE hard gate (.owner/.kicker/.eyebrow); kicker vs caption indistinguishable by geometry — intrinsically name-bound' },
+    'R05': { coverage: 'universal', signal: 'text' },
+    'R56': { coverage: 'universal', signal: 'dom' },
+    'R-ECHO': { coverage: 'universal', signal: 'text' },
+    'R36': { coverage: 'partial', signal: 'css-source', optout: 'margin check name-free / grid check keyed on framework [data-mode=present]' },
+    'R48': { coverage: 'schema-only', signal: 'css-source', optout: 'CSS regex keyed on [data-layout="<6 centerable>"]; raw via [data-role=stage] TODO (PR2)' },
+    'R-EMPTY-HEADER-ZONE': { coverage: 'schema-only', signal: 'dom', optout: 'keyed on .header literal; raw via [data-role=header] + geometry TODO (PR2)' },
+    'R47': { coverage: 'partial', signal: 'css-source', optout: 'css-source variant-discipline scan keyed on [data-variant]' },
+    'R29-32': { coverage: 'universal', signal: 'css-source' },
+    'R-VIS-NO-IMAGERY': { coverage: 'universal', signal: 'dom' },
+    'R02-R07-STRUCTURE': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-LIFT-STYLE-LOST': { coverage: 'raw-only', signal: 'dom', optout: 'lifted raw slide style-preservation, raw by design' },
+    'R-AUTOBALANCE-PRESENT': { coverage: 'universal', signal: 'dom' },
+    'R-RAW-LOOKS-SCHEMA': { coverage: 'raw-only', signal: 'dom', optout: 'warns when a raw page should be schema — raw by design' },
+    'R-OVERFLOW': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-CARD-OVERFLOW': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-TIER': { coverage: 'partial', signal: 'dom', optout: 'card path keyed on .col/.num then name-free fallback' },
+    'R-VIS-HIER': { coverage: 'partial', signal: 'dom', optout: 'card hierarchy keyed on .card' },
+    'R-VIS-BODY-FLOOR': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-DIM-TEXT': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-ORPHAN': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-TITLE-POSITION': { coverage: 'schema-only', signal: 'dom', optout: 'keyed on :scope>.header>.title-zh; raw title position covered by R-VIS-RAW-TITLE-POS twin' },
+    'R-VIS-RAW-TITLE-POS': { coverage: 'raw-only', signal: 'dom', optout: 'layout!=="raw" — the geometric raw twin of R-VIS-TITLE-POSITION' },
+    'R-VIS-TITLE-GAP': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-CROWD': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-PANEL-TOP': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-BALANCE': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-GUTTER': { coverage: 'universal', signal: 'dom' },
+    'R-OVERLAP': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-BAND-COLLIDE': { coverage: 'schema-only', signal: 'dom', optout: 'host set = framework .stage/.grid/.flow...; raw via [data-role=flow|content-band] TODO (PR2)' },
+    'R-VIS-ABSPOS-DUAL-ANCHOR': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-SLACK-FLEX': { coverage: 'universal', signal: 'dom' },
+    'R-FOCAL-CHECK': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-PEER-SIZE': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-ALIGN': { coverage: 'stub', signal: 'dom', optout: 'migrated stub — evaluate() returns [] (no consumer); declared dead, not a gap' },
+    'R-VIS-LABEL-FLOOR': { coverage: 'partial', signal: 'dom', optout: 'card label floor keyed on .card/-card/-tile/-cell/-panel/-box' },
+    'R-VIS-OPT-OUT-ABUSE': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-CARD-MIN-HEIGHT-SPARSE': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-HERO-FLOOR': { coverage: 'schema-only', signal: 'dom', optout: 'HERO_FLOORS[layout] dict excludes raw; cheap name-free geometric twin TODO (PR2)' },
+    'R-VIS-SHORT-LABEL-FLOOR': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-DEAD-ANIM': { coverage: 'universal', signal: 'css-source' },
+    'R-VIS-DEAD-RULE': { coverage: 'universal', signal: 'css-source' },
+    'R-DOM': { coverage: 'universal', signal: 'dom' },
+    'UI1': { coverage: 'universal', signal: 'dom' },
+  };
+
+  // Contract assertion — pure data check, never throws at engine load (a bad entry
+  // must fail CI, not break every deck's validation). Returns a list of violations.
+  function assertRuleContract(ruleIds, meta) {
+    const v = [];
+    for (const id of ruleIds) {
+      const m = meta[id];
+      if (!m) { v.push(`${id}: no RULE_META entry (declare coverage)`); continue; }
+      if ((m.coverage === 'schema-only' || m.coverage === 'raw-only' || m.coverage === 'stub') && !m.optout) {
+        v.push(`${id}: coverage='${m.coverage}' requires an optout justification`);
+      }
+    }
+    for (const id of Object.keys(meta)) {
+      if (!ruleIds.includes(id)) v.push(`${id}: RULE_META entry has no matching rule in RULES`);
+    }
+    return v;
+  }
+
   const RULES = [
     {
       // R-VIS-CANVAS-CENTER · 内容并集相对"画布"垂直居中 (2026-05-31)
@@ -3553,6 +3640,88 @@
     },
 
     {
+      // R-VIS-DIM-TEXT · 正文文字对比度过低(在深色画布上发灰看不清)。新增 2026-06-05。
+      //   与 R-WHITE-TEXT 互补:R-WHITE-TEXT 扫【作者 CSS 源】的字面 rgba(255,255,255,<1),
+      //   看不穿框架 token —— `color:var(--fs-text-40)` 解析后是软白却被它漏掉(本规则诞生的
+      //   导火索:一份 deck 用 --fs-text-40 写正文,投影全灰,R-WHITE-TEXT 一条没报)。本条走
+      //   【computed DOM】,token/继承都已解析,正补这个盲区。
+      //   feishu-deck 基础 ink 是纯 #fff,`--fs-text-40`(白@0.40)是 chrome 专用档;把它
+      //   (或更暗的纯灰)用在句子型正文上 → 投影发灰。几何 name-free:遍历叶元素,有直接
+      //   文本(≥8 字、非 chrome 类、非 mock、非隐藏),解析 computed color 的有效亮度
+      //   eff = alpha × 相对亮度;eff < 0.5(≈ 白@0.5 以下 / 深纯灰)→ warn。chrome
+      //   (.footnote/.source/.eyebrow/.pageno…)本就该暗,经 chrome-class 豁免;确属设计
+      //   意图的暗注记 → 元素加 `data-allow-dim-text`。warn(对比度是启发式 + 不破坏存量交付)。
+      //   阈值 0.5 放过框架 sanctioned 的 body 0.72 / sub 0.65,只逮把 0.40 档误用到正文。
+      id: 'R-VIS-DIM-TEXT',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        if (isHeroLayout) return [];
+        const findings = [];
+        const seen = new Set();
+        slide.querySelectorAll('*').forEach((el) => {
+          if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          let txt = '';
+          for (const n of el.childNodes) if (n.nodeType === 3) txt += n.textContent;
+          txt = txt.trim();
+          if (txt.length < 8) return;                                   // sentence-like body only
+          // ALL-CAPS Latin = eyebrow / footer / tag convention (e.g. "MESSENGER · DOCS"):
+          // chrome-by-convention even without a chrome class, and meant to read dim. Skip.
+          if (/[A-Z]/.test(txt) && !/[a-z\u4e00-\u9fff]/.test(txt)) return;
+          // Bilingual EN sub-track (.title-en / .subtitle-en / .label-en …): an
+          // intentionally de-emphasised secondary translation line (R-LANG owns it),
+          // not body — skip so DIM-TEXT doesn't flag every bilingual deck's EN row.
+          {
+            const _cls = (el.className && el.className.baseVal !== undefined
+              ? el.className.baseVal : (el.className || '')).toString();
+            if (/(?:^|\s)[\w-]*-en(?:\s|$)/.test(_cls)) return;
+          }
+          if (visHasAnyClass(el, VIS_CONTENT_CHROME_CLASSES)) return;   // chrome may legitimately be dim
+          let inMock = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+          }
+          if (inMock) return;
+          let allowOut = false;
+          for (let n = el; n; n = n.parentElement) {
+            if (n.dataset && n.dataset.allowDimText != null) { allowOut = true; break; }
+          }
+          if (allowOut) return;
+          const m = (cs.color || '').match(/rgba?\(([^)]+)\)/);
+          if (!m) return;
+          const p = m[1].split(',').map((s) => parseFloat(s));
+          if (p.length < 3) return;
+          const maxc = Math.max(p[0], p[1], p[2]);
+          const minc = Math.min(p[0], p[1], p[2]);
+          if (maxc - minc > 40) return;                                 // saturated brand-accent text (blue/orange/violet) — intentional color, NOT washed-out grey
+          const a = p.length >= 4 ? p[3] : 1;
+          const lum = (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255;
+          const eff = a * lum;                                          // effective brightness on dark canvas
+          if (eff >= 0.5) return;                                       // framework body 0.72 / sub 0.65 pass
+          const sel = shortSel(el);
+          const key = `${slide_idx}::${sel}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const preview = txt.length > 40 ? txt.slice(0, 40) + '…' : txt;
+          findings.push({
+            rule: 'R-VIS-DIM-TEXT', severity: 'warn', slide_idx,
+            selector: sel, effective_brightness: Math.round(eff * 100) / 100,
+            message:
+              `slide ${slide_idx} · \`${sel}\` 正文 ("${preview}") 有效亮度仅 `
+              + `${Math.round(eff * 100)}% —— 深色画布上发灰看不清(基础 ink 是纯 #fff,`
+              + `--fs-text-40 / 0.40 是 chrome 专用档,别用在句子型正文上)。`
+              + `Fix: 正文用 var(--fs-text) 或 ≥ 0.84 亮度,次要说明 ≥ 0.72;`
+              + `真要暗的注记 → 用 .footnote / .source 等 chrome 类,或元素加 data-allow-dim-text。`,
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
       // R-VIS-ORPHAN · CJK 孤字 / 上长下短 失衡换行。(步骤 3 第六批迁自 visual-audit.js 的
       // orphan producer + validate.py 的 orphan 消费段)。几何逐字搬:每个 CJK 叶元素(无块级
       // 子元素、非 SVG 文本、CJK≥4、非 mock-internal、非 nowrap/pre),按 line-box 量行宽;
@@ -5664,6 +5833,14 @@
         try {
           const fs = rule.evaluate(slide, ctx) || [];
           for (const f of fs) findings.push(f);
+          // Coverage hook (UNIFY-VALIDATE-ARCH): a schema-keyed rule may carry a
+          // name-free geometric twin `rawFallback(slide, ctx)` for raw pages whose
+          // bespoke markup its main selector can't see. It self-guards (bails if the
+          // framework hook IS present) so no double-report. Dormant until defined.
+          if (layout === 'raw' && typeof rule.rawFallback === 'function') {
+            const rf = rule.rawFallback(slide, ctx) || [];
+            for (const f of rf) findings.push(f);
+          }
         } catch (e) {
           findings.push({
             rule: rule.id, severity: 'error', slide_idx,
