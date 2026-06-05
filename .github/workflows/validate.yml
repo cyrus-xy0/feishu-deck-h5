@@ -79,7 +79,15 @@ jobs:
         run: python3 assets/validate.py examples/sample-deck-inline.html --strict
 
       - name: DeckJSON unit tests
-        run: python3 -m unittest discover -s deck-json/tests -p 'test_*.py'
+        # The suite migrated to pytest (fixtures / skips / parametrize) during the
+        # UNIFY-VALIDATE-ARCH refactor, so `unittest discover` errors on import
+        # (ModuleNotFoundError: pytest). Install pytest and run pytest. Chromium is
+        # not installed on the runner, so the browser-backed visual tests skip via
+        # their `_chromium_ok()` / `skip_if_no_engine()` graceful-degrade guards —
+        # the byte/source + logic tests (contracts, golden, byte rules) all run.
+        run: |
+          pip install pytest
+          python3 -m pytest deck-json/tests/ -q
 
       - name: Summary
         if: always()
