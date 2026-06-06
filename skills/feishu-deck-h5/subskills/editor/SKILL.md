@@ -139,6 +139,13 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
 
 ## References To Load As Needed
 
+- `../../references/layout-recipes.md` — **read before editing the layout / fill /
+  whitespace of a `layout:"raw"` slide.** Sparse content does NOT get fixed by
+  stretching bordered cards (`min-height` / `flex:1`) to reach the floor — that
+  makes hollow cards (content jammed top, dead air middle). Re-shape to a layout
+  that fills 16:9 by nature (vertical flow, wide stacked rows, tall hero beside
+  stacked annotations) and keep growing visuals borderless. See "Raw slides +
+  genuinely-sparse content".
 - `../../references/editing-discipline.md`
 - `../../references/request-router.md`
 - `../../references/deck-generation-policy.md`
