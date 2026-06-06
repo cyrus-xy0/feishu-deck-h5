@@ -29,7 +29,15 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
 ## Mode Routing
 
 - **Small edit**: lock slide key/scope, edit `deck.json`, render, validate only
-  locked slide(s).
+  locked slide(s). The locked scope is the boundary for the re-render too — pass it
+  to `render-deck.py` so downstream steps don't re-process the whole deck. For an
+  edit confined to specific pages, re-render with `--scope N` (1-based page numbers,
+  e.g. `--scope 1` or `--scope 3,5`): it refreshes only those pages in the making-of
+  and skips the whole-deck readability advisory + geometry audit, cutting a 50-page
+  re-render from ~2m12s to ~12s while still capturing the changed page's screenshot.
+  Use `--quick` instead when you don't need the making-of updated this run (skips the
+  snapshot entirely, ~12-18s). Full render (no flag) only for a new deck or a
+  whole-deck change. See `references/editing-discipline.md` → "Re-render speed".
 - **EDIT_IMPORTED_HTML**: user wants to modify the uploaded/current HTML itself.
   Require existing-state artifacts first: `input/source.html`,
   `input/runtime-library/source-dossier.json`, `output/DESIGN-PLAN.md`,

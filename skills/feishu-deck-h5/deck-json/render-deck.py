@@ -1910,7 +1910,7 @@ def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
 # Main render
 # ---------------------------------------------------------------------------
 
-def _maybe_auto_snapshot(out_html) -> None:
+def _maybe_auto_snapshot(out_html, scope=None) -> None:
     """渲染成功后,给开着制作日志(log/)的 deck 自动拍一版 deck-log snapshot。
 
     为什么放这里(代码)而不是 harness hook:render-deck.py 是 SKILL 硬闸
@@ -1953,13 +1953,26 @@ def _maybe_auto_snapshot(out_html) -> None:
             if not (run_root / "log").is_dir():     # init 没成(没装依赖 / 异常)→ 别硬拍
                 return
             print(f"\n[deck-log] 自动补建制作日志(此 run 未走 new-run.sh)→ {run_root.name}/log/")
-        r = subprocess.run(
-            [sys.executable, str(deck_log), "snapshot", str(run_root),
-             "--label", "auto · post-render"],
-            capture_output=True, text=True, timeout=120, env=env)
-        first = (r.stdout.strip().splitlines() or [""])[0] if r.stdout else ""
-        if r.returncode == 0 and first:
-            print(f"\n[deck-log] {first}")
+        if scope:
+            # 锁定编辑:范围作为边界传到 snapshot —— 只刷改动页(snapshot --slide N
+            # 走单页路径:只截那一页、跳过整片几何审计、刷新 making-of、不新建版本),
+            # 而不是把整份 deck 重拍重审。N 是 1-based 页号(= URL #N = frame_index)。
+            for n in scope:
+                r = subprocess.run(
+                    [sys.executable, str(deck_log), "snapshot", str(run_root),
+                     "--slide", str(n)],
+                    capture_output=True, text=True, timeout=120, env=env)
+                first = (r.stdout.strip().splitlines() or [""])[0] if r.stdout else ""
+                if r.returncode == 0 and first:
+                    print(f"\n[deck-log] {first}")
+        else:
+            r = subprocess.run(
+                [sys.executable, str(deck_log), "snapshot", str(run_root),
+                 "--label", "auto · post-render"],
+                capture_output=True, text=True, timeout=120, env=env)
+            first = (r.stdout.strip().splitlines() or [""])[0] if r.stdout else ""
+            if r.returncode == 0 and first:
+                print(f"\n[deck-log] {first}")
         # 失败(没装 Playwright / snapshot 内部报错)就安静 —— 不报错、不拖垮 render
     except Exception:
         pass
@@ -1996,6 +2009,29 @@ def main(argv=None) -> int:
                          "flag, real decks under runs/ get these audits as a "
                          "NON-BLOCKING advisory (F-253); --visual promotes them "
                          "into the pass/fail gate.")
+    ap.add_argument("--quick", action="store_true",
+                    help="FAST PATH for small / text-only edits (date, a word, a "
+                         "number — anything that cannot change layout). Skips the "
+                         "deck-log auto-snapshot (per-page Playwright screenshot of "
+                         "the WHOLE deck) and the content/story-case schema-fit "
+                         "refusal. KEEPS deck.json schema validation + the HTML "
+                         "validator (the delivery safety gate). On a 50-page deck "
+                         "this turns ~2m12s into ~12s. NOTE: --scope N hits the same "
+                         "~12s AND keeps the changed page's making-of screenshot — "
+                         "prefer it unless you explicitly don't want the log updated. "
+                         "Do NOT use after layout / font-size / add-remove-element "
+                         "changes — those need the full visual pass.")
+    ap.add_argument("--scope", default=None,
+                    help="LOCKED EDIT SCOPE — comma-separated 1-based page numbers "
+                         "(= URL #N = frame_index) that this edit touched, e.g. "
+                         "`--scope 1` or `--scope 3,5`. Makes the locked range the "
+                         "boundary for the post-render making-of snapshot: it shoots "
+                         "ONLY those pages (`deck-log snapshot --slide N`), skipping "
+                         "the whole-deck geometry audit and the re-shoot of unchanged "
+                         "pages. The changed page's screenshot still lands in the "
+                         "making-of (unlike --quick which skips the snapshot entirely). "
+                         "Also implies --skip-fit-check. Use for copy/layout edits "
+                         "confined to specific pages; omit for a full new-deck render.")
     ap.add_argument("--renumber", action="store_true",
                     help="rewrite each slide's screen_label leading number to its TRUE "
                          "frame_index (post-_disabled-skip), persisted back to deck.json "
@@ -2003,6 +2039,23 @@ def main(argv=None) -> int:
                          "lift/insert/reorder so the library label number matches the "
                          "on-screen page number / URL hash (#N).")
     args = ap.parse_args(argv)
+
+    # Parse the locked edit scope (1-based page numbers) into a list of ints.
+    scope_pages = []
+    if args.scope:
+        for tok in str(args.scope).split(","):
+            tok = tok.strip()
+            if tok.isdigit() and int(tok) >= 1:
+                scope_pages.append(int(tok))
+        if not scope_pages:
+            print(f"render-deck: --scope '{args.scope}' 解析不出有效页号(要 1-based 整数,"
+                  f"逗号分隔),忽略。", file=sys.stderr)
+
+    if args.quick or scope_pages:
+        # Quick mode / scope-locked edit = "this edit is confined". Drop the
+        # generation-era fit-check; the snapshot behaviour (skip vs scoped) is
+        # decided at the _maybe_auto_snapshot call site below.
+        args.skip_fit_check = True
 
     if args.inline and not args.skip_copy_assets:
         # --inline supersedes copy-assets
@@ -2223,7 +2276,14 @@ def main(argv=None) -> int:
         # automatically — without forcing every render, or the /tmp smoke tests,
         # through Playwright. Skipped when --visual already ran them in the gate;
         # a no-op when Playwright is absent (validate.py degrades → no R-VIS).
-        if not args.visual and "/runs/" in str(args.output_dir.resolve()):
+        # Scope-locked (--scope) or text-only (--quick) edits skip this whole-deck
+        # advisory: it is a NON-BLOCKING readability re-audit of ALL pages and is
+        # itself a full Playwright load (~31s) — re-auditing the 49 pages you did
+        # not touch violates the locked scope and is the bulk of a scoped render's
+        # wall-clock. The static gate above still runs. For --scope, the changed
+        # page still gets its making-of screenshot via the snapshot below.
+        if (not args.visual and "/runs/" in str(args.output_dir.resolve())
+                and not scope_pages and not args.quick):
             adv = subprocess.run(
                 [sys.executable, str(VALIDATE_HTML), str(out_html), "--visual", "--json"],
                 capture_output=True, text=True,
@@ -2336,7 +2396,18 @@ def main(argv=None) -> int:
 
     # 渲染全部成功后:若这份 deck 开着制作日志(log/ 存在)就自动拍一版 making-of。
     # 纯代码实现、不依赖任何 harness hook —— 每个用户 / 每种 harness / 每次 render 都生效。
-    _maybe_auto_snapshot(out_html)
+    #   --scope N : 锁定编辑 —— 只刷改动页(范围作为边界,见 _maybe_auto_snapshot)。
+    #   --quick   : 纯文本快路 —— 整个跳过截图(不要 making-of 反映这次改动时用)。
+    #   都不给   : 全量 snapshot(新 deck / 大改用)。
+    if scope_pages:
+        print(f"       [scope] making-of 只刷第 {','.join(map(str, scope_pages))} 页"
+              f"(范围内截图,跳整片审计)。")
+        _maybe_auto_snapshot(out_html, scope=scope_pages)
+    elif args.quick:
+        print("       [quick] 跳过自动截图 + fit-check(纯文本编辑快路);"
+              "要把改动页截进 making-of 请改用 --scope N。")
+    else:
+        _maybe_auto_snapshot(out_html)
     return 0
 
 

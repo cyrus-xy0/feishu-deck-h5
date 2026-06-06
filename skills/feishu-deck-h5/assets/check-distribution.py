@@ -352,7 +352,26 @@ def main():
         browser = pw.chromium.launch(headless=True)
         ctx = browser.new_context(viewport={"width":1920,"height":1080})
         page = ctx.new_page()
-        page.goto(url, wait_until="load", timeout=60_000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        # Bounded settle (B/2026-06-06): an embedded live demo can keep the 'load'
+        # event pending ~30s, taxing every screenshot/audit pass. Prefer full load
+        # for fidelity but cap it, then await fonts so CJK text doesn't shoot in a
+        # fallback face. This deck: ~31s (load) → ~1-5s, same pixels.
+        try:
+            page.wait_for_load_state("load", timeout=4_000)
+        except Exception:
+            pass
+        try:
+            page.evaluate("() => Promise.race([(document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(r => setTimeout(r, 2000))])")
+        except Exception:
+            pass
+        # Wait for framework init (feishu-deck.js sets data-js-ready on .deck at the
+        # end of setup). domcontentloaded can return before layout JS has run, which
+        # would make the geometry measurements below read an un-laid-out DOM.
+        try:
+            page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000)
+        except Exception:
+            pass
         page.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
         page.wait_for_timeout(250)
         data = page.evaluate(MEASURE_JS)

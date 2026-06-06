@@ -18,8 +18,49 @@ Examples:
 ```bash
 python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title "新标题"
 python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.cards.0.body "新正文"
-python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
+python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/ --quick
 ```
+
+### Re-render speed: scope the render to the page(s) you edited
+
+A full `render-deck.py` does THREE whole-deck Playwright loads — the F-253
+readability advisory, the making-of auto-snapshot screenshots, and (inside the
+snapshot) the geometry audit — plus the fit-check. Those whole-deck passes exist
+for GENERATION; re-running them after a one-page edit re-audits 49 pages you never
+touched.
+
+**The locked edit scope is the boundary. Pass it to the renderer.** Two flags:
+
+- **`--scope N`** (preferred for a confined edit — `--scope 1`, `--scope 3,5`):
+  re-render, then refresh ONLY pages N in the making-of (`deck-log snapshot
+  --slide N`). The changed page's screenshot still lands in the log; the
+  whole-deck advisory + geometry audit + re-shoot of unchanged pages are skipped.
+  Implies `--skip-fit-check`. **~2m12s → ~12s.**
+- **`--quick`** (text-only, and you don't need the making-of updated this run):
+  skips the snapshot ENTIRELY. Same speed as `--scope` now, but the edit won't
+  show in the making-of until the next real snapshot. **~2m12s → ~12-18s.**
+
+| render | time | making-of updated? | what runs |
+| --- | --- | --- | --- |
+| default (full) | ~30-60s | yes (whole deck) | fit-check + advisory + audit + full snapshot |
+| `--scope N` | **~12s** | yes (page N only) | static validator + 1-page snapshot |
+| `--quick` | ~12-18s | no | static validator only |
+
+Default to `--scope N` for scope-locked edits — it now matches `--quick` on speed
+while ALSO keeping the changed-page screenshot. Use the full render (no flag) only
+for a new deck or a change that spans the whole deck.
+
+> **Why `--scope N` is ~12s and not ~60s (2026-06-06):** the headless-browser
+> entry points used to `goto(wait_until='load')`, which stalls ~31s on this deck
+> because the embedded live demo never fires `load`. All five screenshot/audit
+> drivers (`deck-log.py`, `check-distribution.py`, `validate.py`, `run-audits.py`,
+> `reconcile-reflow.py`) now use `domcontentloaded` + a *bounded* 4s best-effort
+> `load` wait + `fonts.ready` + a `.deck[data-js-ready]` framework-ready gate.
+> Fast decks still get true-load fidelity in ~1s; a hung sub-resource caps at ~4s
+> instead of ~31s. Verified pixel-equivalent to the old `load` captures (incl. the
+> demo page) — the `data-js-ready` gate is what prevents a blank/un-revealed
+> capture. If you add a new Playwright driver, copy this settle block; do NOT
+> reintroduce a bare `wait_until='load'`.
 
 The old `texts.md` / `apply-texts.py` sidecar flow is retired. Residual
 `data-text-id` attributes in old decks are harmless, but do not author new flows
