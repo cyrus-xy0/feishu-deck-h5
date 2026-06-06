@@ -7,6 +7,27 @@ These four failure modes recurred in the 2026-05-14 CTG run and burned
 30+ minutes of debug time each. Read this section BEFORE doing any
 delete-slide / insert-slide / reorder-slide / custom-layout work.
 
+## Adding content to a `raw` / `lifted` card — measure geometry, not the box
+
+When you ADD a visual element or extra text to a hand-authored `raw` slide
+(new band / rail / extra feature row), a `min-height` or the legacy
+`.slide .grid .card { align-self: stretch }` can inflate the card box so it
+LOOKS like it fits — the box grows, `scrollHeight ≈ clientHeight`, and a quick
+`card.getBoundingClientRect()` vs the strap shows a healthy gap — while the box
+itself overflows its `.grid` and the **centered** content silently overlaps the
+sibling strap. Measure the right things before declaring done:
+
+- container `el.scrollHeight > el.clientHeight` (does content overflow its box?),
+- the `.grid` (or stage child) the card lives in — same check,
+- the **last content child** `.bottom` vs the **next sibling**'s `.top` (real
+  collision), NOT just the card's bounding box.
+
+`render-deck.py` now BLOCKS on the hard geometry rules
+(`R-VIS-CARD-OVERFLOW` / `R-OVERLAP` / `R-OVERFLOW` / `R-VIS-BAND-COLLIDE`) for
+full `/runs/` renders, but a scoped / `--quick` / `DECK_ALLOW_GEOM_OVERFLOW=1`
+render skips that gate — so on those paths this manual check is on you. See
+`references/troubleshooting.md` ("Render says PASS yet a card's text spills").
+
 ## Editing Copy
 
 The correct path for copy changes is `deck.json` → rerender. Do not post-render

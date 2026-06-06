@@ -2256,6 +2256,7 @@ def main(argv=None) -> int:
         # If --visual, run validate.py WITHOUT --no-visual so Playwright audits
         # (R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR) fire.
         # Otherwise default behaviour: static checks only.
+        _geom_block = False
         validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html)]
         if not args.visual:
             validate_cmd.append("--no-visual")
@@ -2302,6 +2303,37 @@ def main(argv=None) -> int:
                         print(f"  … +{len(_vis) - 20} more", file=sys.stderr)
                     print(f"  ↳ focus one page: python3 {VALIDATE_HTML.name} "
                           "<html> --visual --slide <key>", file=sys.stderr)
+                # HARD geometry breakage is NOT a soft readability nit. A box whose
+                # content is clipped / spills visibly past its border / overlaps a
+                # sibling (R-VIS-CARD-OVERFLOW / R-OVERLAP / R-OVERFLOW /
+                # R-VIS-BAND-COLLIDE — the HARD_RULES set, severity=error even on
+                # lifted slides) is real, user-visible breakage: the exact class of
+                # defect this advisory-demotion was hiding (a hero card spilling onto
+                # the bottom strap rendered "PASS / errors 0" because the default gate
+                # is --no-visual and the whole-deck re-audit below was advisory-only).
+                # That re-audit already ran just above for free, so promote ONLY the
+                # hard-geometry error subset back to a BLOCKING gate; the soft tier /
+                # orphan / floor / balance items stay advisory (F-253). Escape hatch
+                # for a deliberate intentional spill: DECK_ALLOW_GEOM_OVERFLOW=1.
+                _HARD_GEOM = {"R-VIS-CARD-OVERFLOW", "R-OVERLAP", "R-OVERFLOW",
+                              "R-VIS-BAND-COLLIDE"}
+                _geom = [f for f in _data.get("errors", [])
+                         if str(f.get("code", "")) in _HARD_GEOM]
+                if _geom and not os.environ.get("DECK_ALLOW_GEOM_OVERFLOW"):
+                    print("\n❌ BLOCKING · geometry breakage (content clipped / "
+                          "spilled past its box / overlapping a sibling — real "
+                          "defect, not a readability nit):", file=sys.stderr)
+                    for f in _geom[:12]:
+                        print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
+                    if len(_geom) > 12:
+                        print(f"  … +{len(_geom) - 12} more", file=sys.stderr)
+                    print("  ↳ fix the spilling / overlapping element: shorten "
+                          "content, fix min-height / justify-content, or give the "
+                          "box more height. Measure el.scrollHeight vs clientHeight "
+                          "AND last-child.bottom vs the next sibling's top — NOT just "
+                          "the card's bounding box. Intentional spill → "
+                          "DECK_ALLOW_GEOM_OVERFLOW=1.", file=sys.stderr)
+                    _geom_block = True
             except Exception:
                 pass  # an advisory must NEVER break a render
 
@@ -2310,6 +2342,15 @@ def main(argv=None) -> int:
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)
             if rc.stderr.strip():
                 print(rc.stderr, file=sys.stderr)
+            return 4
+
+        if _geom_block:
+            print(file=sys.stderr)
+            print("render-deck: BLOCKED on geometry breakage (see ❌ above). This is "
+                  "the content-overflow / overlap class the static --no-visual gate "
+                  "cannot see; the whole-deck visual re-audit caught it. Fix the "
+                  "spilling/overlapping element, or set DECK_ALLOW_GEOM_OVERFLOW=1 if "
+                  "it is genuinely intentional.", file=sys.stderr)
             return 4
 
     # 7. Post-render asset handling — choose one of:
