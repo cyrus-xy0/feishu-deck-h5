@@ -455,6 +455,12 @@ _SLIDE_META_JS = r"""
   // 内容指纹:djb2 over .slide innerHTML —— 用于增量截图判定"这页变没变"。
   // 取 innerHTML(内容)而非 outerHTML:截图时往 .slide 上写的 --fs-scale 内联样式
   // 不进 innerHTML,指纹对截图副作用稳定。
+  // 再剥掉子元素上的内联 style="..." 属性:框架运行时(balanceSlide 垂直居中、
+  // auto-fit 等)会按测量结果往子元素写 top/bottom/transform 等内联值,且在截图
+  // 时刻(~300ms)动画/测量尚未 settle,每次落点差几 px → 指纹漂移 → 同一页每版
+  // 都被误判"变了"而空截。每页真正的 CSS 在 <style> 块里(不是 style 属性,不受影响),
+  // 所以剥掉内联 style 只滤掉运行时噪声,真实内容/结构改动照样进指纹。
+  const norm = (html) => html.replace(/ style=("[^"]*"|'[^']*')/g, '');
   const fp = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) { h = ((h << 5) + h + str.charCodeAt(i)) | 0; } return (h >>> 0).toString(36); };
   const frames = [...document.querySelectorAll('.slide-frame')];
   return frames.map((f, i) => {
@@ -463,7 +469,7 @@ _SLIDE_META_JS = r"""
       idx: i + 1,
       key: (s && (s.getAttribute('data-slide-key') || s.id)) || ('slide-' + (i + 1)),
       layout: (s && s.getAttribute('data-layout')) || '',
-      h: s ? fp(s.innerHTML) : '',
+      h: s ? fp(norm(s.innerHTML)) : '',
     };
   });
 }
