@@ -3,11 +3,16 @@ name: feishu-deck-h5
 description: |
   总控 skill for Feishu / Lark-style HTML decks. Use when the user asks for
   飞书风格 PPT, Lark deck, 汇报材料, 客户提案, h5 deck, 16:9 网页演示, HTML deck
-  generation/editing/validation/publishing, or material parsing for this deck
-  pipeline. This controller does not do worker implementation itself: it routes
-  workflow steps to subskills under subskills/. Default output is a dark,
-  cinematic 1920x1080 HTML deck with validated local delivery and optional
-  Feishu publishing / Base ingestion. Generation is DeckJSON/render-deck first:
+  generation/editing/validation/publishing/importing, or material parsing for this deck
+  pipeline. Also use when the user asks to publish a finished HTML deck to
+  妙笔 / 秒笔 / Miaobi / MagicBook / Magic Page / html-box /
+  magic.solutionsuite.cn. For 妙笔/MagicBook/html-box publishing, route to this
+  skill's publisher subskill, not lark-apps/Miaoda; 妙搭/Miaoda is only a
+  compatibility target when explicitly requested. This controller does not do
+  worker implementation itself: it routes workflow steps to subskills under
+  subskills/. Default output is a dark, cinematic 1920x1080 HTML deck with
+  validated local delivery and optional Magic Page publishing /
+  slide-library importing via PR and Cloudflare viewer sync. Generation is DeckJSON/render-deck first:
   run design before render, default slides to raw-first unless they are pure
   standard schema shapes, and always validate before handoff. Do not use for
   producing a real `.pptx`; route that to an appropriate PowerPoint/keynote
@@ -17,7 +22,7 @@ description: |
 # feishu-deck-h5
 
 This is the **controller**. It owns workflow, scope control, and dispatch. It does
-not author slides, render HTML, validate visuals, publish, or parse source
+not author slides, render HTML, validate visuals, publish, import, or parse source
 materials directly.
 
 ## Mandatory Router
@@ -25,7 +30,8 @@ materials directly.
 Before doing anything, lock three things:
 
 1. **Mode**: parse / design / render / validate / simulate / edit / publish /
-   full pipeline / generation-from-source-html / edit-imported-html / translate.
+   import / full pipeline / generation-from-source-html / edit-imported-html /
+   translate.
 2. **Scope**: one slide, named slides, whole deck, or one run folder. Default to the
    smallest scope the user asked for.
 3. **Target**: run directory, `outline.json`, `deck.json`, `index.html`, slide key,
@@ -33,6 +39,23 @@ Before doing anything, lock three things:
 
 For a single-slide small edit, state the lock and proceed. If scope expands beyond
 what the user named, stop and ask.
+
+Routing guard for publish requests:
+
+- If the user says 妙笔, 秒笔, Miaobi, MagicBook, Magic Page, html-box, or
+  `magic.solutionsuite.cn`, lock `Mode=publish` and dispatch to
+  `subskills/publisher/SKILL.md`.
+- Do not route those requests to `lark-apps` / 妙搭 / Miaoda. Use Miaoda only
+  when the user explicitly says 妙搭, Miaoda, or asks for a Miaoda app.
+
+Routing guard for slide-library import requests:
+
+- If the user already has an HTML deck and explicitly says 入库, 提交, 上传,
+  import, submit, archive, add to slide library, or push into the reusable slide
+  library, lock `Mode=import` and dispatch to `subskills/importer/SKILL.md`.
+- Importer means quality gate first, then PR into
+  `FuQiang/feishu-slide-library`, then sync the Cloudflare-hosted library
+  viewer. It is distinct from Magic Page publishing.
 
 ## Controller Hard Gates
 
@@ -100,7 +123,7 @@ bundles, reviewing different slide ranges, or running validation while the main
 thread prepares a non-overlapping handoff. Keep dependent chains sequential:
 Parser output gates Designer, Designer output gates Renderer, Renderer output
 gates Validator. Simulator may run only after Validator/local delivery, and
-Publisher only runs after explicit user confirmation.
+Publisher / Importer only run after explicit user confirmation.
 
 Run a step inline instead of spawning when any of these are true:
 
@@ -114,8 +137,9 @@ Run a step inline instead of spawning when any of these are true:
 When a routed step runs inline, treat prior chat context as non-authoritative.
 Before executing that subskill, reread the current on-disk upstream artifacts it
 depends on, such as `source-dossier.json`, `outline.json`, `DESIGN-PLAN.md`,
-`deck.json`, `index.html`, validator reports, or publish manifests. Do not rely
-on cached summaries, earlier reads, or remembered file contents.
+`deck.json`, `index.html`, validator reports, publish manifests, or import
+manifests. Do not rely on cached summaries, earlier reads, or remembered file
+contents.
 
 If a spawned worker fails, times out, or reports uncertainty, the controller must
 either retry with a narrower prompt or take over inline. Never leave the user
@@ -133,7 +157,8 @@ Read exactly the subskill needed for the next step:
 | Check finished or in-progress deck for text, visual, structural, language, and delivery compliance                                            | `subskills/validator/SKILL.md` |
 | Operate existing artifacts: edit existing decks, reskin foreign HTML, lift/swap slides, convert/import existing material, round-trip recovery | `subskills/editor/SKILL.md`    |
 | Translate / localize an existing deck (or page range) into another language: backfill → parity branch-decision → verbatim text-pairs → apply → render (or in-place for lossy-backfill decks), plus embedded-iframe and brand-asset localization | `subskills/translator/SKILL.md` |
-| Publish confirmed HTML to Feishu hosting and write publish metadata back to Base                                                              | `subskills/publisher/SKILL.md` |
+| Publish confirmed HTML to Magic Page / Feishu hosting only                                                                                   | `subskills/publisher/SKILL.md` |
+| Quality-gate then import confirmed finished HTML into `FuQiang/feishu-slide-library` via PR and sync Cloudflare viewer                    | `subskills/importer/SKILL.md`  |
 | Parse uploaded materials into local `input/runtime-library/source-dossier.json` and normalize assets into `input/runtime-library/assets/`. A `.pptx` is converted (build_pptx) into a structured `canvas` deck.json — code reconstruction, no screenshots; hard pages → placeholder + reported | `subskills/parser/SKILL.md`    |
 | Rehearse how a validated deck may land with target customer or stakeholder roles                                                              | `subskills/simulator/SKILL.md` |
 
@@ -188,6 +213,11 @@ For a new deck:
    delivery. Spawn a Simulator worker when multi-agent dispatch is available.
 6. **Publisher** only after the user confirms the HTML can be published. Spawn a
    Publisher worker when multi-agent dispatch is available.
+7. **Importer** only after the user confirms the finished HTML should be ingested
+   / submitted / uploaded into `FuQiang/feishu-slide-library`. Importer runs the
+   ingest quality gate first, then the slide-library PR/confirm flow, then waits
+   for Cloudflare viewer sync when requested. Spawn an Importer worker when
+   multi-agent dispatch is available.
 
 For an existing deck:
 
@@ -211,6 +241,9 @@ For an existing deck:
    advice.
 7. Use **Publisher** only after explicit publish confirmation. Spawn a Publisher
    worker when multi-agent dispatch is available.
+8. Use **Importer** only after explicit library-ingest / submit / upload
+   confirmation. Importer must quality-gate before PR/confirm and Cloudflare
+   viewer sync. Spawn an Importer worker when multi-agent dispatch is available.
 
 ## Shared Contracts
 
@@ -233,7 +266,13 @@ For an existing deck:
 - Simulator writes `runs/<...>/output/pitch-rehearsal.json` and
   `PITCH_REHEARSAL.md`; it does not publish, ingest, or automatically modify the
   deck.
-- Publisher must not publish until the user has confirmed the exact HTML artifact.
+- Publisher must not publish until the user has confirmed the exact HTML artifact,
+  and must not ingest into slide-library.
+- Importer must not ingest until the user has confirmed the exact finished HTML
+  artifact for `FuQiang/feishu-slide-library`. It must run quality gate before
+  ingest, then use the slide-library PR/confirm flow to sync the
+  Cloudflare-hosted viewer; it must not treat Magic Page links as library publish
+  success.
 - Every `.slide` must have a stable semantic `data-slide-key`. Schema rendering
   adds it automatically; hand-authored/lifted HTML must preserve or add it before
   delivery.
@@ -254,7 +293,7 @@ For an existing deck:
 ## Cloud Knowledge / Asset Base
 
 Use this Feishu Base as the shared cloud knowledge and asset library when designer,
-renderer, parser, or publisher need cloud context:
+renderer, parser, publisher, or importer need cloud context:
 
 `https://bytedance.larkoffice.com/base/DBtybdvHYaovVwsWLatcipJBnrg?table=tblRIgS1rgDpUPW0&view=vewaY9hqu7`
 

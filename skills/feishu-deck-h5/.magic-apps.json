@@ -38,5 +38,35 @@
       "tab": "https://applink.feishu.cn/client/web_app/open?mode=appCenter&appId=cli_a98afe875979500d&width=640&min_width=350&max_width=1000&lk_target_url=https://magic.solutionsuite.cn/html-box/vlmQ5B8pVw1"
     },
     "last_published": "2026-06-02T06:59:47.635Z"
+  },
+  "runs/publisher/lark-ai-native-work-2026-05-20-inline-20260605182257/output/magic-page-ready.html": {
+    "remoteId": "vlFcQml5n6M",
+    "urls": {
+      "html_box": "https://magic.solutionsuite.cn/html-box/vlFcQml5n6M",
+      "dashboard": "https://magic.solutionsuite.cn/dashboard/vlFcQml5n6M",
+      "panel": "https://applink.feishu.cn/client/web_app/open?mode=panel&appId=cli_a98afe875979500d&width=640&min_width=350&max_width=1000&lk_target_url=https://magic.solutionsuite.cn/html-box/vlFcQml5n6M",
+      "tab": "https://applink.feishu.cn/client/web_app/open?mode=appCenter&appId=cli_a98afe875979500d&width=640&min_width=350&max_width=1000&lk_target_url=https://magic.solutionsuite.cn/html-box/vlFcQml5n6M"
+    },
+    "last_published": "2026-06-05T10:23:04.653Z"
+  },
+  "runs/publisher/index-20260607161135/output/magic-page-ready.html": {
+    "remoteId": "vlQmP0UOk2n",
+    "urls": {
+      "html_box": "https://magic.solutionsuite.cn/html-box/vlQmP0UOk2n",
+      "dashboard": "https://magic.solutionsuite.cn/dashboard/vlQmP0UOk2n",
+      "panel": "https://applink.feishu.cn/client/web_app/open?mode=panel&appId=cli_a98afe875979500d&width=640&min_width=350&max_width=1000&lk_target_url=https://magic.solutionsuite.cn/html-box/vlQmP0UOk2n",
+      "tab": "https://applink.feishu.cn/client/web_app/open?mode=appCenter&appId=cli_a98afe875979500d&width=640&min_width=350&max_width=1000&lk_target_url=https://magic.solutionsuite.cn/html-box/vlQmP0UOk2n"
+    },
+    "last_published": "2026-06-07T08:11:42.116Z"
+  },
+  "runs/publisher/lark-xiaozhu-kuaipao-2026-06-07-inline-20260607200549/output/magic-page-ready.html": {
+    "remoteId": "vlRjNPOYaFj",
+    "urls": {
+      "html_box": "https://magic.solutionsuite.cn/html-box/vlRjNPOYaFj",
+      "dashboard": "https://magic.solutionsuite.cn/dashboard/vlRjNPOYaFj",
+      "panel": "https://applink.feishu.cn/client/web_app/open?mode=panel&appId=cli_a98afe875979500d&width=640&min_width=350&max_width=1000&lk_target_url=https://magic.solutionsuite.cn/html-box/vlRjNPOYaFj",
+      "tab": "https://applink.feishu.cn/client/web_app/open?mode=appCenter&appId=cli_a98afe875979500d&width=640&min_width=350&max_width=1000&lk_target_url=https://magic.solutionsuite.cn/html-box/vlRjNPOYaFj"
+    },
+    "last_published": "2026-06-07T12:05:58.729Z"
   }
 }

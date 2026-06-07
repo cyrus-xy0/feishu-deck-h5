@@ -1,0 +1,4 @@
+interface:
+  display_name: "Importer"
+  short_description: "Quality-gate and PR-ingest confirmed feishu-deck-h5 HTML into FuQiang/feishu-slide-library."
+  default_prompt: "Use $importer only after the user has an HTML deck and explicitly asks to 入库/提交/上传/import/submit. First run/reuse the ingest quality gate, then ingest through FuQiang/feishu-slide-library PR/confirm, and sync the Cloudflare-hosted viewer. Do not treat Magic Page links as library ingest or viewer sync success."

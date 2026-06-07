@@ -1649,13 +1649,13 @@ def main(argv: list[str] | None = None) -> int:
                 "source_roles": html_roles,
                 "notes": ["Use material_layer and slide_layer only after designer has produced a confirmed outline."],
             },
-            "publisher": {
-                "target_skill": "publisher",
+            "importer": {
+                "target_skill": "importer",
                 "payload_schema": "skills/feishu-deck-h5/schema/source-dossier.schema.json",
                 "consumes": ["knowledge_layer", "material_layer", "slide_layer", "provenance"],
                 "ready": False,
                 "source_roles": html_roles,
-                "notes": ["Ingest only after deck-validator passes or the user marks records as knowledge-only candidates."],
+                "notes": ["Ingest only after deck-validator passes and the user confirms the finished HTML for slide-library."],
             },
         },
         "validation": {

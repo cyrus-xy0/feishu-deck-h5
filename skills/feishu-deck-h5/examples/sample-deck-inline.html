@@ -194,7 +194,18 @@ body {
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="table"]),
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="timeline"]),
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="process"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="image-text"]) {
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="image-text"]),
+/* 2026-05-28 · raw + iframe-embed default to content-bg letterbox fill.
+   Without these in the whitelist, the slide-frame keeps the deck-level
+   radial gradient in the letterbox area while .slide itself paints
+   content-bg — luma jump at the slide top edge reads as "标题上方有黑条"
+   on non-16:9 viewports. Most raw slides are content-page-ish; raw
+   slides emulating cover / end / replica can override per-slide.
+   Phase 1.c extras (matrix-2x2 / issue-tree / flow-swim / waterfall /
+   arch-stack / logo-wall / content-before-after) are handled in
+   extra-layouts.css, not duplicated here. */
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="raw"]),
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="iframe-embed"]) {
   background: #000 var(--fs-asset-content-bg) center/cover no-repeat;
 }
 .deck[data-mode="present"] .slide-frame.is-current {
@@ -233,13 +244,21 @@ body {
   border: 1px solid var(--fs-hairline);
   border-radius: 6px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+  /* 2026-05-29 · F-27 perf: skip painting off-screen frames in scroll/browse
+     mode too (present mode already does this at line ~157). No
+     contain-intrinsic-size needed — the base .slide-frame keeps
+     `aspect-ratio:16/9 + width:100% + contain:size`, so each frame's box is
+     sized by layout (not content), reserving correct height with zero
+     scroll-anchor jank. Saves a full 1920×1080 paint per off-screen slide on
+     long decks (esp. mobile browse). */
+  content-visibility: auto;
 }
 
 /* ---- Deck UI overlay (progress bar, mode toggle, bottom controls) ---- */
 .deck-ui {
   position: fixed; z-index: 50; pointer-events: none;
   font-family: var(--fs-font-latin); color: var(--fs-text-48);
-  font-size: 16px; letter-spacing: 0.08em;
+  font-size: var(--fs-foot); letter-spacing: 0.08em;
 }
 
 /* Top progress bar — present-mode only, brand keyline gradient */
@@ -289,7 +308,7 @@ body {
 .deck-ui .deck-controls .indicator {
   display: inline-flex; align-items: baseline;
   min-width: 64px; justify-content: center;
-  font: 600 16px/1 var(--fs-font-latin); letter-spacing: 0.10em;
+  font: 600 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.10em;
   color: #fff;
 }
 .deck-ui .deck-controls .indicator .sep { color: var(--fs-text-40); margin: 0 2px; }
@@ -299,7 +318,7 @@ body {
 /* Tiny corner hint — present mode only */
 .deck-ui .nav-hint {
   position: fixed; left: 24px; bottom: 32px; pointer-events: none;
-  color: var(--fs-text-40); font: 500 16px/1 var(--fs-font-latin);
+  color: var(--fs-text-40); font: 500 var(--fs-foot)/1 var(--fs-font-latin);
   letter-spacing: 0.10em;
 }
 
@@ -328,6 +347,13 @@ body {
 .deck-ui.is-idle .deck-progress { opacity: .35; }
 /* Hovering chrome cancels idle fade visually (the JS mousemove also fires) */
 .deck-ui .deck-controls:hover { opacity: 1 !important; }
+/* Kiosk / projection mode (URL hash #proj | #bare | #clean | #kiosk):
+   force-hide ALL chrome — page bar, controls, hint — and stay hidden
+   (unlike .is-idle, hover/mousemove never wakes it). For projection,
+   embedded iframes (e.g. Miaoda), and signage. Toggled by JS on hashchange. */
+.deck-ui.is-kiosk .deck-progress,
+.deck-ui.is-kiosk .deck-controls,
+.deck-ui.is-kiosk .nav-hint { display: none !important; }
 
 /* Mobile: shrink controls, remove hint */
 @media (max-width: 640px) {
@@ -355,6 +381,12 @@ body {
   width: 160px; height: 50px;          /* master 106.4 × 33.5 native × 1.5 */
   background: var(--fs-asset-logo) left center/contain no-repeat;
   text-indent: -9999px; overflow: hidden;
+  z-index: 20;                          /* brand chrome ABOVE flattened content.
+     .slide>* (line ~1838) puts every direct .slide child at z-index:1; the
+     wordmark declared none, so it tied content at 1 and a later full-bleed raw
+     child (layout:"raw") painted over it by DOM order = logo flash-then-gone.
+     20 sits in the chrome band 2–49: above content, below pager(50/60) &
+     mobile chrome(1001). cover/end overrides inherit this. */
 }
 /* Cover & End (封面 / 封底) — same colored logo, top-LEFT, larger */
 .slide[data-layout="cover"] .wordmark,
@@ -377,7 +409,7 @@ body {
 
 /* Eyebrow (uppercase Latin, accent color, tracked) */
 .slide .eyebrow {
-  font: 600 16px/1 var(--fs-font-latin);
+  font: 600 var(--fs-foot)/1 var(--fs-font-latin);
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--fs-accent);
 }
@@ -391,21 +423,21 @@ body {
 
 /* Reusable bilingual title block */
 .slide .title-zh {
-  font: 600 48px/1.15 var(--fs-font-cjk);
+  font: 600 var(--fs-title)/1.15 var(--fs-font-cjk);
   letter-spacing: -0.005em; color: #fff;
 }
 .slide .title-en {
   margin-top: 14px;
-  font: 500 24px/1.4 var(--fs-font-latin);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-latin);
   color: var(--fs-text-48); letter-spacing: 0.02em;
 }
 
 /* Body text */
 .slide .body {
-  font: 500 28px/1.5 var(--fs-font-cjk); color: var(--fs-text-72);
+  font: 500 var(--fs-sub)/1.5 var(--fs-font-cjk); color: var(--fs-text-72);
 }
 .slide .lede {
-  font: 500 28px/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
+  font: 500 var(--fs-sub)/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
 }
 .slide .caption {
   /* Body content per SKILL.md "Typography floor — content body & captions
@@ -413,7 +445,7 @@ body {
      value was below the documented body floor and read as illegible
      fine print on projector. For chrome-style citations (e.g. footnote
      under a stats table) use `.footnote` (14 px chrome) instead. */
-  font: 500 24px/1.4 var(--fs-font-latin);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-latin);
   color: var(--fs-text-48); letter-spacing: 0.06em;
 }
 
@@ -444,7 +476,7 @@ body {
   border: 1px solid var(--fs-text-16);
   border-radius: var(--fs-radius-pill);
   padding: 10px 18px;
-  font: 500 16px/1 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1 var(--fs-font-cjk);
   color: var(--fs-text-72);
   background: rgba(255,255,255,0.02);
 }
@@ -595,11 +627,11 @@ body {
    which read as visibly smaller than neighboring slides. content-3up's
    tighter overrides at lines 514-518 still apply where present. */
 .slide .ctitle {
-  font: 600 28px/1.3 var(--fs-font-cjk);
+  font: 600 var(--fs-sub)/1.3 var(--fs-font-cjk);
   color: var(--fs-text); margin: 0;
 }
 .slide .cbody {
-  font: 500 24px/1.6 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.6 var(--fs-font-cjk);
   color: var(--fs-text-72); margin: 0;
 }
 
@@ -701,7 +733,7 @@ body {
    同一页内 content label(产品名)必须 ≥ 24 Body,不能 16 chrome,否则在投影
    距离上看不清。 */
 .slide[data-layout="section"] .pills .pill {
-  font-size: 24px;
+  font-size: var(--fs-body);
   padding: 12px 22px;
 }
 
@@ -724,7 +756,7 @@ body {
    52 px rule below now applies to ALL content layouts.
    See feishu-deck.css line ~922 .slide .header .title-zh */
 .slide[data-layout="content-3up"] .header .pageno {
-  font: 500 16px/1 var(--fs-font-latin);
+  font: 500 var(--fs-foot)/1 var(--fs-font-latin);
   color: var(--fs-text-48); letter-spacing: 0.18em;
 }
 .slide[data-layout="content-3up"] .grid {
@@ -746,19 +778,40 @@ body {
   /* 2026-05-17: 28 → 48 — when a hero numeral is the visual anchor, the
      accompanying title must hold its own at Title tier; 28 reads as sub
      and the title looked weak against the 88 num. */
-  font: 700 48px/1.15 var(--fs-font-cjk); color: #fff;
+  font: 700 var(--fs-title)/1.15 var(--fs-font-cjk); color: #fff;
 }
 .slide[data-layout="content-3up"] .card .cbody {
   /* 2026-05-16: 20 → 22 — body content per SKILL.md typography floor. */
-  font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); flex: 1;
+  font: 500 var(--fs-body)/1.55 var(--fs-font-cjk); color: var(--fs-text-65); flex: 1;
 }
 .slide[data-layout="content-3up"] .card .cfoot {
   display: flex; align-items: center; justify-content: space-between;
   border-top: 1px solid var(--fs-hairline); padding-top: 16px;
-  font: 500 16px/1 var(--fs-font-latin); letter-spacing: 0.14em;
+  font: 500 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--fs-text-48);
 }
 .slide[data-layout="content-3up"] .card .cfoot svg { color: var(--fs-accent); }
+/* 规范 L3 落地(2026-05-30):content-3up 卡片按内容尺寸 + 共享中线 + 卡内垂直
+   居中,取代全局 `.slide .grid .card { align-self: stretch }` 的强制等高。等高会把
+   内容最多的那张卡片文字挤到底边(实测下内距 −27px 溢出,两侧却空 113px)。改后:
+   稀疏卡片居中、留白均衡;最满的卡片长高吃下内容,不再贴底。只覆盖 content-3up,
+   不动 1712 行的全局 legacy stretch(其它版式仍依赖它)。
+   验证:assets/check-distribution.py 在青啤 slide 3 上 3 findings → 0,全 deck 零回归。 */
+.slide[data-layout="content-3up"] .grid .card {
+  /* 2026-06-01: align-self center → stretch. The 2026-05-30 L3 fix used
+     `center` to stop the fullest card overflowing under the THEN-current
+     fixed-height band. The next day (2026-05-31, ~line 1685) the grid was
+     reworked to `flex:1 + align-content:center`, so the single grid row is
+     now `auto` = tallest card's content height and centered in the band.
+     Under THAT geometry `center` left shorter cards at their own (smaller)
+     content height → visibly ragged card heights (user-reported: "第三个框
+     变大了"). `stretch` makes every card match the row track (= tallest
+     content), giving an even grid WITHOUT overflow — the track is auto-sized
+     to content, so the tallest card's content exactly fits by construction.
+     `justify-content: center` keeps content vertically centered inside. */
+  align-self: stretch;
+  justify-content: center;
+}
 
 /* ============================================================================
    LAYOUT 04 — Content 2-column (text + visual)
@@ -789,7 +842,7 @@ body {
   /* 2026-05-17: text-72 → #fff. feature-list items ARE body content;
      muted color was readability gap on projector. */
   position: relative; padding-left: 28px;
-  font: 500 24px/1.45 var(--fs-font-cjk); color: #fff;
+  font: 500 var(--fs-body)/1.45 var(--fs-font-cjk); color: #fff;
   list-style: none;
 }
 .slide ul.feature-list li::before {
@@ -829,7 +882,7 @@ body {
   width: 24px; height: 24px; flex: 0 0 24px;
   border-radius: 50%;
   display: grid; place-items: center;
-  font: 700 16px/1 var(--fs-font-latin);
+  font: 700 var(--fs-foot)/1 var(--fs-font-latin);
   background: rgba(51, 214, 192, 0.20);
   color: var(--fs-teal);
 }
@@ -838,11 +891,11 @@ body {
   min-width: 0;
 }
 .slide .fs-claim-row__label {
-  font: 700 24px/1.3 var(--fs-font-cjk); color: #fff;
+  font: 700 var(--fs-body)/1.3 var(--fs-font-cjk); color: #fff;
   letter-spacing: -0.005em;
 }
 .slide .fs-claim-row__desc {
-  font: 500 24px/1.4 var(--fs-font-cjk); color: #cdd0df;
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk); color: #cdd0df;
 }
 /* Accent variants */
 .slide .fs-claim-row.is-blue   { border-color: rgba(60,127,255,0.40); background: rgba(60,127,255,0.05); }
@@ -856,10 +909,92 @@ body {
 .slide .fs-claim-row.is-orange { border-color: rgba(254,127,0,0.40); background: rgba(254,127,0,0.05); }
 .slide .fs-claim-row.is-orange .fs-claim-row__icon { background: rgba(254,127,0,0.20); color: var(--fs-orange); }
 
+/* ============================================================================
+   UTILITY · .fs-titled-panel — bind a heading to its members in ONE panel
+   (added 2026-06-05, promoted from richness-primitives recipe / pg-27 fix).
+   USE when a heading LABELS a set (steps / criteria / KPIs / do-don't): the
+   title + items live in one tinted panel — header gets a divider, members are
+   internal divider-rows. Without it, a bare heading floats orphaned above a row
+   of equal-weight bordered cards and the group stops reading as one unit.
+   Pair it 等高 with a sibling visual (image / chart) via the row's
+   `align-items: stretch` so the two read as a balanced pair.
+
+   Structure:
+     <div class="fs-titled-panel is-teal">                <!-- accent variant -->
+       <div class="fs-titled-panel__head">
+         <h3 class="fs-titled-panel__title">三步算账</h3>
+         <span class="fs-titled-panel__tag">10 MIN</span>     <!-- optional -->
+       </div>
+       <div class="fs-titled-panel__rows">
+         <div class="fs-titled-panel__row">
+           <span class="fs-titled-panel__n">01</span>
+           <div><p class="fs-titled-panel__rt">看线上单量</p>
+                <p class="fs-titled-panel__rd">打开美团看竞品当日单量。</p></div>
+         </div>
+       </div>
+     </div>
+   Accents: .is-blue / .is-teal / .is-violet / .is-purple / .is-orange (default teal).
+   ============================================================================ */
+.slide .fs-titled-panel {
+  --tp-accent: var(--fs-teal);
+  display: flex; flex-direction: column; min-height: 0;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--tp-accent) 32%, transparent);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--tp-accent) 8%, transparent),
+    color-mix(in srgb, var(--tp-accent) 2%, transparent));
+  padding: 20px 26px;
+}
+.slide .fs-titled-panel__head {
+  display: flex; align-items: baseline; gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--tp-accent) 28%, transparent);
+}
+.slide .fs-titled-panel__title { font: 800 32px/1.2 var(--fs-font-cjk); color: #fff; margin: 0; }
+.slide .fs-titled-panel__tag {
+  font: 800 24px/1 var(--fs-font-latin); color: var(--tp-accent); letter-spacing: 0.04em;
+}
+.slide .fs-titled-panel__rows {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+  justify-content: space-between;
+}
+.slide .fs-titled-panel__row {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 16px;
+  align-items: start; padding: 18px 0;
+  border-top: 1px solid rgba(255,255,255,0.10);
+}
+.slide .fs-titled-panel__row:first-child { border-top: none; }
+.slide .fs-titled-panel__n  { font: 800 30px/1 var(--fs-font-latin); color: var(--tp-accent); }
+.slide .fs-titled-panel__rt { font: 800 26px/1.3 var(--fs-font-cjk); color: #fff; margin: 0 0 4px; }
+.slide .fs-titled-panel__rd { font: 500 24px/1.45 var(--fs-font-cjk); color: rgba(255,255,255,0.90); margin: 0; }
+.slide .fs-titled-panel.is-blue   { --tp-accent: var(--fs-blue); }
+.slide .fs-titled-panel.is-teal   { --tp-accent: var(--fs-teal); }
+.slide .fs-titled-panel.is-violet { --tp-accent: var(--fs-violet); }
+.slide .fs-titled-panel.is-purple { --tp-accent: var(--fs-purple); }
+.slide .fs-titled-panel.is-orange { --tp-accent: var(--fs-orange); }
+
 .slide[data-layout="content-2col"] .col-visual {
   border: 1px solid var(--fs-hairline); border-radius: 16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
   position: relative; overflow: hidden;
+}
+/* 规范 L3 (2026-06-01) — SINGLE-child visual panel centers its content vertically.
+   Root cause (pg29 feishu-ai-scene-tools 实战): a panel container (.col-visual /
+   lifted *-pane) holding ONE shorter-than-column block (product shot / single
+   card / mock) left it top-stacked — the panel had no internal vertical
+   centering, only .stage/.grid did. This is the panel-level twin of the
+   content-3up card-centering fix.
+   Guards (do NOT break existing defenses):
+   · BF12 multi-card columns → excluded via :not(:has(card+card)) so equal-height
+     fill still wins;
+   · BF2 self-decorated children (.data-panel etc.) → the BF2 frame-strip rule
+     still applies; centering a single self-decorated panel is harmless;
+   · BF7 hero image (inline min-height directive) → that rule sets its own
+     align; an inline-min-height child fills the column so justify-content has
+     no slack to act on — no conflict.
+   Single-child only: a column with 2+ stacked cards is handled by BF12 above. */
+.slide[data-layout="content-2col"] .col-visual:not(:has(> .canonical-card + .canonical-card)):not(:has(> .news-card + .news-card)):not(:has(> .data-panel + .data-panel)) {
+  display: flex; flex-direction: column; justify-content: center;
 }
 
 /* ============================================================================
@@ -912,7 +1047,7 @@ body {
    without competing with the 132 number. */
 .slide[data-layout="stats"] .col .trend {
   display: inline-flex; align-items: center; gap: 8px;
-  font: 600 28px/1 var(--fs-font-cjk); letter-spacing: 0.04em;
+  font: 600 var(--fs-sub)/1 var(--fs-font-cjk); letter-spacing: 0.04em;
   text-transform: none; color: var(--fs-accent);
 }
 .slide[data-layout="stats"] .col .num {
@@ -920,10 +1055,10 @@ body {
   color: #fff;
 }
 .slide[data-layout="stats"] .col .num .unit {
-  font-size: 48px; color: var(--fs-text-72); margin-left: 8px; font-weight: 600;
+  font-size: var(--fs-title); color: var(--fs-text-72); margin-left: 8px; font-weight: 600;
 }
 .slide[data-layout="stats"] .col .label {
-  font: 500 24px/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk); color: var(--fs-text-72);
 }
 /* 2026-05-20 · font family switched latin → cjk on .source / .footnote.
    When source text mixes Latin and CJK ("Source · 内部传输实测 2024 Q4"),
@@ -931,12 +1066,12 @@ body {
    renders smaller / mismatched. CJK-first font handles both scripts more
    uniformly at 16px. */
 .slide[data-layout="stats"] .col .source {
-  font: 500 16px/1.4 var(--fs-font-cjk); color: var(--fs-text-40);
+  font: 500 var(--fs-foot)/1.4 var(--fs-font-cjk); color: var(--fs-text-40);
   letter-spacing: 0.06em;
 }
 .slide[data-layout="stats"] .footnote {
   position: absolute; left: 96px; right: 96px; bottom: 110px;
-  font: 500 16px/1.4 var(--fs-font-cjk); color: var(--fs-text-40);
+  font: 500 var(--fs-foot)/1.4 var(--fs-font-cjk); color: var(--fs-text-40);
   letter-spacing: 0.04em;
 }
 
@@ -983,13 +1118,13 @@ body {
    apparent size. Headers must be ≥ 24 px / 600 / CJK / white. */
 .slide[data-layout="table"] thead th {
   text-align: left; padding: 22px 24px;
-  font: 600 24px/1.3 var(--fs-font-cjk); letter-spacing: 0.02em;
+  font: 600 var(--fs-body)/1.3 var(--fs-font-cjk); letter-spacing: 0.02em;
   text-transform: none; color: #fff;
   border-bottom: 1px solid var(--fs-divider);
 }
 .slide[data-layout="table"] tbody td {
   padding: 26px 24px; vertical-align: top;
-  font: 500 24px/1.45 var(--fs-font-cjk); color: var(--fs-text-72);
+  font: 500 var(--fs-body)/1.45 var(--fs-font-cjk); color: var(--fs-text-72);
   border-bottom: 1px solid var(--fs-hairline);
 }
 .slide[data-layout="table"] tbody td:first-child {
@@ -1004,7 +1139,7 @@ body {
 .slide[data-layout="table"]:has(.footnote) .table-wrap { bottom: 180px; }
 .slide[data-layout="table"] .footnote {
   position: absolute; left: 96px; right: 96px; bottom: 96px;
-  font: 500 16px/1.5 var(--fs-font-cjk); color: var(--fs-text-40);
+  font: 500 var(--fs-foot)/1.5 var(--fs-font-cjk); color: var(--fs-text-40);
   letter-spacing: 0.02em;
 }
 
@@ -1036,15 +1171,15 @@ body {
   background: var(--fs-accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--fs-accent) 18%, transparent);
 }
 .slide[data-layout="timeline"] .node .when {
-  font: 700 28px/1 var(--fs-font-latin); color: #fff; letter-spacing: 0.04em;
+  font: 700 var(--fs-sub)/1 var(--fs-font-latin); color: #fff; letter-spacing: 0.04em;
 }
 .slide[data-layout="timeline"] .node .what {
-  font: 600 28px/1.3 var(--fs-font-cjk); color: #fff;
+  font: 600 var(--fs-sub)/1.3 var(--fs-font-cjk); color: #fff;
 }
 .slide[data-layout="timeline"] .node .desc {
   /* 2026-05-16: 18 → 22 — timeline node body content per SKILL.md
      typography floor. Was reading as illegible fine print on projector. */
-  font: 500 24px/1.5 var(--fs-font-cjk); color: var(--fs-text-65);
+  font: 500 var(--fs-body)/1.5 var(--fs-font-cjk); color: var(--fs-text-65);
   text-wrap: balance;   /* 2026-05-26 · even the 2-line wrap (R-VIS-ORPHAN) */
 }
 
@@ -1069,23 +1204,21 @@ body {
   display: flex; flex-direction: column; gap: 20px; position: relative;
 }
 .slide[data-layout="process"] .step .stnum {
-  font: 700 48px/1 var(--fs-font-latin); color: var(--fs-accent); opacity: 0.6;
+  font: 700 var(--fs-title)/1 var(--fs-font-latin); color: var(--fs-accent); opacity: 0.6;
 }
 .slide[data-layout="process"] .step h3 {
   /* 2026-05-17: 28 → 48 — when stnum (48 hero) is the visual anchor of
      each card, the step title must hold its own at Title tier. */
-  font: 700 48px/1.2 var(--fs-font-cjk); color: #fff;
+  font: 700 var(--fs-title)/1.2 var(--fs-font-cjk); color: #fff;
 }
 .slide[data-layout="process"] .step p {
   /* 2026-05-16: 18 → 22 — process-step body per SKILL.md typography floor. */
-  font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text-65);
+  font: 500 var(--fs-body)/1.55 var(--fs-font-cjk); color: var(--fs-text-65);
 }
-.slide[data-layout="process"] .step:not(:last-child)::after {
-  content: ""; position: absolute; right: -22px; top: 50%;
-  width: 16px; height: 16px;
-  border-top: 2px solid var(--fs-accent); border-right: 2px solid var(--fs-accent);
-  transform: translateY(-50%) rotate(45deg); opacity: 0.6;
-}
+/* (#84) Old 16px chevron arrow REMOVED — it merged with the canonical
+   `.step::after` clip-path arrow (defined further below) on every non-last
+   step, producing a garbled double glyph. That clip-path rule is now the
+   single source of the process step arrow. */
 
 /* 规范 L4: process layout's output panel (right-side ~400 px wide) attribute
    list MUST be a single column — 2-col grid in a 400 px container yields
@@ -1100,7 +1233,7 @@ body {
   gap: 14px 0;
 }
 .slide[data-layout="process"] .output .attrs > * {
-  font: 500 24px/1.4 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk);
   color: var(--fs-text-72);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -1124,7 +1257,7 @@ body {
   position: absolute; top: 96px; left: 96px; right: 96px;
 }
 .slide[data-layout="agenda"][data-variant="with-header"] .header h2 {
-  font: 700 48px/1.05 var(--fs-font-cjk); letter-spacing: -0.005em;
+  font: 700 var(--fs-title)/1.05 var(--fs-font-cjk); letter-spacing: -0.005em;
 }
 
 /* TOC = vertical pill stack, centered on canvas
@@ -1173,7 +1306,7 @@ body {
 
 /* Numeral — italic, large, brand blue */
 .slide[data-layout="agenda"] .toc .item .n {
-  font: italic 700 48px/1 var(--fs-font-latin);
+  font: italic 700 var(--fs-title)/1 var(--fs-font-latin);
   color: var(--fs-blue);
   letter-spacing: 0.04em;
 }
@@ -1182,14 +1315,14 @@ body {
 .slide[data-layout="agenda"] .toc .item .title-zh {
   /* allow:white-opacity — agenda pill text master-spec hierarchy at 0.92
      keeps the active item's 1.0 readable as "this is the section we're in". */
-  font: 600 28px/1.2 var(--fs-font-cjk);
+  font: 600 var(--fs-sub)/1.2 var(--fs-font-cjk);
   color: rgba(255,255,255,0.92);
   letter-spacing: 0.005em;
 }
 /* Bilingual EN suffix retained for opt-in bilingual decks */
 .slide[data-layout="agenda"] .toc .item .title-en {
   display: block; margin-top: 6px;
-  font: 500 16px/1.3 var(--fs-font-latin);
+  font: 500 var(--fs-foot)/1.3 var(--fs-font-latin);
   color: var(--fs-text-48);
 }
 /* If the agenda item DOM is just <div class="n">.. </div><div class="title-zh">..</div>
@@ -1219,14 +1352,14 @@ body {
   font: 700 64px/1.15 var(--fs-font-cjk); margin-bottom: 24px;
 }
 .slide[data-layout="big-stat"] .copy p {
-  font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); max-width: 600px;
+  font: 500 var(--fs-body)/1.55 var(--fs-font-cjk); color: var(--fs-text-65); max-width: 600px;
 }
 /* 2026-05-20 · big-stat eyebrow override. Global .slide .eyebrow is 16px
    Latin (designed for footer chrome). In big-stat next to a 312px hero
    number, 16 reads as invisible. Bump to 28 (sub tier) so eyebrow earns
    its labeling role in the hero composition. */
 .slide[data-layout="big-stat"] .copy .eyebrow {
-  font-size: 28px;
+  font-size: var(--fs-sub);
   margin-bottom: 18px;
   letter-spacing: 0.08em;
 }
@@ -1317,7 +1450,7 @@ body {
   /* allow:white-opacity — small Latin contact line at bottom-left of end
      page; 0.55 is the "chrome / metadata" tone, sized 16px (Foot tier). */
   position: absolute; left: 124px; bottom: 80px;
-  font: 500 16px/1.5 var(--fs-font-latin);
+  font: 500 var(--fs-foot)/1.5 var(--fs-font-latin);
   color: rgba(255,255,255,0.55); letter-spacing: 0.06em;
 }
 /* (end .footer hide rule retired — global .slide .footer { display: none } now handles it.) */
@@ -1376,7 +1509,13 @@ body {
 .slide[data-layout="table"] .header,
 .slide[data-layout="timeline"] .header,
 .slide[data-layout="process"] .header,
-.slide[data-layout="big-stat"] .header {
+.slide[data-layout="big-stat"] .header,
+/* 2026-05-28 · `raw` joins the unified .header positioning so native-lift
+   slides (deck.json layout: "raw" with .header inside their data.html)
+   automatically get the master title coord (top:61, left:73, right:320)
+   instead of falling to top:0 static flow. Lifts that want a custom header
+   position can override via the slide's inline <style>. */
+.slide[data-layout="raw"] .header {
   position: absolute; top: 61px; left: 73px; right: 320px;  /* matches logo top */
   padding-bottom: 0; border-bottom: 0;
   display: block;
@@ -1388,7 +1527,7 @@ body {
 }
 .slide .header .eyebrow {
   display: block; margin: 14px 0 0 0;
-  font: 600 16px/1 var(--fs-font-latin); letter-spacing: 0.18em;
+  font: 600 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.18em;
   color: var(--fs-accent);
 }
 .slide .header .title-zh,
@@ -1402,7 +1541,7 @@ body {
      CSS in per-page <style> blocks can adjust title margin normally;
      if you need to push a subtitle further from the title, prefer
      `margin-top` on the subtitle (see `.page-sub` default below). */
-  font: 600 48px/1.1 var(--fs-font-cjk);
+  font: 600 var(--fs-title)/1.1 var(--fs-font-cjk);
   letter-spacing: -0.005em; color: #fff;
   white-space: nowrap;                      /* 规范: single line — no wrap */
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
@@ -1418,7 +1557,7 @@ body {
        </div>
 
    Defaults (master-aligned 2026-05-15, elevated from CTG-run feedback):
-     · font-size: 28px (rung 4 on the type ladder)
+     · font-size: var(--fs-sub) (rung 4 on the type ladder)
      · color: #fff (no opacity tricks — body floor applies)
      · margin-top: 36px (= 0.82× the 44/52 px title — wide enough that
        the subtitle reads as a separate line, narrow enough to stay
@@ -1430,7 +1569,7 @@ body {
   display: block;
   margin: 36px 0 0 0;
   padding: 0;
-  font: 500 28px/1.45 var(--fs-font-cjk);
+  font: 500 var(--fs-sub)/1.45 var(--fs-font-cjk);
   letter-spacing: 0;
   color: #fff;
   max-width: 100%;
@@ -1518,16 +1657,29 @@ body {
 .slide[data-layout="timeline"]     > .stage,
 .slide[data-layout="table"]        > .stage,
 .slide[data-layout="agenda"]       > .stage,
-.slide[data-layout="stats"]        > .stage {
-  /* 2026-05-15 · symmetric vertical positioning so stage geometric center
-     equals slide geometric center (y=540). Asymmetric top/bottom (e.g.
-     220/110) shifts the stage center below the slide center, producing
-     the "content reads slightly low" complaint from the CTG run feedback.
-     Trade-off: stage is 90 px shorter than the 220/110 layout (680 vs
-     770). Decks that genuinely need the extra height add the
-     `.stage--tall` opt-in class (see below). */
+.slide[data-layout="stats"]        > .stage,
+/* 2026-05-28 · `raw` joins the unified .stage positioning so native-lift
+   slides automatically get the master body-zone box (top:200, bottom:200,
+   left:96, right:96, flex column, justify-content:center). Without this,
+   lifted .stage falls to static flow → content goes edge-to-edge ("贴边")
+   because the source slide's inline .stage rule typically only overrides
+   top/bottom/gap and relies on the framework cascade for position/left/right.
+   Lifts that want a full-bleed body (e.g. a chart filling the canvas) can
+   override via the slide's inline <style> with `padding: 0` on .slide,
+   or by redeclaring .stage with their own values + !important. */
+.slide[data-layout="raw"]          > .stage {
+  /* 2026-05-31 · OWNER DECISION (supersedes the 2026-05-15 symmetric default):
+     anchor the body zone to the [title-bottom → screen-bottom] band so content
+     centers BELOW the title (band mid ≈ 596), per the canonical rule "content
+     centers in [titleBottom→bottom]; the title never participates". The old
+     symmetric 200/200 (center y=540) read as "内容偏上" because it folded the
+     title band into the centering. top:168 clears a two-line title (title
+     bottom ≈ 151); bottom:56 keeps a small floor margin → band mid
+     (168 + 1024)/2 ≈ 596. This REVERSES the 2026-05-15 CTG "reads slightly low"
+     change — owner re-decided 2026-05-31. Dense slides that genuinely want the
+     legacy canvas-center (y=540) opt back via `.stage--center540` (see below). */
   position: absolute;
-  top: 200px; left: 96px; right: 96px; bottom: 200px;
+  top: 168px; left: 96px; right: 96px; bottom: 56px;
   display: flex; flex-direction: column;
   justify-content: center;
   gap: 24px;
@@ -1542,6 +1694,66 @@ body {
   top: 220px; bottom: 110px;
 }
 
+/* 2026-05-31 · opt BACK to the legacy symmetric canvas-center (center y=540).
+   For dense slides where centering-below-title reads as "too low" (the
+   2026-05-15 CTG preference). The default is now title-anchored (≈596). */
+.slide > .stage.stage--center540 {
+  top: 200px; bottom: 200px;
+}
+
+/* 2026-05-29 · CARD-FILL utility class.
+   When a flex-column card has `min-height` set for visual presence (so it's
+   taller than its content's natural height), the default `justify-content:
+   flex-start` packs content at the top with empty space at the bottom of
+   the card — feels half-filled. `justify-content: space-between` distributes
+   children evenly across the card's height, so the card content visually
+   fills the frame.
+
+   Use this WHEN the card has min-height larger than its natural content
+   height. If content fills the card naturally (content height ≥ min-height),
+   this has no effect (space-between needs slack).
+
+   This is NOT the same as BF9's "dead-middle space" anti-pattern:
+   BF9 is about ACCIDENTAL stretching (flex:1 / align-items:stretch with sparse
+   content). card-fill is about INTENTIONAL min-height for visual sizing —
+   the slack is by design, and space-between fills it deliberately.
+
+   Triggered by 2026-05-29 P15: 5-card row with min-height 640px for visual
+   presence; content packs at top, ~160px empty at bottom of each card.
+   Applying space-between distributes the 5 children (head + system + doing
+   + stuck + by) evenly. */
+.fs-card-fill {
+  justify-content: space-between !important;
+}
+
+/* 2026-05-29 · ANCHORED-TITLE STAGE pattern.
+   When `.stage` contains a TITLE element as a direct child (.ttl-block,
+   .ttl-main, .header, h1, h2), the default `justify-content: center` on
+   .stage drags the title down to vertical center — wrong: title should
+   stay anchored at TOP, body should fill remaining vertical space.
+
+   Triggered by 2026-05-29 P15 lift: source `kangshifu-8-depts` puts title
+   INSIDE .stage (with `.header { display: none }` hiding the framework
+   default header). My fix initially over-corrected: with grid content-sized,
+   stage's `justify-content: center` pulled the title down with the cards,
+   leaving empty band at top AND bottom but title not at top.
+
+   Fix: when stage has a title direct child, switch to flex-start (anchor
+   title) AND require body container to have `flex: 1 + align-content:
+   center` so it fills the remainder + centers its content within. This
+   is a framework default — authors don't need to think about it.
+
+   The body container is whatever takes flex: 1 (the author's responsibility
+   to set on the body grid / nodes / etc.). Cards inside should set their
+   own min-height for visual presence (sweet-spot ~480-560px). */
+.slide > .stage:has(> .ttl-block),
+.slide > .stage:has(> .ttl-main),
+.slide > .stage:has(> .header),
+.slide > .stage:has(> h1),
+.slide > .stage:has(> h2) {
+  justify-content: flex-start;
+}
+
 /* Inner body containers flow naturally inside .stage — override the
    layout-default absolute positioning. Specificity (0,3,0) > (0,2,0). */
 .slide[data-layout="content-2col"] > .stage > .grid,
@@ -1554,6 +1766,120 @@ body {
   position: static;
   top: auto; right: auto; bottom: auto; left: auto;
 }
+
+/* 2026-05-31 · 生成即对(配合 R-VIS-CANVAS-CENTER 校验):content-2col/3up 的
+   .grid 在 .stage 内 flex:1 撑满 + 行内居中。统一 .stage 锚标题底(top:168/
+   bottom:56,带中线≈596)后,grid 若取自然高会被 stage 的 justify-content:center
+   在 856 带里"硬居中"→ 满铺页悬在偏下(用户反馈"太靠下")。改为 grid flex:1
+   吃满整个 856 带:
+     · 稀疏内容 → align-content:center 在带内居中(中线≈596,= R-VIS-CANVAS-CENTER 基准)
+     · 满铺内容 → 无 slack → 卡片顶对齐铺满饱满(不沉)
+   于是"稀疏居中 / 满铺撑满"成为自动的 CSS 行为,无需阈值判断,render 出来天生对。
+   只 scope content-2col/3up(其它版式内层容器未被 .stage 包裹,不受影响)。 */
+.slide[data-layout="content-2col"] > .stage > .grid,
+.slide[data-layout="content-3up"]  > .stage > .grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: center;
+}
+/* content-2col 视觉列(图/iframe)防被 grid 行拉伸变形 */
+.slide[data-layout="content-2col"] > .stage > .grid { align-items: center; }
+
+/* 2026-06-05 · BF-GRIDFILL-SIBLING · the `flex:1 撑满` above silently assumes
+   the .grid is the SOLE body block in .stage. When the .stage ALSO holds a
+   sibling block — a footer anchor-band, a lede line, a disclaimer strip — the
+   grown .grid eats EVERY pixel of vertical slack: cards float dead-centre in an
+   over-tall grid and the sibling is shoved to the far edge, opening a big dead
+   band between them. Worse, the stage's own `justify-content:center` becomes a
+   no-op (flex:1 left it zero slack to distribute), so the intended
+   "group the blocks + centre the group" never happens. This is the
+   "为撑满屏幕把页脚顶到底" anti-pattern — filling the screen is NOT a goal; a
+   centred group with balanced top/bottom whitespace is.
+   Fix: the fill only makes sense for a lone grid. When the grid has siblings it
+   must take intrinsic height so the stage groups + centres all blocks together
+   (sparse → centred ≈596; dense → fills naturally — same as a lone grid, minus
+   the manufactured slack). Gate the fill to :only-child. Authors who genuinely
+   want a middle block to stretch (top+bottom anchored layouts) opt back in with
+   the explicit `.fs-fill` class below — consistent with .fs-card-fill /
+   .stage--tall. Specificity (0,5,0) > the (0,4,0) base rule, so it wins. */
+.slide[data-layout="content-2col"] > .stage > .grid:not(:only-child),
+.slide[data-layout="content-3up"]  > .stage > .grid:not(:only-child) {
+  flex: 0 0 auto;
+}
+
+/* Opt-in: a stage child that SHOULD stretch to fill remaining vertical space
+   (e.g. a middle block in an intentional top-quote → fill → bottom-disclaimer
+   layout, or a body that fills below a pinned title). `!important` so it beats
+   the :only-child gate above regardless of source order. */
+.slide > .stage > .fs-fill {
+  flex: 1 1 auto !important;
+  min-height: 0;
+}
+
+/* ============================================================================
+ *  SCREENSHOT TILE  ·  .shot-twin / .shot-col / .shot-pill / img.shot-img
+ *  2026-06-05 · codified from meeting-recap-ai (label-above) + ai-knows-you.
+ *  N FULL (un-cropped) product screenshots side by side, each with a pill label.
+ *
+ *  WHEN: show screenshots WHOLE, each topped (or footed) by a short pill label.
+ *  Distinct from story-case `.scene-frame` (feishu-deck-patterns.css), which
+ *  CROPS a documentary still via `background-size: cover` + overlay caption.
+ *  NOTE: lives in feishu-deck.css (the always-loaded core), NOT
+ *  feishu-deck-patterns.css — that file is only linked by story-case/one-pager
+ *  decks, so a pattern that must work everywhere belongs here.
+ *
+ *  WHY a real <img>, not a `background-size:contain` frame (this is the whole
+ *  point of the pattern). A contain image floats inside a FIXED-height frame, so
+ *  shots of different aspect ratios sit at different vertical offsets and the
+ *  gap between the *visible image* and its label differs column-to-column
+ *  (measured 14 vs 54px on the source page). The validator can't see it
+ *  (R-VIS-GUTTER measures DOM rects, not the floated background extent), and the
+ *  runtime `balanceColumns` fix (feishu-deck.js) only half-solves it — it
+ *  tightens the frame but then CENTRES each unit, so the labels end up
+ *  mis-aligned across columns. An <img> sizes to its own aspect ratio with NO
+ *  letterbox slack, and balanceColumns ignores it (it only touches
+ *  background-size:contain). So: top-align the columns → labels line up; the
+ *  pill↔image gap is the flex `gap` → identical for every aspect ratio; each
+ *  image is as tall as it needs to be (shorter shots simply end higher).
+ * ============================================================================ */
+.slide .shot-twin {
+  display: grid;
+  grid-template-columns: repeat(var(--shot-cols, 2), 1fr);
+  gap: 28px;
+  align-items: start;        /* top-align columns → pill labels line up across columns */
+  justify-items: center;
+}
+.slide .shot-col {
+  display: flex; flex-direction: column;
+  gap: 14px;                 /* THE label↔image gap — one constant, every aspect ratio */
+  align-items: center; min-width: 0;
+}
+.slide .shot-pill {
+  align-self: center;
+  padding: 10px 24px;
+  background: rgba(60,127,255,0.20);
+  border: 1px solid rgba(60,127,255,0.50);
+  border-radius: 999px;
+  font: 700 24px/1.2 var(--fs-font-cjk);
+  color: #fff;
+  letter-spacing: 0.005em;
+}
+.slide .shot-col.is-violet .shot-pill { background: rgba(159,111,241,0.20); border-color: rgba(159,111,241,0.50); }
+.slide .shot-col.is-teal   .shot-pill { background: rgba(51,214,192,0.18);  border-color: rgba(51,214,192,0.50); }
+.slide .shot-col.is-orange .shot-pill { background: rgba(254,127,0,0.18);   border-color: rgba(254,127,0,0.50); }
+
+.slide img.shot-img {
+  display: block;
+  max-width: 100%;
+  max-height: var(--shot-max-h, 740px);   /* floor for tall portraits; override per deck if the stage is shorter */
+  width: auto; height: auto;               /* scale to natural aspect ratio — no letterbox, no float */
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+}
+/* caption-BELOW variant: author the pill AFTER the image in markup and add this
+   class on the twin; bottom-align so the image bottoms (and the captions under
+   them) line up. */
+.slide .shot-twin--cap-below { align-items: end; }
 
 /* When timeline is .stage-wrapped, the .axis (still absolutely positioned
    relative to .slide) needs to align with the .nodes' new flow position.
@@ -1715,6 +2041,23 @@ body {
     radial-gradient(55% 45% at 92% 8%, rgba(159,111,241,0.30), transparent 60%),
     radial-gradient(55% 45% at 8% 92%, rgba(60,127,255,0.22), transparent 60%);
 }
+/* 2026-05-29 · letterbox-aware decor mirror (BF15.1 framework fix).
+   mix-glow's bright zone is at 92% 8% (top-right) — on non-16:9 fullscreen
+   viewports the slide's ::before tint stops at the slide edge but the
+   letterbox area above stays untinted → visible luma jump = "上面有黑色的边".
+   Mirror decor onto `.slide-frame::after` so it covers letterbox + slide
+   uniformly, and suppress slide's own ::before to prevent double-tint
+   stacking at the slide boundary. */
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="mix-glow"])::after {
+  content: ''; position: absolute; inset: 0;
+  pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(55% 45% at 92% 8%, rgba(159,111,241,0.30), transparent 60%),
+    radial-gradient(55% 45% at 8% 92%, rgba(60,127,255,0.22), transparent 60%);
+}
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="mix-glow"]) > .slide[data-decor~="mix-glow"]::before {
+  background-image: none;
+}
 
 /* teal-glow: bottom-left teal bloom (data / KPI emphasis) */
 .slide[data-decor~="teal-glow"]::before {
@@ -1726,6 +2069,17 @@ body {
 .slide[data-decor~="orange-spark"]::before {
   background-image:
     radial-gradient(40% 32% at 88% 18%, rgba(254,127,0,0.22), transparent 65%);
+}
+/* 2026-05-29 · letterbox-aware decor mirror (BF15.1 framework fix · same as mix-glow).
+   orange-spark bright zone at 88% 18% (top-right) → same letterbox luma jump issue. */
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="orange-spark"])::after {
+  content: ''; position: absolute; inset: 0;
+  pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(40% 32% at 88% 18%, rgba(254,127,0,0.22), transparent 65%);
+}
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-decor~="orange-spark"]) > .slide[data-decor~="orange-spark"]::before {
+  background-image: none;
 }
 
 /* aurora: three-color ambient (matches the legacy .has-aurora class) */
@@ -1802,11 +2156,11 @@ body {
   display: inline-flex; align-items: center; gap: 10px;
   padding: 10px 18px; border-radius: 999px;
   border: 1px dashed color-mix(in srgb, var(--fs-teal) 60%, transparent);
-  font: 600 16px/1 var(--fs-font-cjk);
+  font: 600 var(--fs-foot)/1 var(--fs-font-cjk);
   color: var(--fs-teal); letter-spacing: 0.02em;
 }
 .slide .north-star::before {
-  content: "★"; font-size: 16px; color: var(--fs-teal);
+  content: "★"; font-size: var(--fs-foot); color: var(--fs-teal);
 }
 
 /* Verdict pill matrix (pattern B) — Go / Conditional / No-Go cards */
@@ -1831,7 +2185,7 @@ body {
      on dense cards and read as illegible. Now inline self-aligned-start pill
      at Body tier (24); reads as a peer label, never overlaps. */
   align-self: flex-start;
-  font: 700 24px/1 var(--fs-font-cjk); letter-spacing: 0.04em;
+  font: 700 var(--fs-body)/1 var(--fs-font-cjk); letter-spacing: 0.04em;
   padding: 10px 20px; border-radius: 999px;
   color: var(--fs-text-72);
 }
@@ -1850,14 +2204,14 @@ body {
 .slide .boundary-no  { border: 1px dashed color-mix(in srgb, var(--fs-orange) 60%, transparent); }
 .slide .boundary-yes { border: 1px solid color-mix(in srgb, var(--fs-teal) 60%, transparent); }
 .slide .boundary-no .pill, .slide .boundary-yes .pill {
-  display: inline-flex; padding: 8px 14px; font: 600 16px/1 var(--fs-font-latin);
+  display: inline-flex; padding: 8px 14px; font: 600 var(--fs-foot)/1 var(--fs-font-latin);
   letter-spacing: 0.14em; text-transform: uppercase; border-radius: 999px;
   margin-bottom: 14px;
 }
 .slide .boundary-no .pill  { background: rgba(254,127,0,0.16);  color: var(--fs-orange); }
 .slide .boundary-yes .pill { background: rgba(51,214,192,0.16); color: var(--fs-teal); }
-.slide .boundary-no .body  { font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text-65); text-decoration: line-through; text-decoration-color: rgba(254,127,0,.45); }
-.slide .boundary-yes .body { font: 500 24px/1.55 var(--fs-font-cjk); color: var(--fs-text); }
+.slide .boundary-no .body  { font: 500 var(--fs-body)/1.55 var(--fs-font-cjk); color: var(--fs-text-65); text-decoration: line-through; text-decoration-color: rgba(254,127,0,.45); }
+.slide .boundary-yes .body { font: 500 var(--fs-body)/1.55 var(--fs-font-cjk); color: var(--fs-text); }
 .slide .boundary-yes .hl   { color: var(--fs-teal); font-weight: 600; }
 
 /* Evolution chip (pattern F) — 现阶段 → 未来 */
@@ -1867,12 +2221,12 @@ body {
   border: 1px dashed var(--fs-text-16);
 }
 .slide .evolution-chip .stage-tag {
-  font: 600 16px/1 var(--fs-font-latin); letter-spacing: 0.18em;
+  font: 600 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.18em;
   text-transform: uppercase; color: var(--fs-text-48);
   white-space: nowrap;
 }
 .slide .evolution-chip .stage-body {
-  font: 500 24px/1.4 var(--fs-font-cjk); color: var(--fs-text);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk); color: var(--fs-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .slide .evolution-chip .stage-body.is-future { color: var(--fs-teal); font-weight: 600; }
@@ -1889,7 +2243,7 @@ body {
      Per SKILL.md: "Content chips that carry meaning ≥ 18 px min" — but
      these are headline strategy labels, treated as body. */
   display: inline-flex; align-items: center; gap: 10px;
-  font: 600 24px/1.2 var(--fs-font-cjk);
+  font: 600 var(--fs-body)/1.2 var(--fs-font-cjk);
 }
 .slide .principle-band .principle::before {
   content: ""; width: 8px; height: 8px; border-radius: 999px;
@@ -1938,7 +2292,7 @@ body {
     color-mix(in srgb, var(--fs-blue) 22%, transparent),
     color-mix(in srgb, var(--fs-purple) 14%, transparent));
   border: 1px solid color-mix(in srgb, var(--fs-blue) 45%, transparent);
-  font: 700 24px/1.3 var(--fs-font-cjk);
+  font: 700 var(--fs-body)/1.3 var(--fs-font-cjk);
   color: var(--fs-text);
   letter-spacing: 0.06em;
   display: inline-flex; align-items: center; gap: 14px;
@@ -1970,19 +2324,19 @@ body {
 }
 .slide .arch-hand-title { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 .slide .arch-hand-title h3 {
-  font: 700 28px/1.2 var(--fs-font-cjk);
+  font: 700 var(--fs-sub)/1.2 var(--fs-font-cjk);
   color: var(--fs-text);
 }
 .slide .arch-hand-title .em {
   /* 2026-05-16: 16 → 22 — EN motto under hand title is a content sub-line
      (carries the architecture's English name); per SKILL.md it's body. */
-  font: 600 24px/1.2 var(--fs-font-latin);
+  font: 600 var(--fs-body)/1.2 var(--fs-font-latin);
   letter-spacing: 0.18em;
   color: var(--fs-text-72);
 }
 .slide .arch-hand .sub {
   /* 2026-05-16: 20 → 22 — hand explanation line per SKILL.md body floor. */
-  font: 500 24px/1.5 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.5 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .arch-items { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
@@ -1991,7 +2345,7 @@ body {
   display: flex; align-items: center; gap: 14px;
   padding: 14px 16px; border-radius: 10px;
   background: rgba(255,255,255,0.05);
-  font: 500 24px/1.45 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.45 var(--fs-font-cjk);
   color: var(--fs-text);
 }
 .slide .arch-item .n {
@@ -1999,7 +2353,7 @@ body {
   border-radius: 8px;
   display: grid; place-items: center;
   background: var(--fs-blue); color: #fff;
-  font: 700 16px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-foot)/1 var(--fs-font-cjk);
 }
 .slide .arch-hand.right .arch-item .n { background: var(--fs-teal); color: #0A0E1B; }
 .slide .arch-base {
@@ -2010,7 +2364,7 @@ body {
     color-mix(in srgb, var(--fs-teal) 12%, transparent));
   border: 1px dashed color-mix(in srgb, var(--fs-text) 18%, transparent);
   text-align: center;
-  font: 500 24px/1.45 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.45 var(--fs-font-cjk);
   color: var(--fs-text-72);
   letter-spacing: 0.04em;
 }
@@ -2085,7 +2439,7 @@ body {
 }
 .slide .desktop-frame .iframe-hint {
   position: absolute; top: 16px; right: 16px;
-  font: 600 16px/1 var(--fs-font-latin); letter-spacing: 0.14em;
+  font: 600 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.14em;
   text-transform: uppercase;
   background: rgba(60,127,255,0.85); color: #fff;
   padding: 8px 14px; border-radius: 999px;
@@ -2148,10 +2502,10 @@ body {
   justify-content: stretch;                          /* same */
   gap: 18px;                                         /* tighter for vertical */
 }
-/* hide the right-pointing arrow; vertical variant gets no arrow */
-.slide[data-layout="process"][data-variant="vertical"] .step:not(:last-child)::after {
-  display: none;
-}
+/* (#84) vertical-variant chevron-hide REMOVED — it only suppressed the old
+   16px chevron (now deleted). The canonical `.step::after` arrow is already
+   hidden in vertical mode by the broader
+   `[data-variant="vertical"] .step::after { display:none }` rule. */
 
 /* ============================================================================
    UI MOCK PRIMITIVES (规范: re-render screenshots as HTML, not raster images)
@@ -2184,7 +2538,7 @@ body {
   padding: 14px 18px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   background: rgba(255,255,255,0.02);
-  font: 500 16px/1 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .ui-traffic-lights {
@@ -2212,7 +2566,7 @@ body {
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 999px;
   padding: 8px 18px;
-  font: 500 16px/1 var(--fs-font-latin);
+  font: 500 var(--fs-foot)/1 var(--fs-font-latin);
   color: var(--fs-text-72);
   letter-spacing: 0.02em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -2241,7 +2595,7 @@ body {
   display: flex; flex-direction: column; gap: 4px;
 }
 .slide .ui-sidebar .ui-section {
-  font: 600 16px/1 var(--fs-font-latin); letter-spacing: 0.14em;
+  font: 600 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--fs-text-40);
   padding: 14px 12px 8px;
 }
@@ -2262,7 +2616,7 @@ body {
 .slide .ui-tab {
   position: relative;
   padding: 10px 16px;
-  font: 500 16px/1.2 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1.2 var(--fs-font-cjk);
   color: var(--fs-text-48);
   border-radius: 8px;
   cursor: default;
@@ -2289,7 +2643,7 @@ body {
   gap: 14px;
   padding: 14px 18px;
   border-bottom: 1px solid rgba(255,255,255,0.04);
-  font: 500 16px/1.4 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1.4 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .ui-list-item.is-selected {
@@ -2297,7 +2651,7 @@ body {
   color: #fff;
 }
 .slide .ui-list-item .ui-meta {
-  font: 500 16px/1 var(--fs-font-latin);
+  font: 500 var(--fs-foot)/1 var(--fs-font-latin);
   color: var(--fs-text-40); letter-spacing: 0.02em;
   white-space: nowrap;
 }
@@ -2305,11 +2659,11 @@ body {
   display: flex; flex-direction: column; gap: 4px; min-width: 0;
 }
 .slide .ui-list-item .ui-line .name {
-  font-size: 16px; color: #fff; font-weight: 600;
+  font-size: var(--fs-foot); color: #fff; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .slide .ui-list-item .ui-line .preview {
-  font-size: 16px; color: var(--fs-text-48);
+  font-size: var(--fs-foot); color: var(--fs-text-48);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -2319,7 +2673,7 @@ body {
   width: 40px; height: 40px; border-radius: 999px;
   display: grid; place-items: center;
   background: color-mix(in srgb, var(--fs-blue) 22%, #131723);
-  color: #fff; font: 700 16px/1 var(--fs-font-latin);
+  color: #fff; font: 700 var(--fs-foot)/1 var(--fs-font-latin);
   letter-spacing: 0.02em; text-transform: uppercase;
 }
 /* Per-tone variants — rgba baked statically (was color-mix). Identical visual,
@@ -2327,8 +2681,8 @@ body {
 .slide .ui-avatar[data-tone="teal"]   { background: #1F2D34; background: rgba(51,214,192,0.26); }
 .slide .ui-avatar[data-tone="purple"] { background: #1E1A38; background: rgba(92,63,251,0.26); }
 .slide .ui-avatar[data-tone="orange"] { background: #292019; background: rgba(254,127,0,0.26); }
-.slide .ui-avatar.lg { width: 56px; height: 56px; font-size: 24px; }
-.slide .ui-avatar.sm { width: 32px; height: 32px; font-size: 16px; }
+.slide .ui-avatar.lg { width: 56px; height: 56px; font-size: var(--fs-body); }
+.slide .ui-avatar.sm { width: 32px; height: 32px; font-size: var(--fs-foot); }
 
 /* ---- Chat bubbles ---- */
 
@@ -2336,7 +2690,7 @@ body {
   max-width: 70%;
   padding: 14px 18px;
   border-radius: 16px;
-  font: 500 16px/1.45 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1.45 var(--fs-font-cjk);
   background: rgba(255,255,255,0.06);
   color: var(--fs-text);
   border: 1px solid rgba(255,255,255,0.04);
@@ -2365,7 +2719,7 @@ body {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 10px;
-  font: 500 16px/1.3 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1.3 var(--fs-font-cjk);
   color: #fff;
 }
 .slide .ui-input::placeholder { color: var(--fs-text-40); }
@@ -2376,7 +2730,7 @@ body {
   padding: 12px 22px;
   border-radius: 10px;
   border: 1px solid transparent;
-  font: 600 16px/1 var(--fs-font-cjk);
+  font: 600 var(--fs-foot)/1 var(--fs-font-cjk);
   cursor: default;
 }
 .slide .ui-btn.is-primary {
@@ -2407,21 +2761,21 @@ body {
   padding: 12px 16px;
   border-right: 1px solid rgba(255,255,255,0.04);
   border-bottom: 1px solid rgba(255,255,255,0.04);
-  font: 500 16px/1.3 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1.3 var(--fs-font-cjk);
   color: var(--fs-text-72);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .slide .ui-grid .ui-cell.is-header {
   background: rgba(255,255,255,0.04);
   color: #fff; font-weight: 600;
-  font-size: 16px; letter-spacing: 0.04em;
+  font-size: var(--fs-foot); letter-spacing: 0.04em;
 }
 .slide .ui-grid .ui-cell.is-tag {
   display: inline-block;
 }
 .slide .ui-grid .ui-cell .ui-pill {
   display: inline-block; padding: 4px 10px; border-radius: 999px;
-  font: 600 16px/1 var(--fs-font-latin); letter-spacing: 0.06em;
+  font: 600 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.06em;
 }
 /* Per-tone pill backgrounds — rgba baked (was color-mix). */
 .slide .ui-grid .ui-cell .ui-pill[data-tone="teal"]   { background: rgba(51,214,192,0.18);  color: var(--fs-teal); }
@@ -2443,7 +2797,7 @@ body {
   display: inline-grid; place-items: center;
   min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;
   background: var(--fs-blue); color: #fff;
-  font: 700 16px/1 var(--fs-font-latin);
+  font: 700 var(--fs-foot)/1 var(--fs-font-latin);
 }
 .slide .ui-badge.is-mute { background: rgba(255,255,255,0.16); color: var(--fs-text-72); }
 
@@ -2516,7 +2870,7 @@ body {
    Matches the v3 reference where number+icon header creates a strong eyebrow. */
 .slide .card .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .slide .card .num {
-  font: 700 28px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-sub)/1 var(--fs-font-cjk);
   color: var(--fs-text-48);  /* was --fs-text-50 (undefined, silent fallback to currentColor) */
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -2530,7 +2884,7 @@ body {
   margin-top: 24px;
   padding: 14px 0 14px 28px;
   border-left: 4px solid var(--fs-teal);
-  font: 600 28px/1.45 var(--fs-font-cjk);
+  font: 600 var(--fs-sub)/1.45 var(--fs-font-cjk);
   color: var(--fs-text);
   max-width: 1400px;
 }
@@ -2554,12 +2908,12 @@ body {
 .slide .voice-card::before {
   content: "\201C";
   position: absolute; top: 6px; left: 24px;
-  font: 48px/1 Georgia, serif;
+  font: var(--fs-title)/1 Georgia, serif;
   color: var(--fs-blue);
   opacity: 0.45;
 }
 .slide .voice-card .q {
-  font: 500 24px/1.7 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.7 var(--fs-font-cjk);
   color: var(--fs-text);
   margin-top: 36px;
 }
@@ -2567,7 +2921,7 @@ body {
   /* 2026-05-16: 18 → 22 — customer/attribution name MUST be legible on
      projector; this is content, not chrome. Use .attrib (14 px chrome)
      for anonymous attribution like "anonymous source · 2024 industry data". */
-  font: 500 24px/1.4 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk);
   color: var(--fs-text-72);
   letter-spacing: 0.04em;
   border-top: 1px dashed var(--fs-hairline);
@@ -2593,13 +2947,13 @@ body {
   border-color: color-mix(in srgb, var(--fs-teal) 40%, transparent);
 }
 .slide .cta-box .l h3 {
-  font: 700 28px/1.3 var(--fs-font-cjk);
+  font: 700 var(--fs-sub)/1.3 var(--fs-font-cjk);
   color: var(--fs-text);
   margin-bottom: 8px;
 }
 .slide .cta-box .l p {
   /* 2026-05-16: 20 → 22 — CTA explanation body per SKILL.md body floor. */
-  font: 500 24px/1.55 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.55 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .cta-box .cta-btn {
@@ -2611,7 +2965,7 @@ body {
   border-radius: var(--fs-radius-pill);
   background: var(--fs-text);
   color: var(--fs-bg-1);  /* was --fs-bg (undefined, silent fallback to currentColor → invisible on white bg) */
-  font: 700 24px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-body)/1 var(--fs-font-cjk);
   letter-spacing: 0.04em;
   cursor: pointer;
   transition:
@@ -2646,7 +3000,7 @@ body {
   text-align: center;
 }
 .slide .kpi-strip .kpi .v {
-  font: 800 28px/1.1 var(--fs-font-cjk);
+  font: 800 var(--fs-sub)/1.1 var(--fs-font-cjk);
   color: var(--fs-text);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -2655,7 +3009,7 @@ body {
 .slide .kpi-strip .kpi .v.is-blue   { color: var(--fs-blue);   }
 .slide .kpi-strip .kpi .v.is-orange { color: var(--fs-orange); }
 .slide .kpi-strip .kpi .l {
-  font: 500 24px/1.4 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk);
   color: var(--fs-text-72);
   margin-top: 6px;
 }
@@ -2681,7 +3035,7 @@ body {
 }
 .slide .calc-row:last-of-type { border-bottom: 0; }
 .slide .calc-row label {
-  font: 500 24px/1.4 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .calc-row input[type="range"] {
@@ -2708,7 +3062,7 @@ body {
   box-shadow: 0 0 0 4px rgba(60,127,255,0.30);
 }
 .slide .calc-row .v {
-  font: 700 24px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-body)/1 var(--fs-font-cjk);
   color: var(--fs-teal);
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -2722,12 +3076,12 @@ body {
   display: flex; justify-content: space-between; align-items: center; gap: 24px;
 }
 .slide .calc-result .lbl {
-  font: 500 24px/1.4 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk);
   color: var(--fs-text);
   letter-spacing: 0.04em;
 }
 .slide .calc-result .amount {
-  font: 800 48px/1 var(--fs-font-cjk);
+  font: 800 var(--fs-title)/1 var(--fs-font-cjk);
   background: var(--fs-grad-keyline);
   -webkit-background-clip: text; background-clip: text;
   color: transparent;
@@ -2735,7 +3089,7 @@ body {
   letter-spacing: -0.02em;
 }
 .slide .calc-hint {
-  font: italic 500 16px/1.55 var(--fs-font-cjk);
+  font: italic 500 var(--fs-foot)/1.55 var(--fs-font-cjk);
   color: var(--fs-text-48);  /* was --fs-text-50 (undefined, silent fallback) */
   letter-spacing: 0.04em;
 }
@@ -2750,7 +3104,7 @@ body {
   padding: 14px 18px;
   background: rgba(255,255,255,0.03);
   border-radius: 12px;
-  font: 500 24px/1.4 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.4 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 .slide .ui-row .lbl { color: var(--fs-text-72); }
@@ -2769,18 +3123,18 @@ body {
   border: 1px solid color-mix(in srgb, var(--fs-orange) 35%, transparent);
 }
 .slide .ui-alert .t {
-  font: 700 16px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-foot)/1 var(--fs-font-cjk);
   letter-spacing: 0.18em;
   color: var(--fs-orange);
   margin-bottom: 8px;
 }
 .slide .ui-alert h5 {
-  font: 700 24px/1.3 var(--fs-font-cjk);
+  font: 700 var(--fs-body)/1.3 var(--fs-font-cjk);
   color: var(--fs-text);
   margin-bottom: 6px;
 }
 .slide .ui-alert p {
-  font: 500 16px/1.55 var(--fs-font-cjk);
+  font: 500 var(--fs-foot)/1.55 var(--fs-font-cjk);
   color: var(--fs-text-72);
 }
 
@@ -2791,19 +3145,19 @@ body {
   border: 1px solid color-mix(in srgb, var(--fs-blue) 35%, transparent);
 }
 .slide .ui-kpi .t {
-  font: 700 16px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-foot)/1 var(--fs-font-cjk);
   letter-spacing: 0.18em;
   color: var(--fs-blue);
   margin-bottom: 8px;
 }
 .slide .ui-kpi .v {
-  font: 800 28px/1 var(--fs-font-cjk);
+  font: 800 var(--fs-sub)/1 var(--fs-font-cjk);
   color: var(--fs-text);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
 .slide .ui-kpi .d {
-  font: 600 16px/1.4 var(--fs-font-cjk);
+  font: 600 var(--fs-foot)/1.4 var(--fs-font-cjk);
   color: var(--fs-teal);
   margin-top: 4px;
 }
@@ -2832,7 +3186,7 @@ body {
   gap: 18px;
 }
 .slide .data-panel > h4 {
-  font: 600 24px/1.3 var(--fs-font-cjk);
+  font: 600 var(--fs-body)/1.3 var(--fs-font-cjk);
   color: var(--fs-text);
   letter-spacing: 0.02em;
   margin: 0;
@@ -2850,13 +3204,13 @@ body {
   display: flex;
   gap: 18px;
   align-items: baseline;
-  font: 500 24px/1.45 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.45 var(--fs-font-cjk);
   color: var(--fs-text);
 }
 .slide .data-panel .row::before {
   content: "▸";
   color: var(--fs-blue);
-  font-size: 16px;
+  font-size: var(--fs-foot);
   flex-shrink: 0;
 }
 .slide .data-panel .row .lbl { flex: 1;          color: var(--fs-text); }
@@ -2946,28 +3300,28 @@ body {
   box-shadow: 0 0 0 4px rgba(60, 127, 255, 0.10);
 }
 .slide .ns-card .idx {
-  font: 800 48px/1 var(--fs-font-cjk);
+  font: 800 var(--fs-title)/1 var(--fs-font-cjk);
   letter-spacing: -0.02em;
   color: var(--fs-blue);
 }
 .slide .ns-card h4 {
-  font: 700 28px/1.3 var(--fs-font-cjk);
+  font: 700 var(--fs-sub)/1.3 var(--fs-font-cjk);
   color: var(--fs-text);
   margin: 0;
 }
 .slide .ns-card .star-label,
 .slide .ns-card .core-label {
-  font: 700 16px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-foot)/1 var(--fs-font-cjk);
   letter-spacing: 0.18em;
   color: var(--fs-text-72);
   margin-top: 4px;
 }
 .slide .ns-card .star {
-  font: 700 24px/1.3 var(--fs-font-cjk);
+  font: 700 var(--fs-body)/1.3 var(--fs-font-cjk);
   color: var(--fs-teal);
 }
 .slide .ns-card .core {
-  font: 600 16px/1.4 var(--fs-font-cjk);
+  font: 600 var(--fs-foot)/1.4 var(--fs-font-cjk);
   color: var(--fs-text);
 }
 .slide .ns-card .tags {
@@ -2979,7 +3333,7 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .slide .ns-card .tag-chip {
-  font: 600 16px/1.3 var(--fs-font-cjk);
+  font: 600 var(--fs-foot)/1.3 var(--fs-font-cjk);
   padding: 6px 10px;
   border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.10);
@@ -3056,7 +3410,7 @@ body {
   display: flex; align-items: center; gap: 12px;
 }
 .slide .scene-card .sc-name {
-  font: 700 24px/1.2 var(--fs-font-cjk);
+  font: 700 var(--fs-body)/1.2 var(--fs-font-cjk);
   color: var(--fs-text);
   letter-spacing: -0.005em;
 }
@@ -3068,20 +3422,20 @@ body {
   border: 0;
 }
 .slide .scene-card .sc-label {
-  font: 700 16px/1 var(--fs-font-cjk);
+  font: 700 var(--fs-foot)/1 var(--fs-font-cjk);
   letter-spacing: 0.18em;
   color: currentColor;
 }
 .slide .scene-card .sc-obj {
   /* 2026-05-16: 18 → 22 — scene-card "个性化对象" body line per body floor.
      The 6-up grid is dense, but 18 px reads as fine print on projector. */
-  font: 600 24px/1.45 var(--fs-font-cjk);
+  font: 600 var(--fs-body)/1.45 var(--fs-font-cjk);
   color: var(--fs-text);
 }
 .slide .scene-card .sc-lever {
   /* 2026-05-16: 16 → 22 — scene-card economic-lever line is the rhetorical
      hook per SKILL.md scene-grid recipe; MUST be legible. */
-  font: 500 24px/1.45 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.45 var(--fs-font-cjk);
   color: var(--fs-text-72);
   padding: 10px 12px;
   border-radius: 8px;
@@ -3110,7 +3464,7 @@ body {
   background: rgba(255,255,255,0.04);
   border-left: 3px solid var(--fs-teal);
   border-radius: 8px;
-  font: 500 24px/1.55 var(--fs-font-cjk);
+  font: 500 var(--fs-body)/1.55 var(--fs-font-cjk);
   color: var(--fs-text-72);
   display: flex; align-items: flex-start; gap: 14px;
 }
@@ -3121,7 +3475,7 @@ body {
   border-radius: 6px;
   background: rgba(51,214,192,0.15);
   color: var(--fs-teal);
-  font: 700 16px/1.3 var(--fs-font-cjk);
+  font: 700 var(--fs-foot)/1.3 var(--fs-font-cjk);
   letter-spacing: 0.06em;
 }
 .slide .report-item.is-warn { border-left-color: var(--fs-orange); }
@@ -3383,6 +3737,94 @@ body {
   .deck[data-mode="present"] ~ .fs-mobile-pageno { display: block; }
 }
 
+/* ============================================================================
+   规范 L3 分布修复 sweep(2026-05-30)— 把 content-3up 的"内容尺寸+居中"
+   correct-by-construction 打法推广到其它多卡/多块版式。每条都 scoped 到该版式的
+   渲染结构,不动全局 1722 行 legacy stretch;均经 assets/check-distribution.py
+   注入测 + 真渲染验证:目标版式不均内容 findings 下降、零回归。
+   (content-3up 的那条在 ~778 行;extras 版式 matrix/before-after/logo-wall 在
+    deck-json/templates/extra-layouts.css 末尾同名 sweep 块。
+    stats 故意不改 —— KPI 列顶基线对齐是正确阅读结构,几何"均衡"反而破坏它。)
+   ============================================================================ */
+
+/* content-2col:两列都含 framed box 时 un-stretch,让框共享竖直中线(治左高右低)。
+   :not(:has(> .col-visual[min-height])) 守住 BF7 raw hero-image(它靠 stretch 让
+   col-text space-between 贴到图片上下沿)。canonical 2col 本就免疫,这是 hardening。 */
+.slide[data-layout="content-2col"] .grid:not(:has(> .col-visual[style*="min-height"])) {
+  align-items: center;
+}
+
+/* process:步骤卡同 content-3up —— 按内容尺寸 + 共享中线 + 卡内垂直居中,
+   消除内容最多那张挤底、其余顶锚空一大片。 */
+.slide[data-layout="process"] .flow > .step {
+  align-self: center;
+  justify-content: center;
+}
+
+/* ============================================================================
+   Presenter mode (speaker view) — PowerPoint/Keynote-style. Built by
+   feishu-deck.js setupPresenter(); toggled with 'P'. Audience sees the deck
+   (this window behind the overlay, and/or the projector window); the presenter
+   sees current + next previews, notes, and a timer.
+   ============================================================================ */
+.fs-presenter {
+  position: fixed; inset: 0;
+  z-index: 2147483000;
+  display: none;                /* JS sets flex */
+  flex-direction: column;
+  background: #0b0e16;
+  color: #e6edf7;
+  padding: 20px 22px 14px;
+  gap: 14px;
+  font: 500 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.fs-presenter .pv-grid {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 18px;
+}
+.fs-presenter .pv-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.fs-presenter .pv-lab { font-size: 12px; color: #8b93ad; margin: 0 0 6px 2px; letter-spacing: .04em; }
+.fs-presenter .pv-notes-lab { margin-top: 14px; }
+.fs-presenter .pv-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+}
+.fs-presenter .pv-cur { box-shadow: 0 0 0 2px rgba(58,134,255,.55); }
+.fs-presenter .pv-embed { position: absolute; inset: 0; background: linear-gradient(135deg,#1a2238,#0c1222); }
+.fs-presenter .pv-notes {
+  flex: 1; min-height: 0; overflow-y: auto;
+  background: #121726; border: 1px solid #2a3450; border-radius: 8px;
+  padding: 12px 14px; font-size: 17px; line-height: 1.6; color: #fff;
+  white-space: pre-wrap;
+  width: 100%; box-sizing: border-box; resize: none;   /* editable textarea */
+  font-family: inherit; outline: none;
+}
+.fs-presenter .pv-notes:focus { border-color: #3a86ff; }
+.fs-presenter .pv-save { background: #2a8c5a; }
+.fs-presenter .pv-save:hover { background: #24794d; }
+.fs-presenter .pv-bar {
+  display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
+}
+.fs-presenter .pv-btn {
+  border: 0; border-radius: 999px; padding: 9px 16px; font-size: 15px; cursor: pointer;
+  background: rgba(255,255,255,.12); color: #fff;
+}
+.fs-presenter .pv-btn:hover { background: rgba(255,255,255,.2); }
+.fs-presenter .pv-proj { background: #3a86ff; }
+.fs-presenter .pv-proj:hover { background: #2f74e6; }
+.fs-presenter .pv-pos { font-size: 15px; color: #cfe0ff; min-width: 70px; text-align: center; }
+.fs-presenter .pv-timer {
+  font-size: 22px; font-variant-numeric: tabular-nums; color: #fff;
+  margin-left: 8px; min-width: 64px; text-align: center;
+}
+
 /* === Inlined brand assets (single-file delivery mode) === */
 :root {
   --fs-asset-logo: url("data:image/png;base64,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");
@@ -3415,13 +3857,13 @@ body {
 <!-- 01 Cover (封面) ======================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="cover" data-screen-label="01 Cover" data-slide-key="cover">
-    <div class="wordmark" data-text-id="slide-01.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="stage">
-      <h1 class="title title-zh" data-text-id="slide-01.title">先进团队的<br>工作方式</h1>
-      <p class="subtitle" data-text-id="slide-01.subtitle">The way advanced teams work</p>
+      <h1 class="title title-zh">先进团队的<br>工作方式</h1>
+      <p class="subtitle">The way advanced teams work</p>
     </div>
     <div class="author">
-      <span class="role" data-text-id="slide-01.role">客户提案 · 2026.04</span>飞书企业服务团队
+      <span class="role">客户提案 · 2026.04</span>飞书企业服务团队
     </div>
   </div>
 </div>
@@ -3429,17 +3871,17 @@ body {
 <!-- 02 Agenda ============================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="agenda" data-screen-label="02 Agenda" data-slide-key="agenda">
-    <div class="wordmark" data-text-id="slide-02.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh" data-text-id="slide-02.title_zh">本次汇报共六个部分</h2>
+      <h2 class="title-zh">本次汇报共六个部分</h2>
     </div>
     <div class="toc">
-      <div class="item"><div class="n" data-text-id="slide-02.n">01</div><div><div class="title-zh" data-text-id="slide-02.title_zh_02">背景与挑战</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en">Context and challenges</div></div></div>
-      <div class="item"><div class="n" data-text-id="slide-02.n_02">02</div><div><div class="title-zh" data-text-id="slide-02.title_zh_03">先进团队的工作方式</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_02">How advanced teams work</div></div></div>
-      <div class="item"><div class="n" data-text-id="slide-02.n_03">03</div><div><div class="title-zh" data-text-id="slide-02.title_zh_04">飞书平台能力</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_03">Lark platform capabilities</div></div></div>
-      <div class="item"><div class="n" data-text-id="slide-02.n_04">04</div><div><div class="title-zh" data-text-id="slide-02.title_zh_05">客户实证</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_04">Customer evidence</div></div></div>
-      <div class="item"><div class="n" data-text-id="slide-02.n_05">05</div><div><div class="title-zh" data-text-id="slide-02.title_zh_06">部署与服务</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_05">Rollout and service</div></div></div>
-      <div class="item"><div class="n" data-text-id="slide-02.n_06">06</div><div><div class="title-zh" data-text-id="slide-02.title_zh_07">下一步</div><div class="title-en" data-allow-body-floor data-text-id="slide-02.title_en_06">Next steps</div></div></div>
+      <div class="item"><div class="n">01</div><div><div class="title-zh">背景与挑战</div><div class="title-en" style="font-size:24px">Context and challenges</div></div></div>
+      <div class="item"><div class="n">02</div><div><div class="title-zh">先进团队的工作方式</div><div class="title-en" style="font-size:24px">How advanced teams work</div></div></div>
+      <div class="item"><div class="n">03</div><div><div class="title-zh">飞书平台能力</div><div class="title-en" style="font-size:24px">Lark platform capabilities</div></div></div>
+      <div class="item"><div class="n">04</div><div><div class="title-zh">客户实证</div><div class="title-en" style="font-size:24px">Customer evidence</div></div></div>
+      <div class="item"><div class="n">05</div><div><div class="title-zh">部署与服务</div><div class="title-en" style="font-size:24px">Rollout and service</div></div></div>
+      <div class="item"><div class="n">06</div><div><div class="title-zh">下一步</div><div class="title-en" style="font-size:24px">Next steps</div></div></div>
     </div>
   </div>
 </div>
@@ -3447,54 +3889,54 @@ body {
 <!-- 03 Section (一级章节页) ================================================ -->
 <div class="slide-frame">
   <div class="slide" data-layout="section" data-screen-label="03 Section" data-slide-key="section-advanced-team">
-    <div class="wordmark" data-text-id="slide-03.wordmark">飞书</div>
-    <div class="chapter-num" data-text-id="slide-03.chapter_num">02.</div>
-    <h2 class="title title-zh" data-text-id="slide-03.title">先进团队的工作方式</h2>
-    <p class="lede" data-text-id="slide-03.lede">即时同步 · 共识对齐 · 闭环交付</p>
+    <div class="wordmark">飞书</div>
+    <div class="chapter-num">02.</div>
+    <h2 class="title title-zh">先进团队的工作方式</h2>
+    <p class="lede">即时同步 · 共识对齐 · 闭环交付</p>
     <div class="pills">
-      <span class="pill" data-text-id="slide-03.pill_01">飞书消息</span>
-      <span class="pill" data-text-id="slide-03.pill_02">飞书文档</span>
-      <span class="pill" data-text-id="slide-03.pill_03">飞书多维表格</span>
-      <span class="pill" data-text-id="slide-03.pill_04">飞书知识库</span>
-      <span class="pill" data-text-id="slide-03.pill_05">飞书视频会议</span>
+      <span class="pill">飞书消息</span>
+      <span class="pill">飞书文档</span>
+      <span class="pill">飞书多维表格</span>
+      <span class="pill">飞书知识库</span>
+      <span class="pill">飞书视频会议</span>
     </div>
   </div>
 </div>
 
 <!-- 04 Content 3-up ======================================================= -->
 <div class="slide-frame">
-  <div class="slide" data-layout="content-3up" data-screen-label="04 Content" data-slide-key="three-pillars">
-    <div class="wordmark" data-text-id="slide-04.wordmark">飞书</div>
+  <div class="slide" data-layout="content-3up" data-screen-label="04 Content" data-slide-key="three-pillars" data-allow-no-focal>
+    <div class="wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh" data-text-id="slide-04.title_zh">先进团队的三大工作方式</h2>
+      <h2 class="title-zh">先进团队的三大工作方式</h2>
     </div>
-    <div class="grid">
+    <div class="grid" style="align-content:center">
       <div class="card">
         <div class="head">
           <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
-          <div class="num" data-text-id="slide-04.num">01</div>
+          <div class="num">01</div>
         </div>
-        <h3 class="ctitle" data-text-id="slide-04.ctitle_01">即时同步<br>Instant sync</h3>
-        <p class="cbody" data-text-id="slide-04.cbody_01">30 万人组织,一封消息触达全员,3 秒内全部已读。</p>
-        <div class="cfoot"><span data-allow-body-floor data-text-id="slide-04.span">MESSENGER · DOCS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <h3 class="ctitle">即时同步<br>Instant sync</h3>
+        <p class="cbody">30 万人组织,一封消息触达全员,3 秒内全部已读。</p>
+        <div class="cfoot"><span data-allow-body-floor>MESSENGER · DOCS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
       <div class="card">
         <div class="head">
           <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
-          <div class="num" data-text-id="slide-04.num_02">02</div>
+          <div class="num">02</div>
         </div>
-        <h3 class="ctitle" data-text-id="slide-04.ctitle_02">共识对齐<br>Aligned consensus</h3>
-        <p class="cbody" data-text-id="slide-04.cbody_02">所有讨论沉淀进 Wiki,决策可追溯,新成员第一天就能看到全貌。</p>
-        <div class="cfoot"><span data-allow-body-floor data-text-id="slide-04.span_02">WIKI · BASE</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <h3 class="ctitle">共识对齐<br>Aligned consensus</h3>
+        <p class="cbody">所有讨论沉淀进 Wiki,决策可追溯,新成员第一天就能看到全貌。</p>
+        <div class="cfoot"><span data-allow-body-floor>WIKI · BASE</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
       <div class="card">
         <div class="head">
           <div class="tile"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
-          <div class="num" data-text-id="slide-04.num_03">03</div>
+          <div class="num">03</div>
         </div>
-        <h3 class="ctitle" data-text-id="slide-04.ctitle_03">闭环交付<br>Closed-loop delivery</h3>
-        <p class="cbody" data-text-id="slide-04.cbody_03">从需求到上线,流程在 Base 中自动流转,每一步都有责任人和时间戳。</p>
-        <div class="cfoot"><span data-allow-body-floor data-text-id="slide-04.span_03">BASE · MEETINGS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <h3 class="ctitle">闭环交付<br>Closed-loop delivery</h3>
+        <p class="cbody">从需求到上线,流程在 Base 中自动流转,每一步都有责任人和时间戳。</p>
+        <div class="cfoot"><span data-allow-body-floor>BASE · MEETINGS</span><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
     </div>
   </div>
@@ -3502,19 +3944,19 @@ body {
 
 <!-- 05 Content 2-col ====================================================== -->
 <div class="slide-frame">
-  <div class="slide" data-layout="content-2col" data-screen-label="05 Content" data-slide-key="lark-base-tour">
-    <div class="wordmark" data-text-id="slide-05.wordmark">飞书</div>
+  <div class="slide" data-layout="content-2col" data-screen-label="05 Content" data-slide-key="lark-base-tour" data-allow-imbalance>
+    <div class="wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh" data-text-id="slide-05.title_zh">让流程在表格里运转</h2>
+      <h2 class="title-zh">让流程在表格里运转</h2>
     </div>
     <div class="grid">
       <div class="col-text">
-        <p class="lede" data-text-id="slide-05.lede">Lark Base 把任务、工单、合同、人员、审批,统一到一个可视化的多维表格。</p>
+        <p class="lede">Lark Base 把任务、工单、合同、人员、审批,统一到一个可视化的多维表格。</p>
         <ul class="feature-list">
-          <li data-text-id="slide-05.li">看板、甘特、日历、卡片视图,一份数据多种视角。</li>
-          <li data-text-id="slide-05.li_02">关联字段把分散的表打成网,数据不再孤立。</li>
-          <li data-text-id="slide-05.li_03">触发器 + 自动化,把人手操作变成系统行为。</li>
-          <li data-text-id="slide-05.li_04">开放 API,与 ERP、CRM、自研系统双向同步。</li>
+          <li>看板、甘特、日历、卡片视图,一份数据多种视角。</li>
+          <li>关联字段把分散的表打成网,数据不再孤立。</li>
+          <li>触发器 + 自动化,把人手操作变成系统行为。</li>
+          <li>开放 API,与 ERP、CRM、自研系统双向同步。</li>
         </ul>
       </div>
       <div class="col-visual">
@@ -3600,65 +4042,65 @@ body {
 <!-- 06 Quote ============================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="quote" data-screen-label="06 Quote" data-slide-key="quote-30k-team">
-    <div class="wordmark" data-text-id="slide-06.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="stack">
       <hr class="keyline">
-      <blockquote>飞书让 30 万人 <span class="accent-text" data-text-id="slide-06.accent_text">像一个团队</span> 一样工作。</blockquote>
-      <div class="attrib" data-text-id="slide-06.attrib">某头部互联网公司 · CIO · 2024</div>
+      <blockquote style="text-wrap:balance">飞书让 30 万人 <span class="accent-text">像一个团队</span> 一样工作。</blockquote>
+      <div class="attrib">某头部互联网公司 · CIO · 2024</div>
     </div>
   </div>
 </div>
 
 <!-- 07 Stats ============================================================== -->
 <div class="slide-frame">
-  <div class="slide" data-layout="stats" data-screen-label="07 Stats" data-slide-key="kpi-4up">
-    <div class="wordmark" data-text-id="slide-07.wordmark">飞书</div>
+  <div class="slide" data-layout="stats" data-screen-label="07 Stats" data-slide-key="kpi-4up" data-allow-imbalance>
+    <div class="wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh" data-text-id="slide-07.title_zh">飞书带来的可量化结果</h2>
+      <h2 class="title-zh">飞书带来的可量化结果</h2>
     </div>
-    <div class="grid">
+    <div class="grid" style="align-content:center">
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
-        <span class="trend" data-text-id="slide-07.trend">↑ 触达</span>
-        <div class="num">3<span class="unit" data-text-id="slide-07.unit">秒</span></div>
-        <div class="label" data-text-id="slide-07.label">30 万人组织全员消息送达时延</div>
-        <div class="source" data-text-id="slide-07.source">Source · 内部传输实测 2024 Q4</div>
+        <span class="trend">↑ 触达</span>
+        <div class="num">3<span class="unit">秒</span></div>
+        <div class="label">30 万人组织全员消息送达时延</div>
+        <div class="source">Source · 内部传输实测 2024 Q4</div>
       </div>
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <span class="trend" data-text-id="slide-07.trend_02">↑ 已读</span>
-        <div class="num">98<span class="unit" data-text-id="slide-07.unit_02">%</span></div>
-        <div class="label" data-text-id="slide-07.label_02">关键通知 30 分钟内已读率</div>
-        <div class="source" data-text-id="slide-07.source_02">Source · 12 家头部企业平均</div>
+        <span class="trend">↑ 已读</span>
+        <div class="num">98<span class="unit">%</span></div>
+        <div class="label">关键通知 30 分钟内已读率</div>
+        <div class="source">Source · 12 家头部企业平均</div>
       </div>
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
-        <span class="trend" data-text-id="slide-07.trend_03">↑ ROI</span>
-        <div class="num">3.2<span class="unit" data-text-id="slide-07.unit_03">×</span></div>
-        <div class="label" data-text-id="slide-07.label_03">部署 12 个月后协同 ROI 中位数</div>
-        <div class="source" data-text-id="slide-07.source_03">Source · IDC 2024 商务白皮书</div>
+        <span class="trend">↑ ROI</span>
+        <div class="num">3.2<span class="unit">×</span></div>
+        <div class="label">部署 12 个月后协同 ROI 中位数</div>
+        <div class="source">Source · IDC 2024 商务白皮书</div>
       </div>
       <div class="col">
         <div class="tile sm"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-        <span class="trend" data-text-id="slide-07.trend_04">↓ 决策</span>
-        <div class="num">&lt;60<span class="unit" data-text-id="slide-07.unit_04">秒</span></div>
-        <div class="label" data-text-id="slide-07.label_04">关键决策从发起到对齐时长</div>
-        <div class="source" data-text-id="slide-07.source_04">Source · 客户访谈 N=24</div>
+        <span class="trend">↓ 决策</span>
+        <div class="num">&lt;60<span class="unit">秒</span></div>
+        <div class="label">关键决策从发起到对齐时长</div>
+        <div class="source">Source · 客户访谈 N=24</div>
       </div>
     </div>
-    <p class="footnote" data-text-id="slide-07.footnote">数据样本: 12 家中国头部企业, 2024 Q3-Q4 实测, 口径见附录 A.</p>
+    <p class="footnote">数据样本: 12 家中国头部企业, 2024 Q3-Q4 实测, 口径见附录 A.</p>
   </div>
 </div>
 
 <!-- 08 Big stat =========================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="big-stat" data-screen-label="08 Big Stat" data-slide-key="scale-30k">
-    <div class="wordmark" data-text-id="slide-08.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="stage">
-      <div class="num">30<span class="unit" data-text-id="slide-08.unit">万人</span></div>
+      <div class="num">30<span class="unit">万人</span></div>
       <div class="copy">
-        <h2 data-text-id="slide-08.h2">单一组织,统一协同</h2>
-        <p data-text-id="slide-08.p">飞书的消息、文档、视频会议在 30 万人量级下保持秒级响应,且不依赖私有部署。</p>
+        <h2>单一组织,统一协同</h2>
+        <p>飞书的消息、文档、视频会议在 30 万人量级下保持秒级响应,且不依赖私有部署。</p>
       </div>
     </div>
   </div>
@@ -3690,10 +4132,10 @@ body {
       </g>
       <rect width="1920" height="1080" fill="url(#ph2)"/>
     </svg>
-    <div class="wordmark" data-text-id="slide-09.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="stage">
-      <h2 class="title title-zh" data-text-id="slide-09.title">现场决策,<br>从未离线</h2>
-      <p class="lede" data-text-id="slide-09.lede">门店、产线、出差、远程,飞书让每一处节点都能即时被看到、被对齐。</p>
+      <h2 class="title title-zh">现场决策,<br>从未离线</h2>
+      <p class="lede">门店、产线、出差、远程,飞书让每一处节点都能即时被看到、被对齐。</p>
     </div>
   </div>
 </div>
@@ -3701,21 +4143,21 @@ body {
 <!-- 10 Table ============================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="table" data-screen-label="10 Table" data-slide-key="comparison-vs-traditional">
-    <div class="wordmark" data-text-id="slide-10.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh" data-text-id="slide-10.title_zh">飞书与传统办公套件</h2>
+      <h2 class="title-zh">飞书与传统办公套件</h2>
     </div>
-    <div class="table-wrap">
+    <div class="table-wrap" style="display:flex;flex-direction:column;justify-content:center">
       <table>
         <thead>
-          <tr><th data-text-id="slide-10.th_01">能力</th><th data-text-id="slide-10.th_02">飞书 Lark</th><th data-text-id="slide-10.th_03">传统套件 A</th><th data-text-id="slide-10.th_04">传统套件 B</th></tr>
+          <tr><th>能力</th><th>飞书 Lark</th><th>传统套件 A</th><th>传统套件 B</th></tr>
         </thead>
         <tbody>
-          <tr><td data-text-id="slide-10.td_01">消息 + 文档 + 表格 + 会议 一体化</td><td data-text-id="slide-10.td_02">原生集成</td><td data-text-id="slide-10.td_03">多产品拼接</td><td data-text-id="slide-10.td_04">多产品拼接</td></tr>
-          <tr><td data-text-id="slide-10.td_05">多维表格 (Base) 自动化</td><td data-text-id="slide-10.td_06">核心能力</td><td data-text-id="slide-10.td_07">第三方插件</td><td data-text-id="slide-10.td_08">不支持</td></tr>
-          <tr><td data-text-id="slide-10.td_09">30 万人级消息触达</td><td data-text-id="slide-10.td_10">3 秒内全员</td><td data-text-id="slide-10.td_11">未公开</td><td data-text-id="slide-10.td_12">未公开</td></tr>
-          <tr><td data-text-id="slide-10.td_13">跨域中英双语支持</td><td data-text-id="slide-10.td_14">原生</td><td data-text-id="slide-10.td_15">需配置</td><td data-text-id="slide-10.td_16">需配置</td></tr>
-          <tr><td data-text-id="slide-10.td_17">开放 API + Webhook</td><td data-text-id="slide-10.td_18">全量开放</td><td data-text-id="slide-10.td_19">受限</td><td data-text-id="slide-10.td_20">受限</td></tr>
+          <tr><td>消息 + 文档 + 表格 + 会议 一体化</td><td>原生集成</td><td>多产品拼接</td><td>多产品拼接</td></tr>
+          <tr><td>多维表格 (Base) 自动化</td><td>核心能力</td><td>第三方插件</td><td>不支持</td></tr>
+          <tr><td>30 万人级消息触达</td><td>3 秒内全员</td><td>未公开</td><td>未公开</td></tr>
+          <tr><td>跨域中英双语支持</td><td>原生</td><td>需配置</td><td>需配置</td></tr>
+          <tr><td>开放 API + Webhook</td><td>全量开放</td><td>受限</td><td>受限</td></tr>
         </tbody>
       </table>
     </div>
@@ -3725,15 +4167,15 @@ body {
 <!-- 11 Timeline =========================================================== -->
 <div class="slide-frame">
   <div class="slide" data-layout="timeline" data-screen-label="11 Timeline" data-slide-key="roadmap-12week" style="--cols:4">
-    <div class="wordmark" data-text-id="slide-11.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh" data-text-id="slide-11.title_zh">12 周落地路径</h2>
+      <h2 class="title-zh">12 周落地路径</h2>
     </div>
-    <div class="nodes">
-      <div class="node"><div class="when" data-text-id="slide-11.when">W1-2</div><div class="what" data-text-id="slide-11.what">需求蓝图</div><div class="desc" data-text-id="slide-11.desc">访谈 6 部门, 输出协同地图与目标 KPI。</div></div>
-      <div class="node"><div class="when" data-text-id="slide-11.when_02">W3-5</div><div class="what" data-text-id="slide-11.what_02">关键流程上线</div><div class="desc" data-text-id="slide-11.desc_02">销售、HR、财务三条核心流在 Base 中先跑通。</div></div>
-      <div class="node"><div class="when" data-text-id="slide-11.when_03">W6-8</div><div class="what" data-text-id="slide-11.what_03">全员推广</div><div class="desc" data-text-id="slide-11.desc_03">分层培训, 关键岗位 100% 接入, 数据搬迁完成。</div></div>
-      <div class="node"><div class="when" data-text-id="slide-11.when_04">W9-12</div><div class="what" data-text-id="slide-11.what_04">数据复盘</div><div class="desc" data-text-id="slide-11.desc_04">复盘 KPI, 调整流程, 形成长期治理机制。</div></div>
+    <div class="nodes" style="align-items:center">
+      <div class="node"><div class="when">W1-2</div><div class="what">需求蓝图</div><div class="desc">访谈 6 部门, 输出协同地图与目标 KPI。</div></div>
+      <div class="node"><div class="when">W3-5</div><div class="what">关键流程上线</div><div class="desc">销售、HR、财务三条核心流在 Base 中先跑通。</div></div>
+      <div class="node"><div class="when">W6-8</div><div class="what">全员推广</div><div class="desc">分层培训, 关键岗位 100% 接入, 数据搬迁完成。</div></div>
+      <div class="node"><div class="when">W9-12</div><div class="what">数据复盘</div><div class="desc">复盘 KPI, 调整流程, 形成长期治理机制。</div></div>
     </div>
     <div class="axis"></div>
   </div>
@@ -3742,15 +4184,15 @@ body {
 <!-- 12 Process (4-step pipeline) ============================================ -->
 <div class="slide-frame">
   <div class="slide" data-layout="process" data-screen-label="12 Process" data-slide-key="process-4step" style="--cols:4">
-    <div class="wordmark" data-text-id="slide-12.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="header">
-      <h2 class="title-zh" data-text-id="slide-12.title_zh">需求到交付,四步成型</h2>
+      <h2 class="title-zh">需求到交付,四步成型</h2>
     </div>
     <div class="flow">
-      <div class="step"><div class="stnum" data-text-id="slide-12.stnum">01</div><h3 data-text-id="slide-12.h3">提出</h3><p data-text-id="slide-12.p">任意一线员工在 Messenger 发起,自动落入 Base 队列。</p></div>
-      <div class="step"><div class="stnum" data-text-id="slide-12.stnum_02">02</div><h3 data-text-id="slide-12.h3_02">对齐</h3><p data-text-id="slide-12.p_02">相关方在 Docs 留痕讨论,关键决策沉淀到 Wiki。</p></div>
-      <div class="step"><div class="stnum" data-text-id="slide-12.stnum_03">03</div><h3 data-text-id="slide-12.h3_03">交付</h3><p data-text-id="slide-12.p_03">负责人在 Base 中流转, 责任人 + 时间戳每一步可追溯。</p></div>
-      <div class="step"><div class="stnum" data-text-id="slide-12.stnum_04">04</div><h3 data-text-id="slide-12.h3_04">复盘</h3><p data-text-id="slide-12.p_04">会后 Meetings 自动生成纪要, 关键指标进入下个周期。</p></div>
+      <div class="step"><div class="stnum">01</div><h3>提出</h3><p>任意一线员工在 Messenger 发起,自动落入 Base 队列。</p></div>
+      <div class="step"><div class="stnum">02</div><h3>对齐</h3><p>相关方在 Docs 留痕讨论,关键决策沉淀到 Wiki。</p></div>
+      <div class="step"><div class="stnum">03</div><h3>交付</h3><p>负责人在 Base 中流转, 责任人 + 时间戳每一步可追溯。</p></div>
+      <div class="step"><div class="stnum">04</div><h3>复盘</h3><p>会后 Meetings 自动生成纪要, 关键指标进入下个周期。</p></div>
     </div>
   </div>
 </div>
@@ -3758,9 +4200,9 @@ body {
 <!-- 13 End (封底带 slogan) ================================================= -->
 <div class="slide-frame">
   <div class="slide" data-layout="end" data-screen-label="13 End" data-slide-key="closing">
-    <div class="wordmark" data-text-id="slide-13.wordmark">飞书</div>
+    <div class="wordmark">飞书</div>
     <div class="slogan" role="img" aria-label="先进团队 先用飞书"></div>
-    <div class="contact" data-text-id="slide-13.contact">contact@feishu.cn  ·  feishu.cn</div>
+    <div class="contact">contact@feishu.cn  ·  feishu.cn</div>
   </div>
 </div>
 
@@ -3790,6 +4232,371 @@ body {
   const FS_REFIT_DEBOUNCE = 80;
 
   let activeController = null;       // tracks the current init's AbortController
+
+  // ============================================================
+  // Runtime auto-balance (2026-05-30): after scale-to-fit, geometrically fix
+  // mis-distributed boxes so RAW / legacy decks (which bypass the schema
+  // correct-by-construction defaults) come out balanced ON LOAD — not
+  // detected-then-fixed. name-free / geometric (no layout-name whitelist).
+  //  · measurement-gated: only touches slides that actually measure crowded.
+  //  · apply-measure-keep-or-revert: a correction is kept ONLY if it reduces
+  //    crowding without introducing new canvas overflow → never makes a slide
+  //    worse (genuinely over-full boxes, e.g. content 161px too tall, revert).
+  //  · skips hero layouts, [data-allow-imbalance], [data-no-autobalance] decks.
+  //  · content-visibility hides non-current slides in present mode, so each
+  //    slide is balanced the first time it is actually laid out (initial pass
+  //    for current/scroll slides, the is-current observer for the rest).
+  //  · NO new ResizeObserver / addEventListener — stays within P52/P53 budget.
+  // ============================================================
+  const HERO_AB = new Set(['cover', 'section', 'big-stat', 'quote', 'image-text', 'end']);
+  const _abHasText = (el) => {
+    for (const n of el.childNodes) if (n.nodeType === 3 && n.textContent.trim()) return true;
+    return false;
+  };
+  const _abTextUnion = (root) => {
+    let t = Infinity, b = -Infinity, any = false;
+    root.querySelectorAll('*').forEach((el) => {
+      if (/^(SVG|svg|SCRIPT|STYLE)$/.test(el.tagName) || !_abHasText(el)) return;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      any = true; t = Math.min(t, r.top); b = Math.max(b, r.bottom);
+    });
+    return any ? { top: t, bottom: b } : null;
+  };
+  const _abFramed = (el) => {
+    const cs = getComputedStyle(el);
+    const border = ['Top', 'Right', 'Bottom', 'Left'].some((s) =>
+      parseFloat(cs['border' + s + 'Width'] || 0) > 0 &&
+      !/transparent|rgba\(0, 0, 0, 0\)/.test(cs['border' + s + 'Color']));
+    const bg = cs.backgroundColor && !/transparent|rgba\(0, 0, 0, 0\)/.test(cs.backgroundColor);
+    const bgi = cs.backgroundImage && cs.backgroundImage !== 'none';
+    return border || bg || bgi;
+  };
+  const _abMedia = (el) => {
+    const cs = getComputedStyle(el);
+    if (cs.backgroundImage && cs.backgroundImage !== 'none' && !/gradient/i.test(cs.backgroundImage)) return true;
+    if (el.querySelector('img,iframe,canvas,video,picture')) return true;
+    const raw = el.className, c = (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || '')).toString();
+    return /\b(photo|image|img|visual|mock|thumb|avatar|portrait|media|phone|screen)\b/i.test(c);
+  };
+  // Per-slide measurement: crowd severity (framed box text jammed against its
+  // bottom edge) + spill (how far any framed box bottom passes the slide edge).
+  function _abMeasure(slide) {
+    const scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+    const sb = slide.getBoundingClientRect().bottom;
+    const all = [...slide.querySelectorAll('*')].filter((el) =>
+      _abFramed(el) && !_abMedia(el) && el.getBoundingClientRect().height > 80 * scale);
+    const boxes = all.filter((el) => !all.some((o) => o !== el && o.contains(el)));
+    let severity = 0, spill = 0, overflow = 0; const crowded = [], overflowed = [];
+    for (const box of boxes) {
+      const r = box.getBoundingClientRect();
+      spill = Math.max(spill, (r.bottom - sb) / scale);
+      const cu = _abTextUnion(box); if (!cu) continue;
+      const distTop = (cu.top - r.top) / scale, distBottom = (r.bottom - cu.bottom) / scale;
+      // 文字溢出框底(distBottom<0)= grow-box 的对象:框被写死/挤扁,内容掉出去。
+      if (distBottom < -1) { overflow += (-distBottom); overflowed.push([box, -distBottom]); }
+      if (distBottom < 10 && distTop > distBottom + 16) { crowded.push(box); severity += (16 - distBottom); }
+    }
+    return { severity, spill, overflow, crowded, overflowed };
+  }
+  // HARD RULE (death rule): auto-balance must NEVER move a content-page title
+  // or subtitle. These positions are snapshotted before any correction and
+  // re-checked after — if a correction shifts ANY of them, the whole slide is
+  // reverted. Belt: corrections only un-stretch the crowded box's FRAMED peers,
+  // never title/non-box siblings.
+  const _abTitleEls = (slide) => [...slide.querySelectorAll(
+    '.header, .title-zh, .title-en, .subtitle, .eyebrow, .kicker, ' +
+    '.header h1, .header h2, .header h3')];
+
+  function balanceSlide(slide) {
+    const layout = slide.getAttribute('data-layout') || '';
+    if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return;
+    const before = _abMeasure(slide);
+    if (before.severity === 0 && before.overflow === 0) return;  // balanced → no-op (schema decks)
+    // Snapshot title/subtitle positions — they may not move (hard rule).
+    const titleSnap = _abTitleEls(slide).map((el) => {
+      const r = el.getBoundingClientRect(); return [el, r.top, r.left];
+    });
+    // Correction: un-stretch the crowded box's FRAMED peers only (content-sized
+    // + shared centerline; never a title/other sibling) + center content
+    // vertically inside flex-column boxes — the content-3up fix on raw geometry.
+    const touched = [];
+    const rows = new Set();
+    before.crowded.forEach((box) => { if (box.parentElement) rows.add(box.parentElement); });
+    rows.forEach((p) => {
+      for (const ch of p.children) {
+        if (ch.nodeType !== 1 || !_abFramed(ch) || _abMedia(ch)) continue;  // peers only
+        touched.push([ch, 'alignSelf', ch.style.alignSelf]);
+        ch.style.alignSelf = 'center';
+      }
+    });
+    before.crowded.forEach((box) => {
+      const cs = getComputedStyle(box);
+      if (cs.display.indexOf('flex') >= 0 && cs.flexDirection.indexOf('column') === 0) {
+        touched.push([box, 'justifyContent', box.style.justifyContent]);
+        box.style.justifyContent = 'center';
+      }
+      // A common imported/raw failure is a fixed-height card with asymmetric
+      // padding (e.g. 70px top / 3px bottom) plus flex-end. Merely changing
+      // justify-content cannot center the visible text because the content box
+      // itself is biased downward. Shift padding budget from top to bottom while
+      // keeping total vertical padding constant, then let measure-or-revert prove
+      // the crowd got better without moving titles or spilling the canvas.
+      const cu = _abTextUnion(box);
+      if (cu) {
+        const scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+        const r = box.getBoundingClientRect();
+        const distTop = (cu.top - r.top) / scale;
+        const distBottom = (r.bottom - cu.bottom) / scale;
+        if (distBottom < 10 && distTop > distBottom + 16) {
+          const pt = parseFloat(cs.paddingTop) || 0;
+          const pb = parseFloat(cs.paddingBottom) || 0;
+          const move = Math.min((distTop - distBottom) / 2, Math.max(0, pt - 12));
+          if (move > 1) {
+            touched.push([box, 'paddingTop', box.style.paddingTop]);
+            touched.push([box, 'paddingBottom', box.style.paddingBottom]);
+            box.style.paddingTop = Math.round(pt - move) + 'px';
+            box.style.paddingBottom = Math.round(pb + move) + 'px';
+          }
+        }
+      }
+    });
+    // GROW-BOX (2026-05-31): a box whose text overflows its bottom (written-in /
+    // squeezed-flat height) → raise its min-height to contain the content (the
+    // runtime version of grow-box-fit's 拉高框). We grow OPTIMISTICALLY here;
+    // the measure-or-revert guard below is the safety net — if growing pushes
+    // the slide past its edge (no canvas room) or moves the title, the whole
+    // thing reverts (incl. these min-heights). Never shrinks; never touches fonts.
+    const scaleAB = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+    before.overflowed.forEach(([box, over]) => {
+      const r = box.getBoundingClientRect();
+      touched.push([box, 'minHeight', box.style.minHeight]);
+      box.style.minHeight = Math.ceil(r.height / scaleAB + over + 6) + 'px';
+    });
+    const after = _abMeasure(slide);
+    const titleMoved = titleSnap.some(([el, t, l]) => {
+      const r = el.getBoundingClientRect();
+      return Math.abs(r.top - t) > 1 || Math.abs(r.left - l) > 1;
+    });
+    // Keep if EITHER crowd OR overflow got meaningfully better, AND neither got
+    // worse, AND no new canvas spill, AND the title didn't move (death rule).
+    const crowdBetter = after.severity < before.severity - 0.5;
+    const overflowBetter = after.overflow < before.overflow - 2;
+    const improved = (crowdBetter || overflowBetter) &&
+                     after.severity <= before.severity + 0.5 &&
+                     after.overflow <= before.overflow + 2 &&
+                     after.spill <= Math.max(before.spill, 2) && !titleMoved;
+    if (improved) {
+      slide.setAttribute('data-fs-autobalanced', '');
+    } else {
+      for (const [el, prop, val] of touched) el.style[prop] = val || '';  // incl. title-moved revert
+    }
+  }
+  // ---- R-VIS-CANVAS-CENTER runtime fix (2026-05-31): vertically center the content
+  //      UNION inside the visual canvas [main-title bottom → 1080], not inside the .stage
+  //      box. .stage is often anchored symmetrically (top:200/bottom:200 → center 540)
+  //      while the canvas center is ~597 once the title eats the top → content reads 偏上
+  //      by a per-page amount. Mechanism = TRANSLATE the band: top += off, bottom -= off.
+  //      Same height, so it is (a) immune to flex:1 children absorbing extra space (the
+  //      trap that hollowed out justify-content in the earlier attempt), and (b) sets
+  //      top/bottom — not transform — so it COMPOSES with the fs-reveal entrance transform
+  //      instead of being overridden by it. Measured AFTER entrance animations settle
+  //      (transform → identity), else the union reads mid-animation. Geometry mirrors the
+  //      validate.py / visual-audit.js R-VIS-CANVAS-CENTER detector.
+  const _ccMeasure = (slide) => {
+    const sr = slide.getBoundingClientRect();
+    const scale = sr.height / 1080;
+    if (scale < 0.01) return null;
+    const top0 = sr.top;
+    const header = slide.querySelector(':scope > .header');
+    const hb = (header && header.getClientRects().length)
+      ? (header.getBoundingClientRect().bottom - top0) / scale : 0;
+    let t = Infinity, b = -Infinity, any = false;
+    slide.querySelectorAll('*').forEach((el) => {
+      if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+      if (header && (el === header || header.contains(el))) return;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+      if (cs.position === 'absolute' || cs.position === 'fixed') {
+        // Skip structural/chrome (.stage / header / wordmark) and decorative
+        // absolute layers — but INCLUDE an absolutely-positioned CONTENT BAND
+        // (a DIRECT child of .slide, i.e. a sibling of .stage, that bears text),
+        // else the runtime centers the in-flow content right UNDER it
+        // (R-VIS-BAND-COLLIDE root). Deliberately narrow: ONLY that exact band
+        // shape is newly measured — chrome, decorative layers, and deeper
+        // absolute labels stay skipped, so normal decks are unaffected.
+        const isBand = el.parentElement === slide && _abHasText(el)
+          && !el.classList.contains('stage')
+          && !el.classList.contains('header')
+          && !el.classList.contains('wordmark');
+        if (!isBand) return;
+      }
+      const tag = el.tagName;
+      const isMedia = tag === 'IMG' || tag === 'SVG' || tag === 'svg' || tag === 'CANVAS' || tag === 'VIDEO';
+      if (!_abHasText(el) && !isMedia && el.children.length) return;            // empty wrappers don't count
+      const r = el.getBoundingClientRect();
+      if (r.width < 6 || r.height < 6) return;
+      // Clamp to clipping ancestors — content clipped away by an overflow:hidden
+      // ancestor (phone-mock chat taller than its frame, input bar below the clip)
+      // is invisible; counting it skews the union. Intersect with each clipping box.
+      let vt = r.top, vb = r.bottom;
+      for (let p = el.parentElement; p && p !== slide; p = p.parentElement) {
+        if (getComputedStyle(p).overflowY !== 'visible') {
+          const pr = p.getBoundingClientRect();
+          if (pr.top > vt) vt = pr.top;
+          if (pr.bottom < vb) vb = pr.bottom;
+        }
+      }
+      if (vb - vt < 6) return;
+      t = Math.min(t, (vt - top0) / scale);
+      b = Math.max(b, (vb - top0) / scale);
+      any = true;
+    });
+    if (!any) return null;
+    const canvasMid = (hb + 1080) / 2;
+    return { offset: canvasMid - (t + b) / 2, hb, ccTop: t, ccBot: b, contentH: b - t, bandH: 1080 - hb };
+  };
+  function _ccApply(slide) {
+    const layout = slide.getAttribute('data-layout') || '';
+    if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return;
+    if (slide.getBoundingClientRect().height < 30) return;          // not laid out / navigated away
+    const m = _ccMeasure(slide);
+    if (!m || m.hb < 40) return;                                    // header-bearing content pages only
+    if (Math.abs(m.offset) <= 12) return;                           // sub-perceptual → leave it
+    if (m.contentH > m.bandH - 8) return;                           // can't fit when centered → genuinely full
+    let el = null;
+    for (const sel of [':scope > .stage', ':scope > .grid', ':scope > .flow',
+                       ':scope > .nodes', ':scope > .toc', ':scope > .table-wrap']) {
+      const c = slide.querySelector(sel); if (c) { el = c; break; }
+    }
+    if (!el) return;
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'absolute' && cs.position !== 'fixed') return;          // band must be positioned
+    const top = parseFloat(cs.top), bot = parseFloat(cs.bottom);
+    if (!isFinite(top) || !isFinite(bot)) return;
+    const off = Math.round(m.offset);
+    // Container-fit gate: only band-translate if the band CONTAINER itself stays on-canvas
+    // after the shift (top inset / bottom inset = how far it can move up / down before an
+    // edge leaves the canvas). If the shift would push it off, the container is already
+    // canvas-filling and the offset is an INTERNAL top-alignment issue (content top-aligned
+    // in a tall container — R-VIS-BALANCE / justify-content territory), NOT a container
+    // mis-anchor. Translating it would just spill it off the edge (e.g. a top-aligned table
+    // in a 770px box). Skip — band-translate is only for mis-anchored containers (the
+    // symmetric .stage [200,880] case), where there is slack on both sides.
+    if (off > 0 ? off > bot - 4 : -off > top - 4) return;
+    // Death rule, scoped for a whole-block translate: protect only titles OUTSIDE the
+    // translated band — the page header/title at the top must never move. A subtitle or
+    // label that lives INSIDE the band is content: it rides the block down as one unit
+    // (relative position preserved), which is exactly what centering should do. (The crowd
+    // pass protects in-box subtitles because it un-stretches peers; here nothing is
+    // displaced relative to the content — the entire composition shifts together.)
+    const titleSnap = _abTitleEls(slide).filter((t) => !el.contains(t))
+      .map((t) => { const r = t.getBoundingClientRect(); return [t, r.top, r.left]; });
+    const pTop = el.style.top, pBot = el.style.bottom;
+    el.style.setProperty('top', Math.round(top + off) + 'px', 'important');
+    el.style.setProperty('bottom', Math.round(bot - off) + 'px', 'important');
+    const after = _ccMeasure(slide);
+    const titleMoved = titleSnap.some(([t, y, x]) => {
+      const r = t.getBoundingClientRect(); return Math.abs(r.top - y) > 1 || Math.abs(r.left - x) > 1;
+    });
+    const ok = after && Math.abs(after.offset) < Math.abs(m.offset) - 2 &&
+               after.ccTop > m.hb - 6 && after.ccBot < 1080 - 4 && !titleMoved;
+    if (ok) slide.setAttribute('data-fs-canvascentered', '');
+    else { el.style.top = pTop; el.style.bottom = pBot; }           // measure-or-revert
+  }
+  // Defer until entrance animations settle (transform back to identity), then apply once.
+  function centerSlideInCanvas(slide) {
+    const anims = (slide.getAnimations ? slide.getAnimations({ subtree: true }) : []).filter((a) => {
+      try { return a.effect.getComputedTiming().iterations !== Infinity; } catch (e) { return false; }
+    });
+    if (!anims.length) { try { _ccApply(slide); } catch (e) { /* best-effort */ } return; }
+    let done = false;
+    const go = () => { if (done) return; done = true; try { _ccApply(slide); } catch (e) { /* best-effort */ } };
+    Promise.all(anims.map((a) => a.finished.catch(() => {}))).then(go);
+    setTimeout(go, 1200);                                           // hard cap if an animation never resolves
+  }
+  // ---- Letterboxed-image unit fix (2026-05-31): the "差得多→分别居中" branch for media
+  //      columns. A column whose media is a `background-size:contain` image sits
+  //      letterboxed in a fixed-height frame (flex:1 / min-height:720), so its label
+  //      floats ABOVE the image (detached) and the image reads shorter than a sibling
+  //      column. Size the frame to the IMAGE's own aspect ratio → the label rides
+  //      directly on the photo as one tight unit → the cell's centering then centers
+  //      that unit. Only fires when the image is meaningfully letterboxed vertically
+  //      (>18% slack); a small letterbox is left to the whole-block pass ("差不多→整体
+  //      对齐"). Flow columns already center via align-items — this is only for the
+  //      contain-image case that align-items can't reach. Runs BEFORE canvas-center so
+  //      the block pass measures the tightened, internally-balanced columns.
+  const _ccImageFrames = (slide) => {
+    const out = [];
+    slide.querySelectorAll('*').forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.backgroundSize !== 'contain') return;
+      const m = cs.backgroundImage && cs.backgroundImage.match(/url\(["']?(.*?)["']?\)/);
+      if (m) out.push({ el, url: m[1] });
+    });
+    return out;
+  };
+  function balanceColumns(slide) {
+    const layout = slide.getAttribute('data-layout') || '';
+    if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return Promise.resolve();
+    const frames = _ccImageFrames(slide);
+    if (!frames.length) return Promise.resolve();
+    const sc = (slide.getBoundingClientRect().height / 1080) || 1;
+    return Promise.all(frames.map(({ el, url }) => new Promise((resolve) => {
+      const r = el.getBoundingClientRect();
+      const frameW = r.width / sc, frameH = r.height / sc;
+      if (frameW < 40 || frameH < 40) return resolve();
+      const im = new Image();
+      im.onerror = () => resolve();
+      im.onload = () => {
+        const ar = im.naturalWidth / im.naturalHeight;
+        if (!ar || ar <= frameW / frameH) return resolve();          // not wider than frame → no vertical letterbox
+        const containedH = frameW / ar;                              // image's rendered height in the frame
+        if (containedH >= frameH * 0.82) return resolve();           // <18% slack → 差不多 → leave for block pass
+        const cell = el.parentElement;
+        const prev = [el.style.flex, el.style.minHeight, el.style.height, el.style.aspectRatio,
+                      el.style.width, el.style.backgroundSize, el.style.maxHeight,
+                      cell && cell.style.justifyContent];
+        el.style.setProperty('flex', '0 0 auto', 'important');
+        el.style.setProperty('min-height', '0', 'important');
+        el.style.setProperty('height', 'auto', 'important');
+        el.style.setProperty('aspect-ratio', im.naturalWidth + '/' + im.naturalHeight);
+        el.style.setProperty('width', '100%', 'important');
+        el.style.setProperty('background-size', 'cover', 'important');
+        el.style.setProperty('max-height', Math.round(frameH) + 'px', 'important');
+        if (cell) cell.style.setProperty('justify-content', 'center', 'important');
+        if (el.getBoundingClientRect().height / sc > frameH - 6) {   // didn't actually tighten → revert
+          el.style.flex = prev[0]; el.style.minHeight = prev[1]; el.style.height = prev[2];
+          el.style.aspectRatio = prev[3]; el.style.width = prev[4]; el.style.backgroundSize = prev[5];
+          el.style.maxHeight = prev[6]; if (cell) cell.style.justifyContent = prev[7] || '';
+        } else {
+          slide.setAttribute('data-fs-colbalanced', '');
+        }
+        resolve();
+      };
+      im.src = url;
+    })));
+  }
+  function maybeBalance(slide) {
+    if (!slide || slide.hasAttribute('data-fs-balanced')) return;
+    const deck = slide.closest('.deck');
+    if (deck && deck.hasAttribute('data-no-autobalance')) return;
+    // content-visibility:auto skips off-screen slides → their content has 0
+    // size. Only tag+balance once a content container is actually laid out;
+    // otherwise leave untagged so the is-current observer retries when visible.
+    const probe = slide.querySelector('.stage, .grid, .flow, .nodes, .toc, .stack, .header, [class*="card"]');
+    if (!probe || probe.getBoundingClientRect().height < 30) return;
+    slide.setAttribute('data-fs-balanced', '');
+    try { balanceSlide(slide); } catch (e) { /* never break the deck over layout */ }
+    // columns first (tightens letterboxed media → internally-balanced cols), then the
+    // whole-block canvas-center on the tightened layout. balanceColumns resolves after
+    // any image loads (or immediately when there are none).
+    balanceColumns(slide)
+      .catch(() => {})
+      .then(() => { try { centerSlideInCanvas(slide); } catch (e) { /* best-effort */ } });
+  }
 
   function init() {
     const deck = document.querySelector('.deck');
@@ -3845,11 +4652,20 @@ body {
     signal.addEventListener('abort', () => ro.disconnect());
     frames.forEach(scaleFrame);   // initial scale
 
+    // ---- Presenter mode (speaker view + projector-window follow) ----
+    setupPresenter(deck, frames, signal);
+
     // ---- Keyboard nav (present mode) + F = fullscreen (any mode) ----
     document.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault(); toggleFullscreen(); nudgeIdle(); return;
+      }
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        if (typeof window.__fsTogglePresenter === 'function') window.__fsTogglePresenter();
+        return;
       }
       if (deck.dataset.mode !== 'present') return;
       const cur = currentIdx(frames);
@@ -3860,14 +4676,14 @@ body {
         // that map "advance" to Enter.
         case 'ArrowRight': case 'ArrowDown': case 'PageDown':
         case ' ': case 'Spacebar': case 'Enter':
-          e.preventDefault(); goTo(deck, frames, Math.min(cur + 1, frames.length - 1)); break;
+          e.preventDefault(); goTo(deck, frames, stepNext(frames, cur)); break;
         case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
         case 'Backspace':
-          e.preventDefault(); goTo(deck, frames, Math.max(cur - 1, 0)); break;
+          e.preventDefault(); goTo(deck, frames, stepPrev(frames, cur)); break;
         case 'Home':
-          e.preventDefault(); goTo(deck, frames, 0); break;
+          e.preventDefault(); goTo(deck, frames, firstVisible(frames)); break;
         case 'End':
-          e.preventDefault(); goTo(deck, frames, frames.length - 1); break;
+          e.preventDefault(); goTo(deck, frames, lastVisible(frames)); break;
         case 'Escape':
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
           break;
@@ -3896,9 +4712,7 @@ body {
       if (Math.abs(e.deltaY) < 30) return;
       wheelLock = now;
       const cur = currentIdx(frames);
-      const next = e.deltaY > 0
-        ? Math.min(cur + 1, frames.length - 1)
-        : Math.max(cur - 1, 0);
+      const next = e.deltaY > 0 ? stepNext(frames, cur) : stepPrev(frames, cur);
       goTo(deck, frames, next);
     }, { signal, passive: true });
 
@@ -3914,9 +4728,7 @@ body {
       touchStartY = null;
       if (Math.abs(dy) < 50) return;
       const cur = currentIdx(frames);
-      const next = dy < 0
-        ? Math.min(cur + 1, frames.length - 1)
-        : Math.max(cur - 1, 0);
+      const next = dy < 0 ? stepNext(frames, cur) : stepPrev(frames, cur);
       goTo(deck, frames, next);
     }, { signal, passive: true });
 
@@ -3928,7 +4740,9 @@ body {
       if (!raw) return false;
       if (/^\d+$/.test(raw)) {
         const idx = Math.max(0, Math.min(frames.length - 1, parseInt(raw, 10) - 1));
-        goTo(deck, frames, idx, false);
+        // updateHash=true normalizes an out-of-range / `#0` hash to the clamped
+        // slide's canonical #N (was left stale, mismatching the shown slide).
+        goTo(deck, frames, idx, true);
         return true;
       }
       // data-slide-key / id live on the inner .slide, not on .slide-frame
@@ -3943,7 +4757,22 @@ body {
       return false;
     }
     window.addEventListener('hashchange', readHash, { signal });
-    if (!readHash()) goTo(deck, frames, 0, false);
+    if (!readHash()) goTo(deck, frames, firstVisible(frames), false);
+
+    // ---- Kiosk / projection mode — hash keyword force-hides all chrome ----
+    // #proj | #bare | #clean | #kiosk → page bar + controls + hint vanish and
+    // stay hidden (idle-fade still wakes on hover; kiosk does not). For
+    // projecting, embedding in an iframe (e.g. Miaoda), and signage. Pure
+    // present-layer: works for any deck regardless of source model.
+    function applyKioskChrome() {
+      // Guard with (?![\w-]) instead of \b: \b treats '-' as a word boundary, so
+      // a valid slide-key hash like #proj-2026 / #clean-tech would wrongly trip
+      // kiosk mode and hide ALL nav chrome (M7). The keyword must be the WHOLE
+      // hash token (not followed by another word-char OR a hyphen).
+      ui.classList.toggle('is-kiosk', /(^|[#&/])(proj|bare|clean|kiosk)(?![\w-])/i.test(location.hash || ''));
+    }
+    window.addEventListener('hashchange', applyKioskChrome, { signal });
+    applyKioskChrome();
     // Initial target is now visible via .is-current; disable the CSS
     // first-frame fallback so the cover cannot bleed through later fades.
     deck.setAttribute('data-js-ready', '');
@@ -3955,6 +4784,10 @@ body {
     // starts the current slide's video.
     const mediaState = frames.map((f) => f.classList.contains('is-current'));
     frames.forEach((f, i) => syncFrameMedia(f, mediaState[i]));
+    // Initial auto-balance pass: balances the current slide (present mode) and
+    // every laid-out slide (scroll mode). Non-current present-mode slides are
+    // content-visibility-hidden here and get balanced on first enter (below).
+    requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => maybeBalance(f.querySelector('.slide'))); });
     const mediaObserver = new MutationObserver((muts) => {
       for (const m of muts) {
         const i = frames.indexOf(m.target);
@@ -3963,6 +4796,9 @@ body {
         if (now === mediaState[i]) continue;   // class changed but is-current didn't
         mediaState[i] = now;
         syncFrameMedia(m.target, now);
+        // Balance a present-mode slide the first time it becomes visible
+        // (content-visibility makes it measurable only now).
+        if (now) requestAnimationFrame(() => { if (signal.aborted) return; maybeBalance(m.target.querySelector('.slide')); });
       }
     });
     frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
@@ -4021,10 +4857,10 @@ body {
     // scroll mode is auto-detected via viewport. Toggle button became redundant
     // and added noise to top-right corner where the brand logo sits.
     ui.querySelector('.ctl.prev').addEventListener('click', () => {
-      goTo(deck, frames, Math.max(0, currentIdx(frames) - 1));
+      goTo(deck, frames, stepPrev(frames, currentIdx(frames)));
     }, { signal });
     ui.querySelector('.ctl.next').addEventListener('click', () => {
-      goTo(deck, frames, Math.min(frames.length - 1, currentIdx(frames) + 1));
+      goTo(deck, frames, stepNext(frames, currentIdx(frames)));
     }, { signal });
     ui.querySelector('.ctl.fs').addEventListener('click', toggleFullscreen, { signal });
 
@@ -4101,6 +4937,44 @@ body {
       if (frames[i].classList.contains('is-current')) return i;
     }
     return 0;
+  }
+
+  // ---- Hidden slides (隐藏页, PPT-style "hide slide") -----------------------
+  // A slide marked `hidden: true` in deck.json renders `data-hidden` on its
+  // `.slide` (durable — re-render keeps it). The slide stays in the DOM and is
+  // still reachable by a direct #N / #key hash and in scroll mode, but LINEAR
+  // present-mode navigation (→ / ← / space / wheel / swipe / prev-next) skips
+  // over it, and the page indicator counts only visible slides.
+  function isHidden(f) {
+    const s = f.querySelector('.slide');
+    return !!(s && s.hasAttribute('data-hidden'));
+  }
+  function stepNext(frames, cur) {            // next visible after cur (else stay)
+    for (let i = cur + 1; i < frames.length; i++) if (!isHidden(frames[i])) return i;
+    return cur;
+  }
+  function stepPrev(frames, cur) {            // prev visible before cur (else stay)
+    for (let i = cur - 1; i >= 0; i--) if (!isHidden(frames[i])) return i;
+    return cur;
+  }
+  function firstVisible(frames) {
+    for (let i = 0; i < frames.length; i++) if (!isHidden(frames[i])) return i;
+    return 0;
+  }
+  function lastVisible(frames) {
+    for (let i = frames.length - 1; i >= 0; i--) if (!isHidden(frames[i])) return i;
+    return frames.length - 1;
+  }
+  function visibleCount(frames) {
+    let n = 0; for (const f of frames) if (!isHidden(f)) n++; return n;
+  }
+  // 1-based position of `idx` among visible frames (visible frames at-or-before
+  // idx). A hidden current slide reports the count of visible frames before it,
+  // floored at 1, so the indicator never reads 0.
+  function visibleOrdinal(frames, idx) {
+    let n = 0;
+    for (let i = 0; i <= idx && i < frames.length; i++) if (!isHidden(frames[i])) n++;
+    return Math.max(1, n);
   }
 
   // Restart-on-enter for slide media (2026-05-24).
@@ -4183,6 +5057,232 @@ body {
       if (location.hash !== newHash) history.replaceState(null, '', newHash);
     }
     updateUI(deck, frames);
+    if (typeof window.__fsOnNav === 'function') window.__fsOnNav(idx);  // presenter hook
+  }
+
+  // ============================================================
+  // Presenter mode (2026-06): PowerPoint/Keynote-style speaker view + a separate
+  // projector/audience window that follows the presenter's navigation.
+  //  · Speaker view: current + next-slide live previews (cloned .slide, scaled —
+  //    same technique as the editor thumbnails, no rasterization), per-slide
+  //    speaker notes (from deck.json `notes`, emitted as a hidden JSON island),
+  //    a timer, and prev/next.
+  //  · Projector window: window.open(...#proj) → clean kiosk view; follows nav
+  //    via BroadcastChannel (same-origin, no backend; localStorage fallback).
+  //  · Entry: 'P' toggles speaker view (no-op in the projector follower window).
+  // ============================================================
+  function setupPresenter(deck, frames, signal) {
+    let notes = {};
+    try {
+      const el = document.getElementById('fs-deck-notes');
+      if (el) notes = JSON.parse(el.textContent || '{}');
+    } catch (e) { notes = {}; }
+
+    // A projector window is opened by openProjector() with window.name
+    // 'fs-projector'. It FOLLOWS the leader's nav and never leads.
+    const isFollower = (window.name === 'fs-projector');
+
+    let chan = null;
+    try { chan = new BroadcastChannel('fs-deck-present'); } catch (e) { chan = null; }
+    const LS_KEY = 'fs-deck-present-goto';
+    function broadcast(idx) {
+      if (isFollower) return;
+      const msg = { type: 'goto', idx: idx, t: Date.now() };
+      if (chan) { try { chan.postMessage(msg); } catch (e) {} }
+      try { localStorage.setItem(LS_KEY, JSON.stringify(msg)); } catch (e) {}
+    }
+    function onRemoteGoto(msg) {
+      if (!isFollower || !msg || msg.type !== 'goto' || typeof msg.idx !== 'number') return;
+      if (frames[msg.idx]) goTo(deck, frames, msg.idx, false);
+    }
+    if (chan) chan.onmessage = (e) => onRemoteGoto(e.data);
+    window.addEventListener('storage', (e) => {
+      if (e.key === LS_KEY && e.newValue) { try { onRemoteGoto(JSON.parse(e.newValue)); } catch (x) {} }
+    }, { signal });
+
+    let pv = null, pvOpen = false, timerStart = 0, timerId = 0, pvKey = null, projWin = null;
+
+    // nav hook called by goTo: mirror to the projector + refresh speaker view.
+    window.__fsOnNav = (idx) => { broadcast(idx); if (pvOpen) renderPV(); };
+
+    const curIdx = () => currentIdx(frames);
+
+    // Persist edited notes into the hidden island so a save (window.deckEdit.save
+    // / ⌘S) bakes them into the HTML, and `sync-index-to-deck.py --notes-only`
+    // can push them back to the deck.json `notes` field.
+    function writeNotesIsland() {
+      let isl = document.getElementById('fs-deck-notes');
+      if (!isl) {
+        isl = document.createElement('script');
+        isl.type = 'application/json'; isl.id = 'fs-deck-notes';
+        document.body.appendChild(isl);
+      }
+      isl.textContent = JSON.stringify(notes);
+    }
+
+    // Live preview: clone the real .slide and scale it (no <img>, no raster).
+    function thumbInto(box, slide) {
+      if (!box) return;
+      box.textContent = '';
+      if (!slide) return;
+      const c = slide.cloneNode(true);
+      c.removeAttribute('id');
+      c.querySelectorAll('[id]').forEach((e) => e.removeAttribute('id'));
+      c.querySelectorAll('[contenteditable]').forEach((e) => e.removeAttribute('contenteditable'));
+      c.querySelectorAll('iframe, video').forEach((e) => {
+        const ph = document.createElement('div'); ph.className = 'pv-embed'; e.replaceWith(ph);
+      });
+      c.style.cssText = 'position:absolute;top:0;left:0;margin:0;width:1920px;height:1080px;' +
+                        'transform-origin:top left;pointer-events:none;';
+      box.appendChild(c);
+      const w = box.clientWidth || 480;
+      c.style.transform = 'scale(' + (w / 1920) + ')';
+    }
+
+    function renderPV() {
+      if (!pv) return;
+      const ci = curIdx();
+      const ni = stepNext(frames, ci);
+      const curSlide = frames[ci] && frames[ci].querySelector('.slide');
+      const hasNext = ni !== ci;
+      thumbInto(pv.querySelector('.pv-cur'),  curSlide);
+      thumbInto(pv.querySelector('.pv-next'), hasNext ? frames[ni].querySelector('.slide') : null);
+      const key = curSlide && curSlide.dataset.slideKey;
+      pvKey = key || null;
+      const ta = pv.querySelector('.pv-notes');
+      ta.value = (key && notes[key]) ? notes[key] : '';
+      ta.placeholder = '写这一页的讲稿…（自动存入页面;💾 或 ⌘S 保存到文件)';
+      pv.querySelector('.pv-pos').textContent =
+        visibleOrdinal(frames, ci) + ' / ' + visibleCount(frames);
+      pv.querySelector('.pv-nextlabel').textContent = hasNext ? '下一页' : '（已是最后一页）';
+    }
+
+    function fmtTime(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60), r = s % 60;
+      return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    function buildPV() {
+      pv = document.createElement('div');
+      pv.className = 'fs-presenter';
+      pv.innerHTML =
+        '<div class="pv-grid">' +
+          '<div class="pv-col"><div class="pv-lab">当前</div><div class="pv-cur pv-box"></div></div>' +
+          '<div class="pv-col"><div class="pv-lab pv-nextlabel">下一页</div><div class="pv-next pv-box"></div>' +
+            '<div class="pv-lab pv-notes-lab">备注（可编辑）</div>' +
+            '<textarea class="pv-notes" spellcheck="false"></textarea></div>' +
+        '</div>' +
+        '<div class="pv-bar">' +
+          '<button class="pv-btn pv-prev" type="button">‹ 上一页</button>' +
+          '<span class="pv-pos">1 / 1</span>' +
+          '<button class="pv-btn pv-nextbtn" type="button">下一页 ›</button>' +
+          '<span class="pv-timer">00:00</span>' +
+          '<button class="pv-btn pv-reset" type="button" title="计时归零">↺</button>' +
+          '<button class="pv-btn pv-save" type="button" title="保存讲稿到当前 HTML 文件">💾 保存</button>' +
+          '<button class="pv-btn pv-proj" type="button" title="打开放映窗(观众屏,自动跟随)">📺 放映窗</button>' +
+          '<button class="pv-btn pv-exit" type="button" title="退出 (Esc / P)">✕ 退出</button>' +
+        '</div>';
+      document.body.appendChild(pv);
+      pv.querySelector('.pv-prev').onclick    = () => goTo(deck, frames, stepPrev(frames, curIdx()));
+      pv.querySelector('.pv-nextbtn').onclick = () => goTo(deck, frames, stepNext(frames, curIdx()));
+      pv.querySelector('.pv-proj').onclick    = openProjector;
+      pv.querySelector('.pv-exit').onclick    = closePresenter;
+      pv.querySelector('.pv-reset').onclick   = () => { timerStart = Date.now(); };
+      // edit notes → update in-memory map + the hidden island (so any save persists)
+      pv.querySelector('.pv-notes').addEventListener('input', function () {
+        if (!pvKey) return;
+        if (this.value) notes[pvKey] = this.value; else delete notes[pvKey];
+        writeNotesIsland();
+      });
+      // 💾 save → bake island into the HTML via the edit-mode FS-Access save.
+      pv.querySelector('.pv-save').onclick = () => {
+        writeNotesIsland();
+        if (window.deckEdit && typeof window.deckEdit.save === 'function') {
+          window.deckEdit.save();
+        } else {
+          alert('已写入页面。用编辑模式(E)的 ⌘S 保存到文件,'
+              + '或运行 sync-index-to-deck.py --notes-only 同步到 deck.json。');
+        }
+      };
+    }
+
+    function openPresenter() {
+      if (pvOpen) return;
+      if (!pv) buildPV();
+      pv.style.display = 'flex';
+      pvOpen = true;
+      if (!timerStart) timerStart = Date.now();
+      timerId = setInterval(() => {
+        const t = pv && pv.querySelector('.pv-timer');
+        if (t) t.textContent = fmtTime(Date.now() - timerStart);
+      }, 1000);
+      requestAnimationFrame(renderPV);   // ensure boxes have width before scaling
+    }
+    function closePresenter() {
+      if (!pvOpen) return;
+      pvOpen = false;
+      if (pv) pv.style.display = 'none';
+      clearInterval(timerId);
+      closeProjector();   // exiting the presenter dismisses the projector it spawned — no orphan
+    }
+    window.__fsTogglePresenter = isFollower
+      ? function () {}
+      : function () { pvOpen ? closePresenter() : openPresenter(); };
+
+    function projAlive() { try { return !!projWin && !projWin.closed; } catch (e) { return false; } }
+    function updateProjBtn() {
+      const btn = pv && pv.querySelector('.pv-proj');
+      if (btn) btn.textContent = projAlive() ? '📺 关闭放映窗' : '📺 放映窗';
+    }
+    function closeProjector() {
+      if (projAlive()) { try { projWin.close(); } catch (e) {} }
+      projWin = null;
+      updateProjBtn();
+    }
+    // 📺 toggles the audience/projector window. The handle is KEPT (it used to be
+    // discarded) so the deck can actually close it — otherwise the #proj kiosk
+    // window orphaned in the background with no way to dismiss it ("关不掉的窗口").
+    function openProjector() {
+      if (projAlive()) { closeProjector(); return; }      // already open → close (clear dismiss path)
+      const url = location.pathname + location.search + '#proj';
+      projWin = window.open(url, 'fs-projector', 'width=1280,height=760');
+      updateProjBtn();
+      setTimeout(() => broadcast(curIdx()), 400);   // land the new window on our slide
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && pvOpen) { e.preventDefault(); closePresenter(); }
+    }, { signal });
+
+    signal.addEventListener('abort', () => {
+      clearInterval(timerId);
+      closeProjector();
+      if (chan) { try { chan.close(); } catch (e) {} }
+      window.__fsOnNav = null;
+      window.__fsTogglePresenter = null;
+    });
+    // Close the projector if the whole tab/window goes away — never leave an orphan behind.
+    window.addEventListener('beforeunload', () => { if (!isFollower) closeProjector(); }, { signal });
+
+    // The projector itself (#proj follower) is a chrome-less kiosk window, so it had
+    // no in-page way to close — give it its own dismiss button. Lives ON body (not
+    // inside .deck-ui), so the `.is-kiosk` chrome-hide does not touch it; it is the
+    // last-resort exit for an orphaned audience window.
+    if (isFollower) {
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '✕ 关闭放映窗';
+      x.setAttribute('aria-label', '关闭放映窗');
+      x.style.cssText =
+        'position:fixed;top:12px;right:12px;z-index:2147483600;padding:8px 14px;' +
+        'border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(8,12,24,.72);' +
+        'color:#fff;font:600 14px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;' +
+        'cursor:pointer;opacity:.2;transition:opacity .2s;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
+      x.addEventListener('mouseenter', () => { x.style.opacity = '1'; });
+      x.addEventListener('mouseleave', () => { x.style.opacity = '.2'; });
+      x.addEventListener('click', () => { try { window.close(); } catch (e) {} });
+      document.body.appendChild(x);
+    }
   }
 
   function buildUI() {
@@ -4206,7 +5306,7 @@ body {
           '<svg class="i-exit"  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="nav-hint">← →   翻页  ·  F 全屏</div>';
+      '<div class="nav-hint">← →&nbsp;翻页&nbsp; ·&nbsp; F&nbsp;全屏&nbsp; ·&nbsp; P&nbsp;演示者&nbsp; ·&nbsp; E&nbsp;编辑</div>';
     return ui;
   }
 
@@ -4214,13 +5314,16 @@ body {
     const ui = document.querySelector('.deck-ui');
     if (!ui) return;
     const cur = currentIdx(frames);
-    const total = frames.length;
+    // Indicator counts only VISIBLE slides (hidden 隐藏页 are skipped in the
+    // show), so "3 / 12" matches what the audience actually pages through.
+    const total = visibleCount(frames);
+    const pos   = visibleOrdinal(frames, cur);
     const isPresent = deck.dataset.mode === 'present';
     const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
 
-    ui.querySelector('.cur').textContent   = pad(cur + 1);
+    ui.querySelector('.cur').textContent   = pad(pos);
     ui.querySelector('.total').textContent = pad(total);
-    const pct = total > 0 ? ((cur + 1) / total) * 100 : 0;
+    const pct = total > 0 ? (pos / total) * 100 : 0;
     ui.querySelector('.deck-progress .bar').style.width = pct + '%';
     ui.querySelector('.ctl.fs .i-enter').style.display = isFullscreen ? 'none'  : 'block';
     ui.querySelector('.ctl.fs .i-exit').style.display  = isFullscreen ? 'block' : 'none';
@@ -4250,6 +5353,13 @@ body {
     } else {
       requestFullscreen();
     }
+  }
+
+  function isTypingTarget(target) {
+    if (!target || !(target instanceof Element)) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   }
 
   function maybePortraitToast() {
@@ -4342,6 +5452,10 @@ body {
       if (mode === 'present' && typeof idx === 'number') {
         frames.forEach((f, i) => f.classList.toggle('is-current', i === idx));
         scaleNow(idx);
+        // Keep the URL hash in sync (#914): the mobile patch toggles is-current
+        // directly instead of going through the main goTo(), so without this a
+        // reload / shared link restored the wrong slide.
+        try { history.replaceState(null, '', '#' + (idx + 1)); } catch (e) {}
       } else if (mode === 'scroll') {
         frames.forEach((_, i) => scaleNow(i));
       }
@@ -4354,6 +5468,7 @@ body {
         frames.forEach((f, i) => f.classList.toggle('is-current', i === next));
         scaleNow(next);
         updatePageNo();
+        try { history.replaceState(null, '', '#' + (next + 1)); } catch (e) {}
       }
     }
 

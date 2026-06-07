@@ -1,4 +1,4 @@
 interface:
   display_name: "Publisher"
-  short_description: "Publish confirmed feishu-deck-h5 HTML to Miaobi Magic Page and ingest it into feishu-slide-library."
-  default_prompt: "Use $publisher to publish the confirmed HTML deck to Miaobi and ingest it into feishu-slide-library after validator pass and user confirmation."
+  short_description: "Publish confirmed feishu-deck-h5 HTML to Miaobi Magic Page."
+  default_prompt: "Use $publisher to publish the confirmed HTML deck to Miaobi after validator pass and user confirmation. Do not ingest it into feishu-slide-library."
