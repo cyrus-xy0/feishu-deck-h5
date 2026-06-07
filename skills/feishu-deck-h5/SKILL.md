@@ -219,6 +219,14 @@ For an existing deck:
   screenshots); a legacy HTML-only deck (no deck.json) is backfilled to deck.json
   from its real DOM before it is operated on. Editing is uniform across canvas /
   raw / schema slides: render → edit → sync back to `deck.json` → re-render.
+- Bespoke entrance/emphasis motion ("高级感"动效) is **opt-in** and lives ONLY in
+  `slide.custom_css` (CSS-only, round-trips). Never head `<style>`, `<script>`, or a
+  JS lib (GSAP/anime.js/WAAPI) — deck.json has no JS slot, so any script is wiped on
+  re-render. The framework already ships a baseline `fs-reveal` stagger; bespoke
+  motion is layout-last, per-page, scoped to `.slide-frame.is-current
+  .slide[data-slide-key=K]`, and designed fresh per page (not stamped from a frozen
+  template). See `references/motion-system.md` for the constraints, method, and the
+  extensible effect catalog.
 - Work happens inside `runs/<timestamp>-<slug>/`. After preflight and before any
   new generation, create a run with `assets/new-run.sh <slug>` and announce the
   absolute run path. Use a short ASCII slug derived from the topic/customer; do
@@ -294,6 +302,7 @@ Workers should load only the reference files they need:
 - `references/layout-recipes.md`
 - `references/narrative-patterns.md`
 - `references/richness-primitives.md`
+- `references/motion-system.md`
 - `references/one-pager-case.md`
 - `references/check-only.md`
 - `references/validator-rules.md`
