@@ -8,10 +8,10 @@
     {
       "name": "feishu-deck-h5",
       "source": "./",
-      "description": "飞书风格 HTML deck 生成技能 — 单文件 16:9 网页演示，深色商务汇报",
+      "description": "飞书风格 HTML deck 生成/编辑/发布技能 — 支持发布到妙笔/MagicBook(html-box)，妙搭仅显式请求时使用",
       "version": "1.0.0",
       "category": "skill",
-      "tags": ["presentation", "html", "feishu", "lark", "deck", "ppt"]
+      "tags": ["presentation", "html", "feishu", "lark", "deck", "ppt", "miaobi", "magicbook", "html-box"]
     }
   ]
 }

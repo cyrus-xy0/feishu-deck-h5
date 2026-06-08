@@ -1,16 +1,7 @@
-phase-1c	4	R-VIS-CANVAS-CENTER
 phase-1c	4	R-VIS-HERO-FLOOR
-phase-1c	4	R-VIS-SLACK-FLEX
 phase-1c	5	R-VIS-BALANCE
 phase-1c	5	R-VIS-SLACK-FLEX
 phase-1c	8	R-FOCAL-CHECK
 phase-1c	8	R-VIS-CANVAS-CENTER
 phase-1c	8	R-VIS-DIM-TEXT
 phase-1c	9	R-VIS-BALANCE
-sample-deck	10	R-VIS-BALANCE
-sample-deck	10	R-VIS-CANVAS-CENTER
-sample-deck	2	R-VIS-OPT-OUT-ABUSE
-sample-deck	4	R-FOCAL-CHECK
-sample-deck	5	R-VIS-BALANCE
-sample-deck	6	R-VIS-ORPHAN
-sample-deck	7	R-VIS-CANVAS-CENTER

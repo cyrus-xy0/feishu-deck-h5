@@ -31,6 +31,39 @@ desktop, or any other ad-hoc location, unless the user explicitly
 asks ("放到下载目录"). If the harness sandbox can't reach
 `runs/<ts>/output/`, that's Mode 2 — package and attach, don't relocate.
 
+### 🔒 Pre-handoff visual self-review — validator green ≠ done
+
+Before any deck crosses the agent → user boundary, the gate is
+**render → look at every page with a designer's eye → fix → THEN
+deliver.** It is NOT `render → validate (rules) → ship`.
+
+**Why** (user feedback · 世界坚果协会 deck): the first cut passed the
+validator clean (0 error) yet shipped with the title sitting low /
+missing and visibly hollow pages. The user asked three times "为什么
+不能一次做对". Root cause: the agent equated "validator 0 error" with
+"done" and never looked. Worse, the failures **compound** — centering
+the title hides the hollowness in the middle; only when the title is
+restored to its baseline does the empty space surface.
+
+**What the validator cannot judge** (no rule covers these — they are
+aesthetic, and `raw` / bespoke pages skip the position rules outright
+because there is nothing to measure):
+
+- **Title position** — is it at the standard baseline, or drifted /
+  missing? (raw pages bypass `R-VIS-TITLE-POSITION`, see E6 in
+  `editing-discipline`)
+- **Fullness** — is the page hollow (top / middle / bottom blank band)?
+- **Consistency** — does it match its sibling pages' style?
+- **Focus** — is there a clear first-read, or is everything flat?
+
+**How to apply:** after render, **look at each page's screenshot** and
+walk it through 「标题位 / 饱满度 / 一致性 / 焦点」 before you trust the
+green light. If it fails, fix and re-render. In multi-agent runs, make
+"post-render per-page visual self-review" a **default stage**, not an
+afterthought. This complements the precise-measurement gate (computed
+`font-size` px, see `check-only` / `validator-rules`): font sizes you
+**measure**, but composition / title position / hollowness you **look at**.
+
 ### 🔒 Delivery contract — NEVER hand back a single linked HTML file
 
 This is a **hard rule, no exceptions**. Before any artifact crosses

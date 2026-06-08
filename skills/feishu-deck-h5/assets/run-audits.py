@@ -926,7 +926,24 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             browser = pw.chromium.launch(headless=True)
             context = browser.new_context(viewport={"width": 1920, "height": 1080})
             page = context.new_page()
-            page.goto(url, wait_until="load", timeout=60_000)
+            page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+            # Bounded settle (B/2026-06-06): an embedded live demo can keep the
+            # 'load' event pending ~30s, taxing every audit run. Prefer full load
+            # for fidelity but cap it, then await fonts. This deck: ~31s → ~1-5s.
+            try:
+                page.wait_for_load_state("load", timeout=4_000)
+            except Exception:
+                pass
+            try:
+                page.evaluate("() => Promise.race([(document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(r => setTimeout(r, 2000))])")
+            except Exception:
+                pass
+            # Wait for framework init (feishu-deck.js sets data-js-ready on .deck).
+            # domcontentloaded can return before layout JS runs → un-laid-out DOM.
+            try:
+                page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000)
+            except Exception:
+                pass
             page.wait_for_timeout(settle_ms)  # 让 scale-to-fit / 布局稳定
             # ── 把链接的【框架 CSS】源文本注入成 <style data-source="framework"> ──
             # R-CSSVAR 要读"所有 CSS 源文本"判定 var(--x) 定义/引用,而 file:// 下外链

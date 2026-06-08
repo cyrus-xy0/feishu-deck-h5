@@ -56,17 +56,24 @@ def _version_card(log_dir: Path, e: dict, audit_by_v: dict, inline: bool) -> str
     v = e.get("v", "")
     label = _ESC(e.get("label") or "")
     slides = e.get("slides") or []
+    # 只显示「本版真正改动/新截」的页:它的 png 落在 screenshots/<本版>/ 下;
+    # 未改动页的 png 指向更早版本目录(reuse 指针),不再重复铺在这一版里。
+    # (v001 基线全部新截 → 自然全显示;旧版无指纹全量重截亦回落为全显示。)
+    prefix = f"screenshots/{v}/"
+    changed = [s for s in slides if (s.get("png") or "").startswith(prefix)]
+    n_total = sum(1 for s in slides if s.get("png"))
     thumbs = ""
-    for s in slides:
-        png = s.get("png")
-        if not png:
-            continue
-        src = _img_src(log_dir, png, inline)
+    for s in changed:
+        src = _img_src(log_dir, s["png"], inline)
         cap = f"{s.get('idx')} · {_ESC(s.get('key') or '')}"
         thumbs += (f'<figure class="thumb" onclick="lb(this)"><img loading="lazy" src="{src}" '
                    f'alt="{cap}"><figcaption>{cap}</figcaption></figure>')
     if not thumbs:
-        thumbs = '<div class="muted">（这一版没有截图 —— 可能没装 playwright）</div>'
+        # 一张新图都没有 = 这一版没改任何页(全部复用上一版),或没装 playwright
+        thumbs = ('<div class="muted">（这一版无改动页 —— 全部复用上一版截图）</div>'
+                  if n_total else '<div class="muted">（这一版没有截图 —— 可能没装 playwright）</div>')
+    chg_badge = (f'<span class="badge chg">📄 改动 {len(changed)} 页</span>'
+                 if changed else '<span class="badge ok">无改动页</span>')
 
     findings = (audit_by_v.get(v) or {}).get("findings") or []
     if findings:
@@ -81,7 +88,7 @@ def _version_card(log_dir: Path, e: dict, audit_by_v: dict, inline: bool) -> str
     return f"""
     <div class="card version" id="{_ESC(v)}">
       <div class="vhead"><span class="vtag">🆕 {_ESC(v)}</span>
-        <span class="vlabel">{label}</span>{audit_block}{snap_link}</div>
+        <span class="vlabel">{label}</span>{chg_badge}{audit_block}{snap_link}</div>
       <div class="strip">{thumbs}</div>
     </div>"""
 
@@ -130,6 +137,12 @@ border-radius:14px;padding:18px 20px}
 border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px #04081b}
 .turn:before{background:var(--accent)}.version:before{background:var(--ok)}
 .problem:before{background:var(--bad)}.fix:before{background:var(--warn)}
+/* 嵌套组:回合触发的 render 缩进挂在回合卡下面 */
+.nested{margin:-8px 0 26px 16px;padding-left:22px;border-left:2px dashed #20305a}
+.nested .card{margin-bottom:14px}
+.nested .card:before{left:-29px;width:9px;height:9px;top:24px}
+.nested.empty{color:var(--mut);font-style:italic;font-size:13px;padding:8px 0 4px 22px;border-left:2px dashed #20305a}
+.leadlabel{color:var(--mut);font-weight:600;letter-spacing:1px;font-size:13px;margin:0 0 14px}
 .turn-no{font-size:12px;color:var(--mut);font-weight:600;letter-spacing:1px;margin-bottom:10px}
 .row{display:flex;gap:12px;margin:10px 0}
 .who{flex:0 0 64px;font-size:13px;font-weight:600;padding-top:2px}
@@ -147,6 +160,7 @@ max-height:420px;overflow:auto;color:#c4cdec}
 .vlabel{color:#cdd6f0}
 .badge{font-size:12px;padding:3px 10px;border-radius:20px;cursor:default}
 .badge.ok{background:#0f2e22;color:var(--ok)}.badge.warn{background:#3a2b0d;color:var(--warn);cursor:pointer}
+.badge.chg{background:#0d2440;color:var(--accent)}
 details.audit{display:inline}details.audit summary{list-style:none;display:inline}
 details.audit ul{margin:10px 0 0;padding-left:18px;color:#e8c98a;font-size:13px;width:100%}
 .snaplink{margin-left:auto;color:#6f8fd8;font-size:12px;text-decoration:none}
@@ -186,23 +200,52 @@ def render_html(log_dir: Path, events: list[dict], out_path: Path, inline: bool 
             e["summary"] = summary_by_n[e["n"]]
     n_turns = sum(1 for e in events if e.get("t") == "turn")
     versions = [e for e in events if e.get("t") == "version"]
+    # 真实新截张数 = 各版 png 落在自己版本目录下的页(复用页不计),避免把每版 46 当截图数
+    n_shots = sum(sum(1 for s in (v.get("slides") or [])
+                      if (s.get("png") or "").startswith(f"screenshots/{v.get('v','')}/"))
+                  for v in versions)
     n_problems = sum(1 for e in events if e.get("t") == "problem")
     first_ts = next((e.get("ts") for e in events if e.get("ts")), "")
 
-    cards = []
+    # 把每次 render(version)/problem/fix 归到「触发它的回合」名下:按时间线扫,
+    # 每遇到一个 turn 就开一个新组,其后的 version/problem/fix 都挂进当前组的 children,
+    # 嵌套渲染 → 回合卡下面缩进显示的就是这一回合改的页。第一个回合之前的版本(初始建稿)
+    # 单独归入一个无 turn 的前置组。
+    def _child_card(e: dict) -> str:
+        t = e.get("t")
+        if t == "version":
+            return _version_card(log_dir, e, audit_by_v, inline)
+        if t == "problem":
+            return _problem_card(e)
+        if t == "fix":
+            return _fix_card(e)
+        return ""
+
+    groups: list[dict] = []
+    cur = {"turn": None, "children": []}   # 前置组:第一个回合之前的初始版本
     for e in events:
         t = e.get("t")
         if t == "turn":
-            cards.append(_turn_card(e))
-        elif t == "version":
-            cards.append(_version_card(log_dir, e, audit_by_v, inline))
-        elif t == "problem":
-            cards.append(_problem_card(e))
-        elif t == "fix":
-            cards.append(_fix_card(e))
+            groups.append(cur)
+            cur = {"turn": e, "children": []}
+        elif t in ("version", "problem", "fix"):
+            cur["children"].append(e)
         # session / audit 不单独出卡(audit 并进 version)
+    groups.append(cur)
 
-    body = "\n".join(cards)
+    blocks = []
+    for g in groups:
+        kids = "\n".join(_child_card(e) for e in g["children"])
+        if g["turn"] is None:
+            # 前置组:没有触发回合,直接平铺(标注「初始建稿」)
+            if g["children"]:
+                blocks.append(f'<div class="leadlabel">🎬 初始建稿</div>\n{kids}')
+            continue
+        nested = f'<div class="nested">{kids}</div>' if kids else \
+            '<div class="nested empty">（这一回合没有触发新的渲染版本）</div>'
+        blocks.append(_turn_card(g["turn"]) + "\n" + nested)
+
+    body = "\n".join(blocks)
     doc = f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>制作纪录片 · {_ESC(title)}</title><style>{_CSS}</style></head>
@@ -213,7 +256,7 @@ def render_html(log_dir: Path, events: list[dict], out_path: Path, inline: bool 
   <div class="stats">
     <div class="stat"><b>{n_turns}</b><span>对话回合</span></div>
     <div class="stat"><b>{len(versions)}</b><span>版本快照</span></div>
-    <div class="stat"><b>{sum(v.get('n_slides',0) for v in versions)}</b><span>截图总数</span></div>
+    <div class="stat"><b>{n_shots}</b><span>新截图数</span></div>
     <div class="stat"><b>{n_problems}</b><span>记录的问题</span></div>
   </div>
 </header>

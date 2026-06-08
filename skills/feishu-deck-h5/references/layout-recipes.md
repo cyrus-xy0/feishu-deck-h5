@@ -531,6 +531,50 @@ fill canvas, content stuck at top of each card, big empty bottom across
 the slide. User asks "why is there so much empty space?" — agent has to
 add centering after the fact. **The default layout should already center.**
 
+### Raw slides + genuinely-sparse content — pick a shape that FILLS, don't stretch boxes
+
+Everything above (group + centre, "*filling the screen is not a goal*",
+`R-VIS-SLACK-FLEX`, `R-VIS-CARD-MIN-HEIGHT-SPARSE`) applies to `layout:"raw"`
+too — and raw is the default, so it's where this bug actually ships. The schema
+guards key off known containers (`content-3up` `.grid`, etc.); **bespoke raw
+class names slip through them**, so own the discipline by hand. Two raw-specific
+failure modes:
+
+1. **Never hard-code `min-height` (or `flex:1`+stretch) on a bordered card to
+   force it to the floor.** A box that has a border / background stretched past
+   its content = visible hollow: content jammed at the top, footer/`代价` line
+   jammed at the bottom, dead air in the middle. Cards are **content-height**,
+   full stop.
+
+2. **When content is genuinely too sparse to fill even when centred** (e.g. 4
+   short cards + a one-row diagram cover only ~45 % of the canvas), neither
+   `justify-content:center` nor `space-between` saves it — centring leaves one
+   big middle gap; space-between leaves big *even* gaps; both read as "ran out
+   of content". Do **not** stretch anything. **Re-shape the layout to one whose
+   natural proportion fills 16:9:**
+   - a **vertical** flow / timeline / process spine (top→bottom) instead of a
+     single horizontal row — verticality fills height by nature and is the right
+     shape for a long serial process;
+   - **wide, stacked** rows (N cards stacked full-width, each short) instead of a
+     tall horizontal card row — each row is content-tall, the stack fills the
+     column;
+   - move supporting items **beside a tall hero visual** (two columns: tall
+     diagram left, stacked annotations right) so both columns fill height;
+   - let the **hero visual grow and keep it borderless** — air *around* a
+     borderless diagram on the canvas reads as breathing room; the *same* air
+     *inside* a bordered box reads as broken.
+
+   **Rule of thumb: whitespace belongs on the canvas / around borderless
+   visuals — never inside a bordered box.** If you are tempted to stretch a card
+   to fill, the layout *shape* is wrong; re-shape it instead of stretching.
+
+   *Case (2026-06-06): a "新险种卡在审批长链" raw page — a one-row chain + a
+   4-card horizontal row left ~half the slide empty; stretching the cards made
+   540 px hollow cards (two rounds of "间距太大 / 框太高" feedback). Fix that
+   landed: vertical approval flowchart (left column, fills height) + 4 wide
+   stacked pain-point cards (right column); both columns fill, zero stretch, zero
+   gap.*
+
 ---
 
 

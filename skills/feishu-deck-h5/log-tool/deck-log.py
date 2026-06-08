@@ -455,6 +455,12 @@ _SLIDE_META_JS = r"""
   // 内容指纹:djb2 over .slide innerHTML —— 用于增量截图判定"这页变没变"。
   // 取 innerHTML(内容)而非 outerHTML:截图时往 .slide 上写的 --fs-scale 内联样式
   // 不进 innerHTML,指纹对截图副作用稳定。
+  // 再剥掉子元素上的内联 style="..." 属性:框架运行时(balanceSlide 垂直居中、
+  // auto-fit 等)会按测量结果往子元素写 top/bottom/transform 等内联值,且在截图
+  // 时刻(~300ms)动画/测量尚未 settle,每次落点差几 px → 指纹漂移 → 同一页每版
+  // 都被误判"变了"而空截。每页真正的 CSS 在 <style> 块里(不是 style 属性,不受影响),
+  // 所以剥掉内联 style 只滤掉运行时噪声,真实内容/结构改动照样进指纹。
+  const norm = (html) => html.replace(/ style=("[^"]*"|'[^']*')/g, '');
   const fp = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) { h = ((h << 5) + h + str.charCodeAt(i)) | 0; } return (h >>> 0).toString(36); };
   const frames = [...document.querySelectorAll('.slide-frame')];
   return frames.map((f, i) => {
@@ -463,7 +469,7 @@ _SLIDE_META_JS = r"""
       idx: i + 1,
       key: (s && (s.getAttribute('data-slide-key') || s.id)) || ('slide-' + (i + 1)),
       layout: (s && s.getAttribute('data-layout')) || '',
-      h: s ? fp(s.innerHTML) : '',
+      h: s ? fp(norm(s.innerHTML)) : '',
     };
   });
 }
@@ -507,7 +513,26 @@ def _shoot(html_path: Path, out_png_dir: Path, only_slide: int | None = None,
         ctx = browser.new_context(viewport={"width": DESIGN_W, "height": DESIGN_H},
                                   device_scale_factor=1)
         page = ctx.new_page()
-        page.goto(url, wait_until="load", timeout=60_000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        # Bounded settle (B/2026-06-06): an embedded live demo can keep the 'load'
+        # event pending ~30s, taxing every screenshot/audit pass. Prefer full load
+        # for fidelity but cap it, then await fonts so CJK text doesn't shoot in a
+        # fallback face. This deck: ~31s (load) → ~1-5s, same pixels.
+        try:
+            page.wait_for_load_state("load", timeout=4_000)
+        except Exception:
+            pass
+        try:
+            page.evaluate("() => Promise.race([(document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(r => setTimeout(r, 2000))])")
+        except Exception:
+            pass
+        # Wait for the framework to finish init (feishu-deck.js sets data-js-ready
+        # on .deck at the end of setup). domcontentloaded can return BEFORE that, so
+        # without this gate a capture can fire on un-revealed (blank) slide content.
+        try:
+            page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000)
+        except Exception:
+            pass
         page.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
         page.wait_for_timeout(300)
         meta = page.evaluate(_SLIDE_META_JS)

@@ -128,6 +128,30 @@
         touched.push([box, 'justifyContent', box.style.justifyContent]);
         box.style.justifyContent = 'center';
       }
+      // A common imported/raw failure is a fixed-height card with asymmetric
+      // padding (e.g. 70px top / 3px bottom) plus flex-end. Merely changing
+      // justify-content cannot center the visible text because the content box
+      // itself is biased downward. Shift padding budget from top to bottom while
+      // keeping total vertical padding constant, then let measure-or-revert prove
+      // the crowd got better without moving titles or spilling the canvas.
+      const cu = _abTextUnion(box);
+      if (cu) {
+        const scale = parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1;
+        const r = box.getBoundingClientRect();
+        const distTop = (cu.top - r.top) / scale;
+        const distBottom = (r.bottom - cu.bottom) / scale;
+        if (distBottom < 10 && distTop > distBottom + 16) {
+          const pt = parseFloat(cs.paddingTop) || 0;
+          const pb = parseFloat(cs.paddingBottom) || 0;
+          const move = Math.min((distTop - distBottom) / 2, Math.max(0, pt - 12));
+          if (move > 1) {
+            touched.push([box, 'paddingTop', box.style.paddingTop]);
+            touched.push([box, 'paddingBottom', box.style.paddingBottom]);
+            box.style.paddingTop = Math.round(pt - move) + 'px';
+            box.style.paddingBottom = Math.round(pb + move) + 'px';
+          }
+        }
+      }
     });
     // GROW-BOX (2026-05-31): a box whose text overflows its bottom (written-in /
     // squeezed-flat height) → raise its min-height to contain the content (the

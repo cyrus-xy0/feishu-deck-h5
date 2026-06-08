@@ -1,7 +1,7 @@
 {
   "name": "feishu-deck-h5",
   "version": "1.0.0",
-  "description": "飞书风格 HTML deck 生成技能 — 单文件 16:9 网页演示，深色商务汇报",
+  "description": "飞书风格 HTML deck 生成/编辑/发布技能 — 16:9 网页演示，支持发布到妙笔/MagicBook(html-box)与素材库入库",
   "author": {
     "name": "FuQiang",
     "url": "https://github.com/FuQiang"

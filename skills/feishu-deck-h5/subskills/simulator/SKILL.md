@@ -174,5 +174,6 @@ python3 skills/feishu-deck-h5/subskills/simulator/simulate-pitch.py \
 - `deck-designer`: 当问题是叙事结构、受众选择、页序、每页重点、关键 idea 或主张。
 - `deck-renderer`: 当问题是具体页面、文案、layout、可读性、素材落地或证据页。
 - `deck-validator`: 当下一版生成后需要再次验收。
-- `publisher`: 当 deck 通过验收且预演没有阻断性修改建议时,把可复用的 slide、素材和知识交给入库流程。
+- `publisher`: 当 deck 通过验收且预演没有阻断性修改建议时,只在用户确认后发布 Magic Page 链接。
+- `importer`: 当 deck 通过验收且用户确认成品 HTML 应入库时,把可复用的 slide、素材和知识交给 slide-library 入库流程。
 - 飞书 Base 素材库/知识库: 当问题是缺客户案例、行业数据、demo、logo 或产品截图。
