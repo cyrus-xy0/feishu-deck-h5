@@ -13,6 +13,11 @@ Pipeline:
   4. Render embeddable blocks in body_blocks → partial per block.type
   5. Compose into deck shell                → _shell.html template
   6. Run HTML validator on output           → fail if validator errors
+     6c. Layout-distribution audit (check-distribution.py) → geometric
+         纵向利用率 / 块间死带 / 整排卡贴底 the symmetric-offset balance rule
+         misses. Advisory on a normal /runs/ render (auto-surfaces, non-blocking);
+         --visual promotes it to a HARD gate. Per-slide opt-out: deck.json slide
+         `"allow": ["imbalance"]` (→ data-allow-imbalance, also silences R-VIS-FILL).
   7. Write index.html + report success
 
 stdlib-only Python 3.11+. No external deps. Mirrors render.py conventions
@@ -64,6 +69,7 @@ BLOCKS_DIR    = TEMPLATES_DIR / "blocks"
 SCHEMA_FILE   = HERE / "deck-schema.json"
 VALIDATE_DECK = HERE / "validate-deck.py"
 VALIDATE_HTML = ASSETS_DIR / "validate.py"
+CHECK_DIST    = ASSETS_DIR / "check-distribution.py"
 COPY_ASSETS   = ASSETS_DIR / "copy-assets.py"
 
 # Single-source the run-root precondition: reuse copy-assets.find_run_root so the
@@ -2257,6 +2263,7 @@ def main(argv=None) -> int:
         # (R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-LABEL-FLOOR) fire.
         # Otherwise default behaviour: static checks only.
         _geom_block = False
+        _dist_block = False
         validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html)]
         if not args.visual:
             validate_cmd.append("--no-visual")
@@ -2337,6 +2344,57 @@ def main(argv=None) -> int:
             except Exception:
                 pass  # an advisory must NEVER break a render
 
+        # 6c. Layout-distribution gate (check-distribution.py) — the geometric
+        # "纵向利用率 / 块间死带 / 整排卡贴底" audit the visual engine's
+        # symmetric-offset balance model structurally misses: a dead zone in the
+        # MIDDLE of the canvas keeps the content UNION centered, so R-VIS-BALANCE
+        # (center-offset) passes while half the canvas is empty (the exact
+        # "下面都是空的" raw-page miss). Reuses the standalone auditor wholesale,
+        # including its `data-allow-imbalance` override (author intent via deck.json
+        # slide `"allow": ["imbalance"]`). NON-BLOCKING advisory by default so it
+        # auto-surfaces on every real render; `--visual` promotes it to a hard gate
+        # — parity with how --visual promotes the readability visual audits. Scope:
+        # only real decks under runs/ (skips /tmp smoke tests) and not on
+        # --scope/--quick edits (it is a whole-deck Playwright pass over off-scope
+        # pages). Its own Playwright load (~一遍) is the cost; a render under
+        # --skip-validate-html skips it with the rest of the HTML gate.
+        if (CHECK_DIST.exists()
+                and "/runs/" in str(args.output_dir.resolve())
+                and not scope_pages and not args.quick):
+            dist = subprocess.run(
+                [sys.executable, str(CHECK_DIST), str(out_html), "--json"],
+                capture_output=True, text=True,
+            )
+            try:
+                import json as _json
+                _slides = _json.loads(dist.stdout or "[]")
+                _findings = []
+                for _s in _slides:
+                    for _sig in _s.get("signals", []) or []:
+                        _code = _sig[0] if len(_sig) > 0 else ""
+                        _msg = _sig[2] if len(_sig) > 2 else ""
+                        _findings.append((_s.get("idx"),
+                                          _s.get("screen_label", ""), _code, _msg))
+                if _findings:
+                    _hard = bool(args.visual)
+                    _tag = ("❌ BLOCKING · layout-distribution"
+                            if _hard else
+                            "📐 distribution advisory · layout geometry")
+                    _gate = "" if _hard else " (NOT a delivery gate · --visual enforces)"
+                    print(f"\n{_tag}{_gate}:", file=sys.stderr)
+                    for _idx, _lbl, _code, _msg in _findings[:20]:
+                        print(f"  • [{_code}] #{_idx} {_lbl}: {_msg}", file=sys.stderr)
+                    if len(_findings) > 20:
+                        print(f"  … +{len(_findings) - 20} more", file=sys.stderr)
+                    print("  ↳ fill the empty canvas / even the box insets, OR mark "
+                          "the slide intentional in deck.json: slide "
+                          "\"allow\": [\"imbalance\"]. Focus one page: python3 "
+                          f"{CHECK_DIST.name} <html> --slide <N>", file=sys.stderr)
+                    if _hard:
+                        _dist_block = True
+            except Exception:
+                pass  # an advisory must NEVER break a render
+
         if rc.returncode != 0:
             print(file=sys.stderr)
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)
@@ -2351,6 +2409,15 @@ def main(argv=None) -> int:
                   "cannot see; the whole-deck visual re-audit caught it. Fix the "
                   "spilling/overlapping element, or set DECK_ALLOW_GEOM_OVERFLOW=1 if "
                   "it is genuinely intentional.", file=sys.stderr)
+            return 4
+
+        if _dist_block:
+            print(file=sys.stderr)
+            print("render-deck: BLOCKED on layout-distribution under --visual (see "
+                  "❌ above). This is the mid-canvas dead-zone / 纵向利用率 / 整排卡"
+                  "贴底 class the symmetric-offset balance rule cannot see. Fill the "
+                  "empty canvas, even the box insets, or mark the slide intentional "
+                  "with \"allow\": [\"imbalance\"] in deck.json.", file=sys.stderr)
             return 4
 
     # 7. Post-render asset handling — choose one of:
