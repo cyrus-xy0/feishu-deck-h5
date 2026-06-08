@@ -129,6 +129,28 @@ def inline_css_links(html: str, html_path: Path, *, inline_images: bool) -> tupl
     return re.sub(r"<link\b[^>]*?>", replace_link, html, flags=re.S | re.I), count, image_count
 
 
+def rewrite_preload_image_links(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
+    count = 0
+
+    def replace_link(match: re.Match[str]) -> str:
+        nonlocal count
+        tag = match.group(0)
+        rel = (attr_value(tag, "rel") or "").lower()
+        as_type = (attr_value(tag, "as") or "").lower()
+        href = attr_value(tag, "href")
+        if "preload" not in rel or as_type != "image" or not href:
+            return tag
+        asset = resolve_asset(html_path, href)
+        if asset is None or data_uri(asset) is None:
+            return tag
+        count += 1
+        if inline_images:
+            return ""
+        return tag.replace(href, attr_escape(upload_staging_ref(asset)))
+
+    return re.sub(r"<link\b[^>]*?>", replace_link, html, flags=re.S | re.I), count
+
+
 def inline_js_scripts(html: str, html_path: Path) -> tuple[str, int]:
     count = 0
 
@@ -233,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     html = src.read_text(encoding="utf-8")
 
     html, n_css, n_link_css_img = inline_css_links(html, src, inline_images=inline_images)
+    html, n_preload_img = rewrite_preload_image_links(html, src, inline_images=inline_images)
     html, n_js = inline_js_scripts(html, src)
     html, n_css_img = inline_css_images(html, src, inline_images=inline_images)
     html, n_img = inline_img_tags(html, src, inline_images=inline_images)
@@ -247,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  CSS files inlined  : {n_css}")
     print(f"  JS files inlined   : {n_js}")
     print(f"  CSS images inlined : {n_css_img + n_link_css_img}")
+    print(f"  preload images     : {n_preload_img}")
     print(f"  <img> inlined      : {n_img}")
     print(f"  style url() inlined: {n_style_img}")
     print(f"  image mode         : {'linked' if args.no_image_inline else 'base64'}")

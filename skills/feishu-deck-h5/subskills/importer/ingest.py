@@ -512,6 +512,8 @@ def report_md(manifest: dict[str, Any]) -> str:
 
 def library_viewer_sync_context(library_ingest: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     pr = library_ingest.get("pr") if isinstance(library_ingest.get("pr"), dict) else {}
+    pr_dry_run = bool(pr.get("dry_run"))
+    ok = bool(library_ingest.get("ok")) and not pr_dry_run
     viewer_url = (
         pr.get("viewer_url")
         or pr.get("cloudflare_url")
@@ -519,18 +521,23 @@ def library_viewer_sync_context(library_ingest: dict[str, Any], args: argparse.N
         or pr.get("url")
         or ""
     )
+    reason = library_ingest.get("reason") or ""
+    if pr_dry_run:
+        reason = "confirm-ingest ran with --dry-run; viewer sync was not published"
+    elif not library_ingest.get("ok"):
+        reason = reason or "library ingest failed before viewer sync"
     return {
         "target": "cloudflare-slide-library",
         "enabled": True,
-        "ok": bool(library_ingest.get("ok")),
-        "dry_run": bool(library_ingest.get("dry_run")),
+        "ok": ok,
+        "dry_run": bool(library_ingest.get("dry_run")) or pr_dry_run,
         "app_url": viewer_url,
         "repo": SLIDE_LIBRARY_REPO,
         "deck_id": library_ingest.get("deck_id") or "",
         "pr": pr,
         "auto_merge_requested": bool(args.auto_merge),
         "wait_viewer_requested": bool(args.wait_viewer),
-        "reason": "" if library_ingest.get("ok") else (library_ingest.get("reason") or "library ingest failed before viewer sync"),
+        "reason": reason,
     }
 
 

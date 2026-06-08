@@ -108,6 +108,64 @@ console.log("https://tos.example.test/" + key.replace(/[^A-Za-z0-9._/-]+/g, "-")
             self.assertIn("https://tos.example.test/pic.png", published_html)
             self.assertIn("window.deckReady = true", published_html)
 
+    def test_inline_assets_removes_local_image_preload_when_images_are_inlined(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="inline-assets-preload-") as td:
+            tmp_path = Path(td)
+            (tmp_path / "assets").mkdir()
+            (tmp_path / "assets" / "hero.png").write_bytes(base64.b64decode("iVBORw0KGgo="))
+            html = tmp_path / "index.html"
+            out = tmp_path / "out.html"
+            html.write_text(
+                """
+<html><head>
+<link rel="preload" as="image" href="assets/hero.png">
+<style>.hero{background:url("assets/hero.png")}</style>
+</head><body><div class="hero"></div></body></html>
+""".strip(),
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [sys.executable, str(INLINE_ASSETS), str(html), "--out", str(out)],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            published_html = out.read_text(encoding="utf-8")
+            self.assertNotIn('href="assets/hero.png"', published_html)
+            self.assertNotIn("url(\"assets/hero.png\")", published_html)
+            self.assertIn("data:image/png;base64", published_html)
+
+    def test_inline_assets_no_image_inline_rewrites_local_image_preload_to_staging_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="inline-assets-preload-linked-") as td:
+            tmp_path = Path(td)
+            (tmp_path / "assets").mkdir()
+            (tmp_path / "assets" / "hero.png").write_bytes(base64.b64decode("iVBORw0KGgo="))
+            html = tmp_path / "index.html"
+            out = tmp_path / "out.html"
+            html.write_text(
+                """
+<html><head>
+<link rel="preload" as="image" href="assets/hero.png">
+<style>.hero{background:url("assets/hero.png")}</style>
+</head><body><div class="hero"></div></body></html>
+""".strip(),
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [sys.executable, str(INLINE_ASSETS), str(html), "--out", str(out), "--no-image-inline"],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            published_html = out.read_text(encoding="utf-8")
+            self.assertNotIn('href="assets/hero.png"', published_html)
+            self.assertIn((tmp_path / "assets" / "hero.png").as_posix(), published_html)
+            self.assertNotIn("data:image", published_html)
+
     def test_no_image_inline_stages_local_images_for_tos_upload(self) -> None:
         if not shutil.which("node"):
             self.skipTest("node not available")
