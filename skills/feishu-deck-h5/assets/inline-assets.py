@@ -3,7 +3,7 @@
 Inline linked deck CSS/JS, optionally leaving image references as URLs.
 
 Default mode creates a self-contained HTML file with image data URIs. For Magic
-Page publishing, pass --no-image-inline after magic-page-assets.py has uploaded
+Page publishing, pass --no-image-inline before magic-page-assets.py uploads
 images to TOS; this keeps the HTML small and prevents base64 image payloads.
 """
 
@@ -75,9 +75,14 @@ def attr_escape(value: str) -> str:
     return html_lib.escape(value, quote=True)
 
 
+def upload_staging_ref(asset: Path) -> str:
+    # Magic Page publisher writes the prepared HTML into a fresh run directory.
+    # Use absolute local refs as a temporary upload staging contract; the next
+    # step rewrites them to TOS URLs before the HTML is sent to Magic Page.
+    return asset.resolve().as_posix()
+
+
 def inline_css_urls(css: str, css_path: Path, *, inline_images: bool) -> tuple[str, int]:
-    if not inline_images:
-        return css, 0
     count = 0
 
     def replace_url(match: re.Match[str]) -> str:
@@ -86,6 +91,8 @@ def inline_css_urls(css: str, css_path: Path, *, inline_images: bool) -> tuple[s
         asset = resolve_asset(css_path, ref)
         if asset is None:
             return match.group(0)
+        if not inline_images:
+            return f"url('{upload_staging_ref(asset)}')"
         uri = data_uri(asset)
         if uri is None:
             return match.group(0)
@@ -120,6 +127,28 @@ def inline_css_links(html: str, html_path: Path, *, inline_images: bool) -> tupl
         )
 
     return re.sub(r"<link\b[^>]*?>", replace_link, html, flags=re.S | re.I), count, image_count
+
+
+def rewrite_preload_image_links(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
+    count = 0
+
+    def replace_link(match: re.Match[str]) -> str:
+        nonlocal count
+        tag = match.group(0)
+        rel = (attr_value(tag, "rel") or "").lower()
+        as_type = (attr_value(tag, "as") or "").lower()
+        href = attr_value(tag, "href")
+        if "preload" not in rel or as_type != "image" or not href:
+            return tag
+        asset = resolve_asset(html_path, href)
+        if asset is None or data_uri(asset) is None:
+            return tag
+        count += 1
+        if inline_images:
+            return ""
+        return tag.replace(href, attr_escape(upload_staging_ref(asset)))
+
+    return re.sub(r"<link\b[^>]*?>", replace_link, html, flags=re.S | re.I), count
 
 
 def inline_js_scripts(html: str, html_path: Path) -> tuple[str, int]:
@@ -165,8 +194,6 @@ def inline_css_images(html: str, html_path: Path, *, inline_images: bool) -> tup
 
 
 def inline_img_tags(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
-    if not inline_images:
-        return html, 0
     count = 0
 
     def replace_img(match: re.Match[str]) -> str:
@@ -175,6 +202,9 @@ def inline_img_tags(html: str, html_path: Path, *, inline_images: bool) -> tuple
         asset = resolve_asset(html_path, src)
         if asset is None:
             return match.group(0)
+        if not inline_images:
+            count += 1
+            return match.group(0).replace(src, attr_escape(upload_staging_ref(asset)))
         uri = data_uri(asset)
         if uri is None:
             return match.group(0)
@@ -185,8 +215,6 @@ def inline_img_tags(html: str, html_path: Path, *, inline_images: bool) -> tuple
 
 
 def inline_html_style_urls(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
-    if not inline_images:
-        return html, 0
     count = 0
 
     def replace_url(match: re.Match[str]) -> str:
@@ -195,6 +223,9 @@ def inline_html_style_urls(html: str, html_path: Path, *, inline_images: bool) -
         asset = resolve_asset(html_path, ref)
         if asset is None:
             return match.group(0)
+        if not inline_images:
+            count += 1
+            return f"url('{upload_staging_ref(asset)}')"
         uri = data_uri(asset)
         if uri is None:
             return match.group(0)
@@ -224,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     html = src.read_text(encoding="utf-8")
 
     html, n_css, n_link_css_img = inline_css_links(html, src, inline_images=inline_images)
+    html, n_preload_img = rewrite_preload_image_links(html, src, inline_images=inline_images)
     html, n_js = inline_js_scripts(html, src)
     html, n_css_img = inline_css_images(html, src, inline_images=inline_images)
     html, n_img = inline_img_tags(html, src, inline_images=inline_images)
@@ -238,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  CSS files inlined  : {n_css}")
     print(f"  JS files inlined   : {n_js}")
     print(f"  CSS images inlined : {n_css_img + n_link_css_img}")
+    print(f"  preload images     : {n_preload_img}")
     print(f"  <img> inlined      : {n_img}")
     print(f"  style url() inlined: {n_style_img}")
     print(f"  image mode         : {'linked' if args.no_image_inline else 'base64'}")
