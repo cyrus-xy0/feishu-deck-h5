@@ -854,8 +854,24 @@ def _preset_geom_name(shape) -> Optional[str]:
     return None
 
 
+def _line_is_nofill(shape) -> bool:
+    """True when the shape's <a:ln> explicitly carries <a:noFill/> — i.e.
+    'width exists but the stroke is none', which PowerPoint renders as NO
+    line. python-pptx only exposes ln.width (still > 0 here), so without
+    reading the raw OOXML we'd treat it as a real border, fail to resolve a
+    color, and fabricate a phantom #888888 box around every such element."""
+    try:
+        sp_pr = shape._element.find(qn("p:spPr"))
+        ln_el = sp_pr.find(qn("a:ln")) if sp_pr is not None else None
+        return ln_el is not None and ln_el.find(qn("a:noFill")) is not None
+    except Exception:
+        return False
+
+
 def _border_obj(shape, cv: Canvas) -> Optional[dict]:
     try:
+        if _line_is_nofill(shape):
+            return None
         ln = shape.line
         if ln.width is not None and int(ln.width) > 0:
             color = rgb_hex(ln.color) or "#888888"
@@ -971,7 +987,8 @@ def _custgeom_svg(shape) -> Optional[str]:
         stroke, sw = "none", 0.0
         try:
             ln = shape.line
-            if ln.width is not None and int(ln.width) > 0:
+            # same noFill trap as _border_obj — width>0 + <a:noFill/> = no stroke
+            if not _line_is_nofill(shape) and ln.width is not None and int(ln.width) > 0:
                 stroke = rgb_hex(ln.color) or "#888888"
                 sw = max(0.5, int(ln.width) / EMU_PER_PT)
         except Exception:

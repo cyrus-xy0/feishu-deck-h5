@@ -85,3 +85,59 @@ def test_pic_crop_none_when_absent():
         _element = etree.Element(qn("p:pic"))
 
     assert bp._pic_crop(_FakeShape()) is None
+
+
+def _shape_with_line():
+    """A real autoshape on a real slide so shape.line round-trips through
+    python-pptx (needed to exercise the noFill XML path + the color fallback)."""
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Emu
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
+    return slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Emu(0), Emu(0), Emu(914400), Emu(914400))
+
+
+def test_border_obj_nofill_returns_none():
+    """Regression: <a:ln w=...><a:noFill/> means NO border. Before the fix
+    _border_obj only checked width>0, failed to resolve a color, and fabricated
+    a phantom #888888 box around every such shape (every text box got a gray
+    border on import)."""
+    shp = _shape_with_line()
+    shp.line.width = bp.EMU_PER_PT * 1  # width>0 …
+    shp.line.fill.background()          # …but explicit <a:noFill/>
+
+    assert bp._line_is_nofill(shp) is True
+    assert bp._border_obj(shp, None) is None, (
+        "noFill line must yield no border, not a phantom #888888 one"
+    )
+
+
+def test_border_obj_real_border_preserved():
+    """A genuinely-colored line still produces a border (the noFill fix must not
+    strip real borders)."""
+    from pptx.dml.color import RGBColor
+
+    shp = _shape_with_line()
+    shp.line.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+    shp.line.width = bp.EMU_PER_PT * 2
+
+    assert bp._line_is_nofill(shp) is False
+    border = bp._border_obj(shp, None)
+    assert border is not None and border["color"].lower() == "#ff0000"
+
+
+def test_line_is_nofill_false_when_no_ln():
+    """No <a:ln> at all → not a noFill line (don't accidentally suppress the
+    width-based border path)."""
+    from lxml import etree
+    from pptx.oxml.ns import qn
+
+    class _FakeShape:
+        _element = etree.SubElement(etree.Element(qn("p:sp")), qn("p:spPr"))
+
+    # spPr present but no a:ln child
+    fake = _FakeShape()
+    fake._element = fake._element.getparent()
+    assert bp._line_is_nofill(fake) is False
