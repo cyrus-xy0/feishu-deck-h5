@@ -68,9 +68,14 @@
 - **修复**：新增 `_line_is_nofill(shape)`——直接读 `<p:spPr><a:ln>` 下是否有 `<a:noFill/>`，有就判定无线条。`_border_obj()`（文本框/AUTO_SHAPE 边框）和 freeform `custGeom` 描边路径都先过这道闸：noFill → 不出边框/描边。真实有颜色的边框照常保留。
 - **通用性**：✅ 任何 `noFill` 线条的形状都不再产生幻影灰框；回归测试 `test_border_obj_nofill_returns_none` / `test_border_obj_real_border_preserved` 锁住两个方向。**教训：python-pptx 的 `ln.width>0` ≠ 有线条，必须读 OOXML 的 `a:ln/a:noFill`。**
 
+### F12 · 干掉混合(2 层)管线 → 单一纯代码重建 + 收尾件共用
+- **背景**：曾有两条管线——`build_pptx.py`(纯代码四层可编辑) + `build_pptx_hybrid.py`(LibreOffice/PyMuPDF 像素保真两层)，且 SKILL.md 把 hybrid 标「推荐默认」，导致导入时被默认带向"像素保真不可编辑",而真实诉求是「全可编辑」。
+- **处理**：① `build_pptx_hybrid.py` `git mv` 归档到 `skills/_deprecated/`。② 它体内三个**零 fitz/PIL 依赖**的收尾函数 `post_process`(letterbox + fitText 超框自适配) / `make_portable`(自包含打包) / `_default_renderer` 剥进新模块 `assets/canvas_finish.py`(纯 stdlib)。③ `rerender-deck.py` 与 `build_pptx.py` 都改 import `canvas_finish`——**build 与 rerender 从此共用同一套渲染层收尾**。④ `build_pptx.py` 渲染后接 `make_portable + post_process`(原来纯管线漏了这步,故无 fitText 也非路径无关自包含)。
+- **通用性**：✅ 单管线,无 LibreOffice/PyMuPDF。60 页基准稿重建 0 unreconstructed、产物自包含(0 悬空 skill 引用)、fitText 已注入;`rerender-deck.py` 端到端经 canvas_finish 重渲通过;7 测试过。**教训：删一条管线前先查它有没有被复用的"中性收尾件"——本例 fitText/打包就被 rerender 与翻译 canvas 分支依赖,无脑 rm 会连带炸掉。**
+
 ## 待办 / 已知有损（按优先级）
 
-- **T1 · autofit 文本收缩**：PPT「溢出时缩小字号」未模拟，超长文本按写死字号渲染会溢出框。keynote 技能也主动放弃了（估算不准）。暂不处理，溢出靠自然换行。
+- **T1 · autofit 文本收缩(部分解决)**：`post_process` 的 fitText 现已接入纯管线,**真正单行**超框文本框在浏览器侧 nowrap+scaleX 贴合(量真实 bbox,非估算)。**仍未解**:多行 / 含 `<br>` 的框 fitText 故意不动(C4:避免把合法换行段挤成一行再压扁),其横向溢出仍 spill(overflow visible,不裁切但越界)——60 页基准稿实测残留 13 页此类横向溢出,**全是 overflow:visible 无纵向裁切**。下一步候选:对"在自然换行宽度下 scrollWidth 仍 > clientWidth"的框(即真·不可换行/源 nowrap)也施加 scaleX(合法换行框 scrollWidth≈clientWidth 不会被误缩,绕开 C4 陷阱)。
 - **T4 · 图片裁剪 `a:srcRect`**：未提取，整图贴入 bbox（可能比原稿多出被裁掉的部分）。
 - **T5 · 占位符字号继承链**：run 无显式字号且为占位符时，未沿 layout/master 继承，回退默认。
 - **T6 · 自由形状 FREEFORM**：有填充的按 bbox 矩形近似（丢自定义几何）；无填充的跳过。复杂图标可能走样。

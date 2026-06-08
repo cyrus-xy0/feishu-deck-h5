@@ -1534,9 +1534,11 @@ def main(argv=None) -> int:
 
     # Keep the DeckJSON schema validation gate ON (handoff contract: validate
     # before render). Skip the post-render HTML validator + the content/story
-    # schema-fit refusal — neither applies to canvas slides.
+    # schema-fit refusal — neither applies to canvas slides. Skip render-deck's
+    # own copy-assets: canvas_finish.make_portable does a path-independent,
+    # CSS-url()-following self-contained pack (superset) right after.
     cmd = [sys.executable, str(render_script), str(deck_path), str(args.out_dir),
-           "--skip-validate-html", "--skip-fit-check"]
+           "--skip-validate-html", "--skip-fit-check", "--skip-copy-assets"]
     if args.inline:
         cmd.append("--inline")
     print(f"==> rendering via {render_script}")
@@ -1548,6 +1550,15 @@ def main(argv=None) -> int:
         return 1
     for line in (res.stdout.strip().splitlines() or [""])[-6:]:
         print(f"    {line}")
+
+    # render-layer finish (shared with rerender-deck.py): self-contained pack +
+    # letterbox/fitText. fitText is the in-browser equivalent of PowerPoint's
+    # autofit shrink-to-fit — single-line boxes that overflow get nowrap+scaleX
+    # at runtime instead of clipping (measures real bbox, no estimation).
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from canvas_finish import make_portable, post_process  # noqa: E402
+    make_portable(args.out_dir, args.renderer)
+    post_process(args.out_dir, deck)
 
     # serve helper
     serve = args.out_dir / "serve.sh"

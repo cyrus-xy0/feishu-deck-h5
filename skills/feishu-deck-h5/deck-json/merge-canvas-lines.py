@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """merge-canvas-lines.py — 把 PDF 抽词拆碎的 canvas 同行碎片合并成整逻辑行.
 
-混合管线(pptx-to-deck build_pptx_hybrid)用 LibreOffice 把幻灯片渲成 PDF 再抽
-文字位置时,**一条视觉文本行常被 PDF 抽词拆成许多各自定位的小 text 元素**
-(常单字一个),彼此边到边相接。逐元素翻译 CJK→EN 会乱;本工具按几何把它们
-聚类还原成逻辑行,让 extract/apply-text-pairs 能对「整行」操作。
+【遗留工具】只对**已退役的混合管线**(旧 build_pptx_hybrid,用 LibreOffice 渲 PDF
+再抽词)产出的 canvas deck 有用——那条管线下**一条视觉文本行常被 PDF 抽词拆成许多
+各自定位的小 text 元素**(常单字一个),彼此边到边相接,逐元素翻译 CJK→EN 会乱。
+现行纯管线 build_pptx 直接从 PPTX 读 runs,**不产生碎片**,新 deck 无需本工具;
+保留它仅为处理存量混合 deck。本工具按几何把碎片聚类还原成逻辑行,让
+extract/apply-text-pairs 能对「整行」操作。
 
 算法(每个 canvas 页):
   1. 按样式签名分组 = (round(size), color, font) —— 一条行的碎片同字号同色同体。

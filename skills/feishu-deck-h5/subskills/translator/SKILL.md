@@ -50,13 +50,15 @@ python3 $DJ/apply-text-pairs.py <deck>/deck.json pairs.filled.json         # det
 python3 $DJ/render-deck.py <deck>/deck.json <deck>/                        # re-render index.html
 ```
 
-## BRANCH A-CANVAS — PPTX / hybrid-import decks (layout:"canvas")
-A `.pptx` import (pptx-to-deck, esp. the LibreOffice-PDF **hybrid** pipeline) is a
-canvas deck: text lives in `data.elements[].runs[].text`, NOT `data.html`. Two
-extra facts change the flow — handle both or the output is garbage:
+## BRANCH A-CANVAS — PPTX-import decks (layout:"canvas")
+A `.pptx` import (pptx-to-deck) is a canvas deck: text lives in
+`data.elements[].runs[].text`, NOT `data.html`. The flow:
 
-1. **PDF抽词把整行拆成碎片** (often single glyphs, each its own positioned element).
-   Translating per-fragment CJK→EN is impossible. **First normalize**:
+1. **(legacy only) PDF抽词把整行拆成碎片** — applied ONLY to old decks built by the
+   retired LibreOffice-PDF **hybrid** pipeline, where one visual line was split into
+   many single-glyph positioned elements. The current pure `build_pptx` reads runs
+   directly from the PPTX and does **not** fragment, so **skip this step for any deck
+   built now**. For a legacy fragmented canvas deck, first normalize:
    ```bash
    python3 $DJ/merge-canvas-lines.py <deck>/deck.json --review <deck>/merge-review.json
    ```
@@ -83,15 +85,15 @@ extra facts change the flow — handle both or the output is garbage:
    > hand-resolve those (edit `data.elements[].runs[].text` directly, splitting the
    > replacement across the same runs). This is intentional — we are NOT doing
    > cross-run fuzzy matching (it would risk mangling per-run styling).
-3. **Re-render must keep the hybrid front-end** (letterbox bg CSS + fitText
+3. **Re-render must keep the canvas front-end** (letterbox bg CSS + fitText
    overflow-fit + self-contained assets) — plain `render-deck.py` drops them.
-   Use the hybrid re-render wrapper (lives in pptx-to-deck, which owns those steps):
+   Use the canvas re-render wrapper (lives in pptx-to-deck, which owns those steps):
    ```bash
    python3 <pptx-to-deck>/assets/rerender-deck.py <deck>/deck.json <deck>/
    ```
-   It re-renders + make_portable + post_process in one shot (skips LibreOffice; the
-   `bg/` + `input/` assets already exist). **fitText now fits overflow** (English ⟶
-   longer than CJK) — measures real `scrollWidth`, condenses (scaleX) or shrinks.
+   It re-renders + make_portable + post_process in one shot (the `input/` assets,
+   and `bg/` if any, already exist). **fitText fits overflow** (English ⟶ longer
+   than CJK) — measures real `scrollWidth`, condenses (scaleX) or shrinks.
 - Always work on a `<deck>-<lang>/` COPY: A-flow re-render overwrites index.html
   in place, so copy the run dir first to keep the source-language deck intact.
 

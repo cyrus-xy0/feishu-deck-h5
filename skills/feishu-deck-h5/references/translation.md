@@ -43,10 +43,13 @@ A `.pptx` import (pptx-to-deck) is a `layout:"canvas"` deck: text is in
 `data.elements[].runs[].text`, not `data.html`. It is a Branch-A deck (deck.json IS
 the source of truth, round-trips by id), but with two canvas-specific hazards:
 
-- **PDF抽词碎片化** (hybrid pipeline). LibreOffice renders slides to PDF, then text is
-  extracted per PDF span — and one visual line is routinely split into many abutting,
-  separately-positioned single-glyph text elements, in non-reading element order. A
-  real measured deck: 912 CJK text elements, **54% ≤2 chars, 344 single glyphs**.
+- **PDF抽词碎片化** (LEGACY — retired hybrid pipeline only). The old LibreOffice-PDF
+  hybrid rendered slides to PDF then extracted text per PDF span — and one visual line
+  was routinely split into many abutting, separately-positioned single-glyph text
+  elements, in non-reading element order. A real measured (legacy) deck: 912 CJK text
+  elements, **54% ≤2 chars, 344 single glyphs**. The current pure `build_pptx` reads
+  runs straight from the PPTX and does **not** fragment — this hazard applies only to
+  decks built by the retired hybrid pipeline.
   Per-fragment CJK→EN translation is impossible and each English word, dropped into a
   narrow CJK-width box, overlaps its neighbour. **Fix = normalize before extract**:
   `merge-canvas-lines.py` clusters by (size,color,font) → center-y band → x-adjacency
