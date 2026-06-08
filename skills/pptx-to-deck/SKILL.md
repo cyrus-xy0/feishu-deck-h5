@@ -3,44 +3,25 @@ name: pptx-to-deck
 description: |
   Convert an existing PowerPoint (.pptx) into an EDITABLE feishu-deck-h5 deck —
   a structured `canvas` deck.json that renders to a 16:9 present-mode HTML deck.
-  STANDALONE skill that uses feishu-deck-h5 as its RENDER BACKEND: it shells into
-  that skill's deck-json/render-deck.py, and the final deck needs its framework
-  CSS/JS. (feishu-deck-h5's parser also delegates .pptx import to this skill.)
+  STANDALONE skill that uses feishu-deck-h5 as its RENDER BACKEND (shells into its
+  deck-json/render-deck.py; the final deck needs that skill's framework CSS/JS).
+  feishu-deck-h5's parser also delegates .pptx import to this skill.
 
   Triggers: "把 PPT/PPTX 转成 deck/HTML/H5", "import pptx", ".pptx 转 deck",
-  "把这份 PowerPoint 还原成网页/可编辑 deck", or when the user hands over a
-  .pptx path and wants it as an editable deck. Do NOT use for `.key` Keynote
-  (use keynote-to-html), a from-scratch redesign (use feishu-deck-h5 directly),
-  or producing a real .pptx.
+  "把这份 PowerPoint 还原成网页/可编辑 deck", or when the user hands over a .pptx
+  and wants it as an editable deck. Do NOT use for `.key` Keynote (use
+  keynote-to-html), a from-scratch redesign (use feishu-deck-h5 directly), or
+  producing a real .pptx.
 
-  TWO pipelines — pick per fidelity need:
-    1. build_pptx.py — PURE CODE RECONSTRUCTION (python-pptx). Walks every slide,
-       emits each shape as an absolutely-positioned typed element: text = clean
-       editable runs, images = original embedded blobs, shapes/gradients/lines =
-       appearance/SVG fields. No PowerPoint app, no Keynote, no LibreOffice, NO
-       SCREENSHOTS; exact EMU geometry, cross-platform. Fully editable; decorative
-       elements (gradients/glow/freeform/cropped images) are best-effort
-       APPROXIMATE.
-    2. build_pptx_hybrid.py — HIGH-FIDELITY HYBRID (needs LibreOffice + PyMuPDF).
-       LibreOffice renders the text-stripped slides into PIXEL-PERFECT decoration
-       backgrounds; foreground text is overlaid as structured editable elements
-       (real per-line bbox / font / color) and original images overlaid lossless.
-       Output is self-contained / portable. Use when decoration must be
-       pixel-perfect AND text editable.
+  TWO pipelines — pick per fidelity need: build_pptx.py = PURE CODE
+  RECONSTRUCTION (python-pptx) → fully editable typed elements, no extra deps,
+  decorative elements (gradients/glow/freeform/cropped images) best-effort
+  APPROXIMATE; build_pptx_hybrid.py = HIGH-FIDELITY HYBRID (needs LibreOffice +
+  PyMuPDF) → pixel-perfect decoration backgrounds with structured editable text
+  overlaid. Both emit a `layout:"canvas"` deck.json rendered by render-deck.py.
 
-  Both emit a `layout:"canvas"` deck.json (DECKJSON-UNIFIED-INTERMEDIATE-SPEC
-  §2/§3: one intermediate layer = deck.json, one edit loop = edit→sync→deck.json),
-  rendered by feishu-deck-h5's render-deck.py; sync-index-to-deck.py round-trips
-  edits back into elements[] by id.
-
-  Un-reconstructable in build_pptx (live chart / SmartArt / OLE) → that slide
-  becomes a placeholder ({placeholder:true, source_page:N}) reported as
-  `unreconstructed slides: [..]`. NO screenshot fallback (--raster /
-  --full-raster are retired no-ops). build_pptx lossy/acceptable (best-effort
-  还原, NOT pixel-perfect): autofit shrink-to-fit not simulated; only linear
-  gradients (radial / lumMod approximated); freeform arcs skipped; image srcRect
-  crop + complex table merges approximated — for pixel-perfect decoration use the
-  hybrid pipeline.
+  See the SKILL.md body for pipeline choice, deps, the lossy/approximation list,
+  and placeholder + retired-flag (--raster/--full-raster are no-ops) behavior.
 ---
 
 # pptx-to-deck

@@ -29,7 +29,15 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
 ## Mode Routing
 
 - **Small edit**: lock slide key/scope, edit `deck.json`, render, validate only
-  locked slide(s).
+  locked slide(s). The locked scope is the boundary for the re-render too — pass it
+  to `render-deck.py` so downstream steps don't re-process the whole deck. For an
+  edit confined to specific pages, re-render with `--scope N` (1-based page numbers,
+  e.g. `--scope 1` or `--scope 3,5`): it refreshes only those pages in the making-of
+  and skips the whole-deck readability advisory + geometry audit, cutting a 50-page
+  re-render from ~2m12s to ~12s while still capturing the changed page's screenshot.
+  Use `--quick` instead when you don't need the making-of updated this run (skips the
+  snapshot entirely, ~12-18s). Full render (no flag) only for a new deck or a
+  whole-deck change. See `references/editing-discipline.md` → "Re-render speed".
 - **EDIT_IMPORTED_HTML**: user wants to modify the uploaded/current HTML itself.
   Require existing-state artifacts first: `input/source.html`,
   `input/runtime-library/source-dossier.json`, `output/DESIGN-PLAN.md`,
@@ -131,6 +139,13 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
 
 ## References To Load As Needed
 
+- `../../references/layout-recipes.md` — **read before editing the layout / fill /
+  whitespace of a `layout:"raw"` slide.** Sparse content does NOT get fixed by
+  stretching bordered cards (`min-height` / `flex:1`) to reach the floor — that
+  makes hollow cards (content jammed top, dead air middle). Re-shape to a layout
+  that fills 16:9 by nature (vertical flow, wide stacked rows, tall hero beside
+  stacked annotations) and keep growing visuals borderless. See "Raw slides +
+  genuinely-sparse content".
 - `../../references/editing-discipline.md`
 - `../../references/request-router.md`
 - `../../references/deck-generation-policy.md`

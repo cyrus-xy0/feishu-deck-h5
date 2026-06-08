@@ -62,6 +62,12 @@
 - **修复**：`sweep.sh` `--virtual-time-budget` 2500 → **12000**，kill 轮询上限 70 → 120（60s），加注释说明 VTB 是上限非固定等待（轻页仍快，只有重图页多等解码）。
 - **通用性**：✅ 任何含重嵌入图的重建 deck 的 QA 截图都不再假黑。**教训：截图工具的"页面坏了"要先排除"截早了"，别急着改重建器——本例诊断一度误判为 build_pptx 静默吞错（`_slide_is_hard` / `except: continue`），实测 `is_hard=False`、`data.elements` 非空才翻案。**
 
+### F11 · `<a:ln><a:noFill/>` 误变成灰色幻影边框（**每个文本框都套灰框**）
+- **现象**：导入后每段文字前面多出一个同位置、`border:#888888 1px` 的 `shape`，整页文本框被灰色细框包住——既不是浏览器选中框也不是编辑态辅助框，是 `build_pptx` 真实生成的边框。
+- **根因**：源 PPTX 的文本框线条是 `<a:ln w="12700"><a:noFill/></a:ln>`——「线宽存在，但线填充为无」= PowerPoint 视为无线条。但 `_border_obj()` 只判断 `ln.width > 0`，拿不到颜色就 fallback 成 `#888888`，于是把"无线条"错误变成灰描边。python-pptx 不暴露 `<a:noFill/>`，只看 `ln.width`（仍 >0），不读原始 OOXML 就识别不了。
+- **修复**：新增 `_line_is_nofill(shape)`——直接读 `<p:spPr><a:ln>` 下是否有 `<a:noFill/>`，有就判定无线条。`_border_obj()`（文本框/AUTO_SHAPE 边框）和 freeform `custGeom` 描边路径都先过这道闸：noFill → 不出边框/描边。真实有颜色的边框照常保留。
+- **通用性**：✅ 任何 `noFill` 线条的形状都不再产生幻影灰框；回归测试 `test_border_obj_nofill_returns_none` / `test_border_obj_real_border_preserved` 锁住两个方向。**教训：python-pptx 的 `ln.width>0` ≠ 有线条，必须读 OOXML 的 `a:ln/a:noFill`。**
+
 ## 待办 / 已知有损（按优先级）
 
 - **T1 · autofit 文本收缩**：PPT「溢出时缩小字号」未模拟，超长文本按写死字号渲染会溢出框。keynote 技能也主动放弃了（估算不准）。暂不处理，溢出靠自然换行。

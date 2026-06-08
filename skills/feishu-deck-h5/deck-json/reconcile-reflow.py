@@ -190,7 +190,24 @@ def _probe(index_html: Path) -> dict:
     with sync_playwright() as pw:
         b = pw.chromium.launch(headless=True)
         page = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
-        page.goto(url, wait_until="load", timeout=60_000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        # Bounded settle (B/2026-06-06): an embedded live demo can keep the 'load'
+        # event pending ~30s. Prefer full load for fidelity but cap it, then await
+        # fonts. Geometry probe needs layout settled — same as the screenshot path.
+        try:
+            page.wait_for_load_state("load", timeout=4_000)
+        except Exception:
+            pass
+        try:
+            page.evaluate("() => Promise.race([(document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(r => setTimeout(r, 2000))])")
+        except Exception:
+            pass
+        # Wait for framework init (feishu-deck.js sets data-js-ready on .deck).
+        # domcontentloaded can return before layout JS runs → un-laid-out geometry.
+        try:
+            page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000)
+        except Exception:
+            pass
         page.evaluate("""() => {
             const d = document.querySelector('.deck');
             if (d) d.setAttribute('data-mode', 'present');

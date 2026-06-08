@@ -67,6 +67,16 @@ review.
   troubleshooting reference before guessing.
 - For framework/layout-default changes, `assets/check-distribution.py` is the
   mechanical distribution smoke test before treating a workaround as durable.
+- `check-distribution.py` is also wired into `render-deck.py` as gate step 6c: it
+  runs automatically on every whole-deck render under `runs/` (advisory + non-
+  blocking by default; `--visual` promotes it to a HARD gate). It catches the
+  geometric 纵向利用率 / 块间死带 / 整排卡贴底 class the symmetric-offset
+  `R-VIS-BALANCE` rule structurally misses (a mid-canvas dead-zone keeps the
+  content union centered, so balance passes while half the canvas is empty). A
+  page whose whitespace is intentional opts out via deck.json slide
+  `"allow": ["imbalance"]` (renders `data-allow-imbalance`, which silences both
+  this gate and the engine's `R-VIS-FILL`). It is skipped on `/tmp` smoke renders
+  and on `--scope`/`--quick` scoped edits.
 
 ## References To Load As Needed
 

@@ -205,7 +205,19 @@ def _archive_screenshots(html_path):
             browser = pw.chromium.launch(headless=True)
             page = browser.new_context(
                 viewport={'width': 1920, 'height': 1080}).new_page()
-            page.goto(url, wait_until='load', timeout=60_000)
+            page.goto(url, wait_until='domcontentloaded', timeout=60_000)
+            # Bounded settle (B/2026-06-06): an embedded live demo can keep the
+            # 'load' event pending ~30s, taxing the whole visual audit. Prefer full
+            # load for fidelity but cap it, then await fonts so CJK text doesn't
+            # measure/shoot in a fallback face. This deck: ~31s (load) → ~1-5s.
+            try:
+                page.wait_for_load_state('load', timeout=4_000)
+            except Exception:
+                pass
+            try:
+                page.evaluate("() => Promise.race([(document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(r => setTimeout(r, 2000))])")
+            except Exception:
+                pass
             try:
                 page.wait_for_function(
                     "() => document.querySelector('.deck[data-js-ready] "

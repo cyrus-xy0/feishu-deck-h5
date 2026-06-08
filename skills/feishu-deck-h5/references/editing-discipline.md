@@ -7,6 +7,27 @@ These four failure modes recurred in the 2026-05-14 CTG run and burned
 30+ minutes of debug time each. Read this section BEFORE doing any
 delete-slide / insert-slide / reorder-slide / custom-layout work.
 
+## Adding content to a `raw` / `lifted` card — measure geometry, not the box
+
+When you ADD a visual element or extra text to a hand-authored `raw` slide
+(new band / rail / extra feature row), a `min-height` or the legacy
+`.slide .grid .card { align-self: stretch }` can inflate the card box so it
+LOOKS like it fits — the box grows, `scrollHeight ≈ clientHeight`, and a quick
+`card.getBoundingClientRect()` vs the strap shows a healthy gap — while the box
+itself overflows its `.grid` and the **centered** content silently overlaps the
+sibling strap. Measure the right things before declaring done:
+
+- container `el.scrollHeight > el.clientHeight` (does content overflow its box?),
+- the `.grid` (or stage child) the card lives in — same check,
+- the **last content child** `.bottom` vs the **next sibling**'s `.top` (real
+  collision), NOT just the card's bounding box.
+
+`render-deck.py` now BLOCKS on the hard geometry rules
+(`R-VIS-CARD-OVERFLOW` / `R-OVERLAP` / `R-OVERFLOW` / `R-VIS-BAND-COLLIDE`) for
+full `/runs/` renders, but a scoped / `--quick` / `DECK_ALLOW_GEOM_OVERFLOW=1`
+render skips that gate — so on those paths this manual check is on you. See
+`references/troubleshooting.md` ("Render says PASS yet a card's text spills").
+
 ## Editing Copy
 
 The correct path for copy changes is `deck.json` → rerender. Do not post-render
@@ -18,8 +39,49 @@ Examples:
 ```bash
 python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title "新标题"
 python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.cards.0.body "新正文"
-python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
+python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/ --quick
 ```
+
+### Re-render speed: scope the render to the page(s) you edited
+
+A full `render-deck.py` does THREE whole-deck Playwright loads — the F-253
+readability advisory, the making-of auto-snapshot screenshots, and (inside the
+snapshot) the geometry audit — plus the fit-check. Those whole-deck passes exist
+for GENERATION; re-running them after a one-page edit re-audits 49 pages you never
+touched.
+
+**The locked edit scope is the boundary. Pass it to the renderer.** Two flags:
+
+- **`--scope N`** (preferred for a confined edit — `--scope 1`, `--scope 3,5`):
+  re-render, then refresh ONLY pages N in the making-of (`deck-log snapshot
+  --slide N`). The changed page's screenshot still lands in the log; the
+  whole-deck advisory + geometry audit + re-shoot of unchanged pages are skipped.
+  Implies `--skip-fit-check`. **~2m12s → ~12s.**
+- **`--quick`** (text-only, and you don't need the making-of updated this run):
+  skips the snapshot ENTIRELY. Same speed as `--scope` now, but the edit won't
+  show in the making-of until the next real snapshot. **~2m12s → ~12-18s.**
+
+| render | time | making-of updated? | what runs |
+| --- | --- | --- | --- |
+| default (full) | ~30-60s | yes (whole deck) | fit-check + advisory + audit + full snapshot |
+| `--scope N` | **~12s** | yes (page N only) | static validator + 1-page snapshot |
+| `--quick` | ~12-18s | no | static validator only |
+
+Default to `--scope N` for scope-locked edits — it now matches `--quick` on speed
+while ALSO keeping the changed-page screenshot. Use the full render (no flag) only
+for a new deck or a change that spans the whole deck.
+
+> **Why `--scope N` is ~12s and not ~60s (2026-06-06):** the headless-browser
+> entry points used to `goto(wait_until='load')`, which stalls ~31s on this deck
+> because the embedded live demo never fires `load`. All five screenshot/audit
+> drivers (`deck-log.py`, `check-distribution.py`, `validate.py`, `run-audits.py`,
+> `reconcile-reflow.py`) now use `domcontentloaded` + a *bounded* 4s best-effort
+> `load` wait + `fonts.ready` + a `.deck[data-js-ready]` framework-ready gate.
+> Fast decks still get true-load fidelity in ~1s; a hung sub-resource caps at ~4s
+> instead of ~31s. Verified pixel-equivalent to the old `load` captures (incl. the
+> demo page) — the `data-js-ready` gate is what prevents a blank/un-revealed
+> capture. If you add a new Playwright driver, copy this settle block; do NOT
+> reintroduce a bare `wait_until='load'`.
 
 The old `texts.md` / `apply-texts.py` sidecar flow is retired. Residual
 `data-text-id` attributes in old decks are harmless, but do not author new flows
@@ -288,6 +350,48 @@ being told "你不觉得难看么" is expensive.
 whether the now-fuller layout has the OPPOSITE problem (overflow,
 R-VIS-CARD-OVERFLOW, cards too tall to fit). Add and delete are symmetric
 — both shift the layout, both need a rebalance check.
+
+---
+
+### E6. Local single-element nudge → do NOT rebalance the whole container (mandatory)
+
+E5's mirror image. When the user asks to move/space **one named
+element** ("这条收口句离卡片太远,移近点" / "把这个标签往上挪一点"),
+**never achieve it by changing the container's alignment** (e.g. flipping
+`.stage` from `justify-content: space-between` to `center`). That
+silently relocates every *other* anchor in the same container — **above
+all, the title.**
+
+**Why this is mandatory** (user feedback 2026-05-31 · zhongan deck,
+flywheel page): to "move the closing line nearer the cards" the agent
+changed `.stage` to `center`, which pushed the title **down 62px**. The
+user caught it on sight: a single-element request had quietly moved an
+element they never named.
+
+**The hard rule — `R-VIS-TITLE-GAP`'s creed:「标题不动,压内容/下移正文」.**
+The title (and every anchor the user did NOT name) keeps its **exact
+original position**.
+
+**The validator will NOT save you on `raw` pages.** `R-VIS-TITLE-POSITION`
+only watches `.header`'s absolute `top` (≈61) and **skips
+`display:none` headers**. A `layout: raw` page typically does
+`.header { display:none }` + a bespoke `.ttl-block` standing in as the
+title → the validator never recognizes it as a title, so a moved title
+goes **unreported**. On raw pages this rule is yours to enforce by hand.
+
+**How to apply:**
+
+1. Change **only that element's own** `margin` (or wrap the "lower
+   group" into a sub-group and center/space *that*) — never re-center
+   the whole `.stage`.
+2. Before editing a raw-page layout, ask: *will this move the title?*
+   If yes, pick a different mechanism.
+3. After the edit, **measure `titleTop` with Playwright and confirm it
+   did not change.** Static validation can't prove this on raw pages.
+
+Cross-ref: E5 (when you SHOULD rebalance — after a delete) is the
+complement; E6 is the boundary that stops over-rebalancing on a local
+nudge.
 
 ---
 
