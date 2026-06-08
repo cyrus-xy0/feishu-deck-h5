@@ -353,3 +353,45 @@ R-VIS-CARD-OVERFLOW, cards too tall to fit). Add and delete are symmetric
 
 ---
 
+### E6. Local single-element nudge → do NOT rebalance the whole container (mandatory)
+
+E5's mirror image. When the user asks to move/space **one named
+element** ("这条收口句离卡片太远,移近点" / "把这个标签往上挪一点"),
+**never achieve it by changing the container's alignment** (e.g. flipping
+`.stage` from `justify-content: space-between` to `center`). That
+silently relocates every *other* anchor in the same container — **above
+all, the title.**
+
+**Why this is mandatory** (user feedback 2026-05-31 · zhongan deck,
+flywheel page): to "move the closing line nearer the cards" the agent
+changed `.stage` to `center`, which pushed the title **down 62px**. The
+user caught it on sight: a single-element request had quietly moved an
+element they never named.
+
+**The hard rule — `R-VIS-TITLE-GAP`'s creed:「标题不动,压内容/下移正文」.**
+The title (and every anchor the user did NOT name) keeps its **exact
+original position**.
+
+**The validator will NOT save you on `raw` pages.** `R-VIS-TITLE-POSITION`
+only watches `.header`'s absolute `top` (≈61) and **skips
+`display:none` headers**. A `layout: raw` page typically does
+`.header { display:none }` + a bespoke `.ttl-block` standing in as the
+title → the validator never recognizes it as a title, so a moved title
+goes **unreported**. On raw pages this rule is yours to enforce by hand.
+
+**How to apply:**
+
+1. Change **only that element's own** `margin` (or wrap the "lower
+   group" into a sub-group and center/space *that*) — never re-center
+   the whole `.stage`.
+2. Before editing a raw-page layout, ask: *will this move the title?*
+   If yes, pick a different mechanism.
+3. After the edit, **measure `titleTop` with Playwright and confirm it
+   did not change.** Static validation can't prove this on raw pages.
+
+Cross-ref: E5 (when you SHOULD rebalance — after a delete) is the
+complement; E6 is the boundary that stops over-rebalancing on a local
+nudge.
+
+---
+
