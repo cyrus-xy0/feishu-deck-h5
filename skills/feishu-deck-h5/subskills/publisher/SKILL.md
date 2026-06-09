@@ -37,6 +37,11 @@ validator pass evidence, or publish metadata.
 
 - 必须有用户明确确认“这就是最终发布物”。
 - 必须有 `deck-validator` 通过结论。只有本地调试/夹具可用 `--allow-unaudited`。
+- 校验必须跑在**即将发布的那一份 HTML 字节**上,不能复用旧的“渲染时已过”结论。重点拦
+  `R-BAKED-DOM`:若发布物含 `data-idx=` / 烤进 body 的 `class="deck-ui"` /
+  `.deck` 带 `data-js-ready`,说明它是“运行后被另存的活 DOM”(非 `render-deck.py` 产物),
+  发布后会二次 init 导致页码定格在 1 / UI 重复 —— 必须从 `deck.json` 重渲出干净版再发,
+  别发烤死版。
 - 妙笔发布默认读取 `MAGIC_TOKEN` 或 `~/.magic-token`;域名默认
   `https://magic.solutionsuite.cn`,可用 `MAGIC_BASE_URL` / `--magic-base-url` 指定。
   如果本地没有 token,必须先要求用户提供 token,不得等到发布 API 阶段才失败。

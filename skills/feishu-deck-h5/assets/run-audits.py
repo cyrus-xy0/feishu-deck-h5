@@ -187,6 +187,7 @@ PERF_BLUR_MAX_PX = 10
 # the byte functions emit must be declared here with signal 'bytes'.
 BYTE_RULE_META = {
     "R-DOC-INTEGRITY":  {"coverage": "universal", "signal": "bytes"},
+    "R-BAKED-DOM":      {"coverage": "universal", "signal": "bytes"},   # serialized post-JS DOM (data-idx / baked .deck-ui / data-js-ready) — must re-render from deck.json
     "R-DOM":            {"coverage": "universal", "signal": "bytes"},   # over-close byte half (under-close/struct DOM half in audits.js)
     "R-SELF-CONTAINED": {"coverage": "universal", "signal": "bytes"},
     "R-KEY":            {"coverage": "universal", "signal": "bytes"},   # no-browser path (DOM half in audits.js)
@@ -808,6 +809,46 @@ def _inline_linked_text(html_text, base_dir):
     return html_text
 
 
+def audit_baked_runtime_dom_bytes(html):
+    """R-BAKED-DOM(err)— 检出"运行后被二次保存的活 DOM"(serialized post-JS DOM)。
+
+    render-deck.py 的干净产物里这些痕迹**永远不出现**:它们全是 feishu-deck.js 在浏览器
+    运行时才写进 DOM 的。一旦出现,说明这份 HTML 是页面跑起来后被「另存 / 烤死」的快照
+    (e.g. 浏览器另存、edit-mode 保存态),而不是渲染器的输出。把它当成 index.html 发布会
+    导致加载时 JS 二次 init:buildUI 再造一个默认 `01 / 01` 的 `.deck-ui` 叠上去 → 页码定格在
+    1、UI 重复、reveal 动画错乱。翻页还能用(handler 绑在真实 .slide-frame 上)所以容易漏判。
+
+    指纹(任一命中即 err):
+      · `data-idx="…"`            —— JS 给每个 .slide-frame 写的运行时序号(render 产物无)
+      · `class="deck-ui"`         —— buildUI() 运行时 createElement+append 的覆盖层(render 产物无)
+      · `.deck` 上 data-js-ready / data-nav-armed / data-edit-paste-guard —— 运行时标志
+
+    修法:从 deck.json 重新 `render-deck.py` 出干净 index.html 再发布,别发这份烤死版。
+    （与 Mira case-b 手搓 index.html 同源:任何绕过渲染器的 HTML 都该被这道闸拦住。）"""
+    findings = []
+    hits = []
+    if re.search(r'<[^>]*\bdata-idx="', html):
+        hits.append("data-idx=（运行时 .slide-frame 序号）")
+    if re.search(r'class="[^"]*\bdeck-ui\b', html):
+        hits.append('class="deck-ui"（运行时 buildUI 覆盖层）')
+    deck_open = re.search(r'<div[^>]*\bclass="[^"]*\bdeck\b[^"]*"[^>]*>', html)
+    if deck_open and re.search(r'data-(js-ready|nav-armed|edit-paste-guard)',
+                               deck_open.group(0)):
+        hits.append(".deck 带运行时标志(data-js-ready/nav-armed/edit-paste-guard)")
+    if hits:
+        findings.append({
+            "rule": "R-BAKED-DOM", "severity": "error", "slide_idx": 0,
+            "message":
+                "serialized post-JS DOM detected — this index.html is a saved/"
+                "“baked” live DOM, not a render-deck.py output. "
+                "Signals: " + "；".join(hits) + "。"
+                "Publishing it double-inits the deck JS (duplicate .deck-ui, page "
+                "counter frozen at 1). Re-render from deck.json with render-deck.py "
+                "and publish that clean file instead.",
+        })
+    return findings
+
+
 def runner_source_byte_findings(html, base_dir):
     """跑【两条路径都要】的 runner 层源字节/文件系统检查,合并成统一 findings(同 schema)。
     与 audits.js 规则同列表、同字段 → 报告层无需区分来源。顺序:R-DOC-INTEGRITY →
@@ -827,6 +868,7 @@ def runner_source_byte_findings(html, base_dir):
     audits.js 重叠,只在 dom_rules=False 路径单独跑(见 runner_no_browser_text_findings)。"""
     out = []
     out.extend(audit_doc_integrity_bytes(html))
+    out.extend(audit_baked_runtime_dom_bytes(html))   # R-BAKED-DOM:烤死的活 DOM(两路径都跑)
     out.extend(audit_dom_balance_bytes(html))   # R-DOM invariant-3:over-close(两路径都跑)
     out.extend(audit_self_contained_bytes(html))
     out.extend(audit_perf_bytes(_inline_linked_text(html, base_dir)))
