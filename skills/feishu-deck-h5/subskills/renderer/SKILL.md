@@ -41,6 +41,16 @@ rely on cached chat summaries or earlier reads of `outline.json`,
 3. Follow the design plan's raw-first stance: `layout: "raw"` is the default;
    schema layouts are only for approved pure standard shapes. Keep raw CSS in
    `slide.custom_css`; do not put per-slide CSS in `<head>`.
+   - **底色归 `.slide-frame`,不在 `.slide` 写整页背景(mandatory)。** 普通
+     raw / content 单页的底色由框架 master 机制铺:`.slide-frame` 按 layout 分发
+     `#000 var(--fs-asset-content-bg) center/cover`(= `lark-content-bg.jpg`,飞书
+     母版暗调渐变;见 `assets/feishu-deck.css` L170–200),`.slide` 必须保持透明让
+     它透上来。生成时 **不要** 在 `custom_css` 给 `.slide`(或整页根容器)写
+     `background` —— 不写自定义渐变、不把 `var(--fs-asset-content-bg)` 焊到
+     `.slide`、不默认铺 grid 纹理;任何一种都会盖掉 master 背景,视觉上就是
+     「底色不对」。也 **不默认加灰底大面板**(半透明灰黑 panel 与暗底相乘 → 显脏
+     显闷);分区用边框 / 细分隔 / 留白。唯一例外:raw 页有意模拟 cover / end /
+     replica,才在该页按需覆盖背景并说明原因。
 4. Look up assets locally first. If missing and cloud assets are needed, query the
    configured Feishu Base via `lark-base`; download or reference only assets needed
    for locked slides.
