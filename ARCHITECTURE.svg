@@ -1,0 +1,271 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1620" font-family="-apple-system,'PingFang SC','Microsoft YaHei',Segoe UI,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8aa0"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4ad98f"/>
+    </marker>
+    <style>
+      .band{rx:14;ry:14;}
+      .lbl{fill:#9fb0c7;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;}
+      .node{rx:9;ry:9;}
+      .nt{fill:#eaf0f8;font-size:13px;font-weight:600;}
+      .ns{fill:#b9c6d8;font-size:11px;}
+      .edge{stroke:#7d8aa0;stroke-width:1.6;fill:none;}
+      .edgeD{stroke:#6a7488;stroke-width:1.4;fill:none;stroke-dasharray:5 4;}
+      .edgeG{stroke:#4ad98f;stroke-width:1.6;fill:none;}
+      .elbl{fill:#8c99ad;font-size:10.5px;}
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1480" height="1620" fill="#0d1117"/>
+
+  <!-- Title -->
+  <text x="40" y="46" fill="#ffffff" font-size="26" font-weight="700">feishu-deck-h5 · 技术架构</text>
+  <text x="40" y="72" fill="#8c99ad" font-size="14">控制器路由调度 · 8 子技能实现 · DeckJSON 唯一中间层 · 确定性渲染 · 校验门禁 · 飞书云发布</text>
+  <line x1="40" y1="88" x2="1440" y2="88" stroke="#222b38" stroke-width="1"/>
+
+  <!-- User -->
+  <rect class="node" x="540" y="108" width="400" height="46" fill="#1a2230" stroke="#3a4658" stroke-width="1.5"/>
+  <text class="nt" x="740" y="130" text-anchor="middle">用户请求</text>
+  <text class="ns" x="740" y="147" text-anchor="middle">解析 / 设计 / 渲染 / 校验 / 编辑 / 翻译 / 发布</text>
+  <path class="edge" d="M740,154 L740,184" marker-end="url(#arr)"/>
+
+  <!-- ===== Controller band ===== -->
+  <rect class="band" x="40" y="188" width="1400" height="120" fill="#10192b" stroke="#2f4a6e" stroke-width="1.5"/>
+  <text class="lbl" x="60" y="210">控制器 Controller · skills/feishu-deck-h5/SKILL.md</text>
+  <rect class="node" x="70" y="224" width="420" height="70" fill="#1f3a5f" stroke="#4a90d9" stroke-width="1.5"/>
+  <text class="nt" x="90" y="250">Router 路由锁定</text>
+  <text class="ns" x="90" y="270">Mode · Scope · Target</text>
+  <text class="ns" x="90" y="286">锁定最小作用域，超界即停</text>
+  <rect class="node" x="520" y="224" width="430" height="70" fill="#1f3a5f" stroke="#4a90d9" stroke-width="1.5"/>
+  <text class="nt" x="540" y="248">Hard Gates 硬性门禁</text>
+  <text class="ns" x="540" y="266">① 必走 DeckJSON/render-deck  ② 先设计后渲染</text>
+  <text class="ns" x="540" y="282">③ 默认 raw-first  ④ 交付/发布前必校验</text>
+  <rect class="node" x="980" y="224" width="430" height="70" fill="#1f3a5f" stroke="#4a90d9" stroke-width="1.5"/>
+  <text class="nt" x="1000" y="248">Multi-Agent Dispatch</text>
+  <text class="ns" x="1000" y="266">可用时每步派发 worker 子代理</text>
+  <text class="ns" x="1000" y="282">依赖链保持串行</text>
+
+  <path class="edge" d="M740,308 L740,338" marker-end="url(#arr)"/>
+  <text class="elbl" x="752" y="326">路由 / 派发</text>
+
+  <!-- ===== Subskills band ===== -->
+  <rect class="band" x="40" y="342" width="1400" height="248" fill="#101722" stroke="#3a4658" stroke-width="1.5"/>
+  <text class="lbl" x="60" y="364">子技能流水线 Subskills · subskills/*/SKILL.md</text>
+
+  <!-- main chain -->
+  <g>
+    <rect class="node" x="60" y="384" width="200" height="64" fill="#243447" stroke="#5a7a9a" stroke-width="1.4"/>
+    <text class="nt" x="72" y="408">Parser 解析</text>
+    <text class="ns" x="72" y="426">素材 → source-dossier.json</text>
+    <text class="ns" x="72" y="440">资产归一化</text>
+
+    <rect class="node" x="300" y="384" width="200" height="64" fill="#243447" stroke="#5a7a9a" stroke-width="1.4"/>
+    <text class="nt" x="312" y="408">Designer 设计</text>
+    <text class="ns" x="312" y="426">→ outline.json</text>
+    <text class="ns" x="312" y="440">+ DESIGN-PLAN.md</text>
+
+    <rect class="node" x="540" y="384" width="200" height="64" fill="#2c4257" stroke="#6f9ec4" stroke-width="1.6"/>
+    <text class="nt" x="552" y="408">Renderer 渲染</text>
+    <text class="ns" x="552" y="426">outline → deck.json</text>
+    <text class="ns" x="552" y="440">→ index.html</text>
+
+    <rect class="node" x="780" y="384" width="200" height="64" fill="#243447" stroke="#5a7a9a" stroke-width="1.4"/>
+    <text class="nt" x="792" y="408">Validator 校验</text>
+    <text class="ns" x="792" y="426">文本/视觉/结构</text>
+    <text class="ns" x="792" y="440">语言/交付合规</text>
+
+    <rect class="node" x="1020" y="376" width="180" height="40" fill="#243447" stroke="#5a7a9a" stroke-width="1.4"/>
+    <text class="nt" x="1032" y="400">Simulator 排练</text>
+    <rect class="node" x="1020" y="424" width="180" height="40" fill="#243447" stroke="#5a7a9a" stroke-width="1.4"/>
+    <text class="nt" x="1032" y="448">Publisher 发布</text>
+
+    <path class="edge" d="M260,416 L300,416" marker-end="url(#arr)"/>
+    <path class="edge" d="M500,416 L540,416" marker-end="url(#arr)"/>
+    <path class="edge" d="M740,416 L780,416" marker-end="url(#arr)"/>
+    <path class="edge" d="M980,402 L1018,396" marker-end="url(#arr)"/>
+    <path class="edge" d="M980,430 L1018,444" marker-end="url(#arr)"/>
+    <text class="elbl" x="986" y="392">通过</text>
+  </g>
+
+  <!-- existing-deck entry: editor / translator -->
+  <g>
+    <rect class="node" x="300" y="486" width="200" height="58" fill="#2a2438" stroke="#7a6a9a" stroke-width="1.4"/>
+    <text class="nt" x="312" y="510">Editor 编辑</text>
+    <text class="ns" x="312" y="528">改稿/reskin/lift-swap/导入</text>
+
+    <rect class="node" x="540" y="486" width="200" height="58" fill="#2a2438" stroke="#7a6a9a" stroke-width="1.4"/>
+    <text class="nt" x="552" y="510">Translator 翻译</text>
+    <text class="ns" x="552" y="528">backfill→pairs→apply</text>
+
+    <text class="elbl" x="60" y="500">已有 deck：</text>
+    <text class="elbl" x="60" y="516">Editor / Translator</text>
+    <text class="elbl" x="60" y="532">发起改动后回到 Renderer</text>
+
+    <path class="edge" d="M420,486 C420,468 580,468 615,452" marker-end="url(#arr)"/>
+    <path class="edge" d="M640,486 L640,452" marker-end="url(#arr)"/>
+  </g>
+
+  <path class="edge" d="M640,448 L640,560 L740,560 L740,632" marker-end="url(#arr)"/>
+  <text class="elbl" x="752" y="600">生产 / 读写</text>
+
+  <!-- ===== Core band ===== -->
+  <rect class="band" x="40" y="636" width="1400" height="150" fill="#1a142b" stroke="#5a3f8a" stroke-width="1.5"/>
+  <text class="lbl" x="60" y="658">核心数据模型 + 工具链 · deck-json/</text>
+
+  <rect class="node" x="540" y="672" width="220" height="58" fill="#5f4a1f" stroke="#d9a64a" stroke-width="2"/>
+  <text class="nt" x="650" y="696" text-anchor="middle">deck.json · DeckJSON</text>
+  <text class="ns" x="650" y="714" text-anchor="middle">唯一事实来源 (SSOT)</text>
+
+  <rect class="node" x="70" y="672" width="200" height="58" fill="#3d2c5f" stroke="#a06bd9" stroke-width="1.4"/>
+  <text class="nt" x="82" y="696">deck-schema.json</text>
+  <text class="ns" x="82" y="714">10 布局+2 特殊+raw</text>
+
+  <rect class="node" x="300" y="672" width="210" height="58" fill="#3d2c5f" stroke="#a06bd9" stroke-width="1.4"/>
+  <text class="nt" x="312" y="696">render-deck.py</text>
+  <text class="ns" x="312" y="714">纯函数渲染器（确定性）</text>
+
+  <rect class="node" x="790" y="672" width="210" height="58" fill="#3d2c5f" stroke="#a06bd9" stroke-width="1.4"/>
+  <text class="nt" x="802" y="696">validate-deck / audits</text>
+  <text class="ns" x="802" y="714">校验门禁 run-audits.js</text>
+
+  <rect class="node" x="1030" y="672" width="380" height="58" fill="#3d2c5f" stroke="#a06bd9" stroke-width="1.4"/>
+  <text class="nt" x="1042" y="696">deck-cli.py · 脚本化工具</text>
+  <text class="ns" x="1042" y="714">lift-slides · apply-text-pairs · sync-index · locate · heal</text>
+
+  <text class="ns" x="395" y="752" text-anchor="middle">index.html 始终派生自 deck.json</text>
+  <path class="edgeD" d="M270,701 L536,701" marker-end="url(#arr)"/>
+  <path class="edge" d="M510,701 L536,701" marker-end="url(#arr)"/>
+  <path class="edge" d="M760,701 L786,701" marker-end="url(#arr)"/>
+  <path class="edgeD" d="M1030,701 L764,701" marker-end="url(#arr)"/>
+
+  <!-- ===== Bottom row: 4 panels ===== -->
+  <!-- Framework assets -->
+  <rect class="band" x="40" y="812" width="430" height="330" fill="#1c1a10" stroke="#7a6a30" stroke-width="1.5"/>
+  <text class="lbl" x="58" y="834">渲染框架资产 · assets/ + templates</text>
+  <rect class="node" x="58" y="848" width="394" height="46" fill="#2d2a1a" stroke="#7a6a30" stroke-width="1.2"/>
+  <text class="nt" x="72" y="868">feishu-deck.css · feishu-deck-patterns.css</text>
+  <text class="ns" x="72" y="884">视觉系统 / 设计 token</text>
+  <rect class="node" x="58" y="904" width="394" height="46" fill="#2d2a1a" stroke="#7a6a30" stroke-width="1.2"/>
+  <text class="nt" x="72" y="924">feishu-deck.js · edit-mode · grow-box-fit</text>
+  <text class="ns" x="72" y="940">交互 / 自适应排版</text>
+  <rect class="node" x="58" y="960" width="394" height="46" fill="#2d2a1a" stroke="#7a6a30" stroke-width="1.2"/>
+  <text class="nt" x="72" y="980">templates/ · shared/ 客户logo·Lark品牌素材</text>
+  <text class="ns" x="72" y="996">布局/组件模板 + 共享资产</text>
+  <rect class="node" x="58" y="1016" width="394" height="46" fill="#2d2a1a" stroke="#7a6a30" stroke-width="1.2"/>
+  <text class="nt" x="72" y="1036">copy-assets · inline-assets · package-deliverable</text>
+  <text class="ns" x="72" y="1052">交付：可移植 / 自包含成品</text>
+
+  <!-- Runs workspace -->
+  <rect class="band" x="490" y="812" width="500" height="330" fill="#0f1f17" stroke="#2f6e4a" stroke-width="1.5"/>
+  <text class="lbl" x="508" y="834">Run 工作区 · runs/&lt;时间戳-slug&gt;/</text>
+  <rect class="node" x="508" y="848" width="464" height="64" fill="#16271e" stroke="#2f6e4a" stroke-width="1.2"/>
+  <text class="nt" x="522" y="872">input/ · runtime-library/</text>
+  <text class="ns" x="522" y="892">source-dossier.json · 归一化 assets</text>
+  <rect class="node" x="508" y="922" width="464" height="64" fill="#16271e" stroke="#2f6e4a" stroke-width="1.2"/>
+  <text class="nt" x="522" y="946">output/</text>
+  <text class="ns" x="522" y="966">outline.json · DESIGN-PLAN.md · deck.json · index.html</text>
+  <rect class="node" x="508" y="996" width="464" height="64" fill="#16271e" stroke="#2f6e4a" stroke-width="1.2"/>
+  <text class="nt" x="522" y="1020">log/ · PROMPTS.md · pitch-rehearsal.json</text>
+  <text class="ns" x="522" y="1040">每次任务隔离的运行目录</text>
+
+  <!-- Sibling + Cloud column -->
+  <rect class="band" x="1010" y="812" width="430" height="150" fill="#101722" stroke="#3a4658" stroke-width="1.5"/>
+  <text class="lbl" x="1028" y="834">兄弟技能 Sibling Skills</text>
+  <rect class="node" x="1028" y="848" width="394" height="50" fill="#243447" stroke="#5a7a9a" stroke-width="1.2"/>
+  <text class="nt" x="1042" y="870">pptx-to-deck</text>
+  <text class="ns" x="1042" y="888">build_pptx / hybrid → canvas deck.json（本技能为渲染后端）</text>
+  <rect class="node" x="1028" y="904" width="394" height="44" fill="#243447" stroke="#5a7a9a" stroke-width="1.2"/>
+  <text class="nt" x="1042" y="926">keynote-to-html</text>
+  <text class="ns" x="1042" y="941">Keynote → HTML 转换</text>
+
+  <rect class="band" x="1010" y="978" width="430" height="164" fill="#0f1f17" stroke="#2f6e4a" stroke-width="1.5"/>
+  <text class="lbl" x="1028" y="1000">飞书云 Feishu Cloud</text>
+  <rect class="node" x="1028" y="1014" width="394" height="42" fill="#1f5f3a" stroke="#4ad98f" stroke-width="1.4"/>
+  <text class="nt" x="1042" y="1034">Feishu Base</text>
+  <text class="ns" x="1042" y="1049">共享知识 / 资产库（按需查询）</text>
+  <rect class="node" x="1028" y="1062" width="394" height="38" fill="#1f5f3a" stroke="#4ad98f" stroke-width="1.4"/>
+  <text class="nt" x="1042" y="1086">飞书托管 magic-page · magic-upload</text>
+  <rect class="node" x="1028" y="1106" width="394" height="30" fill="#16271e" stroke="#2f6e4a" stroke-width="1.2"/>
+  <text class="ns" x="1042" y="1126">lark-base skill · lark-cli --as user</text>
+
+  <!-- cross links from core/subskills to bottom -->
+  <path class="edgeD" d="M395,730 L395,846" marker-end="url(#arr)"/>
+  <text class="elbl" x="402" y="800">渲染使用框架资产</text>
+  <path class="edgeD" d="M650,730 L650,846" marker-end="url(#arr)"/>
+  <text class="elbl" x="658" y="800">产物写入 output/</text>
+  <path class="edgeD" d="M1120,730 L1120,810" marker-end="url(#arr)"/>
+  <text class="elbl" x="1128" y="790">Parser 委派 .pptx</text>
+
+  <!-- publisher -> cloud -->
+  <path class="edgeG" d="M1200,444 C1320,444 1370,640 1300,1010" marker-end="url(#arrG)"/>
+  <text class="elbl" x="1300" y="520" fill="#4ad98f">确认后发布 / 写回记录</text>
+
+  <!-- legend -->
+  <text class="elbl" x="40" y="1166">图例：</text>
+  <rect x="92" y="1156" width="16" height="12" rx="2" fill="#1f3a5f" stroke="#4a90d9"/><text class="elbl" x="114" y="1166">控制器</text>
+  <rect x="166" y="1156" width="16" height="12" rx="2" fill="#243447" stroke="#5a7a9a"/><text class="elbl" x="188" y="1166">子技能</text>
+  <rect x="240" y="1156" width="16" height="12" rx="2" fill="#3d2c5f" stroke="#a06bd9"/><text class="elbl" x="262" y="1166">核心/数据</text>
+  <rect x="330" y="1156" width="16" height="12" rx="2" fill="#5f4a1f" stroke="#d9a64a"/><text class="elbl" x="352" y="1166">deck.json (SSOT)</text>
+  <rect x="470" y="1156" width="16" height="12" rx="2" fill="#1f5f3a" stroke="#4ad98f"/><text class="elbl" x="492" y="1166">飞书云</text>
+
+  <!-- ============================================================ -->
+  <!-- TEMP-ANNOTATION:START  （临时标注 · 后续删除整段即可） -->
+  <!-- ============================================================ -->
+  <g>
+    <rect class="band" x="40" y="1200" width="1400" height="392" fill="#241a10" stroke="#d9803a" stroke-width="2" stroke-dasharray="9 5"/>
+    <text x="60" y="1232" fill="#f2a25a" font-size="13" font-weight="700" letter-spacing="1px">【临时标注 · 后续删除】这次改动：把"死图"拆成能被 AI 接着改的"活材料"</text>
+    <text class="ns" x="60" y="1256" fill="#e8c9a8">目标不是把旧 PPT 复刻成一张高清图，而是变成能被 AI 持续修改、能沉淀成模板复用的"活材料"。</text>
+    <text class="ns" x="60" y="1274" fill="#e8c9a8">唯一标尺 ——「这页之后还能不能被 AI 接着改」。本质是在原架构上延伸加深，不是另起炉灶。</text>
+
+    <!-- 旧做法：2 层 -->
+    <text class="elbl" x="80" y="1316" fill="#9fb0c7" font-size="12" font-weight="700">旧做法 · 2 层（保真最高）</text>
+    <rect class="node" x="80" y="1326" width="230" height="34" fill="#2c4257" stroke="#6f9ec4" stroke-width="1.3"/>
+    <text class="nt" x="195" y="1348" text-anchor="middle" font-size="12">文字层（唯一可改）</text>
+    <rect class="node" x="80" y="1364" width="230" height="56" fill="#3a3026" stroke="#7a6a30" stroke-width="1.3"/>
+    <text class="nt" x="195" y="1388" text-anchor="middle" font-size="12">整页图 · 底图</text>
+    <text class="ns" x="195" y="1406" text-anchor="middle" fill="#c79a72">锁死的像素，动不了</text>
+    <text class="elbl" x="80" y="1440" fill="#8c99ad">天花板：除最上层文字，底下全锁死</text>
+
+    <!-- 箭头 -->
+    <path class="edge" d="M330,1378 L398,1378" stroke="#d9803a" marker-end="url(#arr)"/>
+    <text class="elbl" x="334" y="1370" fill="#f2a25a">在地基上往上盖</text>
+    <text class="elbl" x="334" y="1394" fill="#8c99ad">非推翻重来</text>
+
+    <!-- 新做法：4 层 -->
+    <text class="elbl" x="420" y="1316" fill="#9fb0c7" font-size="12" font-weight="700">新做法 · 4 层（每层都可被大模型单独够到 / 改写）</text>
+    <rect class="node" x="420" y="1326" width="300" height="30" fill="#2c4257" stroke="#6f9ec4" stroke-width="1.3"/>
+    <text class="nt" x="570" y="1346" text-anchor="middle" font-size="12">文字</text>
+    <rect class="node" x="420" y="1358" width="300" height="30" fill="#3d2c5f" stroke="#a06bd9" stroke-width="1.3"/>
+    <text class="nt" x="570" y="1378" text-anchor="middle" font-size="12">元素（新增）</text>
+    <rect class="node" x="420" y="1390" width="300" height="30" fill="#3a3026" stroke="#7a6a30" stroke-width="1.3"/>
+    <text class="nt" x="570" y="1410" text-anchor="middle" font-size="12">图片</text>
+    <rect class="node" x="420" y="1422" width="300" height="30" fill="#1c2a3a" stroke="#4a90d9" stroke-width="1.3"/>
+    <text class="nt" x="570" y="1442" text-anchor="middle" font-size="12">背景（新增）</text>
+    <text class="elbl" x="420" y="1470" fill="#8c99ad">原"图片+文字"两层是地基，再补"背景+元素"——每多拆一层＝多一个可单独改写的对象</text>
+
+    <!-- 对应到管线 -->
+    <path class="edgeD" d="M570,1452 C570,1500 760,1470 760,1452" stroke="#d9803a"/>
+    <text class="elbl" x="600" y="1492" fill="#f2a25a">↑ 即 Parser → pptx-to-deck → 可编辑 canvas deck.json（拆块重建，非整页截图）</text>
+
+    <!-- 代价 + 底线 -->
+    <line x1="800" y1="1300" x2="800" y2="1560" stroke="#5a4a30" stroke-width="1" stroke-dasharray="4 4"/>
+    <text class="elbl" x="824" y="1318" fill="#9fb0c7" font-size="12" font-weight="700">代价（已认）</text>
+    <text class="ns" x="824" y="1340" fill="#e8c9a8">逐块重画，保真比整页截图差一点 ——</text>
+    <text class="ns" x="824" y="1358" fill="#e8c9a8">很清楚差在哪。</text>
+    <text class="elbl" x="824" y="1392" fill="#9fb0c7" font-size="12" font-weight="700">底线（不让步）</text>
+    <text class="ns" x="824" y="1414" fill="#e8c9a8">对要模板化、规模复用的产品，</text>
+    <text class="ns" x="824" y="1432" fill="#e8c9a8">可编辑性是不能让步的底线。</text>
+    <text class="ns" x="824" y="1466" fill="#c0d0e0">· 一张图再精美，落地即退出后续所有流程；</text>
+    <text class="ns" x="824" y="1486" fill="#c0d0e0">· 一份拆开的结构哪怕略失真，它还活着 ——</text>
+    <text class="ns" x="848" y="1506" fill="#7fcfa0">能被改、被翻译、被 AI 优化。</text>
+
+    <rect x="824" y="1528" width="588" height="40" rx="8" fill="#1a2a1e" stroke="#2f6e4a" stroke-width="1.2"/>
+    <text class="nt" x="844" y="1553" fill="#7fcfa0" font-size="12">结论：宁可略失真而"活着"，不要高保真却"死了"。</text>
+  </g>
+  <!-- ============================================================ -->
+  <!-- TEMP-ANNOTATION:END -->
+  <!-- ============================================================ -->
+</svg>
