@@ -22,8 +22,17 @@
 **绝不**:head `<style>`、`<script>`、任何 JS 动画库(GSAP / anime.js / WAAPI)。
 deck.json **没有 JS 槽**,任何脚本只活在 index.html,**下一次重渲染静默丢失**——这正是用户最怕的。
 WAAPI 尤其别用:它的卖点是 JS 运行时控制,静态 deck 用不上,CSS `@keyframes` 全覆盖且 round-trip。
-(若将来真要 JS 动画,必须先给 schema + render-deck.py + framework JS 加 `custom_js` + slide-change
-事件这一整套——那是独立的大改,不在本规范内。)
+
+**唯一已落地的"框架级 JS"例外 = Magic Move(翻页变形)**:它需要 `document.startViewTransition`
+(JS),但这一段 JS 活在 **framework `feishu-deck.js` 的 `goTo()` 单点**、由 deck 级 opt-in 触发,
+**作者只写纯 CSS**(`view-transition-name` 配对进 `custom_css`),所以照样 round-trip。详见 §7。
+除此之外若还要别的 JS 动画,仍须先给 schema + render-deck.py + framework JS 加整套槽——别在 custom_css 里塞 `<script>`。
+
+**Motion tokens(可用非强制)**:框架 `:root` 已提供 `--fs-ease-out` / `--fs-ease-soft` /
+`--fs-dur-enter` / `--fs-dur-quick` / `--fs-dur-ambient` / `--fs-stagger` / `--fs-stagger-tight`。
+custom_css **可以**直接 `var(--fs-ease-out)`、`calc(var(--i,0) * var(--fs-stagger))` 引用,
+让多份 deck 的动效语言天然一致、消灭 copy-paste 漂移。但它**不强制**——某页要自己的曲线/节奏照样自由写
+(§6"别预先固化"的精神:tokens 是货架不是法令)。下面示例为可读仍写字面值,生产里优先引 token。
 
 ## 2. 护栏(不可破,破了就不安全 / 不一致 / 被冲掉)
 
@@ -54,6 +63,11 @@ WAAPI 尤其别用:它的卖点是 JS 运行时控制,静态 deck 用不上,CSS 
 4. **应用 + 重渲染 + 视觉验证**:写进 custom_css → `render-deck.py` 重渲(自带 validator)→
    **playwright 抓动画过程帧**(导航到该页后在几个时刻截图):落定帧证明没破版,中间帧证明动起来了。
    "静态看着对"不算完成(见 [[feedback_visual_review_before_done]]、[[feedback_measure_dont_eyeball_tighten_loop]])。
+5. **"卡半透明"落定断言(HTML PPT 最常见翻车点)**:动画播完后,该页所有入场元素必须真正落定,
+   绝不能定格在半透明 / 偏移态(delay 算错、`both` 漏写、keyframe 终值不是 1 都会导致)。
+   抓帧时**等动画结束**(导航后停 ~1.2s,>最长 `delay+duration`),断言:该页每个 `.reveal` /
+   入场 hook 的 computed `opacity === 1` 且无残留 `transform`。任一不满足 = 该页动效不合格,回去修终值
+   / `both` / delay,别交付。这条是 §3.4 抓帧的**硬判据**,不是"看一眼"。
 
 ## 4. 种子词汇表(可扩展,非封闭集)
 
@@ -109,6 +123,7 @@ WAAPI 尤其别用:它的卖点是 JS 运行时控制,静态 deck 用不上,CSS 
 | **I 连线流动** | 虚线缓慢流动="数据在跑" | SVG `stroke-dasharray` + `stroke-dashoffset` **无限** `linear` | 架构 / 流程图点睛。**要慢**;无限动画 gated reduced-motion |
 | **J 悬浮微动** | 元素出现后缓慢上下浮 | `transform:translateY` **无限** `alternate` ease-in-out(±6–10px / 4–6s) | **只放装饰 / 背景元素,绝不放正文**(动的文字伤可读)。gated reduced-motion |
 | **K 数字滚动** | 数字真从 0 滚到 N | ① `@property --n{syntax:'<integer>'}` 动画 + `counter()` 渲染(整数,无逗号/小数/单位);② 数字列"老虎机" `translateY`(任意格式,markup 重) | KPI / 数据页。**真逐帧任意缓动 + 暂停才需 JS**——那是老问题(无槽),不值得 |
+| **L 起始态入场** | 元素从隐藏切出时直接过渡入场,**不写 keyframes** | `@starting-style` 声明"刚出现那一刻"的起始值 + 普通 `transition`:`@starting-style{opacity:0;transform:translateY(12px)}` 配 `transition:opacity/transform var(--fs-dur-enter) var(--fs-ease-out)` | 比 `@keyframes` 简洁,适合单元素一次性入场;翻页逻辑也简化。坑:仅当元素**新插入/从 `display:none` 切出**才触发;本框架翻页是 toggle `.is-current`(元素一直在 DOM、靠祖先类匹配重放动画),所以 §4b 的 `.reveal` keyframe 路线仍是错落入场的主力,`@starting-style` 主要给 Magic Move / 真新增节点的单点入场补位 |
 
 **受限(需要 JS,本系统不做)**:
 - **焦点引导(口播同步版)**:高亮"讲到哪亮到哪"要 within-slide step 控制,本框架 present 模式只翻页、无元素级 fragment。
@@ -121,14 +136,64 @@ WAAPI 尤其别用:它的卖点是 JS 运行时控制,静态 deck 用不上,CSS 
 ## 5. 调性缩放
 
 - **沉稳商务**(保险 / 金融 / 严肃 B2B):慢(0.5–1.2s)、`ease-out`、无 bounce、辉光克制。
-- **科技酷炫**:扫光更亮、辉光更强、错落更紧。
+- **科技酷炫**:扫光更亮、辉光更强、错落更紧(`var(--fs-stagger-tight)`)。
 - 永远别给严肃 B2B 用弹跳 / 过冲。按品牌选,不固化进任何模板。
+- **`linear()` 缓动(进阶)**:想要"几乎察觉不到的极轻物理感"(微弹簧)时,`linear()` 能定义任意曲线,
+  表现力强过 `cubic-bezier`,例 `animation-timing-function: linear(0,.6 30%,1.02 60%,1)`。但**商业场合那条铁律不变:
+  弹要弹得极轻**——过冲 ≤2%、只给科技调性、严肃 B2B 一律 `--fs-ease-out` 不过冲。
 
 ## 6. 演进
 
 这是**活调色板,不是冻结规格**。每份 deck 从护栏出发**现场设计**;真正反复用、验证过的效果
 再补进第 4 节让它长大。若某个 pattern 在很多 deck 上稳定下来,**那时**才考虑提升成 schema token
 (`slide.motion: "<effect>"`,由 render-deck.py 从内置库展开成 scoped custom_css)——**等它挣到了再固化,别预先写死**。
+
+## 7. Magic Move(翻页变形 / View Transitions)
+
+Keynote「神奇移动」的 HTML 原生版:翻页时**同一个元素从上一页的位置/大小平滑变形到下一页的落点**,
+而不是淡出再淡入。靠浏览器原生 View Transitions API,框架已接好,作者**只写纯 CSS**、round-trip 安全。
+
+### 7.1 怎么开(deck 级 opt-in)
+
+1. deck.json 顶层 `deck.magic_move: true` → render-deck.py 在 deck 根吐 `data-magic-move`。
+2. `feishu-deck.js` 的 `goTo()` 检测到该 attr 后,把翻页那一刻的 DOM 切换包进
+   `document.startViewTransition()`。**护栏全在框架里**:feature-detect(Firefox 无 → 瞬切降级)、
+   仅 present 模式、首屏不触发(`wasArmed`)、`prefers-reduced-motion: reduce` 自动关。
+3. 默认**关**。不开时翻页行为零变化(fs-reveal 基线照旧),所以对存量 deck 零风险。
+
+### 7.2 怎么让某个元素"变形"(配对 `view-transition-name`)
+
+给**前后两页的同一个元素**标**同一个** `view-transition-name`,浏览器自动补间。名字写进
+**两页各自的 `slide.custom_css`**(纯 CSS,round-trip):
+
+```css
+/* 章节页的大序号 01 */
+.slide-frame.is-current .slide[data-slide-key="sec-2"] .big-num { view-transition-name: chap2-num; }
+/* 下一张内容页的页眉序号 —— 同名,于是 01 缩小飞到左上角变成页眉 */
+.slide-frame.is-current .slide[data-slide-key="topic-2"] .page-num { view-transition-name: chap2-num; }
+```
+
+翻页时浏览器把这个元素当成"同一个",从章节页的巨大居中态**变形**到内容页的小页眉态。
+一个动作就讲清"前后两页是同一个故事",这是淡入淡出做不到的叙事——也是 Magic Move 最值钱的用法。
+默认 group 时序框架已给(`::view-transition-group(*)` = `--fs-dur-enter` + `--fs-ease-out`);
+要单独调某个名字,在 custom_css 里写 `::view-transition-group(chap2-num){animation-duration:.5s}`。
+
+### 7.3 护栏(Magic Move 专属,叠加 §2 通用护栏)
+
+1. **名字全 deck 唯一**:`view-transition-name` 在一次过渡里**不能重复**,两个元素同名会报错并退化成瞬切。
+   每对配一个唯一名(`<deck-slug>-<role>`),只在真正要变形的"那一对"上加,别全页乱标。
+2. **只标"前后页都存在的同一逻辑元素"**:logo、章节序号、hero 图、关键 KPI 数字这类跨页延续物。
+   一页有、另一页没有的元素标了也只是单边淡入淡出,不变形——不如不标。
+3. **节制**:一次翻页变形元素 ≤2–3 个,否则满屏乱飞,廉价。其余元素走默认 fs-reveal 即可。
+4. **演示机要 Chromium 系**(Chrome/Edge,Safari 18+ 部分支持);Firefox 优雅降级为瞬切——
+   交付前确认客户演示环境,别承诺"哪都能动"。本框架已 feature-detect,不会报错,只是没动效。
+5. **reduced-motion 自动关**(框架已 gate),无需你在 custom_css 再写一遍。
+6. 仍守 §2:`view-transition-name` 进 custom_css、选择器自带 `[data-slide-key]` 走 scope 直通、不动布局落点。
+
+### 7.4 验证
+
+按 §3.4 抓帧 + §3.5 落定断言:导航过去后抓**翻页中间帧**(证明在变形)和**落定帧**(证明落到正确页眉位、
+opacity===1 不卡半透明)。Firefox/降级环境单独抓一张确认"瞬切但不破版"。
 
 ---
 

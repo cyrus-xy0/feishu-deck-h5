@@ -2223,6 +2223,10 @@ def main(argv=None) -> int:
         deck_data_attrs_parts.append(f' data-title-style="{deck["deck"]["title_style"]}"')
     if deck["deck"].get("logo_position"):
         deck_data_attrs_parts.append(f' data-logo-position="{deck["deck"]["logo_position"]}"')
+    if deck["deck"].get("magic_move"):
+        # OPT-IN Keynote-style Magic Move: feishu-deck.js wraps present-mode slide
+        # changes in document.startViewTransition() when this attr is present.
+        deck_data_attrs_parts.append(' data-magic-move=""')
     deck_data_attrs = "".join(deck_data_attrs_parts)
 
     # Speaker notes island: a hidden JSON map {slide-key → notes} the presenter

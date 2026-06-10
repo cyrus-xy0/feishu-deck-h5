@@ -825,6 +825,9 @@
 
   function goTo(deck, frames, idx, updateHash) {
     if (idx < 0 || idx >= frames.length) return;
+    // Capture armed state BEFORE the arming block below: Magic Move must NOT
+    // fire on the very first paint (same intent as the fs-reveal suppression).
+    const wasArmed = deck.hasAttribute('data-nav-armed');
     // After the first navigation, arm the reveal animation for subsequent
     // slide changes. The CSS suppresses the staggered reveal on the very
     // first slide load so initial paint isn't ~700 ms of stagger animation.
@@ -834,13 +837,33 @@
       // First non-zero nav OR re-asserting current: arm.
       deck.setAttribute('data-nav-armed', '');
     }
-    for (let i = 0; i < frames.length; i++) {
-      frames[i].classList.toggle('is-current', i === idx);
-    }
-    if (deck.dataset.mode === 'present') {
-      scaleFrame(frames[idx]);
+    // The visual swap: toggle the current frame, then scale (present) or
+    // scroll (scroll mode). Factored out so Magic Move can wrap it.
+    const applySwap = () => {
+      for (let i = 0; i < frames.length; i++) {
+        frames[i].classList.toggle('is-current', i === idx);
+      }
+      if (deck.dataset.mode === 'present') {
+        scaleFrame(frames[idx]);
+      } else {
+        frames[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+    // Keynote-style Magic Move (opt-in via deck.json `magic_move` →
+    // data-magic-move): wrap the swap in a View Transition so any element
+    // sharing a `view-transition-name` across the two slides morphs between
+    // its old and new position/size. Feature-detected (Firefox has no
+    // startViewTransition → instant swap), present-mode only, never on first
+    // paint, and disabled under prefers-reduced-motion.
+    const wantsMagicMove = deck.hasAttribute('data-magic-move')
+      && deck.dataset.mode === 'present'
+      && wasArmed
+      && typeof document.startViewTransition === 'function'
+      && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (wantsMagicMove) {
+      document.startViewTransition(applySwap);
     } else {
-      frames[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      applySwap();
     }
     if (updateHash !== false) {
       const newHash = '#' + (idx + 1);

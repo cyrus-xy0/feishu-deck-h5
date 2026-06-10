@@ -260,7 +260,12 @@ For an existing deck:
   motion is layout-last, per-page, scoped to `.slide-frame.is-current
   .slide[data-slide-key=K]`, and designed fresh per page (not stamped from a frozen
   template). See `references/motion-system.md` for the constraints, method, and the
-  extensible effect catalog.
+  extensible effect catalog. The ONE sanctioned framework-level JS exception is
+  Keynote-style **Magic Move** (page-turn morph): opt in via deck.json
+  `deck.magic_move: true` (renderer emits `data-magic-move`; `feishu-deck.js`
+  wraps the present-mode swap in `document.startViewTransition` — feature-detected,
+  reduced-motion-gated, off by default). Authors still write only CSS — matched
+  `view-transition-name` pairs in `custom_css`. See `references/motion-system.md` §7.
 - Work happens inside `runs/<timestamp>-<slug>/`. After preflight and before any
   new generation, create a run with `assets/new-run.sh <slug>` and announce the
   absolute run path. Use a short ASCII slug derived from the topic/customer; do

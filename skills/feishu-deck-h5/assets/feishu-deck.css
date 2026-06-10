@@ -82,6 +82,30 @@
 
   /* — Runtime scale (set by JS) — */
   --fs-scale: 1;
+
+  /* — Motion tokens (AVAILABLE, not mandatory) —
+     The deck's shared motion language. custom_css MAY reference these so bespoke
+     per-page animation stays consistent instead of re-typing curves/durations
+     (see references/motion-system.md). They do NOT force a house style — a page
+     is free to design its own; this only kills copy-paste drift. */
+  --fs-ease-out:    cubic-bezier(.16, 1, .3, 1);   /* signature expo-out */
+  --fs-ease-soft:   cubic-bezier(.4, 0, .2, 1);    /* gentle in-out */
+  --fs-dur-enter:   .6s;                            /* entrance / reveal */
+  --fs-dur-quick:   .35s;                           /* hover / small state */
+  --fs-dur-ambient: 40s;                            /* looping ambient drift */
+  --fs-stagger:     90ms;                           /* steady stagger step */
+  --fs-stagger-tight: 60ms;                         /* tech-tone tighter step */
+}
+
+/* Magic Move (opt-in via deck.json `magic_move`): default morph timing for any
+   element pair sharing a view-transition-name across two slides. Override
+   per-name in slide.custom_css with ::view-transition-group(<name>). Gated so it
+   never runs when the platform/user disables motion. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(*) {
+    animation-duration: var(--fs-dur-enter);
+    animation-timing-function: var(--fs-ease-out);
+  }
 }
 
 /* ---------- Reset (scoped, non-destructive to host pages) ---------- */

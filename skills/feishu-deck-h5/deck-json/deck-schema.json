@@ -74,6 +74,11 @@
           "enum": ["front", "back"],
           "default": "front",
           "description": "Deck-wide default for customer × feishu logo arrangement on content slides. 'front' = customer logo before feishu; 'back' = after. Mirrors PPT '内容页-飞书联名在前/后'."
+        },
+        "magic_move": {
+          "type": "boolean",
+          "default": false,
+          "description": "OPT-IN · Keynote-style Magic Move on page turn via the View Transitions API. When true, the renderer emits data-magic-move on the deck root and feishu-deck.js wraps each present-mode slide change in document.startViewTransition() (feature-detected; gracefully instant on Firefox; gated by prefers-reduced-motion). Off by default so the fs-reveal entrance baseline is unchanged. To make an element MORPH between two pages, give the same `view-transition-name` to its counterpart on both slides via slide.custom_css (round-trips). See references/motion-system.md §7."
         }
       }
     },
