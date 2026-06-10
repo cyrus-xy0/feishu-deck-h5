@@ -46,6 +46,7 @@ FAMILIES = [
     ('布局完整性',           ['L2', 'L4', 'R36', 'R47', 'R48', 'R-CSSVAR',
                               'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST',
                               'R-LIFT-CSS-BUDGET',
+                              'R-CSS-INLINE-BUDGET', 'R-CSS-CROSS-PAGE',
                               'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT',
                               'R-RAW-LOOKS-SCHEMA']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),

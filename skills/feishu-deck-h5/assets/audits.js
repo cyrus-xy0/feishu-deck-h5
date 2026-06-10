@@ -988,6 +988,8 @@
     'R-VIS-PEER-SIZE': { coverage: 'universal', signal: 'dom' },
     // R-VIS-ALIGN: removed 2026-06-10 — was an unimplemented stub; alignment audit deferred.
     'R-LIFT-CSS-BUDGET': { coverage: 'universal', signal: 'dom', optout: 'fires ONLY on lifted slides (data-lifted provenance); clean/authored decks self-exempt — not a coverage narrowing but a scope inherent to the rule' },
+    'R-CSS-INLINE-BUDGET': { coverage: 'universal', signal: 'dom' },
+    'R-CSS-CROSS-PAGE': { coverage: 'universal', signal: 'dom' },
     'R-VIS-LABEL-FLOOR': { coverage: 'partial', signal: 'dom', optout: 'card label floor keyed on .card/-card/-tile/-cell/-panel/-box' },
     'R-VIS-OPT-OUT-ABUSE': { coverage: 'universal', signal: 'dom' },
     'R-VIS-CARD-MIN-HEIGHT-SPARSE': { coverage: 'universal', signal: 'dom' },
@@ -5130,6 +5132,105 @@
             + 'rules this slide never matches) so the lifted page only keeps the CSS '
             + 'it actually uses — smaller deck.json, faster render, cleaner '
             + (severity === 'error' ? 'round-trip.' : 'round-trip. (advisory)'),
+        }];
+      },
+    },
+
+    {
+      // R-CSS-INLINE-BUDGET · 页 CSS 落位收敛 (F-272)。一张 raw 页的 per-page CSS 有两个家:
+      //   ① slide.custom_css(正道 · 渲染成 `<style data-fs-custom-css>` 注入 .slide,随
+      //      deck.json round-trip)— 这是单一真源;
+      //   ② raw `data.html` 顶层内嵌的 `<style>`(实测 68% 走这条)— 不随 deck.json round-trip
+      //      的字段走、膨胀无预算(huatai 1.5MB)、且可含跨页 selector 泄漏。
+      // 这条只统计 raw 页【内嵌 <style>】(= 渲染后 .slide 子树里 NOT data-fs-custom-css 的
+      // <style>)的 UTF-8 字节,> 8KB → warn,提示跑 migrate-head-css-to-custom-css.py 把内嵌
+      // 块迁进 custom_css(钉死单一家)。
+      // name-free:锚 `<style>` 标签 + data-fs-custom-css 标记(渲染器注入的标记,非 deck 内容
+      // 类名),不依赖任何业务类名。注入的 custom_css 块本就在正道里 → 不计;干净/作者 deck 的
+      // raw 页 custom_css 通常已是唯一家、无独立内嵌 <style> → 天然零触发(examples 实测 raw=0
+      // / 内嵌 <style>=0 → 全静默)。advisory · 永不 block。
+      id: 'R-CSS-INLINE-BUDGET',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const WARN_BYTES = 8 * 1024;
+        // 内嵌 <style> = slide 子树里 NOT data-fs-custom-css 的 <style>(custom_css 注入块
+        // 带该标记,已在正道里,不算泄漏家;只有 raw data.html 自带的内嵌块才计)。
+        const embedded = [...slide.querySelectorAll('style')]
+          .filter((s) => !s.hasAttribute('data-fs-custom-css'));
+        if (!embedded.length) return [];
+        const enc = (typeof TextEncoder !== 'undefined') ? new TextEncoder() : null;
+        let bytes = 0;
+        for (const s of embedded) {
+          const txt = s.textContent || '';
+          bytes += enc ? enc.encode(txt).length : txt.length;
+        }
+        if (bytes <= WARN_BYTES) return [];
+        const kb = (bytes / 1024).toFixed(1);
+        const sel = shortSel(slide);
+        return [{
+          rule: 'R-CSS-INLINE-BUDGET', severity: 'warn', slide_idx,
+          slide_sel: sel, css_bytes: bytes,
+          message:
+            `slide ${slide_idx} · \`${sel}\` keeps ${kb}KB of CSS in an INLINE `
+            + '<style> inside its raw `data.html`, over the 8KB budget. Per-page CSS '
+            + 'has two homes — `slide.custom_css` (round-trips with deck.json, the '
+            + 'single source of truth) vs an embedded <style> in data.html (does NOT '
+            + 'round-trip the field, has no budget, and can leak cross-page '
+            + 'selectors). Converge on ONE home: run '
+            + '`migrate-head-css-to-custom-css.py <out>/index.html <out>/deck.json` '
+            + '(it now also sweeps raw-page inline <style> into the slide\'s '
+            + 'custom_css, scoped to its key), then re-render. (advisory · never blocks)',
+        }];
+      },
+    },
+
+    {
+      // R-CSS-CROSS-PAGE · 跨页 selector 泄漏 (F-272)。一张页的 <style>(内嵌 OR 注入的
+      // custom_css 块)里出现【非本页 slide-key】的 selector(`[data-slide-key="OTHER"]` /
+      // `.slide[data-slide-key="OTHER"]`)→ 这条规则其实在样式【别的页】。后果:删本页 / lift
+      // 本页会把那条针对别页的规则一起带走 → 静默破坏别页(huatai 内嵌规则引用别页 slide-key
+      // 即此类)。per-page CSS 必须只 scope 到本页 key。
+      // name-free:锚 data-slide-key 属性(框架 round-trip 锚点,非业务类名)+ <style> 标签;
+      // 不依赖任何 deck 内容类名。本页 key 之外的 data-slide-key 引用即报,本页自己的引用不报。
+      // 干净 deck 的 custom_css 经渲染器 scope_selectors 一律 scope 到本页 key、内嵌 <style>=0
+      // → 天然零触发(examples 实测无跨页泄漏 → 全静默)。advisory · 永不 block。
+      id: 'R-CSS-CROSS-PAGE',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const ownKey = slide.getAttribute('data-slide-key') || '';
+        const styleEls = slide.querySelectorAll('style');
+        if (!styleEls.length) return [];
+        const REF_RE = /\[data-slide-key=(?:"([^"]*)"|'([^']*)'|([\w-]+))\]/g;
+        const foreign = new Set();
+        for (const s of styleEls) {
+          // data-source="framework" 框架样式表理论上不会出现在 .slide 子树里(框架 CSS
+          // 在 head),但保险起见跳过任何带该标记的块。
+          if (s.getAttribute('data-source') === 'framework') continue;
+          const txt = s.textContent || '';
+          let m;
+          REF_RE.lastIndex = 0;
+          while ((m = REF_RE.exec(txt)) !== null) {
+            const k = m[1] || m[2] || m[3] || '';
+            if (k && k !== ownKey) foreign.add(k);
+          }
+        }
+        if (!foreign.size) return [];
+        const sel = shortSel(slide);
+        const keys = [...foreign].slice(0, 6);
+        return [{
+          rule: 'R-CSS-CROSS-PAGE', severity: 'warn', slide_idx,
+          slide_sel: sel, slide_key: ownKey, foreign_keys: keys,
+          message:
+            `slide ${slide_idx} · \`${sel}\` (data-slide-key="${ownKey}") has a `
+            + `<style> rule scoped to ANOTHER page: data-slide-key ${JSON.stringify(keys)}`
+            + `${foreign.size > keys.length ? ` (+${foreign.size - keys.length} more)` : ''}. `
+            + 'Per-page CSS that lives on this page but styles a DIFFERENT slide is a '
+            + 'cross-page leak: deleting or lifting THIS page silently drops that '
+            + 'rule, breaking the OTHER page. Move each foreign-keyed rule into the '
+            + 'slide it actually styles (its own `custom_css`), so every page\'s CSS '
+            + 'is scoped to its OWN key and travels with it. (advisory · never blocks)',
         }];
       },
     },

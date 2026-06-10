@@ -2287,6 +2287,21 @@ def main(argv=None) -> int:
             )
         slides_html.append(slide_html)
 
+    # F-272 advisory bookkeeping — collect raw slides that keep per-page CSS in an
+    # INLINE <style> inside their data.html instead of slide.custom_css (the single
+    # source of truth that round-trips with deck.json). Computed here (we have the
+    # source slide dicts) and PRINTED in the success block below — purely advisory:
+    # never blocks, never touches the gate, never rewrites deck.json. The fix is the
+    # explicit migrate-head-css-to-custom-css.py codemod, not auto-writeback (keeps
+    # "deck.json single source / render read-only").
+    _css_inline_raw_pages = []
+    for _new_idx, (_orig_idx, _slide) in enumerate(active_slides):
+        if _slide.get("layout") != "raw":
+            continue
+        _h = (_slide.get("data") or {}).get("html")
+        if isinstance(_h, str) and "<style" in _h.lower():
+            _css_inline_raw_pages.append((_new_idx + 1, _slide.get("key") or "?"))
+
     # 5. Compose into shell
     shell_tpl = TEMPLATES_DIR / "_shell.html"
     if not shell_tpl.exists():
@@ -2885,6 +2900,21 @@ def main(argv=None) -> int:
 
     print(f"       deck:   {deck['deck']['title']}")
     print(f"       slides: {total}")
+
+    # F-272 · page-CSS locus advisory (NON-BLOCKING, never affects exit code, never
+    # rewrites deck.json). A raw page that keeps its per-page CSS in an inline
+    # <style> inside data.html has it in the WRONG home: that channel doesn't
+    # round-trip the deck.json field, has no size budget, and can leak cross-page
+    # selectors (R-CSS-INLINE-BUDGET / R-CSS-CROSS-PAGE flag this). Nudge toward the
+    # single source of truth — the migrate codemod — but never act on it here.
+    if _css_inline_raw_pages:
+        _pp = ", ".join(f"第{n}页({k})" for n, k in _css_inline_raw_pages[:8])
+        _more = (f" …+{len(_css_inline_raw_pages) - 8} 页"
+                 if len(_css_inline_raw_pages) > 8 else "")
+        print(f"\n⚠ {len(_css_inline_raw_pages)} 个 raw 页内嵌 <style>({_pp}{_more}):"
+              f"建议跑 migrate-head-css-to-custom-css.py 把它们迁进 custom_css"
+              f"(单一真源,随 deck.json round-trip;避免跨页 selector 泄漏 / 膨胀无预算)。",
+              file=sys.stderr)
 
     # Accent review — for any content/story-case slide, print the highlighted
     # word so the author can eyeball that the right pivot is emphasized.

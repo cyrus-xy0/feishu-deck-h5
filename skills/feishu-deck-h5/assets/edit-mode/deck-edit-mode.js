@@ -325,9 +325,91 @@
   }
 
   // ── save ──────────────────────────────────────────────────────────────
+  // Runtime traces that feishu-deck.js writes into the live DOM at present-mode
+  // init — they NEVER appear in a clean render-deck.py output, so saving the
+  // live DOM verbatim bakes them in. The new R-BAKED-DOM gate (run-audits.py)
+  // hard-blocks any index.html carrying these, and sync-index-to-deck.py would
+  // otherwise fold the runtime-computed geometry back into deck.json as if it
+  // were an author edit ("越改越坏"). buildSavedHTML strips them on the CLONE so
+  // the saved file is the pure AUTHOR state — exactly what re-rendering deck.json
+  // would produce. We do NOT touch feishu-deck.js (the runtime stays the runtime;
+  // we only sanitize at the save boundary). What we strip — and what we DON'T:
+  //
+  //   Stripped (UNAMBIGUOUS runtime — never authored, so never destroys content):
+  //     · data-idx (per-frame index), the .deck-ui buildUI() overlay node, and
+  //       the .deck runtime flags (data-js-ready / nav-armed / edit-paste-guard)
+  //       — these are exactly the R-BAKED-DOM fingerprints (attribute-only);
+  //     · data-fs-* per-slide balance/canvas-center MARKER attributes;
+  //     · the --child-i reveal-stagger prop and --fs-scale (scaleFrame) — pure
+  //       runtime CSS custom props an author never writes;
+  //     · top/bottom written with !important — the _ccApply canvas-center band
+  //       translate (the R-11 landmine that compounds every round-trip). Plain
+  //       author top/bottom on absolute boxes carry NO !important, so they survive.
+  //
+  //   NOT stripped (DELIBERATELY): the balanceSlide geometry written WITHOUT
+  //     !important — align-self / justify-content / min-height / padding-top /
+  //     padding-bottom (and the col-balance flex/height/aspect-ratio/max-height).
+  //     These are TEXT-IDENTICAL to ordinary author inline styles (an author may
+  //     well write `justify-content:center` in a raw slide), so stripping them
+  //     would DELETE authored layout — a worse corruption than the one we fix.
+  //     balanceSlide already reverts non-improvements (measure-or-revert), and a
+  //     kept improvement is a stable value (re-render → runtime re-measures →
+  //     already satisfied → no further injection), so it does NOT compound. The
+  //     ONLY compounding mutation is the canvas-center !important top/bottom,
+  //     which we DO strip. (Fully removing the ambiguous-prop residue would need
+  //     the runtime to write its mutations into a removable <style> — the
+  //     "change the runtime" approach this 稳妥版 deliberately does NOT take.)
+  const RUNTIME_SLIDE_MARKER_ATTRS = [
+    'data-fs-balanced', 'data-fs-colbalanced', 'data-fs-canvascentered',
+    'data-fs-autobalanced',
+  ];
+  const RUNTIME_DECK_ATTRS = ['data-js-ready', 'data-nav-armed', 'data-edit-paste-guard'];
+
+  // Strip the unambiguous runtime-injected props from one element's `style` attr,
+  // in place: --child-i + --fs-scale (always), and top/bottom ONLY when they carry
+  // !important (the _ccApply canvas-center signature). Leaves all author inline
+  // styles — including the balance props above — untouched. Drops an empty `style=""`.
+  function stripRuntimeInlineStyle(el) {
+    if (!el.hasAttribute || !el.hasAttribute('style')) return;
+    const st = el.style;
+    st.removeProperty('--child-i');
+    st.removeProperty('--fs-scale');
+    // top/bottom: only the !important (canvas-center) variant is runtime.
+    for (const prop of ['top', 'bottom']) {
+      if (st.getPropertyPriority(prop) === 'important') st.removeProperty(prop);
+    }
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+  }
+
+  // Remove every runtime trace feishu-deck.js bakes into the present-mode DOM,
+  // operating on the detached clone (never the live page). Mirrors the writes
+  // listed above so a ⌘S save never trips R-BAKED-DOM and never feeds runtime
+  // geometry back into deck.json on sync.
+  function stripRuntimeArtifacts(clone) {
+    // deck-root runtime flags
+    const deckEl = clone.matches && clone.matches('.deck') ? clone : clone.querySelector('.deck');
+    if (deckEl) RUNTIME_DECK_ATTRS.forEach((a) => deckEl.removeAttribute(a));
+    // the buildUI() overlay — created at runtime, never in a render output
+    clone.querySelectorAll('.deck-ui').forEach((el) => el.remove());
+    // per-frame runtime index
+    clone.querySelectorAll('.slide-frame[data-idx]').forEach((sf) => sf.removeAttribute('data-idx'));
+    // per-slide auto-balance / canvas-center markers
+    clone.querySelectorAll('.slide').forEach((s) => {
+      RUNTIME_SLIDE_MARKER_ATTRS.forEach((a) => s.removeAttribute(a));
+    });
+    // runtime-injected inline geometry + reveal --child-i on slides AND their
+    // descendants (balanceSlide touches arbitrary nested boxes; --child-i is on
+    // direct slide children). Scan every element under each .slide that carries a
+    // style attr, plus the slide itself.
+    clone.querySelectorAll('.slide, .slide [style], .slide[style]').forEach(stripRuntimeInlineStyle);
+  }
+
   function buildSavedHTML() {
     // Clone the documentElement so we don't disturb the live DOM.
     const clone = document.documentElement.cloneNode(true);
+    // Strip runtime traces feishu-deck.js baked into the live DOM (R-BAKED-DOM
+    // fingerprints + runtime geometry) so the saved file is the pure author state.
+    stripRuntimeArtifacts(clone);
     // Strip edit-mode artifacts
     clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
     clone.querySelectorAll('[spellcheck]').forEach((el) => el.removeAttribute('spellcheck'));
@@ -1062,5 +1144,11 @@
     exit:  exitEditMode,
     save:  save,
     undo:  undo,
+    // Exposed for the round-trip-sanitize test (and bookmarklet inspection):
+    // returns the exact bytes ⌘S would write, with all runtime traces stripped.
+    buildSavedHTML: buildSavedHTML,
+    // The clone-level scrubber, separately callable on any detached node so a
+    // Playwright/jsdom test can assert R-BAKED-DOM fingerprints are gone.
+    stripRuntimeArtifacts: stripRuntimeArtifacts,
   };
 })();

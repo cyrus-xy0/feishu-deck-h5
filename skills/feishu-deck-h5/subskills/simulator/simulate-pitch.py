@@ -329,10 +329,58 @@ def slide_reaction(slide: dict[str, Any], scenario: dict[str, Any]) -> dict[str,
     }
 
 
+def design_plan_of(outline: dict[str, Any]) -> dict[str, Any]:
+    plan = outline.get("design_plan")
+    return plan if isinstance(plan, dict) else {}
+
+
+_NEEDS_CONFIRM_MARKERS = ("需要", "待确认", "待补", "确认", "未提供", "若用户", "可替换", "假设")
+
+
+def pain_signals(outline: dict[str, Any], scenario: dict[str, Any], slides: list[dict[str, Any]]) -> list[str]:
+    """Urgency driver. Designer contract has no `thesis.pain_points`; the
+    closest real signals are the narrative tensions in `design_plan.risks`,
+    any scenario-level pain fields, and slides whose role frames a problem."""
+    plan = design_plan_of(outline)
+    signals = as_list(plan.get("risks"))
+    signals += as_list(scenario.get("pain_points") or scenario.get("pains"))
+    signals += [
+        ensure_text(slide.get("message")) or slide.get("title", "")
+        for slide in slides
+        if slide.get("role") in {"pain", "context", "insight"}
+    ]
+    return [s for s in signals if s]
+
+
+def unsupported_claims(outline: dict[str, Any], slides: list[dict[str, Any]]) -> list[str]:
+    """Trust drag. Contract has no `claim_discipline.unsupported_claims`; the
+    real surface is per-slide evidence items flagged as needing confirmation
+    plus the design_plan's open_questions."""
+    flagged = [
+        item
+        for slide in slides
+        for item in slide.get("evidence", [])
+        if any(marker in item for marker in _NEEDS_CONFIRM_MARKERS)
+    ]
+    flagged += [
+        q
+        for q in as_list(design_plan_of(outline).get("open_questions"))
+        if any(marker in q for marker in _NEEDS_CONFIRM_MARKERS)
+    ]
+    return flagged
+
+
+def needs_confirmation(outline: dict[str, Any]) -> list[str]:
+    """Next-step drag. Contract has no `claim_discipline.needs_user_confirmation`;
+    open_questions in the design_plan are the real unresolved items that hold
+    back a confident next-step ask."""
+    return as_list(design_plan_of(outline).get("open_questions"))
+
+
 def score_deck(outline: dict[str, Any], slides: list[dict[str, Any]], scenario: dict[str, Any]) -> dict[str, int]:
-    pain_points = outline.get("thesis", {}).get("pain_points", []) or []
-    unsupported = outline.get("claim_discipline", {}).get("unsupported_claims", []) or []
-    confirmations = outline.get("claim_discipline", {}).get("needs_user_confirmation", []) or []
+    pain_points = pain_signals(outline, scenario, slides)
+    unsupported = unsupported_claims(outline, slides)
+    confirmations = needs_confirmation(outline)
     evidence_items = [item for slide in slides for item in slide.get("evidence", [])]
     risk_items = [item for slide in slides for item in slide.get("risk_flags", [])]
     proof_requirements = as_list(scenario.get("proof_requirements") or scenario.get("proof"))
@@ -381,8 +429,10 @@ def build_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
     deck = load_json(args.deck_json)
     scenario, scenario_path = load_scenario(args, outline)
     slides = normalize_slides(outline, deck)
-    brief = outline.get("brief", {})
-    design_plan = outline.get("design_plan", {})
+    # `design_plan` is the real designer contract surface; `brief` is only a
+    # legacy/back-compat fallback (the contract has no top-level `brief`).
+    design_plan = design_plan_of(outline)
+    brief = outline.get("brief") if isinstance(outline.get("brief"), dict) else {}
     scores = score_deck(outline, slides, scenario)
     primary_outcome, confidence, why = outcome(scores)
     artifacts = []
@@ -414,8 +464,8 @@ def build_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
     first_non_cover = next((slide["key"] for slide in slides if slide["role"] != "cover"), slides[0]["key"] if slides else "deck-level")
     closing_slide = slides[-1]["key"] if slides else "deck-level"
     personas = default_panel(audience)
-    unsupported = outline.get("claim_discipline", {}).get("unsupported_claims", []) or []
-    confirmations = outline.get("claim_discipline", {}).get("needs_user_confirmation", []) or []
+    unsupported = unsupported_claims(outline, slides)
+    confirmations = needs_confirmation(outline)
 
     return {
         "version": "1.0",

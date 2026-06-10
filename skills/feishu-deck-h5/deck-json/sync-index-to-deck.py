@@ -102,6 +102,125 @@ def _normalize_asset_paths(s: str) -> str:
     return s
 
 
+# ---------------------------------------------------------------------------
+# R-BAKED-DOM guard + runtime-trace sanitizer (F-259).
+#
+# sync's reverse-feed assumes index.html is a render-deck.py output that an
+# author then edited. But the in-browser edit-mode ⌘S (or a plain browser
+# "save page") can serialize the LIVE post-JS DOM, which carries runtime traces
+# feishu-deck.js writes at present-mode init: per-frame data-idx, the buildUI()
+# .deck-ui overlay, .deck runtime flags, per-slide data-fs-* balance markers,
+# the reveal --child-i custom prop, and inline geometry the balanceSlide /
+# canvas-center passes compute (top/bottom/min-height/align-self/etc.). None of
+# those are AUTHOR edits. Folding them back into deck.json makes the source drift
+# every round-trip ("越改越坏"), and the runtime geometry would re-bake on the
+# next render → compounding.
+#
+# Two boundaries, mirroring the edit-mode save sanitizer (deck-edit-mode.js):
+#   1. DETECT the R-BAKED-DOM fingerprints (same logic as run-audits.py
+#      audit_baked_runtime_dom_bytes) and REFUSE by default — the operator
+#      should save through the sanitizing editor or pass --sanitize.
+#   2. --sanitize: strip --child-i + runtime inline-style props from a COPY of
+#      the HTML BEFORE drift comparison, so runtime mutations never count as
+#      edits and never get written into deck.json.
+# We do NOT touch the runtime (feishu-deck.js); we only sanitize at this border.
+# ---------------------------------------------------------------------------
+
+# Always-strip declarations: the UNAMBIGUOUS runtime CSS custom props --child-i
+# (reveal stagger) and --fs-scale (scaleFrame) — an author never writes these.
+# A declaration runs `prop: value` up to the next ; or the end of the attr. The
+# property name is anchored to a declaration boundary (start of body or a `;`),
+# kept in group(1) and re-emitted so neighbouring author declarations stay intact.
+#
+# DELIBERATELY NOT stripped: the balanceSlide geometry written WITHOUT !important
+# (align-self / justify-content / min-height / padding-top / padding-bottom). It
+# is TEXT-IDENTICAL to ordinary author inline styles, so stripping it would DELETE
+# authored layout (a worse corruption than the one this fixes) — and unlike the
+# canvas-center !important top/bottom it does NOT compound across round-trips
+# (balanceSlide reverts non-improvements; a kept value is stable on re-render).
+# See deck-edit-mode.js for the full rationale (the two sanitizers are paired).
+_RUNTIME_DECL_RE = re.compile(
+    r"(^|;)\s*(?:--child-i|--fs-scale)\s*:\s*[^;\"]*",
+    re.I,
+)
+# top/bottom are stripped ONLY when they carry !important — the _ccApply
+# canvas-center signature (the R-11 landmine that compounds). Plain author
+# top/bottom (common on absolute boxes, e.g. `position:absolute;top:0`) carry no
+# !important, so they survive. The boundary group(1) is preserved like above.
+_RUNTIME_CC_DECL_RE = re.compile(
+    r"(^|;)\s*(?:top|bottom)\s*:\s*[^;\"]*!important\s*[^;\"]*",
+    re.I,
+)
+
+
+def _baked_dom_fingerprints(html: str) -> "list[str]":
+    """Return the R-BAKED-DOM fingerprint hits in `html` (empty = clean).
+
+    照抄 run-audits.py audit_baked_runtime_dom_bytes 的指纹检测(同一组 needle),
+    so sync's reject reason matches exactly what the validator/gate reports.
+    Signals (any present = a saved/"baked" live DOM, not a render output):
+      · data-idx="…"                         (runtime .slide-frame index)
+      · class="deck-ui"                       (buildUI() overlay)
+      · .deck open tag with data-js-ready / data-nav-armed / data-edit-paste-guard
+    """
+    hits = []
+    if re.search(r'<[^>]*\bdata-idx="', html):
+        hits.append("data-idx=（运行时 .slide-frame 序号）")
+    if re.search(r'class="[^"]*\bdeck-ui\b', html):
+        hits.append('class="deck-ui"（运行时 buildUI 覆盖层）')
+    deck_open = re.search(r'<div[^>]*\bclass="[^"]*\bdeck\b[^"]*"[^>]*>', html)
+    if deck_open and re.search(r'data-(js-ready|nav-armed|edit-paste-guard)',
+                               deck_open.group(0)):
+        hits.append(".deck 带运行时标志(data-js-ready/nav-armed/edit-paste-guard)")
+    return hits
+
+
+def _sanitize_style_attr(style_body: str) -> str:
+    """Drop runtime-injected declarations from one inline style body, preserving
+    author declarations, their order, AND the author's trailing-';' state.
+    Removes --child-i / --fs-scale always, and top/bottom only when !important
+    (the canvas-center signature). Returns the cleaned body (may be empty).
+
+    Each regex keeps the leading boundary (group 1: '' or ';') so author
+    declarations on either side are untouched; the leftover double-';' is
+    collapsed. We restore the original trailing ';' (render-deck.py's emitted
+    inline styles end with ';', so dropping it would falsely register as drift)."""
+    had_trailing_semi = style_body.rstrip().endswith(";")
+    cleaned = _RUNTIME_DECL_RE.sub(r"\1", style_body)
+    cleaned = _RUNTIME_CC_DECL_RE.sub(r"\1", cleaned)
+    cleaned = re.sub(r";\s*;+", ";", cleaned)            # collapse `;;` runs
+    cleaned = cleaned.strip().strip(";").strip()
+    if cleaned and had_trailing_semi:
+        cleaned += ";"
+    return cleaned
+
+
+def sanitize_runtime_traces(html: str) -> str:
+    """Strip runtime traces from a (possibly baked) index.html so drift compare
+    sees the pure AUTHOR state. Mirrors deck-edit-mode.js stripRuntimeArtifacts
+    at the text level — but conservative: it only removes attributes/props the
+    runtime is KNOWN to write, never author content.
+
+    Removes: per-slide data-fs-* markers, per-frame data-idx, .deck runtime
+    flags, and runtime inline-style declarations (--child-i + geometry) from any
+    style="..." attribute. Leaves the .deck-ui overlay and structural DOM alone
+    (the detect step already flags those; this is purely for the drift compare,
+    and extract_slide_inner reads inside .slide where .deck-ui never lives)."""
+    # 1) strip runtime marker attributes (with or without a value)
+    out = re.sub(r'\s+data-fs-(?:balanced|colbalanced|canvascentered|autobalanced)(?:="[^"]*")?',
+                 "", html)
+    out = re.sub(r'\s+data-idx="[^"]*"', "", out)
+    out = re.sub(r'\s+data-(?:js-ready|nav-armed|edit-paste-guard)(?:="[^"]*")?',
+                 "", out)
+
+    # 2) strip runtime inline-style declarations from every style="..."
+    def _repl_style(m: re.Match) -> str:
+        body = _sanitize_style_attr(m.group(1))
+        return f'style="{body}"' if body else ""
+    out = re.sub(r'style="([^"]*)"', _repl_style, out)
+    return out
+
+
 def extract_slide_inner(html: str, slide_key: str) -> str | None:
     """Find <div class="slide" ... data-slide-key="K" ...>INNER</div> and
     return INNER minus the leading wordmark div, by depth-counting <div>/</div>.
@@ -518,9 +637,15 @@ def backfill_deck(index_html: str, html_stem: str) -> "tuple[dict, list]":
 
 
 def run_backfill(index_html_path: Path, deck_json_path: Path,
-                 dry_run: bool = False) -> int:
+                 dry_run: bool = False, sanitize: bool = False) -> int:
     """CLI handler: backfill a deck.json from an index.html that has none."""
     index_html = index_html_path.read_text(encoding="utf-8")
+    if sanitize:
+        # A baked index.html backfilled verbatim would capture runtime geometry
+        # (balance/canvas-center inline styles + --child-i) into the new raw
+        # slides. Strip those first so the reconstructed deck.json is the author
+        # state. (F-259 — mirrors the full-sync --sanitize path.)
+        index_html = sanitize_runtime_traces(index_html)
     deck, warnings = backfill_deck(index_html, deck_json_path.stem
                                    if deck_json_path.stem != "deck"
                                    else index_html_path.stem)
@@ -773,10 +898,47 @@ def main() -> int:
                          "deck.json since). Without this, a newer deck.json downgrades "
                          "a full sync to a dry-run + hard warning, to avoid silently "
                          "clobbering un-rendered deck.json edits with stale HTML.")
+    ap.add_argument("--sanitize", action="store_true",
+                    help="treat index.html as a saved/'baked' live DOM (carries "
+                         "runtime traces feishu-deck.js wrote at present-mode init) "
+                         "and STRIP those traces before comparing for drift: the "
+                         "reveal --child-i prop, per-slide data-fs-* balance markers, "
+                         "per-frame data-idx, .deck runtime flags, and the inline "
+                         "geometry the balance/canvas-center passes inject "
+                         "(top/bottom/min-height/align-self/justify-content/padding). "
+                         "Without this, a baked index.html is REFUSED (those runtime "
+                         "mutations are NOT author edits — folding them into deck.json "
+                         "makes the source drift every round-trip). Prefer saving via "
+                         "the in-browser edit-mode (⌘S already sanitizes); use this "
+                         "for a plain browser 'save page' or an externally-baked file.")
     args = ap.parse_args()
 
     if not args.index_html.exists():
         print(f"sync-index-to-deck: {args.index_html} not found", file=sys.stderr)
+        return 2
+
+    # R-BAKED-DOM GUARD (F-259): refuse to reverse-feed a saved/"baked" live DOM
+    # unless the operator opts into sanitizing it. The in-browser edit-mode ⌘S
+    # already strips these traces (deck-edit-mode.js buildSavedHTML), so a normal
+    # edit→save→sync flow never trips this. It catches a plain browser "save page"
+    # or any externally-baked snapshot whose runtime mutations would otherwise be
+    # folded into deck.json as fake author edits ("越改越坏"). Applies to ALL
+    # modes (full / surgical / backfill) — runtime traces pollute any reverse map.
+    _baked_hits = _baked_dom_fingerprints(
+        args.index_html.read_text(encoding="utf-8", errors="replace"))
+    if _baked_hits and not args.sanitize:
+        print("⚠ R-BAKED-DOM: index.html looks like a saved/'baked' live DOM, "
+              "not a render-deck.py output.", file=sys.stderr)
+        print("  Runtime traces present: " + "；".join(_baked_hits) + "。",
+              file=sys.stderr)
+        print("  These are written by feishu-deck.js at present-mode init, NOT by "
+              "an author. Reverse-feeding them would corrupt deck.json (the source "
+              "would drift every round-trip).", file=sys.stderr)
+        print("  → Preferred: re-save in the in-browser edit-mode (⌘S already "
+              "strips them), then sync the clean file.", file=sys.stderr)
+        print("  → Or, to strip the traces here before comparing, re-run with "
+              "--sanitize.", file=sys.stderr)
+        print("  (Refusing to write.)", file=sys.stderr)
         return 2
 
     if args.hidden_only or args.order_only or args.notes_only:
@@ -797,7 +959,8 @@ def main() -> int:
             print("sync-index-to-deck: --slide-key is not supported with backfill",
                   file=sys.stderr)
             return 2
-        return run_backfill(args.index_html, args.deck_json, dry_run=args.dry_run)
+        return run_backfill(args.index_html, args.deck_json, dry_run=args.dry_run,
+                            sanitize=args.sanitize)
 
     # DIRECTION GUARD (F-273): a full sync assumes index.html is the NEWER side
     # (the post-render-edited one). If deck.json is NEWER, the operator most
@@ -827,6 +990,14 @@ def main() -> int:
         direction_forced_dry = True
 
     index_html = args.index_html.read_text(encoding="utf-8")
+    if args.sanitize:
+        # Strip runtime traces (--child-i + balance/canvas-center inline geometry
+        # + data-fs-*/data-idx/.deck flags) so the per-slide drift compare below
+        # — extract_slide_inner → data.html, sync_canvas_data → elements[],
+        # custom_css, and the order/hidden/notes reconciles — sees the pure AUTHOR
+        # state and never folds a runtime mutation into deck.json. (F-259)
+        index_html = sanitize_runtime_traces(index_html)
+        print("  (--sanitize: stripped runtime traces before drift compare.)")
     deck = json.loads(args.deck_json.read_text(encoding="utf-8"))
 
     drift_count = 0

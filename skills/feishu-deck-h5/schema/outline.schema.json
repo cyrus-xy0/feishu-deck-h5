@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feishu-deck-h5 designer outline",
+  "description": "Contract for runs/<...>/output/outline.json produced by the designer subskill. Top level is scenario + design_plan + slides[]; every slide carries a stable kebab-case key, a role, a layout_intent (raw:<...> by default), a single_focus, a density_budget, and a six-dimension design_spec. This is a self-check contract, not a render-time gate.",
+  "type": "object",
+  "required": ["scenario", "design_plan", "slides"],
+  "properties": {
+    "scenario": {
+      "type": "object",
+      "description": "Pitch goal, audience, decision context, setting, language (zh-only default), optional risk_level / proof_requirements / source_summary.",
+      "required": ["goal", "audience"],
+      "properties": {
+        "goal": { "type": "string" },
+        "audience": { "type": "string" },
+        "setting": { "type": "string" },
+        "decision": { "type": "string" },
+        "language": { "type": "string" },
+        "risk_level": { "type": "string" },
+        "proof_requirements": { "type": "array" },
+        "source_summary": { "type": "array" }
+      },
+      "additionalProperties": true
+    },
+    "design_plan": {
+      "type": "object",
+      "description": "Narrative arc + visual direction + hero pages + risks/open_questions feeding the rehearsal simulator.",
+      "required": ["title", "narrative_arc"],
+      "properties": {
+        "title": { "type": "string" },
+        "narrative_arc": { "type": "string" },
+        "visual_direction": { "type": "string" },
+        "hero_pages": { "type": "array" },
+        "risks": { "type": "array" },
+        "open_questions": { "type": "array" }
+      },
+      "additionalProperties": true
+    },
+    "slides": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "role",
+          "layout_intent",
+          "single_focus",
+          "density_budget",
+          "design_spec"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Stable kebab-case semantic id, not a positional name like slide-01.",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "role": { "type": "string" },
+          "layout_intent": {
+            "type": "string",
+            "description": "raw:<pattern-or-intent> by default; schema:<layout> only for pure standard shapes."
+          },
+          "is_hero": { "type": "boolean" },
+          "single_focus": { "type": "string" },
+          "content": {},
+          "evidence": { "type": "array" },
+          "assets_needed": { "type": "array" },
+          "density_budget": {
+            "description": "core block + supporting evidence <= layout capacity; non-empty for raw slides."
+          },
+          "design_spec": {
+            "type": "object",
+            "description": "Per-slide design spec. For raw slides it must cover the six dimensions (字号/容器/装饰/对齐/字距/字重), whether as discrete keys or as prose (e.g. six_dim_A / Q2_tiers). outline-lint.py checks coverage; the schema only pins the shape."
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

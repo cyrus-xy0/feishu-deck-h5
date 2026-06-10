@@ -33,9 +33,25 @@ Safety
 - Does NOT edit index.html. Re-render (render-deck.py, or pass --render) to
   regenerate the clean output from the updated deck.json.
 
+F-272 · raw-page inline <style> sweep (page-CSS locus convergence)
+-----------------------------------------------------------------
+A raw slide's per-page CSS has two possible homes: `slide.custom_css` (the single
+source of truth — round-trips with deck.json) OR a `<style>` embedded in its
+`data.html` (does NOT round-trip the field, has no budget, can leak cross-page
+selectors). By DEFAULT this tool now ALSO sweeps each raw slide's top-level
+embedded `<style>` INTO that slide's `custom_css` and strips it from data.html,
+so the page converges on the single home (render-time scope_selectors() then
+scopes the moved CSS to the slide key). This is the fix R-CSS-INLINE-BUDGET /
+R-CSS-CROSS-PAGE point at. `--no-raw-inline` keeps only the legacy head sweep;
+`--raw-inline-only` runs ONLY this sweep and needs deck.json alone (no
+index.html). A `<style data-source="framework">` is left in place.
+
 Usage
 -----
+    # both sweeps (head-CSS from index.html + raw inline <style> from deck.json):
     python3 migrate-head-css-to-custom-css.py <out>/index.html <out>/deck.json [--dry-run] [--render]
+    # ONLY the F-272 raw inline <style> sweep (deck.json alone):
+    python3 migrate-head-css-to-custom-css.py --raw-inline-only <out>/deck.json [--dry-run]
 
 stdlib only. Python 3.10+.
 """
@@ -221,33 +237,89 @@ def collect(html: str):
     return chunks, orphans, skipped_at
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("index_html", type=Path)
-    ap.add_argument("deck_json", type=Path)
-    ap.add_argument("--dry-run", action="store_true", help="report without writing")
-    ap.add_argument("--render", action="store_true",
-                    help="re-render after migrating (verify parity)")
-    args = ap.parse_args(argv)
+# ---------------------------------------------------------------------------
+# F-272 · raw-page inline <style> → custom_css (page-CSS locus convergence)
+# ---------------------------------------------------------------------------
+# A raw slide keeps its per-page CSS in one of two homes: slide.custom_css (the
+# single source of truth — round-trips with deck.json, co-located inside .slide
+# at render) OR a `<style>` embedded in its data.html (does NOT round-trip the
+# field, has no budget, can leak cross-page selectors). This sweep moves the
+# embedded <style> bodies INTO custom_css and strips them from data.html, so the
+# page converges on the single home. R-CSS-INLINE-BUDGET / R-CSS-CROSS-PAGE warn
+# about decks that still carry the embedded channel; this is the fix they point
+# at. Works on deck.json DIRECTLY (no index.html needed) — render-time
+# scope_selectors() then scopes the moved CSS to the slide key.
 
-    for p in (args.index_html, args.deck_json):
-        if not p.exists():
-            print(f"migrate: {p} not found", file=sys.stderr)
-            return 2
+def collect_raw_inline_styles(deck: dict):
+    """For every raw slide, pull every top-level `<style>` body out of its
+    data.html. Returns (moves, total_styles):
+      moves = list of (slide_ref, key, css_to_move, stripped_html, n_styles)
+              — slide_ref is the actual slide dict (so the caller can mutate it).
+    A `<style data-source="framework">` (shouldn't appear in raw data.html, but
+    be safe) is LEFT IN PLACE. data.html with no <style> is skipped."""
+    moves = []
+    total_styles = 0
+    for slide in deck.get("slides", []):
+        if slide.get("layout") != "raw":
+            continue
+        data = slide.get("data") or {}
+        html = data.get("html")
+        if not isinstance(html, str) or "<style" not in html.lower():
+            continue
+        bodies = []
+        n_styles = 0
+        # Strip matched <style>…</style> blocks, collecting non-framework bodies.
+        def _take(m):
+            nonlocal n_styles
+            attrs = m.group("attrs") or ""
+            if 'data-source="framework"' in attrs or "data-source='framework'" in attrs:
+                return m.group(0)          # leave framework blocks in place
+            n_styles += 1
+            body = m.group("body")
+            if body and body.strip():
+                bodies.append(body.strip())
+            return ""                       # remove the <style> from data.html
+        stripped = _STYLE_RE.sub(_take, html)
+        if not n_styles:
+            continue
+        total_styles += n_styles
+        # Collapse the blank lines a removed block can leave behind (cosmetic).
+        stripped = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", stripped)
+        css_to_move = "\n".join(bodies)
+        moves.append((slide, slide.get("key"), css_to_move, stripped, n_styles))
+    return moves, total_styles
 
-    html = args.index_html.read_text(encoding="utf-8")
-    deck = json.loads(args.deck_json.read_text(encoding="utf-8"))
+
+def migrate_raw_inline(deck: dict, *, dry_run: bool):
+    """Apply collect_raw_inline_styles to `deck` (in place unless dry_run).
+    Returns a list of (key, n_styles, n_bytes) actually migrated."""
+    moves, _ = collect_raw_inline_styles(deck)
+    applied = []
+    for slide, key, css_to_move, stripped_html, n_styles in moves:
+        # Idempotency marker — same convention as the head sweep.
+        if "migrated from raw inline <style> by F-272 codemod" in (
+                slide.get("custom_css") or ""):
+            continue
+        applied.append((key, n_styles, len(css_to_move.encode("utf-8"))))
+        if dry_run:
+            continue
+        ts = datetime.now().strftime("%Y-%m-%d")
+        header = f"/* migrated from raw inline <style> by F-272 codemod ({ts}) */"
+        existing = slide.get("custom_css", "") or ""
+        sep = "\n" if existing.strip() else ""
+        new_cc = existing + sep + header
+        if css_to_move.strip():
+            new_cc += "\n" + css_to_move
+        slide["custom_css"] = new_cc
+        slide.setdefault("data", {})["html"] = stripped_html
+    return applied
+
+
+def _migrate_head(html: str, deck: dict, *, dry_run: bool):
+    """The original L7 head-CSS sweep, factored out. Returns (applied, missing,
+    orphans, skipped_at) — applied = [(key, n_rules, n_chars)]."""
     by_key = {s.get("key"): s for s in deck.get("slides", [])}
-
     chunks, orphans, skipped_at = collect(html)
-
-    print(f"migrate-head-css: scanned {args.index_html.name}")
-    if not chunks:
-        print("  ✓ no head/deck-level per-slide CSS found — nothing to migrate.")
-        if orphans:
-            print(f"  ({len(orphans)} non-attributable head rule(s) left in place)")
-        return 0
-
     applied, missing = [], []
     for key, css in chunks.items():
         slide = by_key.get(key)
@@ -262,30 +334,94 @@ def main(argv=None) -> int:
             continue
         n_rules = sum(1 for _ in _walk_top(css))   # top-level rules + keyframes
         applied.append((key, n_rules, len(css)))
-        if not args.dry_run:
+        if not dry_run:
             ts = datetime.now().strftime("%Y-%m-%d")
             header = f"/* migrated from head <style> by L7 codemod ({ts}) */"
             existing = slide.get("custom_css", "") or ""
             sep = "\n" if existing.strip() else ""
             slide["custom_css"] = existing + sep + header + "\n" + css
+    return applied, missing, orphans, skipped_at
 
-    verb = "WOULD MIGRATE" if args.dry_run else "MIGRATED"
-    print(f"  {verb}: {len(applied)} slide(s)")
-    for key, nr, nbytes in applied:
-        print(f"    → {key}  ({nr} rule/keyframe block(s), {nbytes} chars → custom_css)")
-    if missing:
-        print(f"  ⚠ {len(missing)} slide-key(s) referenced in head CSS not found in "
-              f"deck.json (left in head): {missing}")
-    if orphans:
-        print(f"  ⚠ {len(orphans)} head rule(s) with no per-slide selector — left in "
-              f"place (review manually):")
-        for o in orphans[:8]:
-            print(f"      {o}")
-    if skipped_at:
-        print(f"  ⚠ {len(skipped_at)} @media/@supports block(s) in head — NOT migrated "
-              f"(per-slide rules inside @-wrappers need manual review):")
-        for s in skipped_at[:6]:
-            print(f"      {s}")
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("index_html", type=Path, nargs="?", default=None,
+                    help="rendered index.html (for the head-CSS sweep). Optional "
+                         "with --raw-inline-only (which works on deck.json alone).")
+    ap.add_argument("deck_json", type=Path)
+    ap.add_argument("--dry-run", action="store_true", help="report without writing")
+    ap.add_argument("--render", action="store_true",
+                    help="re-render after migrating (verify parity)")
+    ap.add_argument("--no-raw-inline", action="store_true",
+                    help="skip the F-272 raw-page inline <style> → custom_css "
+                         "sweep (head-CSS sweep only, the legacy behaviour)")
+    ap.add_argument("--raw-inline-only", action="store_true",
+                    help="ONLY sweep raw-page inline <style> into custom_css "
+                         "(F-272) — operates on deck.json directly, no index.html "
+                         "needed (skips the head-CSS sweep)")
+    args = ap.parse_args(argv)
+
+    do_head = not args.raw_inline_only
+    do_raw = not args.no_raw_inline
+
+    if do_head and args.index_html is None:
+        print("migrate: index_html is required for the head-CSS sweep "
+              "(pass it, or use --raw-inline-only to sweep deck.json alone).",
+              file=sys.stderr)
+        return 2
+
+    must_exist = [args.deck_json]
+    if do_head:
+        must_exist.append(args.index_html)
+    for p in must_exist:
+        if not p.exists():
+            print(f"migrate: {p} not found", file=sys.stderr)
+            return 2
+
+    deck = json.loads(args.deck_json.read_text(encoding="utf-8"))
+
+    head_applied, head_missing, orphans, skipped_at = [], [], [], []
+    if do_head:
+        html = args.index_html.read_text(encoding="utf-8")
+        print(f"migrate-head-css: scanned {args.index_html.name}")
+        head_applied, head_missing, orphans, skipped_at = _migrate_head(
+            html, deck, dry_run=args.dry_run)
+        if not head_applied and not orphans:
+            print("  ✓ no head/deck-level per-slide CSS found.")
+        else:
+            verb = "WOULD MIGRATE" if args.dry_run else "MIGRATED"
+            print(f"  [head <style>] {verb}: {len(head_applied)} slide(s)")
+            for key, nr, nbytes in head_applied:
+                print(f"    → {key}  ({nr} rule/keyframe block(s), {nbytes} chars → custom_css)")
+            if head_missing:
+                print(f"  ⚠ {len(head_missing)} slide-key(s) referenced in head CSS not "
+                      f"found in deck.json (left in head): {head_missing}")
+            if orphans:
+                print(f"  ⚠ {len(orphans)} head rule(s) with no per-slide selector — "
+                      f"left in place (review manually):")
+                for o in orphans[:8]:
+                    print(f"      {o}")
+            if skipped_at:
+                print(f"  ⚠ {len(skipped_at)} @media/@supports block(s) in head — NOT "
+                      f"migrated (per-slide rules inside @-wrappers need manual review):")
+                for s in skipped_at[:6]:
+                    print(f"      {s}")
+
+    raw_applied = []
+    if do_raw:
+        raw_applied = migrate_raw_inline(deck, dry_run=args.dry_run)
+        if not raw_applied:
+            print("migrate-raw-inline: ✓ no raw-page inline <style> to migrate.")
+        else:
+            verb = "WOULD MIGRATE" if args.dry_run else "MIGRATED"
+            print(f"migrate-raw-inline (F-272): {verb}: {len(raw_applied)} raw slide(s)")
+            for key, nstyle, nbytes in raw_applied:
+                print(f"    → {key}  ({nstyle} inline <style> block(s), "
+                      f"{nbytes} bytes → custom_css; <style> stripped from data.html)")
+
+    if not head_applied and not raw_applied:
+        print("\n  Nothing to migrate.")
+        return 0
 
     if args.dry_run:
         print("\n  (--dry-run; deck.json NOT modified.)")

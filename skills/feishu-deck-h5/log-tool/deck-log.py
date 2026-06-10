@@ -780,6 +780,251 @@ def cmd_diagnose(args) -> int:
     return 0
 
 
+# ----------------------------------------------------------------------------- diff
+# 相邻两轮 snapshot 的逐页视觉对比 —— "heal / reconcile / 批量改写后确认没改坏" 缺的那一半。
+# 每页 PNG 已由 snapshot 落在 screenshots/vNNN/sNN.png;diff 按页 key 配对相邻两版,
+# 算每页差异比例,降序列出,并把"本次编辑 scope 之外却变了的页"标成可能误伤。
+#
+# 差异算法(优先级):
+#   1) 有 Pillow → 感知哈希(aHash 8×8 + dHash 8×8,纯 Pillow 灰度缩放,不引第三方 hash 库
+#      / 不引 numpy)给一个抗微小渲染抖动的相似度;再叠一个**下采样像素差比例**(把两图缩到
+#      32×32 灰度,逐格比,差值 > 阈值的占比)做更敏感的补充信号。综合差异 = 两者取大
+#      (任一通道认为变了就算变)。
+#   2) 没 Pillow → 纯 stdlib 退路:比 PNG 字节(同字节=0%,异字节=标 100% "byte-only",
+#      并在结论里注明未做像素级比对)。绝不崩。
+_DIFF_PIXEL_GRID = 32       # 像素差比例:下采样到 32×32 灰度逐格比
+_DIFF_PIXEL_DELTA = 24      # 单格灰度差 > 此值(0..255)才算"这一格变了"
+
+
+def _have_pillow() -> bool:
+    try:
+        import PIL  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _gray_px(img, w: int, h: int) -> list:
+    """灰度下采样到 w×h,返回逐像素亮度列表(0..255)。
+    用 tobytes() 而非已弃用的 getdata():'L' 模式每像素一字节,跨 Pillow 版本稳定。"""
+    return list(img.convert("L").resize((w, h)).tobytes())
+
+
+def _ahash_bits(img) -> int:
+    """aHash:缩到 8×8 灰度,每像素 > 均值置 1。返回 64-bit 整数。"""
+    px = _gray_px(img, 8, 8)
+    avg = sum(px) / len(px)
+    bits = 0
+    for i, v in enumerate(px):
+        if v > avg:
+            bits |= (1 << i)
+    return bits
+
+
+def _dhash_bits(img) -> int:
+    """dHash:缩到 9×8 灰度,每行相邻像素左 < 右 置 1。返回 64-bit 整数(抗整体亮度变化)。"""
+    px = _gray_px(img, 9, 8)
+    bits = 0
+    k = 0
+    for row in range(8):
+        base = row * 9
+        for col in range(8):
+            if px[base + col] < px[base + col + 1]:
+                bits |= (1 << k)
+            k += 1
+    return bits
+
+
+def _hamming(a: int, b: int) -> int:
+    return bin(a ^ b).count("1")
+
+
+def _phash_diff_ratio(img_a, img_b) -> float:
+    """感知哈希差异比例 = (aHash 汉明 + dHash 汉明) / 128,范围 0..1。"""
+    d = _hamming(_ahash_bits(img_a), _ahash_bits(img_b)) + \
+        _hamming(_dhash_bits(img_a), _dhash_bits(img_b))
+    return d / 128.0
+
+
+def _pixel_diff_ratio(img_a, img_b) -> float:
+    """下采样像素差比例:两图缩到 GRID×GRID 灰度,逐格灰度差 > DELTA 的格子占比(0..1)。"""
+    n = _DIFF_PIXEL_GRID
+    ga = _gray_px(img_a, n, n)
+    gb = _gray_px(img_b, n, n)
+    changed = sum(1 for x, y in zip(ga, gb) if abs(x - y) > _DIFF_PIXEL_DELTA)
+    return changed / float(n * n)
+
+
+def _byte_diff(path_a: Path, path_b: Path) -> tuple[float, str]:
+    """纯 stdlib 退路:字节相同视为 0,否则只能说"变了"(无法量化)。"""
+    same = path_a.stat().st_size == path_b.stat().st_size and \
+        path_a.read_bytes() == path_b.read_bytes()
+    return (0.0 if same else 1.0), "byte"
+
+
+def _image_diff(path_a: Path, path_b: Path) -> tuple[float, str]:
+    """两张 PNG 的综合差异比例(0..1)+ 用的方法标签。
+    Pillow 在且两图都能解码 → max(感知哈希, 像素差);否则(没装 Pillow / 文件不是合法
+    图像 / 解码异常)退回字节比(同=0 / 异=1,method='byte')—— 损坏图也不崩。"""
+    if _have_pillow():
+        try:
+            from PIL import Image
+            with Image.open(path_a) as ia, Image.open(path_b) as ib:
+                ia.load(); ib.load()
+                ph = _phash_diff_ratio(ia, ib)
+                pix = _pixel_diff_ratio(ia, ib)
+            return max(ph, pix), "phash+pixel"
+        except Exception:
+            return _byte_diff(path_a, path_b)   # 损坏/非图像 → 退字节比,绝不崩
+    return _byte_diff(path_a, path_b)
+
+
+def _slides_by_key(version_event: dict) -> dict:
+    """version 事件的 slides[] → {key: {'idx','png'}}(png 是相对 log/ 的路径)。"""
+    out = {}
+    for s in version_event.get("slides", []):
+        k = s.get("key") or (f"slide-{s.get('idx')}" if s.get("idx") is not None else None)
+        if k:
+            out[k] = {"idx": s.get("idx"), "png": s.get("png")}
+    return out
+
+
+def _resolve_diff_versions(events: list[dict], from_v, to_v):
+    """挑出要对比的两个 version 事件。--from/--to 给版本号(int 或 'vNNN');
+    省略则取最后两个 version(相邻轮)。返回 (older_event, newer_event) 或 (None, 原因)。"""
+    versions = [e for e in events if e.get("t") == "version"]
+    if len(versions) < 2 and (from_v is None or to_v is None):
+        return None, f"只有 {len(versions)} 个 snapshot 版本,至少要 2 个才能 diff(先多 `deck-log snapshot` 几次)。"
+
+    def _norm(v):
+        if v is None:
+            return None
+        s = str(v)
+        m = re.fullmatch(r"v?(\d+)", s)
+        return f"v{int(m.group(1)):03d}" if m else s
+
+    by_v = {e.get("v"): e for e in versions}
+    fv, tv = _norm(from_v), _norm(to_v)
+    if fv or tv:
+        # 任一给了:缺的一边补成"另一边/默认"。两个都给 → 精确取这两版。
+        if fv and fv not in by_v:
+            return None, f"找不到版本 {fv}(现有:{', '.join(sorted(by_v))})。"
+        if tv and tv not in by_v:
+            return None, f"找不到版本 {tv}(现有:{', '.join(sorted(by_v))})。"
+        if fv and tv:
+            older, newer = by_v[fv], by_v[tv]
+        elif tv:  # 只给了 --to:from = 它前一个版本
+            ordered = versions
+            i = next((j for j, e in enumerate(ordered) if e.get("v") == tv), None)
+            if i is None or i == 0:
+                return None, f"版本 {tv} 之前没有可对比的版本。"
+            older, newer = ordered[i - 1], ordered[i]
+        else:     # 只给了 --from:to = 它后一个版本
+            ordered = versions
+            i = next((j for j, e in enumerate(ordered) if e.get("v") == fv), None)
+            if i is None or i >= len(ordered) - 1:
+                return None, f"版本 {fv} 之后没有可对比的版本。"
+            older, newer = ordered[i], ordered[i + 1]
+    else:
+        older, newer = versions[-2], versions[-1]
+    return (older, newer), None
+
+
+def cmd_diff(args) -> int:
+    log_dir = _log_dir(Path(args.deck_dir))
+    events = read_events(log_dir)
+    if not events:
+        print(f"✗ 没有任何事件:{_journal(log_dir)}(先 `deck-log init` / `snapshot`)。", file=sys.stderr)
+        return 2
+
+    pair, err = _resolve_diff_versions(events, getattr(args, "from_v", None), getattr(args, "to_v", None))
+    if pair is None:
+        print(f"✗ {err}", file=sys.stderr)
+        return 2
+    older, newer = pair
+
+    scope = None
+    if getattr(args, "scope_keys", None):
+        scope = {k.strip() for k in args.scope_keys.split(",") if k.strip()}
+
+    a_by_key = _slides_by_key(older)
+    b_by_key = _slides_by_key(newer)
+    all_keys = list(dict.fromkeys(list(a_by_key) + list(b_by_key)))  # 保序去重
+
+    rows = []          # 配对成功、两 PNG 都在的页:逐页差异
+    missing = []       # PNG 缺失 / 单边出现 的页(友好报告,不崩)
+    method = None
+    for k in all_keys:
+        a, b = a_by_key.get(k), b_by_key.get(k)
+        if not a or not b:
+            missing.append((k, "仅在旧版" if a else "仅在新版" + "(新增页)"))
+            continue
+        pa = (log_dir / a["png"]).resolve() if a.get("png") else None
+        pb = (log_dir / b["png"]).resolve() if b.get("png") else None
+        if not pa or not pa.exists() or not pb or not pb.exists():
+            miss = []
+            if not pa or not pa.exists():
+                miss.append(f"旧 PNG {a.get('png')}")
+            if not pb or not pb.exists():
+                miss.append(f"新 PNG {b.get('png')}")
+            missing.append((k, "缺图:" + " / ".join(miss)))
+            continue
+        ratio, m = _image_diff(pa, pb)
+        method = m
+        rows.append({"key": k, "idx": b.get("idx") or a.get("idx"),
+                     "ratio": ratio, "pct": round(ratio * 100, 1)})
+
+    # 变化页 = 差异比例超阈值(默认 1%,可调);按差异降序
+    threshold = getattr(args, "threshold", None)
+    threshold = 0.01 if threshold is None else threshold
+    changed = sorted([r for r in rows if r["ratio"] >= threshold],
+                     key=lambda r: r["ratio"], reverse=True)
+    unchanged_n = len(rows) - len(changed)
+
+    # scope 外变化 = 调用方说"这次只该动 scope 里的页",但 scope 之外的页也变了 → 可能误伤
+    if scope is not None:
+        for r in changed:
+            r["unexpected"] = r["key"] not in scope
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "from": older.get("v"), "to": newer.get("v"),
+            "method": method or ("byte" if not _have_pillow() else "phash+pixel"),
+            "threshold": threshold,
+            "changed": changed,
+            "unchanged": unchanged_n,
+            "missing": [{"key": k, "why": why} for k, why in missing],
+            "scope_keys": sorted(scope) if scope is not None else None,
+            "unexpected_keys": sorted(r["key"] for r in changed if r.get("unexpected")) if scope is not None else None,
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    # 人读输出
+    print(f"🔬 diff  {older.get('v')} → {newer.get('v')}   "
+          f"(算法:{method or ('byte 退路(未装 Pillow,仅字节比)' if not _have_pillow() else 'phash+pixel')}"
+          f" · 阈值 {threshold*100:.0f}%)")
+    if not changed:
+        print(f"   ✓ {unchanged_n} 页无明显变化(均 < 阈值);0 页变化。")
+    else:
+        print(f"   {len(changed)} 页有变化 · {unchanged_n} 页基本一致:")
+        for r in changed:
+            mark = ""
+            if r.get("unexpected"):
+                mark = "  ⚠️ scope 外变化(可能误伤)"
+            print(f"     {r['pct']:>5.1f}%  第{r['idx']}页  {r['key']}{mark}")
+        if scope is not None:
+            n_unexp = sum(1 for r in changed if r.get("unexpected"))
+            if n_unexp:
+                print(f"   ⚠️ 共 {n_unexp} 页在编辑 scope({', '.join(sorted(scope))})之外却变了 —— 请核对是否误伤。")
+            else:
+                print(f"   ✓ 所有变化页都在编辑 scope 内,无意外变化。")
+    if missing:
+        print(f"   ⚠️ {len(missing)} 页无法对比:")
+        for k, why in missing:
+            print(f"     - {k}:{why}")
+    return 0
+
+
 # ----------------------------------------------------------------------------- on/off/status
 def cmd_off(args) -> int:
     OFF_SWITCH.parent.mkdir(parents=True, exist_ok=True)
@@ -877,6 +1122,19 @@ def main(argv=None) -> int:
     p = sub.add_parser("diagnose", help="输出供大模型分析 skill bug 的 digest")
     p.add_argument("deck_dir")
     p.set_defaults(func=cmd_diagnose)
+
+    p = sub.add_parser("diff", help="相邻两轮 snapshot 逐页视觉对比(heal/批量改写后确认没改坏)")
+    p.add_argument("deck_dir")
+    p.add_argument("--from", dest="from_v", default=None,
+                   help="起始版本(int 或 vNNN);省略=倒数第二个版本")
+    p.add_argument("--to", dest="to_v", default=None,
+                   help="目标版本(int 或 vNNN);省略=最新版本")
+    p.add_argument("--scope-keys", default=None,
+                   help="本次编辑预期改动的页 key(逗号分隔);其外的页若变了会标⚠️可能误伤")
+    p.add_argument("--threshold", type=float, default=None,
+                   help="判定为变化的差异比例下限,范围 0..1,默认 0.01(即 1 percent)")
+    p.add_argument("--json", action="store_true", help="机读 JSON 输出")
+    p.set_defaults(func=cmd_diff)
 
     p = sub.add_parser("turns", help="预览从 transcript 捞到的回合(调试)")
     p.add_argument("deck_dir"); p.add_argument("--transcript", default=None)

@@ -62,6 +62,15 @@ rely on cached chat summaries or earlier reads of `source-dossier.json`, local
    a cover unless the user asks otherwise.
 9. Write or update the run's `PROMPTS.md` alongside `DESIGN-PLAN.md` so the user's
    actual asks survive the design/render handoff.
+10. After writing `outline.json`, self-check it:
+    `python3 deck-json/outline-lint.py output/outline.json`. This is a *self-check*,
+    not a hard gate — render does not require an `outline.json` and never runs the
+    lint. It catches a half-filled outline before render: every top-level
+    contract key and per-slide key present, and every `raw:` slide carrying a
+    non-empty `density_budget` plus a `design_spec` that covers all six
+    dimensions (字号/容器/装饰/对齐/字距/字重, see `design-first.md`). Fix what it
+    reports; the design intent still lives with you, the lint only checks the
+    spec is actually filled in.
 
 ## `outline.json` Contract
 

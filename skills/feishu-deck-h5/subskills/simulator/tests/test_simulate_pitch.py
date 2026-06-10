@@ -192,5 +192,59 @@ class PitchSimulatorCliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
 
 
+    def _score_outline(self, outline: dict) -> dict:
+        with tempfile.TemporaryDirectory(prefix="pitch-sim-score-") as td:
+            op = Path(td) / "outline.json"
+            oj = Path(td) / "pitch-rehearsal.json"
+            op.write_text(json.dumps(outline, ensure_ascii=False), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(SIMULATOR), "--outline", str(op), "--out-json", str(oj)],
+                cwd=REPO, text=True, capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+            return json.loads(oj.read_text(encoding="utf-8"))["deck_arc"]["scores"]
+
+    def test_scores_vary_with_outline_content(self) -> None:
+        # Regression for the dead-field bug: score_deck used to read
+        # outline["thesis"]["pain_points"] / outline["claim_discipline"][...],
+        # which the designer contract never has — so urgency/trust/next_step were
+        # pinned to baseline regardless of content. They must now move with the
+        # real contract fields (design_plan.risks / open_questions, slide
+        # evidence flagged as needing confirmation).
+        slides = [
+            {"key": "cover", "role": "cover", "title": "X"},
+            {"key": "pain", "role": "pain", "title": "P", "single_focus": "问题严重"},
+            {"key": "sol", "role": "solution", "title": "S"},
+            {"key": "close", "role": "closing", "title": "C"},
+        ]
+        thin = {
+            "scenario": {"goal": "g", "audience": "a", "decision": "d"},
+            "design_plan": {"title": "t", "narrative_arc": "arc"},
+            "slides": [dict(s) for s in slides],
+        }
+        rich_slides = [dict(s) for s in slides]
+        rich_slides[1]["evidence"] = ["需要客户确认当前响应时长", "公开行业报告 2025"]
+        rich_slides[2]["evidence"] = ["产品已上线案例"]
+        rich = {
+            "scenario": {"goal": "g", "audience": "a", "decision": "d"},
+            "design_plan": {
+                "title": "t",
+                "narrative_arc": "arc",
+                "risks": ["风险1", "风险2", "风险3"],
+                "open_questions": ["需要用户确认试点范围", "待确认指标口径"],
+            },
+            "slides": rich_slides,
+        }
+        thin_scores = self._score_outline(thin)
+        rich_scores = self._score_outline(rich)
+        self.assertNotEqual(thin_scores, rich_scores)
+        # urgency rises with design_plan.risks + pain slide
+        self.assertGreater(rich_scores["urgency"], thin_scores["urgency"])
+        # next-step readiness drops with unresolved open_questions
+        self.assertLess(rich_scores["next_step_readiness"], thin_scores["next_step_readiness"])
+        # trust drops when evidence is flagged as needing confirmation
+        self.assertLess(rich_scores["trust"], thin_scores["trust"])
+
+
 if __name__ == "__main__":
     unittest.main()
