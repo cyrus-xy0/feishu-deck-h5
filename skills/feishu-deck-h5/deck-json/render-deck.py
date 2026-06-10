@@ -2088,6 +2088,26 @@ def main(argv=None) -> int:
     except json.JSONDecodeError as e:
         print(f"render-deck: invalid JSON: {e}", file=sys.stderr); return 2
 
+    # 2.45 Deck identity — stamp a per-deck id (data-deck-id on <div class="deck">)
+    # so the in-browser edit mode can refuse to overwrite a DIFFERENT deck's file.
+    # Every deck in this pipeline is named index.html, so the edit-mode save guard
+    # cannot tell two decks apart by filename; it compares this id instead.
+    #
+    # Deliberately NOT persisted back to deck.json: render must not silently mutate
+    # its input (that footgun polluted committed fixtures during testing, and only
+    # --renumber writes deck.json — behind an explicit flag + backup). Instead:
+    #   • deck.json already HAS deck_id  → use it (stable, deterministic, user opt-in
+    #     for cross-render identity)
+    #   • deck.json LACKS deck_id        → mint a fresh one per render, HTML-only
+    # Within an edit session the id is carried in the saved DOM and round-trips, so
+    # resaving the same file always matches; two different decks always differ →
+    # cross-deck overwrite is caught. Legacy HTML with no id at all falls back to
+    # the edit-mode slide-key/title heuristic.
+    deck.setdefault("deck", {})
+    if not deck["deck"].get("deck_id"):
+        import uuid
+        deck["deck"]["deck_id"] = "dk-" + uuid.uuid4().hex[:12]
+
     # 2.5 content/story-case schema-fit refusal (ported from retired render.py).
     # Schema enforces field presence; this catches placeholder / too-short /
     # duplicate beats. Opt out with --skip-fit-check.
@@ -2197,6 +2217,8 @@ def main(argv=None) -> int:
     # .deck[data-title-style="X"] / .deck[data-logo-position="Y"]. Per-slide
     # overrides emit on the .slide element instead (handled in render_slide).
     deck_data_attrs_parts = []
+    if deck["deck"].get("deck_id"):
+        deck_data_attrs_parts.append(f' data-deck-id="{deck["deck"]["deck_id"]}"')
     if deck["deck"].get("title_style"):
         deck_data_attrs_parts.append(f' data-title-style="{deck["deck"]["title_style"]}"')
     if deck["deck"].get("logo_position"):

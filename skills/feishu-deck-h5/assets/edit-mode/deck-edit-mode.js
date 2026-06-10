@@ -359,6 +359,128 @@
     return '<!DOCTYPE html>\n' + clone.outerHTML;
   }
 
+  // ── deck identity guard ────────────────────────────────────────────────
+  // Every deck in this pipeline is named index.html, so a filename check alone
+  // cannot tell two decks apart — the original cross-deck-overwrite bug. Before
+  // overwriting any file we compare the loaded deck's identity against the
+  // target file's identity. Primary signal: data-deck-id (stamped by
+  // render-deck.py, decisive). Fallback for legacy decks rendered before that
+  // feature: slide-key overlap, then <title>.
+  function deckIdentity(root) {
+    const deckEl = root.querySelector('[data-deck-id]');
+    const deckId = deckEl ? deckEl.getAttribute('data-deck-id') : null;
+    const slideKeys = Array.from(root.querySelectorAll('.slide[data-slide-key]'))
+      .map((s) => s.getAttribute('data-slide-key'))
+      .filter(Boolean)
+      .sort();
+    const titleEl = root.querySelector('title');
+    const title = titleEl ? titleEl.textContent.trim() : '';
+    return { deckId, slideKeys, title };
+  }
+
+  // verdict: 'match' (allow silently) | 'mismatch' (warn, user-overridable) |
+  //          'unknown' (insufficient signal — allow, console-log only)
+  function compareDeckIdentity(cur, tgt) {
+    if (cur.deckId && tgt.deckId) {
+      return cur.deckId === tgt.deckId
+        ? { verdict: 'match', reason: 'deck-id' }
+        : { verdict: 'mismatch', reason: 'deck-id' };
+    }
+    const a = new Set(cur.slideKeys), b = new Set(tgt.slideKeys);
+    if (a.size && b.size) {
+      let inter = 0;
+      a.forEach((k) => { if (b.has(k)) inter++; });
+      const jaccard = inter / (a.size + b.size - inter);
+      if (jaccard >= 0.5) return { verdict: 'match', reason: 'slide-keys' };
+      return { verdict: 'mismatch',
+               reason: inter === 0 ? 'slide-keys-disjoint' : 'slide-keys-low-overlap' };
+    }
+    if (cur.title && tgt.title) {
+      return cur.title === tgt.title
+        ? { verdict: 'match', reason: 'title' }
+        : { verdict: 'mismatch', reason: 'title' };
+    }
+    return { verdict: 'unknown', reason: 'insufficient-signal' };
+  }
+
+  async function readDeckIdentityFromHandle(handle) {
+    try {
+      const file = await handle.getFile();
+      const text = await file.text();
+      const doc = new DOMParser().parseFromString(text, 'text/html');
+      return deckIdentity(doc);
+    } catch (e) {
+      console.warn('[deck-edit-mode] could not read target file for identity check:', e);
+      return null;
+    }
+  }
+
+  // Returns true if it is safe to overwrite `handle`, false to abort the save.
+  // Fail-open when the target can't be read (no signal); on the pick path the
+  // filename check is the backstop there.
+  async function targetIsSafeToOverwrite(handle) {
+    const tgt = await readDeckIdentityFromHandle(handle);
+    if (!tgt) return true;
+    const cur = deckIdentity(document);
+    const cmp = compareDeckIdentity(cur, tgt);
+    if (cmp.verdict === 'match') return true;
+    if (cmp.verdict === 'unknown') {
+      console.warn('[deck-edit-mode] deck identity unverifiable (' + cmp.reason +
+                   ') — allowing save');
+      return true;
+    }
+    console.warn('[deck-edit-mode] deck identity MISMATCH (' + cmp.reason +
+                 ') — current vs target', cur, tgt);
+    return await confirmDeckMismatch(cur, tgt, cmp);
+  }
+
+  function confirmDeckMismatch(cur, tgt, cmp) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'edit-save-dialog';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      const line = (id) =>
+        `deck-id <code>${escapeHtml(id.deckId || '（无 · legacy）')}</code> · `
+        + `${id.slideKeys.length} 页 · 《${escapeHtml(id.title || '—')}》`;
+      overlay.innerHTML = `
+        <div class="esd-card esd-card-small">
+          <div class="esd-eyebrow">⚠ 这看起来是另一份 deck</div>
+          <h2 class="esd-title">目标文件和当前 deck 不是同一个</h2>
+          <p class="esd-copy">
+            本管线里每份 deck 都叫 index.html,保存前做了一次身份核对,结果不一致
+            (依据:${escapeHtml(cmp.reason)})。继续会把当前内容写进另一份 deck 的文件。
+          </p>
+          <div class="esd-path-wrap">
+            <div class="esd-path-label">当前正在编辑</div>
+            <code class="esd-path">${line(cur)}</code>
+            <div class="esd-path-label" style="margin-top:8px">即将被覆盖的文件</div>
+            <code class="esd-path">${line(tgt)}</code>
+          </div>
+          <div class="esd-actions">
+            <button class="esd-btn esd-btn-primary" type="button" data-action="cancel">取消(不保存)</button>
+            <button class="esd-btn esd-btn-secondary" type="button" data-action="confirm">我确认,仍要覆盖</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const cleanup = (result) => { overlay.remove(); resolve(result); };
+      overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => cleanup(false));
+      overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => cleanup(true));
+    });
+  }
+
+  // Stable per-deck picker id (hash of pathname) so Chrome remembers each deck's
+  // last-used directory SEPARATELY. Without it, all file:// decks share one
+  // global picker memory, so opening deck B's picker lands in deck A's folder —
+  // the directory bleed that caused the cross-deck overwrite.
+  function pickerIdForPath() {
+    const s = location.pathname;
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+    return 'deck' + (h >>> 0).toString(36);
+  }
+
   // First save: explain the browser permission model before opening the native
   // file picker. The native macOS picker labels the action "Open" even though
   // the browser is asking for write permission; showing this dialog first keeps
@@ -374,6 +496,7 @@
 
     try {
       const [h] = await window.showOpenFilePicker({
+        id: pickerIdForPath(),
         multiple: false,
         types: [{ description: 'HTML deck', accept: { 'text/html': ['.html', '.htm'] } }],
         startIn: 'documents',
@@ -382,6 +505,9 @@
         const ok = await confirmDifferentFile(h.name, currentName);
         if (!ok) return null;
       }
+      // Content fingerprint: refuse to authorize writing a DIFFERENT deck's file
+      // even when the filename matches (it always does — every deck is index.html).
+      if (!(await targetIsSafeToOverwrite(h))) return null;
       if ((await h.queryPermission({ mode: 'readwrite' })) !== 'granted') {
         if ((await h.requestPermission({ mode: 'readwrite' })) !== 'granted') return null;
       }
@@ -567,6 +693,13 @@
               await idbDel(HANDLE_KEY());
               return;
             }
+          }
+          // Identity guard for the cached/restored handle. It was approved for a
+          // file that — if re-rendered or moved — could now be a different deck;
+          // the fresh-pick path is already guarded inside pickFileForOverwrite.
+          if (!(await targetIsSafeToOverwrite(fileHandle))) {
+            showToast('已取消保存(目标文件不是当前 deck)', 2200);
+            return;
           }
         }
         const writable = await fileHandle.createWritable();

@@ -30,6 +30,10 @@ def _normalize(html: str) -> str:
     # deck.json-sourced dates) is deterministic.
     html = re.sub(r'((?:href|src)=")[^"]*?skills/feishu-deck-h5/',
                   r'\1SKILL/', html)
+    # data-deck-id is a per-render random id (when deck.json has none) used only
+    # by the edit-mode cross-deck-overwrite guard — non-deterministic, so pin it
+    # to a stable token, same as the path above.
+    html = re.sub(r'data-deck-id="dk-[a-z0-9]+"', 'data-deck-id="DECKID"', html)
     return html
 
 

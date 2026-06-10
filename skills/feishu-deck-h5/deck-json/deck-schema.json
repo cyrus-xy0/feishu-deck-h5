@@ -38,6 +38,11 @@
       "additionalProperties": false,
       "properties": {
         "title": { "type": "string", "minLength": 1, "description": "Deck title. Used in <title> and as fallback for cover-slide title." },
+        "deck_id": {
+          "type": "string",
+          "pattern": "^dk-[a-z0-9]+$",
+          "description": "Stable per-deck identity, auto-assigned by render-deck.py on first render and persisted here. Stamped as data-deck-id on <div class=\"deck\">; the in-browser edit mode compares it to refuse overwriting a DIFFERENT deck's index.html (every deck is named index.html). Do not hand-edit or copy between decks."
+        },
         "author": { "type": "string", "description": "Initiator's personal name. Used on cover when slide doesn't override." },
         "date": { "type": "string", "description": "Cover-displayed date, e.g. '2026.05.20'." },
         "presentation_date": {
