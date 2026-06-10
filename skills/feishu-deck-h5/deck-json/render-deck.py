@@ -36,6 +36,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -199,6 +200,72 @@ def _esc_br(s):
     if s is None:
         return ""
     return html.escape(str(s), quote=True).replace("\n", "<br>")
+
+
+# ---------------------------------------------------------------------------
+# Provenance stamp (F-266 — Gate 1 model-agnostic enforcement)
+# ---------------------------------------------------------------------------
+# Hard Gate 1 ("must go through render-deck.py") used to be enforced ONLY by the
+# author's personal Claude Code PostToolUse hook — Codex / cloud agents have no
+# such hook, so a model could hand-write / hand-patch index.html (Path B) and
+# nothing in the repo would catch the deck.json↔index.html drift it causes. This
+# stamp moves the enforcement DOWN into the toolchain (model-agnostic): every
+# render-deck.py output carries proof it came from the renderer, plus a hash of
+# the deck.json it was rendered from. The runner-side R-PROVENANCE rule
+# (run-audits.py) then validates that proof.
+#
+# H is the sha256 of the deck.json FILE CONTENT (first 12 hex chars) — NOT the
+# index.html. This is the crux of the false-positive avoidance: post-render
+# rewrites (inline-assets / copy-assets / explode-assets) mutate index.html but
+# never touch deck.json, so the hash stays valid (deck.json unchanged → H
+# unchanged). The hash only goes stale when deck.json itself changes without a
+# re-render (real drift) — exactly what R-PROVENANCE is meant to catch.
+
+PROVENANCE_GENERATOR = "render-deck"
+PROVENANCE_HASH_LEN = 12
+
+
+def deck_json_hash(deck_json_bytes_or_path) -> str:
+    """sha256 of the deck.json FILE CONTENT, first PROVENANCE_HASH_LEN hex chars.
+
+    Accepts a Path (read bytes) or raw bytes. Hashing the on-disk file (not the
+    in-memory parsed dict) is deliberate: render-deck may MINT a deck_id in
+    memory when deck.json lacks one but deliberately does NOT persist it back, so
+    the parsed dict can differ from the file. R-PROVENANCE re-hashes the SAME
+    sibling file on disk; matching against the file content keeps the two in
+    lockstep (parse/serialize round-trips would drift)."""
+    if isinstance(deck_json_bytes_or_path, (bytes, bytearray)):
+        data = bytes(deck_json_bytes_or_path)
+    else:
+        data = Path(deck_json_bytes_or_path).read_bytes()
+    return hashlib.sha256(data).hexdigest()[:PROVENANCE_HASH_LEN]
+
+
+def _stamp_provenance(final_html: str, deck_hash: str) -> str:
+    """Inject the two provenance <meta> tags into <head> of the assembled HTML.
+
+    Inserted right after the <meta charset> line (always the first <head> child
+    in _shell.html) so the stamp is high in <head> and survives partial reads.
+    Idempotent: a re-run on already-stamped HTML replaces the old stamp instead
+    of duplicating it (defensive — the normal call site stamps once on fresh
+    output). Pure string op on the final HTML; touches neither deck.json, the
+    delivery gate, nor the atomic write."""
+    stamp = (
+        f'\n  <meta name="fs-deck-generator" content="{PROVENANCE_GENERATOR}">'
+        f'\n  <meta name="fs-deck-hash" content="{deck_hash}">'
+    )
+    # Drop any pre-existing stamp first (idempotent re-stamp).
+    final_html = re.sub(
+        r'\s*<meta name="fs-deck-(?:generator|hash)" content="[^"]*">', "",
+        final_html)
+    m = re.search(r'<meta\s+charset="[^"]*">', final_html, re.I)
+    if m:
+        return final_html[:m.end()] + stamp + final_html[m.end():]
+    # Fallback: no charset meta (non-standard shell) — inject just after <head>.
+    m = re.search(r'<head[^>]*>', final_html, re.I)
+    if m:
+        return final_html[:m.end()] + stamp + final_html[m.end():]
+    return final_html   # no <head> at all → leave untouched (never crash render)
 
 
 # ---------------------------------------------------------------------------
@@ -2359,6 +2426,21 @@ def main(argv=None) -> int:
         "deck_data_attrs":            deck_data_attrs,
         "notes_json":                 notes_json,
     })
+
+    # F-266: stamp provenance into the assembled HTML — BEFORE the delivery gate
+    # (section 6) and BEFORE the write. Proves this index.html came from
+    # render-deck.py and pins the deck.json it was rendered from (hash of the
+    # SOURCE deck.json file content, so post-render index.html rewrites can't
+    # invalidate it). `--renumber` re-renders after rewriting deck.json, so the
+    # stamp is naturally recomputed against the new file content. Failure to read
+    # deck.json here is non-fatal (deck was already loaded once) — fall back to
+    # the in-memory bytes so a render never dies on the stamp.
+    try:
+        _deck_hash = deck_json_hash(args.deck)
+    except Exception:
+        _deck_hash = deck_json_hash(
+            json.dumps(deck, ensure_ascii=False).encode("utf-8"))
+    final = _stamp_provenance(final, _deck_hash)
 
     out_html = args.output_dir / "index.html"
     # F-269: the delivery gate (section 6 below) runs AFTER this write. If the

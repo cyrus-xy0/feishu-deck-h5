@@ -38,7 +38,8 @@ import validate as V
 # ---------------------------------------------------------------------------
 
 FAMILIES = [
-    ('结构 / DOM',           ['R02', 'R07', 'R-DOM', 'R-DOC-INTEGRITY', 'R-BAKED-DOM']),
+    ('结构 / DOM',           ['R02', 'R07', 'R-DOM', 'R-DOC-INTEGRITY', 'R-BAKED-DOM',
+                              'R-PROVENANCE']),
     ('安全 / 注入面',        ['R-FOREIGN-SCRIPT']),
     ('排版 / 文案',          ['R05', 'R06', 'R13', 'R20', 'R56',
                               'R-WHITE-TEXT', 'R-HIERARCHY', 'R-ECHO',
@@ -84,6 +85,12 @@ CONTEXT_NOTES = {
                         '发布到带飞书登录的 CF viewer = XSS), 普通生成页 = warn. 框架自注入脚本 '
                         '(data-source=framework / framework src / 非可执行 type)与 body 级脚本 '
                         '豁免; 确属故意写脚本的 bespoke raw 页用 data-allow-foreign-script opt-out.',
+    'R-PROVENANCE': 'Gate-1「必走 render-deck.py」的模型无关强制 (F-266). 只在 runs/ 下 '
+                    '且同目录有 deck.json 的真交付 deck 上查 (/tmp 测试 / 独立 HTML / '
+                    'imported 豁免). 无 render-deck 出身章 = warn (改造前的旧 deck 无辜, '
+                    '重渲一次即盖章; --strict / 入库门会升 error). 有章但 fs-deck-hash 与 '
+                    '当前 deck.json 哈希失配 = error (真漂移: 改了 deck.json 没重渲, 或手改了 '
+                    'index.html). 修法: 从 deck.json 跑 render-deck.py 重渲.',
     'R-RAW-LOOKS-SCHEMA': 'raw-first 立场下的过度处理兜底: 一张手搓 raw 页若其实只是 '
                         '一排标准卡片 (图标+标题+正文, 无示意图/动画/箭头连接), 提醒 '
                         '改用 content/3up·blocks 更省更稳. 非阻塞 (warn_soft); 这页若有 '

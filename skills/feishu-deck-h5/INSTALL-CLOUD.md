@@ -210,3 +210,57 @@ error → `exit 4`）。所以系统库该装齐还得装齐。
 数字员工头像的 deck 会得到坏图。建议：运行 UID 不同则 `chmod -R a+rX assets/shared`；
 要把交付物带出容器时优先 `copy-assets.py --shared=copy`（避免 symlink 指回 RO 挂载被
 丢失）。
+
+---
+
+## 8. Gate 1「必走 render-deck.py」的强制（模型无关 + Claude-Code 兜底）
+
+**背景。** Hard Gate 1 要求每份 deck 的 `index.html` 都由 `render-deck.py` 从 `deck.json`
+渲染出来（Path A），不准模型手搓 / 手补 `index.html`（Path B 偷渡）——Path B 会让
+`deck.json ↔ index.html` 漂移，后续 lift / 翻译 / 再渲染全炸。这道闸有**两半**：
+
+### 8.1 模型无关的仓库层强制 —— R-PROVENANCE（**任何环境都生效**）
+
+无论哪个模型 / harness（Codex、云、CC）驱动渲染，都生效，**无需任何 hook 安装**：
+
+- **盖章**：`render-deck.py` 生成 `index.html` 时在 `<head>` 注入两枚 meta —
+  `<meta name="fs-deck-generator" content="render-deck">` 与
+  `<meta name="fs-deck-hash" content="<H>">`，其中 **H = sha256(deck.json 文件内容) 前 12 位**。
+  （基于 deck.json 文件内容、非 index.html —— 这样渲染后改写 index.html 的步骤
+  inline-assets / copy-assets / explode-assets 不会让 H 失配。）
+- **校验**：`assets/run-audits.py` 的 **R-PROVENANCE** 规则在**两条校验路径**
+  （`--visual` / `--no-visual`）都跑（它是 byte/文件系统检查，读同目录 `deck.json` + `index.html`）。
+  **仅当** `index.html` 在 `runs/` 路径下**且**同目录有 `deck.json` 时才查
+  （/tmp 测试、无 deck.json 的独立 HTML、imported 片段一律豁免）。三档：
+  - 无 `fs-deck-generator` 章 → **warn**（存量旧 deck / 改造前渲染的本就没章，无辜；
+    重渲一次即盖章。**`--strict` / 入库门 `--gate ingest` 会把它升为 error**）。
+  - 有章但 `fs-deck-hash` ≠ 当前同目录 `deck.json` 的 sha256 前 12 位 → **error**
+    （真漂移：改了 deck.json 没重渲，或手改了 index.html）。
+- 这一半**不依赖 Claude Code**：它住在 validator 里，所有人跑 `validate.py` /
+  `check-only.py` / `render-deck.py` 的交付闸都自动带上。详见
+  `references/validator-rules.md` 的 R-PROVENANCE 行。
+
+### 8.2 Claude-Code 专属兜底 hook —— `validate-deck-write.py`（**仅 CC 环境**）
+
+`assets/hooks/validate-deck-write.py` 是一颗 **Claude Code 的 PostToolUse hook**：模型一旦
+用 Write/Edit 工具**手写**一份 deck `index.html`（Path B），它就对该文件跑 `validate.py`，
+不合规即 `block` 并把报告塞回模型逼其改到 exit 0。它**只逮 Path B**——`render-deck.py`
+走 Python `open()` 写盘、不经过 Write 工具，所以正常渲染产物永不触发。
+
+> ⚠️ **hook 是 Claude Code 专属**。Codex / 云端 agent 平台**没有 PostToolUse hook 机制，
+> 装不了这颗 hook**——它们靠 §8.1 的 **R-PROVENANCE** 在仓库层兜底。hook 是「写 index.html
+> 当下就拦」的即时反馈；R-PROVENANCE 是「任何模型、任何时候跑校验闸都会发现漂移」的
+> 模型无关强制。两者互补，不互相替代。
+
+**在 Claude Code 环境安装该 hook：**
+
+1. 把 `assets/hooks/validate-deck-write.py` 复制到一个稳定位置，如
+   `~/.claude/hooks/validate-deck-write.py`，并 `chmod +x`。
+2. **改文件顶部的 `SKILL` 常量**指向你本机装好的 skill 路径（这份拷贝里写死的是原作者
+   的 home；路径不对时 hook 会安全 no-op，但就拦不住了）。
+3. 在 `~/.claude/settings.json` 注册为 PostToolUse hook（`matcher: "Write|Edit"`，
+   `command: "python3 ~/.claude/hooks/validate-deck-write.py"`）。文件头部 docstring 有
+   完整的 settings.json 片段示例。
+
+装好后，任何手写且过不了 `validate.py` 的 `runs/<…>/output/index.html` 在模型宣布
+「完成」之前就会被 block。

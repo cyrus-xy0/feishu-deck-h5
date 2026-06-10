@@ -14,6 +14,7 @@
 退出码:0 = 无 error 级(warn 照常打印);1 = 有 error 级(规则抛错等);2 = 环境缺依赖。
 """
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -188,6 +189,7 @@ PERF_BLUR_MAX_PX = 10
 BYTE_RULE_META = {
     "R-DOC-INTEGRITY":  {"coverage": "universal", "signal": "bytes"},
     "R-BAKED-DOM":      {"coverage": "universal", "signal": "bytes"},   # serialized post-JS DOM (data-idx / baked .deck-ui / data-js-ready) — must re-render from deck.json
+    "R-PROVENANCE":     {"coverage": "conditional", "signal": "bytes"},  # runs/ + sibling deck.json only — render-deck stamp present + deck.json hash matches (F-266)
     "R-DOM":            {"coverage": "universal", "signal": "bytes"},   # over-close byte half (under-close/struct DOM half in audits.js)
     "R-SELF-CONTAINED": {"coverage": "universal", "signal": "bytes"},
     "R-KEY":            {"coverage": "universal", "signal": "bytes"},   # no-browser path (DOM half in audits.js)
@@ -849,11 +851,112 @@ def audit_baked_runtime_dom_bytes(html):
     return findings
 
 
+# R-PROVENANCE 工具(F-266)。逐字对应 render-deck.py 的盖章常量,跨进程对齐。
+_PROVENANCE_HASH_LEN = 12
+_PROV_GENERATOR_RE = re.compile(
+    r'<meta\s+name=["\']fs-deck-generator["\']\s+content=["\']([^"\']*)["\']', re.I)
+_PROV_HASH_RE = re.compile(
+    r'<meta\s+name=["\']fs-deck-hash["\']\s+content=["\']([^"\']*)["\']', re.I)
+
+
+def _index_under_runs(path):
+    """True iff `path` (the index.html being audited) lives under a runs/ tree.
+
+    Name-free path signal: ANY ancestor directory named `runs`. This scopes
+    R-PROVENANCE to real delivery renders — /tmp smoke tests, tests/ temp
+    renders and standalone HTML outside runs/ are exempt (never reported). Mirror
+    of the spirit of render-deck's `_is_runs_output`, kept liberal here (any runs/
+    ancestor) because R-PROVENANCE's other gate — a SIBLING deck.json must exist —
+    is the real precondition; together they exempt everything that isn't a
+    deck.json-backed deck under runs/."""
+    parts = {p.name for p in [path, *path.parents]}
+    return "runs" in parts
+
+
+def _deck_json_hash_for(base_dir):
+    """sha256 of the sibling deck.json FILE CONTENT (first _PROVENANCE_HASH_LEN
+    hex chars), or None if no readable deck.json next to index.html. Byte-for-byte
+    the same computation render-deck.py stamps with (deck_json_hash), so a clean
+    re-render always matches."""
+    dj = (base_dir / "deck.json")
+    try:
+        data = dj.read_bytes()
+    except Exception:  # noqa: BLE001 — missing/unreadable → caller treats as absent
+        return None
+    return hashlib.sha256(data).hexdigest()[:_PROVENANCE_HASH_LEN]
+
+
+def audit_provenance_bytes(html, base_dir):
+    """R-PROVENANCE(warn / error · F-266)— Gate 1「必走 render-deck.py」的模型无关强制。
+
+    render-deck.py 给每份产物的 <head> 盖两枚章:
+      · <meta name="fs-deck-generator" content="render-deck">  —— 出身证明
+      · <meta name="fs-deck-hash" content="<H>">               —— H = sha256(deck.json 文件内容)[:12]
+    H 基于【deck.json 文件内容】而非 index.html —— 这是规避误报的核心:渲染后改写
+    (inline-assets / copy-assets / explode-assets 只动 index.html、不动 deck.json)
+    不会让 H 失配(deck.json 没变 → H 没变)。只有「改了 deck.json 没重渲」或「手改
+    index.html(deck.json 仍是旧的)」才会失配 —— 那才是真漂移,该挡。
+
+    仅在【index.html 在 runs/ 路径下 且 同目录有 deck.json】时才查;/tmp 测试、无
+    deck.json 的独立 HTML、imported 片段等一律豁免(不报)。这是模型无关的仓库层强制:
+    Codex/云环境装不了 CC hook,这条 byte 规则在两条校验路径(--visual / --no-visual)
+    都跑,补上 hook 缺位的那一半。
+
+    三档(与 SKILL.md 三道硬闸 / --strict 提升机制对齐):
+      · 无 fs-deck-generator 章 → warn:存量旧 deck(改造前渲染的)本就没章,无辜,
+        重渲一次即盖章 —— 不硬挡。warn 在 --strict / 入库门(--gate ingest)会被统一
+        提升为 error(validate.py / check-only 末尾把 iss.warnings 升 iss.errors),
+        满足「入库门无章升 error」而日常 render 只 warn。
+      · 有章但 fs-deck-hash ≠ 当前同目录 deck.json 的 sha256[:12] → error:真漂移,挡。
+    返回统一 findings。"""
+    findings = []
+    # 仅查 runs/ 下、且有 sibling deck.json 的真交付 deck;其余全豁免(测试 / 独立 HTML / imported)。
+    if not _index_under_runs(base_dir):
+        return findings
+    cur_hash = _deck_json_hash_for(base_dir)
+    if cur_hash is None:
+        return findings   # 无 sibling deck.json → 豁免(独立 HTML / imported,非 deck.json-backed)
+
+    gen_m = _PROV_GENERATOR_RE.search(html)
+    if not gen_m:
+        findings.append({
+            "rule": "R-PROVENANCE", "severity": "warn", "slide_idx": 0,
+            "message":
+                "无 provenance 章(疑似手搓 index.html 或改造前的旧 deck);重渲一次即盖章。"
+                "这份 index.html 的 <head> 缺 `<meta name=\"fs-deck-generator\" "
+                "content=\"render-deck\">` —— 它要么是绕过渲染器手搓/手补的(Path B 偷渡:"
+                "deck.json↔index.html 会漂移,后续 lift/翻译/再渲染会炸),要么是 F-266 "
+                "改造前渲染的旧 deck(无辜)。修法:从同目录 deck.json 跑 "
+                "`render-deck.py <deck.json> <dir>/` 重渲一次,渲染器会盖章。"
+                "[warn · --strict / 入库门(--gate ingest)会升为 error]",
+        })
+        return findings
+
+    hash_m = _PROV_HASH_RE.search(html)
+    stamped_hash = hash_m.group(1) if hash_m else ""
+    if stamped_hash != cur_hash:
+        findings.append({
+            "rule": "R-PROVENANCE", "severity": "error", "slide_idx": 0,
+            "message":
+                f"provenance 章失配 —— index.html 的 fs-deck-hash=\"{stamped_hash or '(缺)'}\" "
+                f"≠ 当前同目录 deck.json 的 sha256[:12]=\"{cur_hash}\"。这是真漂移:要么改了 "
+                "deck.json 却没重渲(index.html 还是旧内容),要么手改了 index.html(deck.json "
+                "仍是旧的)。任一种,交付的 index.html 都与它的 deck.json 不一致 —— 后续 lift/"
+                "翻译/再渲染会以 deck.json 为准、产出与现在所见不同的结果。修法:从 deck.json 跑 "
+                "`render-deck.py <deck.json> <dir>/` 重渲,让 index.html 与 deck.json 重新对齐;"
+                "若 index.html 的手改是有意保留的,把那次改动写回 deck.json(custom_css / raw "
+                "data.html)再重渲。",
+        })
+    return findings
+
+
 def runner_source_byte_findings(html, base_dir):
     """跑【两条路径都要】的 runner 层源字节/文件系统检查,合并成统一 findings(同 schema)。
     与 audits.js 规则同列表、同字段 → 报告层无需区分来源。顺序:R-DOC-INTEGRITY →
-    R-DOM(div over-close balance)→ R-SELF-CONTAINED → perf(与 STATIC_AUDITS 注册顺序
-    对齐,纯 cosmetic)。
+    R-BAKED-DOM → R-DOM(div over-close balance)→ R-SELF-CONTAINED → R-PROVENANCE →
+    perf(纯 cosmetic)。R-PROVENANCE(F-266)是【条件】byte 规则:只在 index.html 在
+    runs/ 下且同目录有 deck.json 时才查(其余豁免),验 render-deck 盖的出身章 + deck.json
+    哈希;它在两条路径都跑,补 CC hook 在非 CC 环境的缺位(模型无关的 Gate-1 强制)。
 
     这些规则在 dom_rules True/False 两条路径都跑:它们读的是浏览器看不到忠实结果的源字节
     (截断 / 多余 </div> / head <style> 泄漏 / 体积预算),与渲染后 DOM 无关、不会与 audits.js
@@ -871,6 +974,7 @@ def runner_source_byte_findings(html, base_dir):
     out.extend(audit_baked_runtime_dom_bytes(html))   # R-BAKED-DOM:烤死的活 DOM(两路径都跑)
     out.extend(audit_dom_balance_bytes(html))   # R-DOM invariant-3:over-close(两路径都跑)
     out.extend(audit_self_contained_bytes(html))
+    out.extend(audit_provenance_bytes(html, base_dir))  # R-PROVENANCE:Gate-1 盖章(F-266,两路径都跑;runs/+sibling deck.json 才查)
     out.extend(audit_perf_bytes(_inline_linked_text(html, base_dir)))
     return out
 
