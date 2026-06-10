@@ -347,13 +347,31 @@ def probe_effective_cjk_font(html_path):
     except ImportError:
         return _CJK_FONT_UNKNOWN
     try:
-        url = Path(html_path).resolve().as_uri()
+        # F-293 perf: effective_cjk_font depends only on THIS machine's installed
+        # fonts + the framework `--fs-font-cjk` stack — NOT on the target deck's
+        # DOM. The old `page.goto(index.html)` re-loaded the (up to 1.5MB) real
+        # deck a SECOND time per --visual run (~5s on heavy decks) for a result
+        # identical to a tiny page. Fingerprint a MINIMAL synthetic page that just
+        # inlines the framework CSS (defines :root --fs-font-cjk) + one CJK
+        # element, so the probe is ~0.3s regardless of deck size. (html_path kept
+        # for signature/back-compat; no longer loaded.)
+        _css_path = Path(__file__).resolve().parent / 'feishu-deck.css'
+        try:
+            _fw_css = _css_path.read_text(encoding='utf-8')
+        except OSError:
+            _fw_css = ':root{--fs-font-cjk:"方正兰亭黑 Pro GB18030",sans-serif}'
+        _probe_html = (
+            '<!doctype html><html><head><meta charset="utf-8"><style>'
+            + _fw_css
+            + '</style></head><body style="font-family:var(--fs-font-cjk)">'
+            '<div class="title-zh">中文字体指纹 ABCabc 0123</div></body></html>')
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
             try:
                 page = browser.new_context(
                     viewport={'width': 1920, 'height': 1080}).new_page()
-                page.goto(url, wait_until='domcontentloaded', timeout=60_000)
+                page.set_content(_probe_html, wait_until='domcontentloaded',
+                                 timeout=30_000)
                 # Await fonts (bounded) so we fingerprint the settled face, not a
                 # mid-swap fallback — same pattern as _archive_screenshots.
                 try:
@@ -499,7 +517,33 @@ def main():
                         'page so its findings are not buried in deck-wide '
                         'pre-existing noise. Does NOT change which audits run — '
                         'only what is reported/exited on; NOT a delivery gate.')
+    p.add_argument('--scope-frames', metavar='N[,N,...]', default=None,
+                   help='F-293 · feed a render SCOPE into the engine so per-slide '
+                        'audits only run on these frames (1-based ordinals, '
+                        'comma-separated, e.g. "2" or "2,3"). UNLIKE --slide '
+                        '(which runs every audit on the whole deck then FILTERS '
+                        'the report), this sets window.__AUDIT_SCOPE__ so the '
+                        'engine SKIPS evaluating off-scope slides entirely — the '
+                        'single-page `--scope` render fast path (audits 50 pages → '
+                        'just the changed one). Deck-level rules (R10 / R-KEY / '
+                        'R-CSSVAR / R-DECK-* / R-VIS-NO-IMAGERY …) still scan the '
+                        'whole DOM and emit once, anchored on the first in-scope '
+                        'frame — they are NOT suppressed by scope.')
     args = p.parse_args()
+    # F-293 · parse --scope-frames into the engine scope list (1-based ordinals).
+    # Distinct from --slide (post-run report filter); this is the REAL scope fed
+    # to run_unified_audits → run_unified_engine → window.__AUDIT_SCOPE__.
+    scope_frames = None
+    if args.scope_frames is not None:
+        try:
+            scope_frames = [int(t) for t in args.scope_frames.split(',')
+                            if t.strip()]
+        except ValueError:
+            print(f'ERROR: --scope-frames must be comma-separated 1-based '
+                  f'integers, got {args.scope_frames!r}', file=sys.stderr)
+            return 2
+        if not scope_frames:
+            scope_frames = None
     if args.screenshots and not args.visual:
         args.visual = True   # --screenshots implies --visual
 
@@ -534,6 +578,7 @@ def main():
     #     NOT run. Use where Chromium is unavailable.
     try:
         run_unified_audits(path, iss, dom_rules=args.visual,
+                           scope=scope_frames,
                            want_screenshots=args.screenshots)
     except Exception as e:
         # The engine adapter should self-degrade; a leak here must still never

@@ -2584,8 +2584,18 @@ def main(argv=None) -> int:
         # unaffected. --visual already ran the audits in the static gate above
         # (rc), so this block is for the default no-visual path only.
         if (not args.visual and _is_runs and not args.quick):
+            # F-293 · for a single-page `--scope` render, feed the scope INTO the
+            # engine (--scope-frames) so audits.js only evaluates the changed
+            # frame(s) instead of all N slides (华泰: 50 pages ~7s → just the
+            # changed one). Deck-level rules still scan the whole DOM and emit
+            # once. The post-run `_in_scope` filter below stays as a backstop
+            # (a no-op once the engine is scoped; harmless double-safety).
+            _adv_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html),
+                        "--visual", "--json"]
+            if scope_pages:
+                _adv_cmd += ["--scope-frames", ",".join(map(str, scope_pages))]
             adv = subprocess.run(
-                [sys.executable, str(VALIDATE_HTML), str(out_html), "--visual", "--json"],
+                _adv_cmd,
                 capture_output=True, text=True,
             )
             # F-255: a GENUINE engine-down (Playwright/Chromium missing) must be
