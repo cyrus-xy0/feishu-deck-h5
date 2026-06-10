@@ -41,8 +41,9 @@ rely on cached chat summaries or earlier reads of `source-dossier.json`, local
 5. Apply the raw-first design stance: every slide defaults to `layout: "raw"`
    when it later becomes DeckJSON. In `outline.json`, express that as
    `layout_intent: "raw:<pattern-or-intent>"`. Fall back to schema only for pure
-   standard shapes listed in `deck-generation-policy.md`. Give every raw slide
-   Q0-Q4 plus a six-dimensional design spec before authoring.
+   standard shapes — the single-source allowlist table is in `design-first.md`
+   (*Decision rule — 白名单回退判定*; `deck-generation-policy.md` points to it).
+   Give every raw slide Q0-Q4 plus a six-dimensional design spec before authoring.
 6. For every slide, include a density budget: core block + supporting evidence <=
    layout capacity. If it will not fit, cut or split content instead of shrinking
    text below the ladder.

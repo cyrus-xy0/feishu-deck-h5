@@ -28,7 +28,14 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
 
 ## Mode Routing
 
-- **Small edit**: lock slide key/scope, edit `deck.json`, render, validate only
+Mode names follow the single **Authoritative Mode Enum** in
+`../../references/request-router.md`. The Editor owns the EDIT family: `EDIT`
+(generic small/substantive edit of an existing deck), `EDIT_IMPORTED_HTML`,
+`RESKIN`, and `LIFT+SWAP`. All of these edit a deck that already exists — they do
+NOT open a new run (a fresh run artifact is `GENERATION`, which routes to
+Designer + Renderer instead).
+
+- **`EDIT` (small edit)**: lock slide key/scope, edit `deck.json`, render, validate only
   locked slide(s). The locked scope is the boundary for the re-render too — pass it
   to `render-deck.py` so downstream steps don't re-process the whole deck. For an
   edit confined to specific pages, re-render with `--scope N` (1-based page numbers,
@@ -88,7 +95,15 @@ on cached chat summaries or earlier reads of `deck.json`, `index.html`,
   vs rewrite. Existing material defaults to 1:1 page count unless user says to
   compress/restructure.
 - **Round-trip recovery**: run `sync-index-to-deck.py` before forking, library
-  ingest, or delivery when `index.html` may contain post-render edits.
+  ingest, or delivery when `index.html` may contain post-render edits. **Always
+  `--dry-run` first and confirm the DRIFT DIRECTION** — drift can mean either
+  genuine post-render `index.html` edits (sync them) or un-rendered `deck.json`
+  edits (re-render instead, do NOT sync, or you overwrite them with stale HTML).
+  The tool guards this: if `deck.json` is newer than `index.html` a full sync
+  refuses to write, warns, and falls back to dry-run (`--index-is-newer`
+  overrides). A default full sync covers raw HTML, canvas, slide order,
+  `custom_css`, `hidden`, and speaker `notes` — so a green report from any
+  earlier (raw-only) run is not a guarantee those fields were checked; re-run.
 - **Copy/text edit**: edit `deck.json` and rerender; do not revive the retired
   `texts.md` sidecar flow or mutate rendered HTML unless doing explicit
   round-trip recovery.

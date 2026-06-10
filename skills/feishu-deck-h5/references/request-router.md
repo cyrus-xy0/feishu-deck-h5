@@ -5,12 +5,46 @@
 
 Before touching files or running tools, lock:
 
-1. **Mode**: `CHECK-ONLY` / `GENERATION` / `GENERATION_FROM_SOURCE_HTML` /
-   `EDIT_IMPORTED_HTML` / `RESKIN` / `LIFT+SWAP` / `PUBLISH`.
+1. **Mode**: pick exactly one from the **Authoritative Mode Enum** below.
 2. **Scope**: single slide, named slides, whole deck, or one run folder. Default
    to the smallest scope the user named. More work requires user authorization.
 3. **Target**: run dir, `deck.json`, `index.html`, slide key, slide number, source
    file set, or publish destination.
+
+### Authoritative Mode Enum (single source of truth)
+
+This table is the ONE canonical Mode vocabulary for the whole skill. The root
+`SKILL.md` Mandatory Router and every subskill reference this list — do not keep a
+second, differently-spelled mode list anywhere. Names are UPPERCASE_SNAKE (with
+`CHECK-ONLY` / `LIFT+SWAP` kept as the established spellings). Every mode maps to
+the subskill that owns its work.
+
+| Mode | When it applies | Routes to (subskill) |
+| --- | --- | --- |
+| `CHECK-ONLY` | Check / review / validate an existing `.html` or deck; no content generation or edit requested. | Validator (`subskills/validator/SKILL.md`) |
+| `GENERATION` | A NEW deck, OR converting external PDF / PPT / doc material into a deck, OR any change that produces a fresh run artifact. Design-first. | Designer + Renderer (`subskills/designer/SKILL.md` → `subskills/renderer/SKILL.md`) |
+| `GENERATION_FROM_SOURCE_HTML` | An uploaded HTML is reference / inspiration / "照着这个重新做" — source material, not the artifact to preserve. | Parser → Designer + Renderer (`subskills/parser/SKILL.md` → designer → renderer) |
+| `EDIT_IMPORTED_HTML` | An uploaded HTML IS the target state; user wants to modify / continue / fix it in place. | Editor (`subskills/editor/SKILL.md`) |
+| `EDIT` | Edit copy / layout of an existing deck inside its own run (deck.json / index.html already exist). | Editor (`subskills/editor/SKILL.md`) |
+| `RESKIN` | Foreign / non-Feishu HTML → "换皮" / 套飞书模板 / Feishu 化, same visual design preserved. | Editor (`subskills/editor/SKILL.md`) |
+| `LIFT+SWAP` | Reuse another deck's pages / layout while swapping copy, client, or wording. | Editor (`subskills/editor/SKILL.md`) |
+| `TRANSLATE` | Translate / localize an existing deck (or page range) into another language. | Translator (`subskills/translator/SKILL.md`) |
+| `PARSE` | Parse uploaded source materials into `source-dossier.json` + normalized assets. (A `.pptx` is reconstructed into an editable `canvas` deck.json.) | Parser (`subskills/parser/SKILL.md`) |
+| `IMPORT` | Quality-gate then ingest a confirmed finished HTML into `FuQiang/feishu-slide-library` (入库 / 提交 / 上传 / submit / archive). | Importer (`subskills/importer/SKILL.md`) |
+| `SIMULATE` | Rehearse how a validated deck lands with a target customer / stakeholder. | Simulator (`subskills/simulator/SKILL.md`) |
+| `PUBLISH` | Publish a confirmed HTML to Magic Page / 妙笔 / MagicBook / html-box hosting. | Publisher (`subskills/publisher/SKILL.md`) |
+
+`EDIT`, `RESKIN`, `LIFT+SWAP`, and `EDIT_IMPORTED_HTML` are the **EDIT family** (all
+route to Editor). `GENERATION` and `GENERATION_FROM_SOURCE_HTML` are the
+**GENERATION family** (both run the design gate before render). The decidable line
+between EDIT-family and GENERATION-family is in **Edit vs Generation boundary**
+below.
+
+The per-mode trigger + action detail for the historically documented modes
+(`CHECK-ONLY`, `GENERATION_FROM_SOURCE_HTML`, `EDIT_IMPORTED_HTML`, `RESKIN`,
+`LIFT+SWAP`, `GENERATION`) is in **Mode Selection Semantics** further down. A full
+pipeline (Parser → Designer → Renderer → Validator → …) is just `GENERATION` (or
+`GENERATION_FROM_SOURCE_HTML`) run end to end — it is not a separate mode.
 
 For slide-specific requests, resolve both ordinal and stable key. URL `#N` means
 slide index `N`; title/key references should be resolved through `slide-index.json`
@@ -85,6 +119,44 @@ Examples:
 - "第 7 页标题 28 改 32" = single-slide small edit, proceed.
 - "第 7 页改成双手架构 hero" = single-slide scope, but beyond-default design, so
   run the design confirmation first.
+
+## Edit vs Generation boundary (decidable)
+
+EDIT-family and GENERATION-family used to give opposite answers for "substantive
+deck edits". The single decidable line is the **artifact target**, not how large
+or creative the change feels:
+
+- **Editing a deck that already exists inside its own run** — `deck.json` /
+  `index.html` are already on disk under `runs/<...>/output/` — is the **EDIT
+  family** (`EDIT` / `EDIT_IMPORTED_HTML` / `RESKIN` / `LIFT+SWAP`). Route to
+  Editor. **Do not open a new run** for editing an existing run's deck (see
+  `references/operational-notes.md`). A beyond-default *design* on one of those
+  pages still passes the design gate (Scope Gate vs Design Gate above), but it is
+  still an edit of the existing artifact, not a new GENERATION run.
+- **Producing a fresh run artifact** — a brand-new deck, or converting external
+  PDF / PPT / doc material into a new deck — is the **GENERATION family**
+  (`GENERATION` / `GENERATION_FROM_SOURCE_HTML`). It runs `new-run.sh` and the
+  design-first pipeline.
+
+So: "改既有 run 目录里的 deck = EDIT 系(Editor,不开新 run);产出一份新 run 工件
+= GENERATION(走 design)". There is no third "substantive edit → GENERATION"
+path; substantive edits to an existing deck stay in the EDIT family.
+
+## Import vs re-create: when conversions pass the Designer
+
+A conversion of existing material (PDF / PPT / `.pptx` / foreign HTML) splits on
+intent, and this is the single口径 the root `SKILL.md` and this router share:
+
+- **Pure import (1:1 restore)** — faithfully reproduce the source deck's pages,
+  no redesign. **免 Designer**: the parser output (e.g. a `.pptx` reconstructed
+  into an editable `canvas` deck.json) hands straight to Renderer / Editor. This
+  is `PARSE` feeding an `EDIT`-style finish, not `GENERATION`.
+- **Import-then-create / rewrite / restructure** — reuse the material as input but
+  produce a re-authored deck. **Must pass the design gate** (`GENERATION` /
+  `GENERATION_FROM_SOURCE_HTML`): Designer runs first.
+
+In short: **纯导入(1:1 还原)免 Designer;导入后再创作 / 重写必须过 design gate.**
+Replica-vs-Rewrite detail lives in `references/converting-existing-material.md`.
 
 ## Mode Selection Semantics
 
@@ -165,7 +237,29 @@ Rewrite rules in `converting-existing-material.md`.
 
 ### GENERATION
 
-Default mode for new decks, PDF/PPT/doc conversion into a deck, and substantive
-deck edits. Run design first with the raw-first policy: per page, default to
-`layout: "raw"` inside DeckJSON and fall back to schema only for pure standard
-shapes. Then preflight/new-run, DeckJSON render, validation, and delivery.
+Mode for producing a **fresh run artifact**: a new deck, or a re-authored deck
+built from PDF / PPT / doc material (import-then-create — pure 1:1 import is
+`PARSE` + Editor, see **Import vs re-create** above). Run design first with the
+raw-first policy: per page, default to `layout: "raw"` inside DeckJSON and fall
+back to schema only for pure standard shapes. Then preflight/new-run, DeckJSON
+render, validation, and delivery.
+
+Substantive edits to an **existing** deck are NOT GENERATION — they stay in the
+EDIT family and route to Editor without a new run (see **Edit vs Generation
+boundary** above). The dividing line is whether you are creating a new run
+artifact or modifying one that already exists, not how large the change is.
+
+### EDIT
+
+Edit copy / layout of an existing deck inside its own run directory; `deck.json` /
+`index.html` already exist. Route to Editor (`subskills/editor/SKILL.md`); do not
+open a new run. A beyond-default design on an edited page still passes the design
+gate, but the work is an edit of the existing artifact. `RESKIN`, `LIFT+SWAP`, and
+`EDIT_IMPORTED_HTML` are the specialized EDIT-family modes documented above.
+
+### TRANSLATE / PARSE / IMPORT / SIMULATE / PUBLISH
+
+These map 1:1 to their owning subskills (Translator / Parser / Importer /
+Simulator / Publisher) per the **Authoritative Mode Enum**. Their detailed
+workflows live in those subskills and in the root `SKILL.md` Canonical Workflow;
+this router only fixes the vocabulary and the routing target.

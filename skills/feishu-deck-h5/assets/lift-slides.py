@@ -97,10 +97,12 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -108,6 +110,27 @@ from pathlib import Path
 # step 1) so render-deck.py + lift-slides.py can't drift on CSS parsing.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deck-json"))
 from _css_utils import iter_css_rules  # noqa: E402
+
+
+def atomic_write_text(path, text, encoding="utf-8"):
+    """Crash-safe write (F-269): temp file in the same dir + os.replace, so a
+    kill mid-write never leaves a half-written deck.json on disk. Mirrors
+    deck-cli.atomic_write_text — kept as a local copy here to avoid an
+    importlib dance against the hyphenated deck-cli.py module name."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 SKILL_PREFIX = "../../../skills/feishu-deck-h5/"
 
@@ -1213,7 +1236,8 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
               file=sys.stderr)
         sys.exit(4)
 
-    dst_deck_json.write_text(
+    atomic_write_text(
+        dst_deck_json,
         json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"\n✓ {appended} slides appended to {dst_deck_json.name} "
           f"(total {len(deck['slides'])})")
@@ -1380,7 +1404,7 @@ def _splice_into_html(dst_html, frame_block, position="end"):
     bak = dst.with_name(dst.name + f".bak-pre-lift-{ts}")
     shutil.copy(dst, bak)
     new_t = t[:insert_at] + block + t[insert_at:]
-    dst.write_text(new_t, encoding="utf-8")
+    atomic_write_text(dst, new_t, encoding="utf-8")   # F-269: crash-safe
     return new_t.count('<div class="slide-frame"'), bak
 
 

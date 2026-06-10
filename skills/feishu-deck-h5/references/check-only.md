@@ -44,15 +44,17 @@ What it does:
 
 ### 规则只有一套源 · 三路取用 · 防漂闸门(架构 mandatory)
 
-**规则逻辑只定义在一处** —— `assets/_validate_audits.py` 的 `audit_*` 函数 +
-`assets/validate.py` 的 `STATIC_AUDITS` 注册表。三条路径全部 `import validate`
-取同一套审计,**没有第二套规则**:
+**规则逻辑只定义在一处** —— 单一引擎:`assets/audits.js`(DOM 规则引擎)+
+`assets/run-audits.py`(字节 / 文件系统域)。`assets/validate.py` 只是编排器,
+通过 `run_unified_audits` 把两者的发现合到一起;三条路径全部经它取同一套审计,
+**没有第二套规则**(旧的 `_validate_audits.py` / `STATIC_AUDITS` 静态注册表已退役)。
+schema 形状校验另在 `deck-json/validate-deck.py`:
 
 | 路径 | 入口 | 怎么取规则 |
 |---|---|---|
-| ① 生成即对 / 渲染后自查 | `deck-json/render-deck.py` | 第 ~1808 行硬闸调 `validate.py` |
-| ② 直接校验 | `assets/validate.py` | 自己就是引擎 |
-| ③ 已成品检查 (check-only) | `assets/check-only.py` | `import validate` → 同一套 `STATIC_AUDITS` |
+| ① 生成即对 / 渲染后自查 | `deck-json/render-deck.py` | 渲染后硬闸调 `validate.py` |
+| ② 直接校验 | `assets/validate.py` | 编排器 → `run_unified_audits`(audits.js + run-audits.py) |
+| ③ 已成品检查 (check-only) | `assets/check-only.py` | `import validate` → 同一套 `run_unified_audits` |
 
 引擎之外只有**两份「附属清单」**(不是第二套规则,只是给规则码挂分组/文案):
 `check-only.py` 的 `FAMILIES`(`--by-rule` 工程师分组)+ `business-rules.yaml`
@@ -67,10 +69,11 @@ What it does:
    自动打 `⚠️ 业务文案未覆盖 N 条…`,不再默默退兜底。
 3. **ingest 门禁自检** —— `warn_on_gate_rule_drift()` 对 ingest 门禁同样比对。
 
-**加 / 改一条规则的标准流程**:① 在 `_validate_audits.py` 写 `audit_*` 逻辑 +
-注册进 `STATIC_AUDITS` → ② `business-rules.yaml` 加一段同名 code 的文案 →
-③ `FAMILIES` 把该 code 归到对应家族 → ④ 跑 `check-rule-coverage.py` 确认三方
-对齐(绿)。逻辑一处、文案一处、分组一处,各司其职,闸门保证不漂。
+**加 / 改一条规则的标准流程**:① 在引擎里写逻辑 —— DOM 规则进 `assets/audits.js`,
+字节 / 文件系统规则进 `assets/run-audits.py`(并在 audits.js 的规则 surface 表登记)
+→ ② `business-rules.yaml` 加一段同名 code 的文案 → ③ `FAMILIES` 把该 code 归到对应
+家族 → ④ 跑 `check-rule-coverage.py` 确认三方对齐(绿)。逻辑一处、文案一处、分组
+一处,各司其职,闸门保证不漂。
 
 ### 报告附加项
 

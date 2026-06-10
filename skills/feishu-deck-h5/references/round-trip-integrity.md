@@ -46,6 +46,20 @@ delivery.**
 The skill ships `deck-json/sync-index-to-deck.py` for both detection
 (dry-run) and recovery (actual sync).
 
+**Default-run direction guard.** A full sync assumes `index.html` is the
+NEWER (post-render-edited) side. If `deck.json` is newer (you edited it and
+didn't re-render), the tool refuses to write — it warns and downgrades to
+`--dry-run`. So your first instinct should always be `--dry-run`, read the
+drift, confirm the direction, then act. Pass `--index-is-newer` only to force a
+reverse-feed against a newer `deck.json`.
+
+**A default full sync covers (no per-flag opt-in):** raw `data.html` inner
+HTML · canvas `data.elements[]` (by-id) · slide ORDER (drag-reorder) ·
+`custom_css` block edits · the `hidden` flag · speaker `notes`. (custom_css,
+hidden and notes used to be missed/flag-gated — a clean report no longer means
+those were checked-and-fine only for raw HTML.) The surgical `--hidden-only` /
+`--order-only` / `--notes-only` flags still exist for an isolated reconcile.
+
 ```bash
 # Detection — exit 0 with drift report; doesn't mutate
 python3 skills/feishu-deck-h5/deck-json/sync-index-to-deck.py \
@@ -74,16 +88,30 @@ python3 ... --force
 **The tool will NOT silently overwrite** non-raw slides (template-rendered:
 `cover`, `quote`, `section`, `iframe-embed`, `agenda`, etc.) without
 `--force`, because converting them to `raw` loses the structured `data`
-fields. Use `--slide-key K --force` to convert one specific slide
-when you really do mean to bake post-render edits in.
+fields. A template slide that HAS browser edits is no longer a silent skip —
+sync prints a loud `⚠ WARNING` naming the slide and noting the edits will be
+lost on re-render (and that `--force` would convert it to raw, dropping the
+structured fields). Use `--slide-key K --force` to convert one specific slide
+when you really do mean to bake post-render edits in. (A by-field reverse map
+that ports template-slide text edits WITHOUT going lossy-to-raw is a separate
+open task.)
 
 ### Fork checklist (mandatory when deriving a new deck from an existing one)
 
 1. **Copy both files**: `cp -r runs/<src>/output runs/<new>/output` (this
    takes BOTH `deck.json` and `index.html`)
 2. **Verify parity**: `python3 .../sync-index-to-deck.py <new>/output/index.html <new>/output/deck.json --dry-run`
-3. **If drift detected**: run without `--dry-run` to reconcile. Re-render
-   to verify: `python3 .../render-deck.py <new>/output/deck.json <new>/output/`
+3. **If drift detected, confirm the DIRECTION before reconciling.** Read the
+   drift list: is it genuine **post-render edits in `index.html`** (the thing
+   sync exists to recover — then run without `--dry-run`), or is it
+   **un-rendered `deck.json` edits** (you changed `deck.json` and haven't
+   re-rendered — then `render-deck.py`, do NOT sync)? Syncing the wrong
+   direction overwrites fresh `deck.json` edits with stale HTML. The tool now
+   guards this: if `deck.json` is newer than `index.html`, a full sync refuses
+   to write, prints a hard warning, and falls back to `--dry-run` (override
+   with `--index-is-newer` only when you truly hand-edited `index.html`). Once
+   the direction is confirmed, reconcile and re-render to verify:
+   `python3 .../render-deck.py <new>/output/deck.json <new>/output/`
 4. Only THEN start editing the new deck.
 
 If you copied only `deck.json` (skipping step 1's `index.html`), step 2

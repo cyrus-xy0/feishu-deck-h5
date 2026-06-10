@@ -33,9 +33,15 @@
   //    crowding without introducing new canvas overflow → never makes a slide
   //    worse (genuinely over-full boxes, e.g. content 161px too tall, revert).
   //  · skips hero layouts, [data-allow-imbalance], [data-no-autobalance] decks.
-  //  · content-visibility hides non-current slides in present mode, so each
-  //    slide is balanced the first time it is actually laid out (initial pass
-  //    for current/scroll slides, the is-current observer for the rest).
+  //  · when slides are laid out (measured 2026-06-10): in present mode ALL
+  //    frames are stacked at `position:absolute; inset:0` (only opacity/
+  //    content-visibility differ), so the single init pass (below) already
+  //    measures + balances EVERY frame whose content `content-visibility:auto`
+  //    actually laid out — which, being in-viewport, is most of them, not just
+  //    the current one (observed 10/13 on sample-deck at init). The is-current
+  //    observer is a RETRY channel, not the primary path: it re-balances only
+  //    the few frames whose content content-visibility happened to skip at init
+  //    (probe height 0 → maybeBalance bailed, left untagged for the retry).
   //  · NO new ResizeObserver / addEventListener — stays within P52/P53 budget.
   // ============================================================
   const HERO_AB = new Set(['cover', 'section', 'big-stat', 'quote', 'image-text', 'end']);
@@ -373,9 +379,13 @@
     if (!slide || slide.hasAttribute('data-fs-balanced')) return;
     const deck = slide.closest('.deck');
     if (deck && deck.hasAttribute('data-no-autobalance')) return;
-    // content-visibility:auto skips off-screen slides → their content has 0
-    // size. Only tag+balance once a content container is actually laid out;
-    // otherwise leave untagged so the is-current observer retries when visible.
+    // In present mode frames are stacked at inset:0, but content-visibility:auto
+    // can still skip layout for a frame the browser deems not-yet-relevant → its
+    // content measures 0. Only tag+balance once a content container is actually
+    // laid out (non-zero height); otherwise leave untagged so the is-current
+    // observer retries when the frame becomes current (measured 2026-06-10: at
+    // init most frames already measure laid-out and get balanced here; only the
+    // few content-visibility skipped fall through to that retry).
     const probe = slide.querySelector('.stage, .grid, .flow, .nodes, .toc, .stack, .header, [class*="card"]');
     if (!probe || probe.getBoundingClientRect().height < 30) return;
     slide.setAttribute('data-fs-balanced', '');
@@ -574,9 +584,13 @@
     // starts the current slide's video.
     const mediaState = frames.map((f) => f.classList.contains('is-current'));
     frames.forEach((f, i) => syncFrameMedia(f, mediaState[i]));
-    // Initial auto-balance pass: balances the current slide (present mode) and
-    // every laid-out slide (scroll mode). Non-current present-mode slides are
-    // content-visibility-hidden here and get balanced on first enter (below).
+    // Initial auto-balance pass: runs maybeBalance on EVERY frame (both modes).
+    // In present mode all frames are stacked at inset:0, so this pass already
+    // balances every frame whose content content-visibility:auto laid out —
+    // measured 2026-06-10: most non-current frames, not just the current one.
+    // The handful content-visibility skipped (probe height 0) stay untagged and
+    // are balanced on first enter by the observer below (a retry, not the
+    // primary path).
     requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => maybeBalance(f.querySelector('.slide'))); });
     const mediaObserver = new MutationObserver((muts) => {
       for (const m of muts) {
@@ -586,8 +600,10 @@
         if (now === mediaState[i]) continue;   // class changed but is-current didn't
         mediaState[i] = now;
         syncFrameMedia(m.target, now);
-        // Balance a present-mode slide the first time it becomes visible
-        // (content-visibility makes it measurable only now).
+        // Retry channel: balance a present-mode slide that the init pass left
+        // untagged because content-visibility:auto had skipped its layout then
+        // (maybeBalance no-ops if it was already tagged at init, which is the
+        // common case — see the init pass above).
         if (now) requestAnimationFrame(() => { if (signal.aborted) return; maybeBalance(m.target.querySelector('.slide')); });
       }
     });

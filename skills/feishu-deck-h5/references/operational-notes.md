@@ -89,6 +89,14 @@ deck artifacts under that run's `output/`.
 Do not create a new run when the user explicitly asks to edit an existing
 `runs/.../output/` deck.
 
+**Edit vs Generation — the decidable line (matches `references/request-router.md`):**
+改既有 run 目录内的 deck(`deck.json` / `index.html` 已存在)= **EDIT 系**(走
+Editor,**不开新 run**);产出一份新 run 工件 = **GENERATION**(`new-run.sh` +
+design gate)。分界是「改既有工件 vs 造新工件」,不是改动大小或创意程度——substantive
+edits to an existing deck stay in the EDIT family, they are NOT GENERATION. A
+beyond-default *design* on an edited page still passes the design gate, but it is
+still an edit, not a new run.
+
 ## ❌ 绝不用裸 `find` 找渲染器 / 工具(空指针根因 · mandatory)
 
 skill 常以 **symlink** 挂在 `~/.claude/skills/feishu-deck-h5 → <repo>/skills/feishu-deck-h5`。

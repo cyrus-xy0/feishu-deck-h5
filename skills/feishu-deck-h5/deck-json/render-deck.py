@@ -40,8 +40,10 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Story-case fit primitives are single-sourced in _story_case_fit.py (F-15) so
@@ -91,6 +93,64 @@ try:
     _find_run_root = _load_find_run_root()
 except Exception:
     _find_run_root = None
+
+
+# Single-source the atomic file write (F-269): import deck-cli's atomic_write_text
+# so render-deck and deck-cli share ONE crash-safe writer. deck-cli.py has a
+# hyphen in its name (not a valid module name), so load it by path like
+# _load_find_run_root above. If the import fails for any reason, fall back to a
+# local implementation with identical semantics — render must never lose its
+# atomic-write guarantee just because the sibling import broke.
+def _load_atomic_write_text():
+    import importlib.util
+    deck_cli = HERE / "deck-cli.py"
+    spec = importlib.util.spec_from_file_location("_deck_cli_atomic", deck_cli)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.atomic_write_text
+
+
+try:
+    atomic_write_text = _load_atomic_write_text()
+except Exception:
+    def atomic_write_text(path, text, encoding="utf-8"):  # local fallback
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding=encoding) as fh:
+                fh.write(text)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+
+def _is_runs_output(out_dir: Path) -> bool:
+    """True iff `out_dir` is a real delivery path under runs/<ts>/output/.
+
+    The delivery quality gate (geometry / visual / distribution) must fire on
+    real decks but NOT on /tmp smoke tests or tests/ temp renders. We decide
+    that via copy-assets.find_run_root — the SAME predicate the copier uses —
+    so "is this a runs/ render" cannot drift between the gate and the copier
+    (a bare `"/runs/" in str(...)` substring matched non-canonical paths like
+    runs/<deck-name>/ that find_run_root rejects). Falls back to the canonical
+    2-hop runs/<ts>/output/ test only if importing find_run_root failed
+    (mirrors the copy-assets precheck fallback)."""
+    out = out_dir.resolve()
+    if _find_run_root is not None:
+        try:
+            _find_run_root(out)
+            return True
+        except SystemExit:
+            return False
+        except Exception:
+            return False
+    return any(p.parent.parent.name == "runs" for p in [out, *out.parents])
 
 # Phase 4 / post-review-medium-6: there's now ONE pathway for \n→<br>.
 # Every {{ field }} substitution goes through _esc_br (see render_template
@@ -2004,8 +2064,16 @@ def main(argv=None) -> int:
     ap.add_argument("--shared", choices=["link", "copy", "skip"], default="link",
                     help="copy-assets mode for shared/* files (default link, see SKILL.md)")
     ap.add_argument("--inline", action="store_true",
-                    help="single-file delivery mode — base64-inline all CSS/JS/images. "
-                         "Mutually exclusive with copy-assets (auto-skips it).")
+                    help="single-file delivery mode — base64-inline all CSS/JS/images "
+                         "(<link>/<script>, <img src>, <source src>, <video src|poster>, "
+                         "and CSS url() backgrounds). Mutually exclusive with "
+                         "copy-assets (auto-skips it).")
+    ap.add_argument("--inline-strict", action="store_true",
+                    help="with --inline: FAIL (non-zero exit) if any LOCAL asset "
+                         "reference could not be inlined (file missing) — those would "
+                         "404 the moment the single-file deck is moved/emailed. "
+                         "Without this flag a missing local ref is left as an external "
+                         "link and only WARNED about.")
     ap.add_argument("--visual", action="store_true",
                     help="run Playwright visual audits as part of the GATE "
                          "(R-OVERFLOW / R-OVERLAP / R-VIS-TIER / R-VIS-BODY-FLOOR "
@@ -2062,6 +2130,10 @@ def main(argv=None) -> int:
         # generation-era fit-check; the snapshot behaviour (skip vs scoped) is
         # decided at the _maybe_auto_snapshot call site below.
         args.skip_fit_check = True
+
+    if args.inline_strict:
+        # --inline-strict only makes sense for single-file delivery; imply it.
+        args.inline = True
 
     if args.inline and not args.skip_copy_assets:
         # --inline supersedes copy-assets
@@ -2252,7 +2324,30 @@ def main(argv=None) -> int:
     })
 
     out_html = args.output_dir / "index.html"
-    out_html.write_text(final, encoding="utf-8")
+    # F-269: the delivery gate (section 6 below) runs AFTER this write. If the
+    # gate then fails (return 4), a naive overwrite would have already replaced
+    # the last "passed-the-gate" index.html with the new BAD one — a failed
+    # render silently corrupts the previously-good deliverable on disk. So back
+    # up any existing index.html FIRST, write the new one ATOMICALLY (no torn
+    # file if killed mid-write), and restore the backup at every gate-fail exit.
+    _index_bak = out_html.with_name("index.html.bak-pre-render")
+    if out_html.exists():
+        shutil.copy2(out_html, _index_bak)
+    else:
+        _index_bak = None   # nothing to restore — this is a fresh render
+
+    def _rollback_index_html():
+        """Gate failed: put the previously-good index.html back so a rejected
+        render never leaves a worse file on disk than the validated one that was
+        there before. A FRESH render (no prior good file) leaves its output in
+        place unchanged — matching the long-standing behaviour, and nothing is
+        lost since there was no validated version to clobber."""
+        if _index_bak is not None and _index_bak.exists():
+            os.replace(_index_bak, out_html)   # atomic restore
+            print("\n已回滚到上一版 index.html(本次 render 未通过闸门)。",
+                  file=sys.stderr)
+
+    atomic_write_text(out_html, final, encoding="utf-8")
 
     # 5.4 — Emit slide-index.json: a compact {key→frame_index,layout,label,bytes,
     #       assets} manifest so a downstream "lift" can pick a slide by semantic
@@ -2278,7 +2373,8 @@ def main(argv=None) -> int:
             for new_idx, (orig_idx, slide) in enumerate(active_slides)
         ],
     }
-    (args.output_dir / "slide-index.json").write_text(
+    atomic_write_text(
+        args.output_dir / "slide-index.json",
         json.dumps(slide_index, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -2290,6 +2386,22 @@ def main(argv=None) -> int:
         # Otherwise default behaviour: static checks only.
         _geom_block = False
         _dist_block = False
+        _vis_block = False
+        # F-255: the delivery gate must be a PATH/FLAG INVARIANT, not something
+        # that silently turns off. `_is_runs` decides "is this a real delivery
+        # render under runs/<ts>/output/" via the SAME predicate copy-assets
+        # uses — so the gate can't drift from the copier (and /tmp smoke tests +
+        # tests/ temp renders stay advisory-only, keeping the suite green).
+        _is_runs = _is_runs_output(args.output_dir)
+        # GATE-COVERAGE bookkeeping (F-255): record what ACTUALLY executed so a
+        # silent "did not run" is always distinguishable from "ran clean" in the
+        # one machine-readable summary line printed before every return below.
+        _gc_static = "ran"
+        _gc_visual = "ran" if args.visual else "skipped"
+        _gc_geometry = "ran" if args.visual else "skipped"
+        _gc_distribution = "skipped"
+        _gc_scope = (",".join(map(str, scope_pages)) if scope_pages
+                     else ("--quick" if args.quick else "full"))
         validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html)]
         if not args.visual:
             validate_cmd.append("--no-visual")
@@ -2310,23 +2422,72 @@ def main(argv=None) -> int:
         # automatically — without forcing every render, or the /tmp smoke tests,
         # through Playwright. Skipped when --visual already ran them in the gate;
         # a no-op when Playwright is absent (validate.py degrades → no R-VIS).
-        # Scope-locked (--scope) or text-only (--quick) edits skip this whole-deck
-        # advisory: it is a NON-BLOCKING readability re-audit of ALL pages and is
-        # itself a full Playwright load (~31s) — re-auditing the 49 pages you did
-        # not touch violates the locked scope and is the bulk of a scoped render's
-        # wall-clock. The static gate above still runs. For --scope, the changed
-        # page still gets its making-of screenshot via the snapshot below.
-        if (not args.visual and "/runs/" in str(args.output_dir.resolve())
-                and not scope_pages and not args.quick):
+        # F-255/F-256: the visual gate must fire on EVERY real delivery render,
+        # not just whole-deck ones. The default gate (`--no-visual`) is static
+        # only; this block runs the Playwright `--visual --json` pass and acts on
+        # error-level findings. It runs whenever this is a runs/ render and not
+        # --quick (text-only fast path — see the loud --quick warning below). For
+        # --scope it runs but ACTS only on findings for the changed pages (deck
+        # null-slide findings included) — a single Playwright load is seconds and
+        # does not violate scope because off-scope pages are filtered out, never
+        # acted on. /tmp smoke tests + tests/ temp renders (not under runs/) keep
+        # the previous advisory-only behaviour, so the existing test suite is
+        # unaffected. --visual already ran the audits in the static gate above
+        # (rc), so this block is for the default no-visual path only.
+        if (not args.visual and _is_runs and not args.quick):
             adv = subprocess.run(
                 [sys.executable, str(VALIDATE_HTML), str(out_html), "--visual", "--json"],
                 capture_output=True, text=True,
             )
+            # F-255: a GENUINE engine-down (Playwright/Chromium missing) must be
+            # detected OUTSIDE the swallow below, so a render whose quality is
+            # actually UNVERIFIED loudly BLOCKS instead of silently passing. The
+            # advisory still must never crash a render, so parse defensively here
+            # too, but the block decision lives at top level.
+            _engine_down = False
+            _data = {}
             try:
                 import json as _json
                 _data = _json.loads(adv.stdout or "{}")
-                _vis = [f for f in (_data.get("warnings", []) + _data.get("errors", []))
+            except Exception:
+                _data = {}
+            _engine_down = any(
+                str(f.get("code", "")) == "R-VISUAL"
+                for f in _data.get("warnings", []))
+            if _engine_down and not os.environ.get("DECK_ALLOW_NO_VISUAL"):
+                _gc_visual = "FAILED(no-playwright)"
+                _gc_geometry = "FAILED(no-playwright)"
+                print("\n❌ BLOCKING · visual gate could not run — "
+                      "Playwright/Chromium unavailable; deck quality is "
+                      "UNVERIFIED.", file=sys.stderr)
+                print("  ↳ install the engine, then re-render:", file=sys.stderr)
+                print("      pip install playwright && python -m playwright "
+                      "install chromium", file=sys.stderr)
+                print("  ↳ ship anyway WITHOUT the visual gate (you accept the "
+                      "risk): DECK_ALLOW_NO_VISUAL=1", file=sys.stderr)
+                _vis_block = True
+            elif _engine_down:
+                # Engine down but escape hatch set — record it honestly.
+                _gc_visual = "skipped(no-playwright·allowed)"
+                _gc_geometry = "skipped(no-playwright·allowed)"
+            try:
+                # --scope: act only on the changed pages. Each finding carries a
+                # `slide` (1-based int, or null for deck-level). Keep findings
+                # whose slide is in scope (when known) PLUS deck-level (null).
+                def _in_scope(f):
+                    if not scope_pages:
+                        return True
+                    s = f.get("slide")
+                    return (s is None) or (s in scope_pages)
+                _errs = [f for f in _data.get("errors", []) if _in_scope(f)]
+                _warns = [f for f in _data.get("warnings", []) if _in_scope(f)]
+                _vis = [f for f in (_warns + _errs)
                         if str(f.get("code", "")).startswith("R-VIS")]
+                if not _engine_down:
+                    _gc_visual = "ran" + (f"(scope={','.join(map(str, scope_pages))})"
+                                          if scope_pages else "")
+                    _gc_geometry = "ran" + (f"(scope={','.join(map(str, scope_pages))})"
+                                            if scope_pages else "")
                 if _vis:
                     print("\n📐 readability advisory · visual audits "
                           "(NOT a delivery gate · F-253):", file=sys.stderr)
@@ -2336,6 +2497,32 @@ def main(argv=None) -> int:
                         print(f"  … +{len(_vis) - 20} more", file=sys.stderr)
                     print(f"  ↳ focus one page: python3 {VALIDATE_HTML.name} "
                           "<html> --visual --slide <key>", file=sys.stderr)
+                # F-256: ALL error-level R-VIS / R-OVERFLOW / R-OVERLAP findings
+                # are real, user-visible defects on a real delivery render —
+                # content rendered below the body floor (R-VIS-BODY-FLOOR), a
+                # short label cramped under the floor, a tier inversion, an
+                # overlap, an overflow. The full --visual advisory already ran
+                # above for free; promote its ERROR severity findings to a
+                # BLOCKING gate (warnings/soft items stay advisory per F-253).
+                # Escape hatch for a deck shipped with known visual errors:
+                # DECK_ALLOW_VIS_ERRORS=1.
+                _vis_errors = [f for f in _errs
+                               if str(f.get("code", "")).startswith(
+                                   ("R-VIS", "R-OVERFLOW", "R-OVERLAP"))]
+                if _vis_errors and not os.environ.get("DECK_ALLOW_VIS_ERRORS"):
+                    print("\n❌ BLOCKING · error-level visual defects (content "
+                          "below the readability floor / overflow / overlap / "
+                          "tier inversion — real, user-visible breakage):",
+                          file=sys.stderr)
+                    for f in _vis_errors[:12]:
+                        print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
+                    if len(_vis_errors) > 12:
+                        print(f"  … +{len(_vis_errors) - 12} more", file=sys.stderr)
+                    print("  ↳ fix the flagged element(s); focus one page: python3 "
+                          f"{VALIDATE_HTML.name} <html> --visual --slide <key>. "
+                          "Ship anyway with known visual errors → "
+                          "DECK_ALLOW_VIS_ERRORS=1.", file=sys.stderr)
+                    _vis_block = True
                 # HARD geometry breakage is NOT a soft readability nit. A box whose
                 # content is clipped / spills visibly past its border / overlaps a
                 # sibling (R-VIS-CARD-OVERFLOW / R-OVERLAP / R-OVERFLOW /
@@ -2344,13 +2531,16 @@ def main(argv=None) -> int:
                 # defect this advisory-demotion was hiding (a hero card spilling onto
                 # the bottom strap rendered "PASS / errors 0" because the default gate
                 # is --no-visual and the whole-deck re-audit below was advisory-only).
-                # That re-audit already ran just above for free, so promote ONLY the
-                # hard-geometry error subset back to a BLOCKING gate; the soft tier /
-                # orphan / floor / balance items stay advisory (F-253). Escape hatch
-                # for a deliberate intentional spill: DECK_ALLOW_GEOM_OVERFLOW=1.
+                # That re-audit already ran just above for free, so promote the
+                # hard-geometry error subset to a BLOCKING gate; the soft tier /
+                # orphan / floor / balance items stay advisory (F-253). This is a
+                # SUBSET of _vis_block above kept intact with its OWN narrower
+                # escape hatch for a deliberate intentional spill:
+                # DECK_ALLOW_GEOM_OVERFLOW=1 (a tighter override than the broad
+                # DECK_ALLOW_VIS_ERRORS — overflow/overlap is rarely intentional).
                 _HARD_GEOM = {"R-VIS-CARD-OVERFLOW", "R-OVERLAP", "R-OVERFLOW",
                               "R-VIS-BAND-COLLIDE"}
-                _geom = [f for f in _data.get("errors", [])
+                _geom = [f for f in _errs
                          if str(f.get("code", "")) in _HARD_GEOM]
                 if _geom and not os.environ.get("DECK_ALLOW_GEOM_OVERFLOW"):
                     print("\n❌ BLOCKING · geometry breakage (content clipped / "
@@ -2384,8 +2574,7 @@ def main(argv=None) -> int:
         # --scope/--quick edits (it is a whole-deck Playwright pass over off-scope
         # pages). Its own Playwright load (~一遍) is the cost; a render under
         # --skip-validate-html skips it with the rest of the HTML gate.
-        if (CHECK_DIST.exists()
-                and "/runs/" in str(args.output_dir.resolve())
+        if (CHECK_DIST.exists() and _is_runs
                 and not scope_pages and not args.quick):
             dist = subprocess.run(
                 [sys.executable, str(CHECK_DIST), str(out_html), "--json"],
@@ -2394,6 +2583,7 @@ def main(argv=None) -> int:
             try:
                 import json as _json
                 _slides = _json.loads(dist.stdout or "[]")
+                _gc_distribution = "ran"
                 _findings = []
                 for _s in _slides:
                     for _sig in _s.get("signals", []) or []:
@@ -2421,11 +2611,65 @@ def main(argv=None) -> int:
             except Exception:
                 pass  # an advisory must NEVER break a render
 
+        # F-255: make a skipped gate's REASON explicit (vs the bare "skipped"
+        # default), so the GATE-COVERAGE line below never blurs "intentionally
+        # skipped" with "silently did not run".
+        if not args.visual:
+            if args.quick:
+                # --quick is the text-only fast path: geometry/visual are
+                # intentionally NOT run. The loud warning below makes the skip
+                # impossible to miss; the coverage line records WHY.
+                _gc_visual = "skipped(--quick)"
+                _gc_geometry = "skipped(--quick)"
+                _gc_distribution = "skipped(--quick)"
+            elif not _is_runs:
+                # /tmp smoke tests + tests/ temp renders: advisory-only, the gate
+                # does not fire (keeps the test suite green).
+                if _gc_visual == "ran":
+                    pass
+                else:
+                    _gc_visual = "skipped(not-runs/·advisory-only)"
+                    _gc_geometry = "skipped(not-runs/·advisory-only)"
+                _gc_distribution = "skipped(not-runs/·advisory-only)"
+            elif scope_pages:
+                # distribution is a whole-deck audit; a scoped edit skips it.
+                if _gc_distribution == "skipped":
+                    _gc_distribution = "skipped(--scope)"
+        # --quick: keep the fast path static-only, but make the skipped hard gate
+        # LOUD so nobody mistakes a quick render for a delivery-ready one (F-255).
+        if args.quick and not args.visual:
+            print("\n⚠ 几何/视觉硬闸未跑(--quick 纯文本快路)——交付前必须全量 "
+                  "render 一次。", file=sys.stderr)
+
+        def _print_gate_coverage():
+            # F-255: ONE machine-readable line so "did not run" is always
+            # distinguishable from "ran clean". Accurate to what executed.
+            print(
+                f"GATE-COVERAGE static={_gc_static} visual={_gc_visual} "
+                f"geometry={_gc_geometry} distribution={_gc_distribution} "
+                f"scope={_gc_scope}", file=sys.stderr)
+
         if rc.returncode != 0:
             print(file=sys.stderr)
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)
             if rc.stderr.strip():
                 print(rc.stderr, file=sys.stderr)
+            _print_gate_coverage()
+            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
+            return 4
+
+        if _vis_block:
+            print(file=sys.stderr)
+            print("render-deck: BLOCKED — this real (runs/) delivery render has "
+                  "error-level visual defects OR could not run the visual gate "
+                  "(see ❌ above). The static --no-visual gate cannot see these; "
+                  "the whole-deck visual audit caught them. Fix the flagged "
+                  "element(s), or — if you accept the risk — re-run with "
+                  "DECK_ALLOW_VIS_ERRORS=1 (known visual errors) / "
+                  "DECK_ALLOW_NO_VISUAL=1 (ship without the visual gate).",
+                  file=sys.stderr)
+            _print_gate_coverage()
+            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
             return 4
 
         if _geom_block:
@@ -2435,6 +2679,8 @@ def main(argv=None) -> int:
                   "cannot see; the whole-deck visual re-audit caught it. Fix the "
                   "spilling/overlapping element, or set DECK_ALLOW_GEOM_OVERFLOW=1 if "
                   "it is genuinely intentional.", file=sys.stderr)
+            _print_gate_coverage()
+            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
             return 4
 
         if _dist_block:
@@ -2444,7 +2690,23 @@ def main(argv=None) -> int:
                   "贴底 class the symmetric-offset balance rule cannot see. Fill the "
                   "empty canvas, even the box insets, or mark the slide intentional "
                   "with \"allow\": [\"imbalance\"] in deck.json.", file=sys.stderr)
+            _print_gate_coverage()
+            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
             return 4
+
+        # Gate passed — emit the coverage line on the success path too, so a
+        # clean render is provably distinguishable from a render whose gate
+        # silently did not run.
+        _print_gate_coverage()
+
+    # F-269: gate passed (or was skipped via --skip-validate-html) — the new
+    # index.html is the one we keep, so drop the pre-render backup. We're past
+    # every `return 4`, so reaching here means no rollback is needed.
+    if _index_bak is not None and _index_bak.exists():
+        try:
+            _index_bak.unlink()
+        except OSError:
+            pass
 
     # 7. Post-render asset handling — choose one of:
     #    (a) --inline: base64-inline CSS/JS/images into the HTML (single-file)
@@ -2454,7 +2716,19 @@ def main(argv=None) -> int:
     #    (c) --skip-copy-assets: leave skill-relative paths (works only inside
     #        the repo's runs/<ts>/output/ structure)
     if args.inline:
-        inline_html(out_html, deck)
+        _missing = inline_html(out_html, deck)
+        if _missing:
+            # F-270: a LOCAL ref we couldn't inline (file missing) stays an
+            # external link → it 404s the instant this "single-file" deck is
+            # moved/emailed. Surface it loudly (it used to be silent); with
+            # --inline-strict, fail so a broken portable deck can't ship.
+            print(f"\n⚠ --inline 未内联 {len(_missing)} 个本地引用"
+                  f"(移动后将 404): {_missing}", file=sys.stderr)
+            if args.inline_strict:
+                print("render-deck: --inline-strict — 存在未内联的本地引用,"
+                      "拒绝输出不完整的单文件 deck。修复缺失文件后重试。",
+                      file=sys.stderr)
+                return 6
         print(f"\nOK  →  {out_html}  (inline single-file mode)")
     elif not args.skip_copy_assets:
         # copy-assets.py requires output under <repo>/runs/<ts>/output/
@@ -2545,19 +2819,60 @@ def main(argv=None) -> int:
     return 0
 
 
-def inline_html(out_html: Path, deck: dict) -> None:
-    """Phase 1.d --inline implementation. Replaces external <link>/<script>
-    references with inlined <style>/<script> blocks. Also base64-encodes
-    referenced images. Adds <meta name=\"fs-deck-mode\" content=\"inline\">
-    so the HTML validator skips the P50 base64 budget warn."""
-    import base64, mimetypes
+def _is_inlinable_local_ref(url: str) -> bool:
+    """True for a ref that must be resolved against a local dir for inlining.
+    False for self-contained (data:), external (http(s)://, //, mailto:, tel:,
+    javascript:, blob:), and in-page fragment (#… or its percent-encoded form
+    %23…, e.g. an SVG `filter='url(%23noise)'`) / blank / dots-only refs.
+    Mirrors lift-slides._is_local_asset_ref so the two stay in lockstep (F-270)."""
+    u = (url or "").strip()
+    if not u:
+        return False
+    low = u.lower()
+    if low.startswith(("data:", "http://", "https://", "//", "mailto:",
+                       "tel:", "javascript:", "blob:", "#", "%23", "about:")):
+        return False
+    # A dots-only ref ('.', '..', '...') is never a real asset filename — it's a
+    # placeholder (e.g. the framework's `url('...')` doc example). Don't try to
+    # inline it and don't report it as a missing asset.
+    if set(u) <= {"."}:
+        return False
+    return True
 
+
+def _file_to_data_uri(path: Path) -> str:
+    """Base64 data: URI for a local file (mime guessed; defaults to image/png)."""
+    import base64, mimetypes
+    mime, _ = mimetypes.guess_type(str(path))
+    if not mime:
+        mime = "image/png"
+    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+def inline_html(out_html: Path, deck: dict) -> list[str]:
+    """Phase 1.d --inline implementation. Replaces external <link>/<script>
+    references with inlined <style>/<script> blocks. Also base64-encodes every
+    referenced asset — CSS url() backgrounds AND HTML media refs (<img src>,
+    <source src>, <video src|poster>), quoted or unquoted (F-270). Adds
+    <meta name=\"fs-deck-mode\" content=\"inline\"> so the HTML validator skips
+    the P50 base64 budget warn.
+
+    Returns the list of LOCAL refs that could NOT be inlined because the file
+    was missing — they stay as external links and will 404 once the single-file
+    deck is moved. The caller warns on these and (with --inline-strict) fails."""
     html_text = out_html.read_text(encoding="utf-8")
+    missing: list[str] = []   # local refs whose file wasn't found (would 404)
+
+    def _record_missing(url: str):
+        if url not in missing:
+            missing.append(url)
 
     def _inline_stylesheet(m):
         href = m.group(1)
         css_path = (out_html.parent / href).resolve()
         if not css_path.is_file():
+            _record_missing(href)
             return m.group(0)  # leave as-is if not findable
         css = css_path.read_text(encoding='utf-8')
         # Inline the CSS's OWN url() refs (e.g. `--fs-asset-cover-bg:
@@ -2566,10 +2881,10 @@ def inline_html(out_html: Path, deck: dict) -> None:
         # out_html-relative background-image pass never finds them and the
         # "portable single-file" deck would lose its cover/section/content
         # backgrounds + Lark logo the moment it's moved. `_resolve_bg` keeps
-        # http/data/missing refs untouched.
+        # http/data/fragment/missing refs untouched (and records the misses).
         css = re.sub(
             r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""",
-            lambda u: f"url({_resolve_bg(css_path, u.group(1))})",
+            lambda u: f"url({_resolve_bg(css_path, u.group(1), _record_missing)})",
             css,
         )
         # data-source="framework": the audit engine (audits.js sheetIsFramework)
@@ -2585,10 +2900,15 @@ def inline_html(out_html: Path, deck: dict) -> None:
         src = m.group(1)
         js_path = (out_html.parent / src).resolve()
         if not js_path.is_file():
+            _record_missing(src)
             return m.group(0)
         return f'<script data-source="framework">{js_path.read_text(encoding="utf-8")}</script>'
 
-    # Order matters: stylesheet first (cheap), then script, then bg images
+    # Order matters: stylesheet first (cheap), then script, then media/bg.
+    # NB: stylesheet/script passes consume <link>/<script> BEFORE the broad
+    # media + url() passes run, so a framework <script src> is never re-touched
+    # as a media ref, and CSS url()s are resolved against their OWN dir above
+    # (already → data:, so the broad url() pass below is a no-op on them).
     html_text = re.sub(
         r'<link\s+rel="stylesheet"\s+href="([^"]+)"\s*/?>',
         _inline_stylesheet, html_text,
@@ -2597,17 +2917,56 @@ def inline_html(out_html: Path, deck: dict) -> None:
         r'<script\b[^>]*?\bsrc="([^"]+)"[^>]*></script>',
         _inline_script, html_text,
     )
-    # bg images: handle url('...') and url("...")
+
+    # HTML media refs: <img src>, <source src>, <video src|poster> (F-270 — the
+    # old inliner only did quoted background-image url(), so these silently
+    # stayed external and 404'd after the deck was moved). Keep the original
+    # quote char; only rewrite LOCAL refs that resolve to a real file.
+    def _inline_attr(m):
+        pre, quote, url, post = m.group("pre"), m.group("q"), m.group("url"), m.group("post")
+        if not _is_inlinable_local_ref(url):
+            return m.group(0)
+        p = (out_html.parent / url).resolve()
+        if not p.is_file():
+            _record_missing(url)
+            return m.group(0)
+        return f"{pre}{quote}{_file_to_data_uri(p)}{quote}{post}"
+
+    _ATTR_PATTERNS = (
+        r'(?P<pre><img\b[^>]*?\bsrc\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+        r'(?P<pre><source\b[^>]*?\bsrc\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+        r'(?P<pre><video\b[^>]*?\bsrc\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+        r'(?P<pre><video\b[^>]*?\bposter\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+    )
+    for _pat in _ATTR_PATTERNS:
+        html_text = re.sub(_pat, _inline_attr, html_text, flags=re.I)
+
+    # CSS url() in inline style="" attributes — quoted OR bare (F-270: bare
+    # `url(x.png)` and non-background-image url() like mask/border-image were
+    # never inlined). This broad pass targets the HTML BODY's inline styles
+    # (relative to out_html). It MUST NOT re-process the already-inlined
+    # <style>/<script> blocks: framework CSS url()s were resolved against their
+    # OWN dir in _inline_stylesheet, and re-scanning them mis-fires on the inner
+    # `url(%23n)` of a data: SVG and on a `url('...')` doc comment (and would
+    # also pollute `missing` / falsely fail --inline-strict). So mask
+    # <style>…</style> and <script>…</script> first, run the url() pass, restore.
+    _masked: list[str] = []
+
+    def _mask(m):
+        _masked.append(m.group(0))
+        return f"\x00MASK{len(_masked) - 1}\x00"
+
+    html_text = re.sub(r"<style\b[^>]*>.*?</style>", _mask,
+                       html_text, flags=re.I | re.S)
+    html_text = re.sub(r"<script\b[^>]*>.*?</script>", _mask,
+                       html_text, flags=re.I | re.S)
     html_text = re.sub(
-        r"(background-image\s*:\s*url\()'([^']+)'(\))",
-        lambda m: f"{m.group(1)}{_resolve_bg(out_html, m.group(2))}{m.group(3)}",
+        r"""(url\(\s*)['"]?([^'")]+?)['"]?(\s*\))""",
+        lambda m: f"{m.group(1)}{_resolve_bg(out_html, m.group(2), _record_missing)}{m.group(3)}",
         html_text,
     )
-    html_text = re.sub(
-        r'(background-image\s*:\s*url\()"([^"]+)"(\))',
-        lambda m: f"{m.group(1)}{_resolve_bg(out_html, m.group(2))}{m.group(3)}",
-        html_text,
-    )
+    html_text = re.sub(r"\x00MASK(\d+)\x00",
+                       lambda m: _masked[int(m.group(1))], html_text)
 
     # Add fs-deck-mode=inline meta (skips P50 base64 budget). Check for the
     # exact meta tag, not the bare string — feishu-deck.js inlines a
@@ -2619,22 +2978,30 @@ def inline_html(out_html: Path, deck: dict) -> None:
             1,
         )
 
-    out_html.write_text(html_text, encoding="utf-8")
+    atomic_write_text(out_html, html_text, encoding="utf-8")
+    return missing
 
 
-def _resolve_bg(out_html: Path, url: str) -> str:
-    """Resolve a background-image url() to data: URI if local file exists."""
-    import base64, mimetypes
-    if url.startswith(("http://", "https://", "data:")):
+def _resolve_bg(out_html: Path, url: str, on_missing=None) -> str:
+    """Resolve a CSS url() ref to a quoted data: URI if the local file exists.
+    A bare `url(x.png)` becomes `url('data:…')`. External (http/data) and missing
+    LOCAL refs pass through re-quoted (the latter reported via `on_missing`).
+    Fragment refs (#…, %23…) and dots-only placeholders pass through BARE — they
+    are commonly the inner `filter='url(%23n)'` of an inline SVG data: URI, and
+    wrapping them in quotes (`url('%23n')`) corrupts the enclosing 'single-quoted'
+    SVG attribute (F-270)."""
+    u = (url or "").strip()
+    low = u.lower()
+    if low.startswith(("#", "%23")) or set(u) <= {"."}:
+        return url   # bare — never quote a fragment / placeholder
+    if not _is_inlinable_local_ref(url):
         return f"'{url}'"
     img_path = (out_html.parent / url).resolve()
     if not img_path.is_file():
+        if on_missing is not None:
+            on_missing(url)
         return f"'{url}'"
-    mime, _ = mimetypes.guess_type(str(img_path))
-    if not mime:
-        mime = "image/png"
-    b64 = base64.b64encode(img_path.read_bytes()).decode("ascii")
-    return f"'data:{mime};base64,{b64}'"
+    return f"'{_file_to_data_uri(img_path)}'"
 
 
 if __name__ == "__main__":

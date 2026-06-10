@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "deck": {
+    "title": "R-DECK-TITLE-DRIFT 跨页标题漂移 · must-fire fixture",
+    "author": "validator-fixture",
+    "date": "2026-06"
+  },
+  "slides": [
+    {
+      "key": "drift-page-a",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "blue",
+      "screen_label": "01 baseline A",
+      "data": {
+        "title": "页面一 · 标准基线标题",
+        "cards": [
+          {"num": "01", "icon": "message-circle", "title_zh": "即时同步", "body": "标题位于标准基线 top:61。"},
+          {"num": "02", "icon": "users", "title_zh": "共识对齐", "body": "标题位于标准基线 top:61。"},
+          {"num": "03", "icon": "check-circle", "title_zh": "闭环交付", "body": "标题位于标准基线 top:61。"}
+        ]
+      }
+    },
+    {
+      "key": "drift-page-b",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "blue",
+      "screen_label": "02 baseline B",
+      "data": {
+        "title": "页面二 · 标准基线标题",
+        "cards": [
+          {"num": "01", "icon": "message-circle", "title_zh": "即时同步", "body": "标题位于标准基线 top:61。"},
+          {"num": "02", "icon": "users", "title_zh": "共识对齐", "body": "标题位于标准基线 top:61。"},
+          {"num": "03", "icon": "check-circle", "title_zh": "闭环交付", "body": "标题位于标准基线 top:61。"}
+        ]
+      }
+    },
+    {
+      "key": "drift-page-c",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "blue",
+      "screen_label": "03 baseline C",
+      "data": {
+        "title": "页面三 · 标准基线标题",
+        "cards": [
+          {"num": "01", "icon": "message-circle", "title_zh": "即时同步", "body": "标题位于标准基线 top:61。"},
+          {"num": "02", "icon": "users", "title_zh": "共识对齐", "body": "标题位于标准基线 top:61。"},
+          {"num": "03", "icon": "check-circle", "title_zh": "闭环交付", "body": "标题位于标准基线 top:61。"}
+        ]
+      }
+    },
+    {
+      "key": "drift-page-d-lower",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "blue",
+      "screen_label": "04 drifted lower",
+      "custom_css": ".header { top: 96px !important; }",
+      "data": {
+        "title": "页面四 · 标题被压低 35px",
+        "cards": [
+          {"num": "01", "icon": "message-circle", "title_zh": "即时同步", "body": "这一页标题被 custom_css 压到 top:96,比其余页低 35px。"},
+          {"num": "02", "icon": "users", "title_zh": "共识对齐", "body": "这一页标题被 custom_css 压到 top:96,比其余页低 35px。"},
+          {"num": "03", "icon": "check-circle", "title_zh": "闭环交付", "body": "这一页标题被 custom_css 压到 top:96,比其余页低 35px。"}
+        ]
+      }
+    }
+  ]
+}

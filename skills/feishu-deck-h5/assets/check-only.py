@@ -38,7 +38,7 @@ import validate as V
 # ---------------------------------------------------------------------------
 
 FAMILIES = [
-    ('结构 / DOM',           ['R02', 'R07', 'R-DOM', 'R-DOC-INTEGRITY']),
+    ('结构 / DOM',           ['R02', 'R07', 'R-DOM', 'R-DOC-INTEGRITY', 'R-BAKED-DOM']),
     ('排版 / 文案',          ['R05', 'R06', 'R13', 'R20', 'R56',
                               'R-WHITE-TEXT', 'R-HIERARCHY', 'R-ECHO',
                               'R-BULLET-DASH', 'R-ESC-HTML']),
@@ -62,6 +62,8 @@ FAMILIES = [
                               'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-CANVAS-CENTER',
                               'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE',
                               'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS', 'R-VIS-RAW-TITLE-STACK']),
+    ('跨页一致性',           ['R-DECK-TITLE-DRIFT', 'R-DECK-PALETTE-DRIFT',
+                              'R-DECK-TYPESCALE-BUDGET']),
 ]
 
 CONTEXT_NOTES = {

@@ -303,6 +303,22 @@ if command -v node >/dev/null 2>&1; then
   fi
 fi
 
+# ---- Check 7: visual-audit capability probe (F-255) — non-fatal ----
+# The delivery quality gate (geometry / visual / distribution) runs the
+# Playwright/Chromium engine. On a real (runs/) delivery render that engine is
+# now REQUIRED — render-deck BLOCKS if it can't run (escape: DECK_ALLOW_NO_VISUAL=1).
+# Surface that capability ONCE here so the agent knows up front whether the gate
+# will be live or degraded. Informational only — NEVER changes preflight's exit
+# code (a missing engine is a degraded-gate state, not a preflight failure). We
+# probe the cheap `import playwright` (a real Chromium launch is ~1s — too slow
+# for preflight); render-deck's own engine-down detection is the authoritative
+# runtime check that actually blocks.
+if python3 -c "import playwright" >/dev/null 2>&1; then
+  echo "CAPABILITY visual-audit: ON"
+else
+  echo "CAPABILITY visual-audit: OFF — install: pip install playwright && python -m playwright install chromium (gates degrade to static-only; runs/ delivery will BLOCK unless DECK_ALLOW_NO_VISUAL=1)"
+fi
+
 # ---- All checks passed ----
 echo "PREFLIGHT OK"
 echo "  skill root: $SKILL_ROOT"

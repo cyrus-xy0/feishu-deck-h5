@@ -1,0 +1,103 @@
+{
+  "version": "1.0",
+  "deck": {
+    "title": "R-DECK-PALETTE-DRIFT 近重复强调色 · must-fire fixture",
+    "author": "validator-fixture",
+    "date": "2026-06"
+  },
+  "slides": [
+    {
+      "key": "palette-teal-a",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "teal",
+      "screen_label": "01 teal A",
+      "custom_css": ".accent-chip-a { color: #5cf0dc; }",
+      "data": {
+        "title": "页面一 · 青色强调 5cf0dc",
+        "cards": [
+          {
+            "num": "01",
+            "icon": "zap",
+            "title_zh": "强调色一",
+            "body": "这一页用 青 #5cf0dc 作强调。"
+          },
+          {
+            "num": "02",
+            "icon": "check",
+            "title_zh": "对齐",
+            "body": "卡片正文。"
+          },
+          {
+            "num": "03",
+            "icon": "users",
+            "title_zh": "闭环",
+            "body": "卡片正文。"
+          }
+        ]
+      }
+    },
+    {
+      "key": "palette-teal-b",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "teal",
+      "screen_label": "02 teal B",
+      "custom_css": ".accent-chip-b { color: #5befdc; }",
+      "data": {
+        "title": "页面二 · 青色强调 5befdc",
+        "cards": [
+          {
+            "num": "01",
+            "icon": "zap",
+            "title_zh": "强调色二",
+            "body": "这一页改成了 青 #5befdc —— 肉眼几乎一样。"
+          },
+          {
+            "num": "02",
+            "icon": "check",
+            "title_zh": "对齐",
+            "body": "卡片正文。"
+          },
+          {
+            "num": "03",
+            "icon": "users",
+            "title_zh": "闭环",
+            "body": "卡片正文。"
+          }
+        ]
+      }
+    },
+    {
+      "key": "palette-teal-c",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "teal",
+      "screen_label": "03 teal C",
+      "custom_css": ".accent-chip-c { color: #5cefdb; }",
+      "data": {
+        "title": "页面三 · 青色强调 5cefdb",
+        "cards": [
+          {
+            "num": "01",
+            "icon": "zap",
+            "title_zh": "强调色三",
+            "body": "这一页又微调成 青 #5cefdb —— 第三个近重复版本。"
+          },
+          {
+            "num": "02",
+            "icon": "check",
+            "title_zh": "对齐",
+            "body": "卡片正文。"
+          },
+          {
+            "num": "03",
+            "icon": "users",
+            "title_zh": "闭环",
+            "body": "卡片正文。"
+          }
+        ]
+      }
+    }
+  ]
+}

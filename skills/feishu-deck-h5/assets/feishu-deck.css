@@ -759,11 +759,14 @@ body {
   /* background set by the unified content-bg rule below — uses
      lark-content-bg.jpg (飞书母版 image1.jpg) for the subtle dark gradient. */
 }
-.slide[data-layout="content-3up"] .header {
-  position: absolute; top: 96px; left: 96px; right: 96px;
-  padding-bottom: 32px; border-bottom: 1px solid var(--fs-hairline);
-  display: grid; grid-template-columns: 1fr auto; align-items: end;
-}
+/* Removed (F-271, 2026-06-10): the content-3up `.header` override that pinned
+   it to top:96/left:96/right:96 (grid, bottom-rule). It was a DEAD rule —
+   the unified content/raw header rule below (~1521, `.slide[...content-3up...]
+   .header { top:61; left:73; right:320; display:block }`) has identical
+   specificity but wins on later cascade, so every content-3up title already
+   renders at the master coord 61/73 (verified: computed top/left = 61/73 both
+   before and after this deletion, byte-identical example renders). Keeping it
+   only misled docs / layout-lint into thinking content-3up titles sit at 96/96. */
 /* Removed v1.5.2: content-3up override that made the title 64 px while
    every other content layout was 52 px (per the unified header rule).
    The user noticed: pages with content-3up showed visibly larger titles

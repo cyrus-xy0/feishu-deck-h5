@@ -147,10 +147,7 @@ Master pixel grid (1920×1080):
 <div class="slide" data-layout="content-3up" data-accent="blue" data-screen-label="04 Content">
   <div class="wordmark">Lark</div>
   <div class="header">
-    <div>
-      <div class="eyebrow">CAPABILITIES · 三大能力</div>
-      <h2 class="title-zh" style="margin-top:14px">先进团队的<br>三大工作方式</h2>
-    </div>
+    <h2 class="title-zh">先进团队的三大工作方式</h2>
   </div>
   <div class="grid">
     <div class="card">
@@ -190,10 +187,7 @@ Master pixel grid (1920×1080):
 <div class="slide" data-layout="content-2col" data-accent="blue" data-screen-label="05 Content">
   <div class="wordmark">Lark</div>
   <div class="header">
-    <div>
-      <div class="eyebrow">PRODUCT · LARK BASE</div>
-      <h2 class="title-zh" style="margin-top:14px">让流程在表格里运转</h2>
-    </div>
+    <h2 class="title-zh">让流程在表格里运转</h2>
   </div>
   <div class="grid">
     <div class="col-text">
@@ -231,10 +225,7 @@ Master pixel grid (1920×1080):
 <div class="slide" data-layout="stats" data-screen-label="07 Stats">
   <div class="wordmark">Lark</div>
   <div class="header">
-    <div>
-      <div class="eyebrow">BUSINESS IMPACT · 实测数据</div>
-      <h2 class="title-zh" style="margin-top:14px">飞书带来的可量化结果</h2>
-    </div>
+    <h2 class="title-zh">飞书带来的可量化结果</h2>
   </div>
   <div class="grid">
     <div class="col">
@@ -306,10 +297,7 @@ Master pixel grid (1920×1080):
 <div class="slide" data-layout="table" data-accent="blue" data-screen-label="10 Table">
   <div class="wordmark">Lark</div>
   <div class="header">
-    <div>
-      <div class="eyebrow">COMPARISON · 平台对比</div>
-      <h2 class="title-zh" style="margin-top:14px">飞书与传统办公套件</h2>
-    </div>
+    <h2 class="title-zh">飞书与传统办公套件</h2>
   </div>
   <div class="table-wrap">
     <table>
@@ -334,10 +322,7 @@ Master pixel grid (1920×1080):
 <div class="slide" data-layout="timeline" data-accent="blue" data-screen-label="11 Timeline" style="--cols:4">
   <div class="wordmark">Lark</div>
   <div class="header">
-    <div>
-      <div class="eyebrow">ROADMAP · 部署节奏</div>
-      <h2 class="title-zh" style="margin-top:14px">12 周落地路径</h2>
-    </div>
+    <h2 class="title-zh">12 周落地路径</h2>
   </div>
   <div class="nodes">
     <div class="node"><div class="when">W1-2</div><div class="what">需求蓝图</div><div class="desc">访谈 6 部门, 输出协同地图与目标 KPI。</div></div>
@@ -355,10 +340,7 @@ Master pixel grid (1920×1080):
 <div class="slide" data-layout="process" data-accent="blue" data-screen-label="12 Process" style="--cols:4">
   <div class="wordmark">Lark</div>
   <div class="header">
-    <div>
-      <div class="eyebrow">SERVICE · 协同闭环</div>
-      <h2 class="title-zh" style="margin-top:14px">需求到交付,四步成型</h2>
-    </div>
+    <h2 class="title-zh">需求到交付,四步成型</h2>
   </div>
   <div class="flow">
     <div class="step"><div class="stnum">01</div><h3>提出</h3><p>任意一线员工在 Messenger 发起,自动落入 Base 队列。</p></div>

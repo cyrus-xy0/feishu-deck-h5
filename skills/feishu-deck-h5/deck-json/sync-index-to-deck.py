@@ -27,7 +27,24 @@ Safety
 - `--dry-run` reports diff without mutating.
 - `--slide-key K` syncs just that one slide.
 - Template-layout slides REQUIRE `--force` (converting cover/quote/agenda/
-  etc. to raw is lossy — drops the structured fields).
+  etc. to raw is lossy — drops the structured fields). Without `--force` a
+  template slide with browser edits now emits a loud WARNING (was a silent skip).
+- DIRECTION GUARD: a full sync assumes index.html is the NEWER side (the post-
+  render-edited one). If deck.json's mtime is NEWER than index.html's (you most
+  likely edited deck.json and have not re-rendered), the tool refuses to write —
+  it prints a hard warning and falls back to --dry-run. Pass `--index-is-newer`
+  (alias `--force-direction`) to override and reverse-feed anyway. The normal
+  render→sync flow (index.html always newer than deck.json) is UNAFFECTED.
+
+What a default full sync now covers (no per-flag opt-in)
+-------------------------------------------------------
+- raw `data.html` inner-HTML drift  (always covered)
+- canvas `data.elements[]` by-id round-trip  (always covered)
+- slide ORDER (drag-reorder)  (already covered)
+- `custom_css` block drift  (NEW — was silently dropped, reported "no drift")
+- `hidden` flag + speaker `notes`  (NEW in the default path — previously only
+  reachable via --hidden-only / --notes-only; both are lossless idempotent
+  surgical reconciles, so there is no reason they needed a separate flag)
 
 Usage
 -----
@@ -35,8 +52,10 @@ Usage
     python3 sync-index-to-deck.py ... --slide-key content-pipeline
     python3 sync-index-to-deck.py ... --dry-run
     python3 sync-index-to-deck.py ... --force        # convert template slides too
+    python3 sync-index-to-deck.py ... --index-is-newer   # override direction guard
 
-stdlib only. Python 3.10+.
+stdlib only (scope_selectors is loaded lazily from the sibling _css_utils.py).
+Python 3.10+.
 """
 from __future__ import annotations
 
@@ -47,6 +66,26 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+
+_SCOPE_SELECTORS = None
+
+
+def _scope_selectors(css: str, slide_key: str) -> str:
+    """Scope author CSS to one slide-key, via the canonical _css_utils primitive
+    (the SAME one render-deck.py uses to emit the <style data-fs-custom-css>
+    block). Loaded lazily so the module stays import-light. scope_selectors is
+    idempotent on already-scoped selectors, so feeding it the deck.json
+    `custom_css` field (scoped OR unscoped) yields exactly the rendered block
+    body — that equality is what custom_css drift detection relies on."""
+    global _SCOPE_SELECTORS
+    if _SCOPE_SELECTORS is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "_css_utils", Path(__file__).resolve().parent / "_css_utils.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SCOPE_SELECTORS = mod.scope_selectors
+    return _SCOPE_SELECTORS(css, slide_key)
 
 
 def _normalize_asset_paths(s: str) -> str:
@@ -532,6 +571,108 @@ def _slide_open_tag(html: str, key: str) -> str | None:
     return m.group(0) if m else None
 
 
+# ---------------------------------------------------------------------------
+# Lossless surgical reconciles (notes / hidden / order). Each mutates `deck` in
+# place (unless dry_run) and returns (changed, report_lines). They are pure
+# structural reconciles — no raw conversion, no inner-HTML diff — so they are
+# SHARED by both the per-flag surgical path (run_surgical_sync) and the default
+# full sync (F-273: hidden+notes used to be reachable ONLY via their own flags;
+# nothing about them justified that, so the full path now runs them too).
+# ---------------------------------------------------------------------------
+
+def _reconcile_notes(deck: dict, html: str, dry_run: bool) -> "tuple[bool, list[str]]":
+    """Speaker notes (口播稿) from the #fs-deck-notes island → slide.notes."""
+    lines = []
+    m = re.search(r'<script type="application/json" id="fs-deck-notes">(.*?)</script>',
+                  html, re.S)
+    html_notes = {}
+    if m:
+        try:
+            html_notes = json.loads(m.group(1).replace('<\\/', '</'))
+        except Exception:
+            html_notes = {}
+    n_changes = []
+    for slide in deck.get("slides", []):
+        key = slide.get("key")
+        if not key:
+            continue
+        new = html_notes.get(key) or None
+        cur = slide.get("notes") or None
+        if new == cur:
+            continue
+        n_changes.append((key, cur, new))
+        if not dry_run:
+            if new:
+                slide["notes"] = new
+            else:
+                slide.pop("notes", None)
+    lines.append(f"[notes] island has {len(html_notes)} note(s)")
+    for key, cur, new in n_changes:
+        lines.append(f"  {key}: notes {'set' if new else 'cleared'}")
+    if not n_changes:
+        lines.append("  ✓ no notes drift.")
+    return bool(n_changes), lines
+
+
+def _reconcile_hidden(deck: dict, html: str, dry_run: bool) -> "tuple[bool, list[str]]":
+    """Per-slide `hidden` (隐藏页) from data-hidden on the slide open tag."""
+    lines = []
+    h_changes, missing = [], []
+    for slide in deck.get("slides", []):
+        key = slide.get("key")
+        if not key:
+            continue
+        tag = _slide_open_tag(html, key)
+        if tag is None:
+            missing.append(key)
+            continue
+        html_hidden = bool(re.search(r'\bdata-hidden\b', tag))
+        if html_hidden == bool(slide.get("hidden")):
+            continue
+        h_changes.append((key, bool(slide.get("hidden")), html_hidden))
+        if not dry_run:
+            if html_hidden:
+                slide["hidden"] = True
+            else:
+                slide.pop("hidden", None)   # clean-remove, no hidden:false residue
+    lines.append(f"[hidden] scanned {len(deck.get('slides', []))} slides")
+    for key, old, new in h_changes:
+        lines.append(f"  {key}: hidden {old} → {new}")
+    if missing:
+        lines.append(f"  ⚠ {len(missing)} slide(s) not found in HTML (skipped): "
+                     f"{', '.join(missing[:8])}")
+    if not h_changes:
+        lines.append("  ✓ no hidden-flag drift.")
+    return bool(h_changes), lines
+
+
+def _reconcile_order(deck: dict, html: str, dry_run: bool) -> "tuple[bool, list[str]]":
+    """Slide ORDER (edit-mode drag-reorder) from DOM order. Only a pure
+    permutation is applied — a differing key SET (add/remove) is left alone."""
+    lines = []
+    dom_order = re.findall(
+        r'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="([^"]+)"', html)
+    deck_keys = [s.get("key") for s in deck.get("slides", []) if s.get("key")]
+    lines.append(f"[order] HTML has {len(dom_order)} slides, deck.json has {len(deck_keys)}")
+    changed = False
+    if not dom_order:
+        lines.append("  ⚠ no data-slide-key in HTML — can't sync order (skipped).")
+    elif set(dom_order) != set(deck_keys):
+        only_html = set(dom_order) - set(deck_keys)
+        only_deck = set(deck_keys) - set(dom_order)
+        lines.append(f"  ⚠ key sets differ (added/removed slides) — order NOT synced. "
+                     f"only-in-HTML: {sorted(only_html)[:5]}  only-in-deck: {sorted(only_deck)[:5]}")
+    elif dom_order == deck_keys:
+        lines.append("  ✓ order already matches.")
+    else:
+        lines.append(f"  reorder: {deck_keys}  →  {dom_order}")
+        if not dry_run:
+            order_idx = {k: i for i, k in enumerate(dom_order)}
+            deck["slides"].sort(key=lambda s: order_idx.get(s.get("key"), 1 << 30))
+        changed = True
+    return changed, lines
+
+
 def run_surgical_sync(index_html_path: Path, deck_json_path: Path,
                       do_hidden: bool, do_order: bool, do_notes: bool, dry_run: bool) -> int:
     """Surgical: reconcile ONLY structural fields from the rendered index.html back
@@ -544,89 +685,18 @@ def run_surgical_sync(index_html_path: Path, deck_json_path: Path,
     deck = json.loads(deck_json_path.read_text(encoding="utf-8"))
     changed = False
 
-    # --- speaker notes (口播稿) from the #fs-deck-notes island ---
     if do_notes:
-        m = re.search(r'<script type="application/json" id="fs-deck-notes">(.*?)</script>',
-                      html, re.S)
-        html_notes = {}
-        if m:
-            try:
-                html_notes = json.loads(m.group(1).replace('<\\/', '</'))
-            except Exception:
-                html_notes = {}
-        n_changes = []
-        for slide in deck.get("slides", []):
-            key = slide.get("key")
-            if not key:
-                continue
-            new = html_notes.get(key) or None
-            cur = slide.get("notes") or None
-            if new == cur:
-                continue
-            n_changes.append((key, cur, new))
-            if not dry_run:
-                if new:
-                    slide["notes"] = new
-                else:
-                    slide.pop("notes", None)
-        print(f"[notes] island has {len(html_notes)} note(s)")
-        for key, cur, new in n_changes:
-            print(f"  {key}: notes {'set' if new else 'cleared'}")
-        if not n_changes:
-            print("  ✓ no notes drift.")
-        changed = changed or bool(n_changes)
-
-    # --- hidden flag ---
+        ch, lines = _reconcile_notes(deck, html, dry_run)
+        print("\n".join(lines))
+        changed = changed or ch
     if do_hidden:
-        h_changes, missing = [], []
-        for slide in deck.get("slides", []):
-            key = slide.get("key")
-            if not key:
-                continue
-            tag = _slide_open_tag(html, key)
-            if tag is None:
-                missing.append(key)
-                continue
-            html_hidden = bool(re.search(r'\bdata-hidden\b', tag))
-            if html_hidden == bool(slide.get("hidden")):
-                continue
-            h_changes.append((key, bool(slide.get("hidden")), html_hidden))
-            if not dry_run:
-                if html_hidden:
-                    slide["hidden"] = True
-                else:
-                    slide.pop("hidden", None)   # clean-remove, no hidden:false residue
-        print(f"[hidden] scanned {len(deck.get('slides', []))} slides")
-        for key, old, new in h_changes:
-            print(f"  {key}: hidden {old} → {new}")
-        if missing:
-            print(f"  ⚠ {len(missing)} slide(s) not found in HTML (skipped): "
-                  f"{', '.join(missing[:8])}")
-        if not h_changes:
-            print("  ✓ no hidden-flag drift.")
-        changed = changed or bool(h_changes)
-
-    # --- slide order (drag-reorder) ---
+        ch, lines = _reconcile_hidden(deck, html, dry_run)
+        print("\n".join(lines))
+        changed = changed or ch
     if do_order:
-        dom_order = re.findall(
-            r'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="([^"]+)"', html)
-        deck_keys = [s.get("key") for s in deck.get("slides", []) if s.get("key")]
-        print(f"[order] HTML has {len(dom_order)} slides, deck.json has {len(deck_keys)}")
-        if not dom_order:
-            print("  ⚠ no data-slide-key in HTML — can't sync order (skipped).")
-        elif set(dom_order) != set(deck_keys):
-            only_html = set(dom_order) - set(deck_keys)
-            only_deck = set(deck_keys) - set(dom_order)
-            print(f"  ⚠ key sets differ (added/removed slides) — order NOT synced. "
-                  f"only-in-HTML: {sorted(only_html)[:5]}  only-in-deck: {sorted(only_deck)[:5]}")
-        elif dom_order == deck_keys:
-            print("  ✓ order already matches.")
-        else:
-            print(f"  reorder: {deck_keys}  →  {dom_order}")
-            if not dry_run:
-                order_idx = {k: i for i, k in enumerate(dom_order)}
-                deck["slides"].sort(key=lambda s: order_idx.get(s.get("key"), 1 << 30))
-            changed = True
+        ch, lines = _reconcile_order(deck, html, dry_run)
+        print("\n".join(lines))
+        changed = changed or ch
 
     if dry_run:
         print(f"\n  (--dry-run; {deck_json_path} NOT written.)")
@@ -646,6 +716,26 @@ def run_surgical_sync(index_html_path: Path, deck_json_path: Path,
     print(f"  python3 {Path(__file__).parent.name}/render-deck.py "
           f"{deck_json_path}  {deck_json_path.parent}/")
     return 0
+
+
+# Direction guard tolerance: deck.json must be MORE than this many seconds newer
+# than index.html to be considered "the wrong direction". A render writes both
+# files back-to-back, so index.html is normally a hair newer; the slack absorbs
+# clock jitter / FS mtime granularity so the normal render→sync flow never trips.
+_DIRECTION_TOLERANCE_S = 2.0
+
+
+def _wrong_direction(deck_json: Path, index_html: Path) -> "float | None":
+    """Return how many seconds deck.json is NEWER than index.html if that gap
+    exceeds the tolerance (→ a full sync would likely clobber un-rendered
+    deck.json edits with stale HTML). Returns None when the direction is fine
+    (index.html newer, equal, or within tolerance) or mtimes are unreadable —
+    fail-open so the guard never blocks the normal flow on an FS quirk."""
+    try:
+        delta = deck_json.stat().st_mtime - index_html.stat().st_mtime
+    except OSError:
+        return None
+    return delta if delta > _DIRECTION_TOLERANCE_S else None
 
 
 def main() -> int:
@@ -675,6 +765,14 @@ def main() -> int:
                     help="surgical: reconcile ONLY speaker notes (口播稿) from the "
                          "#fs-deck-notes island back into deck.json `notes`. Use after "
                          "editing notes in the presenter view + 💾/⌘S. Combinable.")
+    ap.add_argument("--index-is-newer", "--force-direction", dest="index_is_newer",
+                    action="store_true",
+                    help="override the DIRECTION GUARD: reverse-feed index.html → "
+                         "deck.json even when deck.json's mtime is newer (i.e. you "
+                         "really did hand-edit index.html and have NOT touched "
+                         "deck.json since). Without this, a newer deck.json downgrades "
+                         "a full sync to a dry-run + hard warning, to avoid silently "
+                         "clobbering un-rendered deck.json edits with stale HTML.")
     args = ap.parse_args()
 
     if not args.index_html.exists():
@@ -701,6 +799,33 @@ def main() -> int:
             return 2
         return run_backfill(args.index_html, args.deck_json, dry_run=args.dry_run)
 
+    # DIRECTION GUARD (F-273): a full sync assumes index.html is the NEWER side
+    # (the post-render-edited one). If deck.json is NEWER, the operator most
+    # likely edited deck.json and forgot to re-render — running sync would feed
+    # the STALE index.html back over those edits. Refuse to write: downgrade to a
+    # dry-run + hard warning. Override with --index-is-newer. Within the surgical
+    # paths above this guard is intentionally not applied (those are lossless
+    # idempotent reconciles of fields the browser owns, not a content overwrite).
+    direction_forced_dry = False
+    newer_by = _wrong_direction(args.deck_json, args.index_html)
+    if newer_by is not None and not args.index_is_newer and not args.dry_run:
+        print("⚠ DIRECTION GUARD: deck.json is "
+              f"{newer_by:.0f}s NEWER than index.html.", file=sys.stderr)
+        print("  Drift direction is probably REVERSED: you likely edited "
+              "deck.json and have not re-rendered yet.", file=sys.stderr)
+        print("  Running sync now would overwrite those edits with the STALE "
+              "index.html. Refusing to write.", file=sys.stderr)
+        print("  → If you meant to apply deck.json edits, RE-RENDER instead:",
+              file=sys.stderr)
+        print(f"      python3 {Path(__file__).parent.name}/render-deck.py "
+              f"{args.deck_json}  {args.deck_json.parent}/", file=sys.stderr)
+        print("  → If you really did hand-edit index.html (deck.json untouched), "
+              "re-run with --index-is-newer to force the reverse-feed.",
+              file=sys.stderr)
+        print("  (Falling back to --dry-run for this run.)\n", file=sys.stderr)
+        args.dry_run = True
+        direction_forced_dry = True
+
     index_html = args.index_html.read_text(encoding="utf-8")
     deck = json.loads(args.deck_json.read_text(encoding="utf-8"))
 
@@ -708,6 +833,7 @@ def main() -> int:
     skipped_template = []
     skipped_missing = []
     synced = []
+    synced_css = []
 
     for slide in deck.get("slides", []):
         key = slide.get("key")
@@ -720,6 +846,27 @@ def main() -> int:
         if inner is None:
             skipped_missing.append(key)
             continue
+
+        # --- custom_css block drift (F-273, layout-agnostic) ---
+        # extract_slide_inner() STRIPS the leading <style data-fs-custom-css>
+        # block before comparing data.html, and no other path compares it — so a
+        # browser edit to that block was silently dropped while sync reported
+        # "no drift". Compare the rendered block body against the deck.json
+        # `custom_css` field (scoped via the SAME primitive render-deck.py uses;
+        # scope_selectors is idempotent, so scoping the field reproduces the
+        # rendered body when there is no drift) and write back on mismatch. The
+        # stored value is the already-scoped body, which round-trips (re-render
+        # re-scopes → no change), matching _extract_slide_custom_css's contract.
+        html_css = _extract_slide_custom_css(index_html, key)
+        cur_css = slide.get("custom_css") or ""
+        if html_css.strip() != _scope_selectors(cur_css, key).strip():
+            drift_count += 1
+            if not args.dry_run:
+                if html_css.strip():
+                    slide["custom_css"] = html_css
+                else:
+                    slide.pop("custom_css", None)
+            synced_css.append((key, len(cur_css), len(html_css)))
 
         cur_layout = slide.get("layout", "")
         cur_html = slide.get("data", {}).get("html", "") if cur_layout == "raw" else None
@@ -767,12 +914,14 @@ def main() -> int:
                 slide["data"] = {"html": inner}
             synced.append((f"{cur_layout}→raw", key, 0, len(inner)))
 
-    # Reorder deck.json slides to match index.html DOM order. The visual editor's
-    # drag-reorder only rewrites index.html DOM order; without syncing it back,
-    # re-render restores the OLD deck.json order and the reorder is lost. Only
-    # when syncing the WHOLE deck (no --slide-key) and the key SETS match (a pure
-    # permutation — not an add/remove, which is other drift handled elsewhere).
+    surgical_lines: list[str] = []
     if not args.slide_key:
+        # Reorder deck.json slides to match index.html DOM order. The visual
+        # editor's drag-reorder only rewrites index.html DOM order; without
+        # syncing it back, re-render restores the OLD deck.json order and the
+        # reorder is lost. Only when syncing the WHOLE deck (no --slide-key) and
+        # the key SETS match (a pure permutation — not an add/remove, which is
+        # other drift handled elsewhere).
         dom_order = re.findall(
             r'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="([^"]+)"', index_html)
         deck_keys = [s.get("key") for s in deck.get("slides", []) if s.get("key")]
@@ -782,6 +931,20 @@ def main() -> int:
             if not args.dry_run:
                 order_idx = {k: i for i, k in enumerate(dom_order)}
                 deck["slides"].sort(key=lambda s: order_idx.get(s.get("key"), 1 << 30))
+
+        # hidden / notes reconcile (F-273): these were previously reachable ONLY
+        # via --hidden-only / --notes-only, so a default full sync silently left
+        # browser-toggled 隐藏页 and edited 口播稿 un-synced (then reported "no
+        # drift"). They are lossless idempotent field reconciles — fold them into
+        # the default whole-deck path. (Skipped under --slide-key, like order:
+        # those are whole-deck structural concerns, not a single-slide content sync.)
+        h_changed, h_lines = _reconcile_hidden(deck, index_html, args.dry_run)
+        n_changed, n_lines = _reconcile_notes(deck, index_html, args.dry_run)
+        surgical_lines = h_lines + n_lines
+        if h_changed:
+            drift_count += 1
+        if n_changed:
+            drift_count += 1
 
     # Report
     print(f"sync-index-to-deck: scanned {len(deck.get('slides', []))} slides")
@@ -797,10 +960,24 @@ def main() -> int:
             else:
                 delta = f"new {new_size} chars"
             print(f"    [{kind:14s}] {key}  ({delta})")
+    if synced_css:
+        verb = "WOULD UPDATE" if args.dry_run else "UPDATED"
+        print(f"  {verb} custom_css: {len(synced_css)} slide(s)")
+        for key, old_size, new_size in synced_css:
+            print(f"    [{'custom_css':14s}] {key}  ({old_size}→{new_size} chars)")
+    if surgical_lines:
+        for line in surgical_lines:
+            print(line)
     if skipped_template:
-        print(f"  SKIPPED (template layout — use --force to convert): {len(skipped_template)}")
+        # F-273: a template slide with browser edits is data loss waiting to
+        # happen — re-render drops the edits, --force drops the structured
+        # fields. Was a silent SKIPPED line; now a loud WARNING.
+        print(f"  ⚠ WARNING — {len(skipped_template)} TEMPLATE slide(s) have browser "
+              f"edits that will be LOST on re-render:")
         for key, layout in skipped_template:
-            print(f"    {key} (layout={layout})")
+            print(f"    {key} (layout={layout}) — edits not synced. --force would "
+                  f"convert it to raw (LOSSY: drops structured {layout} fields). A "
+                  f"by-field reverse map for template slides is a separate task.")
     if skipped_missing:
         print(f"  SKIPPED (slide-key not in index.html): {len(skipped_missing)}")
         for key in skipped_missing:
@@ -810,7 +987,12 @@ def main() -> int:
         return 0
 
     if args.dry_run:
-        print(f"\n  (--dry-run; deck.json NOT modified. {drift_count} slide(s) would be updated.)")
+        if direction_forced_dry:
+            print(f"\n  (DIRECTION GUARD forced --dry-run; deck.json NOT modified. "
+                  f"{drift_count} item(s) would be reverse-fed. Re-render, or pass "
+                  f"--index-is-newer to override.)")
+        else:
+            print(f"\n  (--dry-run; deck.json NOT modified. {drift_count} slide(s) would be updated.)")
         return 0
 
     # Backup before write

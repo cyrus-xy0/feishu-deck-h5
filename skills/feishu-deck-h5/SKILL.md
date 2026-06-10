@@ -29,9 +29,14 @@ materials directly.
 
 Before doing anything, lock three things:
 
-1. **Mode**: parse / design / render / validate / simulate / edit / publish /
-   import / full pipeline / generation-from-source-html / edit-imported-html /
-   translate.
+1. **Mode**: pick exactly one from the single **Authoritative Mode Enum** in
+   `references/request-router.md` — that table is the one canonical mode
+   vocabulary (`CHECK-ONLY` / `GENERATION` / `GENERATION_FROM_SOURCE_HTML` /
+   `EDIT` / `EDIT_IMPORTED_HTML` / `RESKIN` / `LIFT+SWAP` / `TRANSLATE` / `PARSE` /
+   `IMPORT` / `SIMULATE` / `PUBLISH`) and it also gives each mode's one-line
+   trigger and its `mode → subskill` routing target. Do not keep a second mode
+   list here. (Cross-check: the **Subskill Map** below is the subskill side of the
+   same mapping.)
 2. **Scope**: one slide, named slides, whole deck, or one run folder. Default to the
    smallest scope the user asked for.
 3. **Target**: run directory, `outline.json`, `deck.json`, `index.html`, slide key,
@@ -195,8 +200,10 @@ For a new deck:
    when multi-agent dispatch is available. A `.pptx` import goes Parser →
    build_pptx → a structured, editable `canvas` deck.json (no screenshots);
    un-reconstructable pages (live chart / SmartArt / OLE) are placeholdered and
-   reported for the user to redo — so this can hand straight to Renderer/Editor
-   without a Designer pass when the deck is just being imported. `build_pptx`
+   reported for the user to redo. **Pure import (1:1 restore) 免 Designer**: that
+   `canvas` deck.json hands straight to Renderer/Editor without a Designer pass.
+   But **import-then-create / 重写 must pass the design gate** (Designer first) —
+   the same口径 as `references/request-router.md` "Import vs re-create". `build_pptx`
    lives in the **`pptx-to-deck`** skill — a top-level sibling that Parser
    delegates to and that uses this skill as its render backend; a user may also
    invoke `pptx-to-deck` directly. (A LibreOffice/raster hybrid pipeline was

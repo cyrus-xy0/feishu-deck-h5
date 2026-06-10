@@ -996,6 +996,11 @@
     'R-VIS-DEAD-RULE': { coverage: 'universal', signal: 'css-source' },
     'R-DOM': { coverage: 'universal', signal: 'dom' },
     'UI1': { coverage: 'universal', signal: 'dom' },
+    // 跨页一致性 (DECK-LEVEL · F-257) — deck 级求值,name-free,均 universal(raw+schema
+    // 都跑;opt-out 是显式逃生口,不是 coverage 收窄)。
+    'R-DECK-TITLE-DRIFT': { coverage: 'universal', signal: 'dom' },
+    'R-DECK-PALETTE-DRIFT': { coverage: 'universal', signal: 'css-source' },
+    'R-DECK-TYPESCALE-BUDGET': { coverage: 'universal', signal: 'css-source' },
   };
 
   // Contract assertion — pure data check, never throws at engine load (a bad entry
@@ -3859,13 +3864,22 @@
 
     {
       // R-VIS-RAW-TITLE-POS · raw 内容页的 de-facto 标题不在标准基线 (2026-06-04).
-      // R-VIS-TITLE-POSITION 只量框架 `.header` 的 top(期望 61);raw 页没有 .header、标题
-      // 手写在 .raw-stage 里 → 那条规则没东西可量、静默放行,正是"标题偏下/缺失/顶部留空带"
-      // 一类问题的盲区(世界坚果协会 deck 第一版踩的就是这个:全 deck `.header` 出现 0 次)。
+      // R-VIS-TITLE-POSITION 只量框架 `.header` 里的 `.title-zh` 的 top(期望 61);raw 页
+      // 没有 .header、标题手写在 .raw-stage 里 → 那条规则没东西可量、静默放行,正是
+      // "标题偏下/缺失/顶部留空带"一类问题的盲区(世界坚果协会 deck 第一版踩的就是这个:
+      // 全 deck `.header` 出现 0 次)。
       // 这条补盲,纯几何 name-free:找 de-facto 标题(slide 内最高的 own-text、非 absolute、
       // font-size>=32 的醒目块,正文一般 <=28 不会被选),量它距 slide 顶的 top;>101px(明显
-      // 低于 61 基线 / 上方留了空带)→ warn。只查 layout=raw;有渲染 .header 的归
-      // R-VIS-TITLE-POSITION;hero / data-allow-imbalance 豁免。warn(de-facto 检测是启发式)。
+      // 低于 61 基线 / 上方留了空带)→ warn。只查 layout=raw;hero / data-allow-imbalance 豁免。
+      // 双盲区扩盲 (F-271, 2026-06-10):原本"slide 有任一渲染 .header 就归 TITLE-POSITION"
+      // 太宽 —— raw 页带了 `.header` 但标题用自定义类(.r-title / .r-head,非 .title-zh)时,
+      // TITLE-POSITION 的 titleEl 取到 null → 静默放行,而本条又因 .header 在场提前 return,
+      // 两条规则同时漏(实证 nut-assoc 9 页 top 出现 44/48/61 全漏)。改为:只有 .header 里
+      // 确有 TITLE-POSITION 能量的框架标题(.title-zh / h1.title-zh / h2.title-zh)时才让位;
+      // .header 在场但无框架标题 → 落回下面的 name-free de-facto 扫描(其内含的静态自定义
+      // 标题节点会被选中,top 反映绝对定位 .header 的真实渲染位置)。warn(启发式;绝不 error
+      // —— F-256 已把 error 级 R-VIS 提为阻断,raw 标题位做 error 会让大量现存 raw deck 全被
+      // block,本就标题漂移)。
       id: 'R-VIS-RAW-TITLE-POS',
       severity: 'warn',
       evaluate(slide, ctx) {
@@ -3873,7 +3887,12 @@
         if (layout !== 'raw') return [];
         if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
         const hdr = slide.querySelector(':scope > .header');
-        if (hdr && hdr.getClientRects().length > 0) return [];   // 有框架标题 → 归 TITLE-POSITION
+        // 只有 .header 里确有 TITLE-POSITION 能量的框架标题时才让位(选择器与那条逐字对齐);
+        // 否则(.header 在场但用自定义标题类 / 无标题)落回下面 name-free 扫描,补双盲区。
+        const fwTitle = hdr && hdr.getClientRects().length > 0 && hdr.querySelector(
+          ':scope > .title-zh, :scope > h1.title-zh, :scope > h2.title-zh, '
+          + ':scope h2.title-zh, :scope h1.title-zh');
+        if (fwTitle) return [];   // 有框架标题 → 归 R-VIS-TITLE-POSITION
         const sr = slide.getBoundingClientRect();
         const scale = (sr.height / 1080) || 1;
         let tEl = null, tTop = Infinity;
@@ -5857,6 +5876,253 @@
           }
         });
         return findings;
+      },
+    },
+
+    // ========================================================================
+    //  跨页一致性 (DECK-LEVEL consistency · F-257 cross-page half) —— 至此全部
+    //  62 条规则都是【单页】判定,页与页之间零比较,所以"风格逐页漂移"完全隐形:
+    //  标题基线一页一个位置、强调色每页一个近重复色号(肉眼目测调色)、
+    //  allow:typescale 豁免全 deck 越攒越多(northregion 实测 161 条)。下面三条
+    //  做 deck 级求值(只在 ctx.isFirstInScope 锚帧报一次,内部自己扫整 deck),
+    //  全部 WARN(一致性是建议不是阻断)、name-free(几何/颜色而非类名白名单)、
+    //  带 opt-out。立场:设计自由归模型,skill 只保证「结果合规」——这三条是顾问,
+    //  不是设计专政,故宁可漏报不可误报(误报会训练人忽略它)。
+    // ========================================================================
+
+    {
+      // R-DECK-TITLE-DRIFT · 内容页标题基线 / 字号跨页一致性。R-VIS-TITLE-POSITION
+      // 逐页量「.header 距理想 61px」,但它对每一页独立判定 —— 若整 deck 的标题统一
+      // 偏到 80px,每页与 61 的偏差一致、可能都在容差内或都被同样处理,却没人发现
+      // 「这一页比其余页低了 35px」这种【页间】漂移。这条按 deck 自己的 MODE(众数)
+      // 当基准:收集所有【非 hero】slide 的框架标题(.header .title-zh,退 .header h2)
+      // computed top 与 font-size(都按 slide scale 归一化到 design px),求各自众数;
+      // 某页 top 偏离众数 >8px(对齐 R-VIS-TITLE-POSITION 容差)或 font-size ≠ 众数 → 报。
+      // 跳过 hero / display:none 隐藏 header / 渲染失败的页;deck 或某页带
+      // data-allow-title-drift(或 CSS 注释 /* allow:title-drift */)整豁免。
+      // 需 ≥2 个可量标题才有「众数」可言(单页无所谓一致性)。warn。
+      id: 'R-DECK-TITLE-DRIFT',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RDECK_TITLEDRIFT_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次,挂本次 scope 首帧
+        if (typeof window !== 'undefined') window.__RDECK_TITLEDRIFT_DONE__ = true;
+        if (typeof document === 'undefined') return [];
+        // opt-out:整 deck 关。任一 [data-allow-title-drift] 属性,或任一 <style>/源里
+        // 的 /* allow:title-drift */ 注释(后者可写在 custom_css 里随页 round-trip)。
+        if (document.querySelector('[data-allow-title-drift]')) return [];
+        if (allStyleText().indexOf('allow:title-drift') >= 0) return [];
+
+        const slides = document.querySelectorAll('.slide');
+        // 与 R-VIS-TITLE-POSITION 同套 TITLE_SKIP_LAYOUTS(hero + replica)逐字一致 ——
+        // 这些版式没有内容页式的标准标题基线,纳入比较会污染众数。
+        const TITLE_SKIP_LAYOUTS = new Set(['cover', 'section', 'end', 'quote',
+          'big-stat', 'replica', 'image-text']);
+        const samples = [];   // { idx, top, fs }
+        slides.forEach((sl, i) => {
+          const layout = sl.getAttribute('data-layout') || '';
+          if (TITLE_SKIP_LAYOUTS.has(layout)) return;
+          if (HERO_LAYOUTS.has(layout)) return;
+          if (sl.hasAttribute('data-allow-title-drift')) return;
+          const header = sl.querySelector(':scope > .header');
+          const titleEl = sl.querySelector(
+            ':scope > .header > .title-zh, :scope > .header > h1.title-zh, '
+            + ':scope > .header > h2.title-zh, :scope > .header h2.title-zh, '
+            + ':scope > .header h1.title-zh, :scope > .header > h2');
+          // display:none / 未渲染 header 跳过(getClientRects().length===0 是规范判定,
+          // 与 R-VIS-TITLE-POSITION 一致 —— agenda 等隐藏 header 版式无标题可量)。
+          if (!(header && titleEl && header.getClientRects().length > 0)) return;
+          const sr = sl.getBoundingClientRect();
+          const scale = (sr.height / 1080) || 1;
+          const top = Math.round((titleEl.getBoundingClientRect().top - sr.top) / scale);
+          const fs = Math.round(parseFloat(getComputedStyle(titleEl).fontSize) / scale);
+          samples.push({ idx: i + 1, top, fs });
+        });
+        // 众数需要样本:少于 2 个可量标题 → 无「页间一致性」概念,静默。
+        if (samples.length < 2) return [];
+
+        const modeOf = (vals) => {
+          const c = new Map();
+          for (const v of vals) c.set(v, (c.get(v) || 0) + 1);
+          let best = null, bestN = -1;
+          // 平票时取「数值更小」者当基准(标准基线偏低,61 一族;稳定可复现)。
+          for (const [v, n] of [...c.entries()].sort((a, b) => a[0] - b[0])) {
+            if (n > bestN) { best = v; bestN = n; }
+          }
+          return best;
+        };
+        const topMode = modeOf(samples.map((s) => s.top));
+        const fsMode = modeOf(samples.map((s) => s.fs));
+        const TOL = 8;   // 对齐 R-VIS-TITLE-POSITION 的 8px 容差
+
+        const findings = [];
+        for (const s of samples) {
+          const topOff = Math.abs(s.top - topMode) > TOL;
+          const fsOff = s.fs !== fsMode;
+          if (!topOff && !fsOff) continue;
+          const bits = [];
+          if (topOff) bits.push(`top:${s.top}px vs deck mode ${topMode}px (Δ${s.top - topMode > 0 ? '+' : ''}${s.top - topMode})`);
+          if (fsOff) bits.push(`font-size:${s.fs}px vs deck mode ${fsMode}px`);
+          findings.push({
+            rule: 'R-DECK-TITLE-DRIFT', severity: 'warn', slide_idx: s.idx,
+            message:
+              `slide ${s.idx}: content-page title drifts from the deck baseline — `
+              + bits.join('; ') + '. '
+              + 'Page-to-page title position/size should be consistent across content '
+              + 'pages; align this one to the deck mode (the value most pages share) '
+              + 'so the title doesn\'t jump as the audience pages through. '
+              + 'Deliberate? add `data-allow-title-drift` to the slide (or the deck), '
+              + 'or `/* allow:title-drift */` in its custom_css. (advisory · never blocks)',
+          });
+        }
+        return findings;
+      },
+    },
+
+    {
+      // R-DECK-PALETTE-DRIFT · 跨页近重复强调色("每页重新目测调色"指纹)。R10 故意
+      // strip 掉 <style>(只看 inline / markup),看不见 custom_css / 内联 <style> 里
+      // 写死的近重复色号(如 #5cf0dc 与 #5befdc —— 同一个青,手调出三个版本)。这条
+      // 用 iterStyleBlocks(true)(含框架 + per-page <style>,正是 R10 的盲区)+ inline
+      // style 全量扫 hex / rgb,归一到 rgb,排除近黑/近白/近灰(低 chroma 或暗背景 ——
+      // 背景与文字天然就多,不算 accent),把剩下的「真·强调色」聚类:两色同簇 ⇔ 三
+      // 通道差都 ≤8。只有当某簇含 ≥3 个【不同】hex(即 ≥3 个近重复)才报 —— 校准实测:
+      // 干净 deck 最坏只有 1 个 2-成员簇(brand #3c7fff 与某 mock 蓝 #3a86ff 恰好相近,
+      // 合法),要 3 个近重复才是「手调漂移」。framework 自带 6 个品牌强调色彼此分得很
+      // 开(无近重复)→ 静默。deck 带 data-allow-palette(或 /* allow:palette */)整豁免。
+      // warn。
+      id: 'R-DECK-PALETTE-DRIFT',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RDECK_PALETTE_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次
+        if (typeof window !== 'undefined') window.__RDECK_PALETTE_DONE__ = true;
+        if (typeof document === 'undefined') return [];
+        if (document.querySelector('[data-allow-palette]')) return [];
+        if (allStyleText().indexOf('allow:palette') >= 0) return [];
+
+        // 颜色源 = 全部 CSS(含框架 + per-page <style>,iterStyleBlocks(true))+ inline
+        // style 属性。data: URI 段剥掉(base64 里的假 #hex)。
+        let txt = '';
+        for (const { css } of iterStyleBlocks(true)) txt += '\n' + css;
+        const inlineEls = document.querySelectorAll('[style]');
+        for (const el of inlineEls) txt += '\n' + (el.getAttribute('style') || '');
+        txt = txt.replace(/data:[^"'\s)]+/g, '');
+
+        const colors = new Set();   // 'r,g,b'
+        const addRgb = (r, g, b) => { colors.add(`${r},${g},${b}`); };
+        const hexToRgb = (h) => {
+          let s = h.toLowerCase();
+          if (s.length === 3) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+          return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+        };
+        let m;
+        const HEX = /#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})\b/g;
+        while ((m = HEX.exec(txt))) { const [r, g, b] = hexToRgb(m[1]); addRgb(r, g, b); }
+        const RGB = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/g;
+        while ((m = RGB.exec(txt))) { addRgb(+m[1], +m[2], +m[3]); }
+
+        // 「真·强调色」过滤:必须够鲜艳(chroma = max-min 通道 ≥60)且够亮(max 通道
+        // ≥140)。这排掉:近灰(低 chroma 的文字/边框)、近黑/暗背景(navy #0a1230 一族
+        // chroma 虽 ~30 但 max 很低)、近白。校准:must-fire 青 #5cf0dc chroma148 max240
+        // 通过;暗背景全被挡。
+        const parse = (s) => s.split(',').map(Number);
+        const isAccent = (c) => {
+          const mx = Math.max(c[0], c[1], c[2]);
+          const mn = Math.min(c[0], c[1], c[2]);
+          return (mx - mn) >= 60 && mx >= 140;
+        };
+        const accents = [...colors].map(parse).filter(isAccent);
+
+        // 聚类:同簇 ⇔ 三通道差都 ≤8(near-duplicate 容差)。单链聚合够用。
+        const near = (a, b) => Math.abs(a[0] - b[0]) <= 8 && Math.abs(a[1] - b[1]) <= 8 && Math.abs(a[2] - b[2]) <= 8;
+        const clusters = [];
+        for (const c of accents) {
+          let placed = false;
+          for (const cl of clusters) {
+            if (cl.some((x) => near(x, c))) { cl.push(c); placed = true; break; }
+          }
+          if (!placed) clusters.push([c]);
+        }
+        // 只报 ≥3 个不同 hex 的近重复簇(校准:干净 deck 最多 2-成员簇 → 不报;
+        // ≥3 = 手调漂移)。
+        const toHex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+        const dupClusters = clusters.filter((cl) => cl.length >= 3);
+        if (!dupClusters.length) return [];
+
+        const groups = dupClusters
+          .map((cl) => cl.map(toHex).sort().join(' ≈ '))
+          .join(' | ');
+        return [{
+          rule: 'R-DECK-PALETTE-DRIFT', severity: 'warn', slide_idx,
+          message:
+            `deck palette has near-duplicate accent colors (the "re-eyeballed the `
+            + `accent on every page" fingerprint): ${groups}. `
+            + 'These read as the SAME color but are hand-tuned variants — unify each '
+            + 'cluster to ONE accent (ideally a `--fs-*` token) so the brand color is '
+            + 'identical deck-wide. (R10 can\'t see these because it strips `<style>`.) '
+            + 'Intentional? add `data-allow-palette` to the deck (or `/* allow:palette */`). '
+            + '(advisory · never blocks)',
+        }];
+      },
+    },
+
+    {
+      // R-DECK-TYPESCALE-BUDGET · 全 deck allow:typescale 滥用(豁免变成了常态:
+      // northregion 实测 161 条)。/* allow:typescale */ 本是给罕见 hero 数字(封面 100、
+      // big-stat 132+ 等)的逃生口,被逐页攒成 deck 级常态后,R20 的 4-tier 台阶约束
+      // 实际被架空。这条数【作者 / per-page CSS】里 allow:typescale 出现次数(R20 honor
+      // 的那个 marker)与【非 hero 内容页】数;次数 > 1.0×内容页数 → 报(给出总数、均值)。
+      // ⚠️ 只数作者 CSS(iterStyleBlocks(false),data-source=framework 排除)—— 框架表
+      //    自带 3 条 hero-numeral 豁免(cover/section/image-text 等)是【每个 deck 都有】
+      //    的基线噪声,不是作者滥用;实测干净 deck 作者 marker = 0(无论几页都静默),
+      //    northregion 那 161 条全在 per-page CSS。must-fire 实测 8/2=4×/页 远超。deck 带
+      //    data-allow-typescale-budget(或注释 /* allow:typescale-budget */)整豁免。warn。
+      id: 'R-DECK-TYPESCALE-BUDGET',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RDECK_TSBUDGET_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次
+        if (typeof window !== 'undefined') window.__RDECK_TSBUDGET_DONE__ = true;
+        if (typeof document === 'undefined') return [];
+        if (document.querySelector('[data-allow-typescale-budget]')) return [];
+        // opt-out 注释在【任意】CSS 都认(作者写在 custom_css 也行)。
+        if (allStyleText().indexOf('allow:typescale-budget') >= 0) return [];
+
+        // allow:typescale 出现次数 —— 只数作者 / per-page CSS(排除框架的 hero 基线豁免;
+        // 与 R20 读同一个 marker,但 R20 是逐条按 [data-page=/[data-slide-key= 选择器 gate
+        // 出作者规则,这里直接用 iterStyleBlocks(false) 把 data-source=framework 整块排除)。
+        let authorCss = '';
+        for (const { css: c } of iterStyleBlocks(false)) authorCss += '\n' + c;
+        const occ = (authorCss.match(/allow:typescale/g) || []).length;
+        // 内容页 = 非 hero(与标题漂移同口径:豁免名集合 = HERO_LAYOUTS)。
+        const slides = document.querySelectorAll('.slide');
+        let content = 0;
+        slides.forEach((sl) => {
+          const layout = sl.getAttribute('data-layout') || '';
+          if (!HERO_LAYOUTS.has(layout)) content += 1;
+        });
+        if (content < 1) return [];
+        // 阈值:严格大于 1.0 × 内容页数(phase-1a 恰好 =1.00 须放行 → 用 >,非 >=)。
+        if (occ <= content) return [];
+
+        const avg = (occ / content).toFixed(1);
+        return [{
+          rule: 'R-DECK-TYPESCALE-BUDGET', severity: 'warn', slide_idx,
+          message:
+            `deck uses \`allow:typescale\` ${occ}× across ${content} content pages `
+            + `(~${avg} per page). The exemption is meant for RARE hero numbers `
+            + '(cover 100, section 88/160, big-stat 132+, quote 88+), not a deck-wide '
+            + 'escape from the 4-tier ladder {16,24,28,48}. When most pages opt out, '
+            + 'R20\'s type-scale discipline is effectively gone — pull the recurring '
+            + 'off-tier sizes back onto the ladder (or into shared `--fs-*` tokens) '
+            + 'and keep `allow:typescale` for the genuine hero exceptions. '
+            + 'Deliberate? add `data-allow-typescale-budget` to the deck. '
+            + '(advisory · never blocks)',
+        }];
       },
     },
   ];

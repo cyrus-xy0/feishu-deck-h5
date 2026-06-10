@@ -78,27 +78,20 @@ allowlist below. The common schema set includes cover, agenda, section, content
 variants, quote, stats, big-stat, image-text, table, timeline, process, end, plus
 extra DeckJSON layouts such as `raw`, `replica`, and `iframe-embed`.
 
-Pick by content substance, not aesthetics. If the page has alignment, hierarchy,
-relationship, metaphor, spatial storytelling, animation substance, or narrative
-composition, keep it raw. If it is just a standard shape, schema is faster, safer,
-and more editable.
+Pick by content substance, not aesthetics. A page stays **`raw` (the default)**
+unless it is a *pure standard shape* — a page with no bespoke pairing,
+relationship, narrative, metaphor, spatial composition, or motion substance. Only
+then is a schema layout faster, safer, and more editable. (Do not use vague tests
+like "has alignment / hierarchy" to decide — every page has those.)
 
-Pure standard-shape allowlist:
-
-| Shape | Schema |
-|---|---|
-| Cover: title + owner + date | `cover` |
-| Closing: slogan + contact info | `end` |
-| Single quote + attribution | `quote` |
-| Plain agenda with 3-8 items | `agenda` |
-| Single row of 3-4 KPI numbers, no diagram | `stats/row` |
-| Plain parallel cards: icon + title + body, no diagram/connector/animation | `content/3up` or `content/blocks` |
-| Plain text comparison matrix | `table` |
-| Faithful PDF/page image | `replica` |
-
-Deterministic geometry schemas such as chart, table, logo-wall, flow, and
-arch-stack may also be used when the page is mainly data/structure and does not
-need bespoke story composition. Otherwise, raw is the default.
+**Single source for the fall-back allowlist.** The canonical "when may a page fall
+back to a schema layout" table lives in `references/design-first.md` →
+*Decision rule — 白名单回退判定*. Use that one table; do not keep a second copy
+here (the two drifting apart is what made the same page type land on raw in one
+run and schema in the next). That table already includes the deterministic-geometry
+schemas (`chart` / `table` / `logo-wall` / `flow` / `arch-stack`), which may be
+chosen when the page is mainly data/structure with no bespoke story. **Anything not
+matching a row in that table → `layout: "raw"`.**
 
 Use schema-first only when the user explicitly asks for "schema-first", "安全模式",
 "多用标准 layout", or `DESIGN-PLAN.md` declares `stance: schema-first`.
@@ -178,12 +171,21 @@ and **silently skip any raw page that uses custom header classes**:
 | **R-EMPTY-HEADER-ZONE** | header band isn't left visually empty | `:scope > .header` |
 | **R-VIS-TITLE-GAP** | body doesn't crowd/overlap the title | `.header` + `.stage` |
 
-The only raw fallback, **R-VIS-RAW-TITLE-POS**, is a name-free heuristic that just
-measures the top of the tallest ≥32px text block — it catches a title pushed *down*
-but does **not** catch a two-layer header (eyebrow stacked above the title), because
-folding a kicker into the same `h2` keeps the measured element-top at the baseline.
-That is exactly how a "飞书 不合规的双层标题" slips through: invent `.r-head` +
-a kicker line, pass the geometry check, ship a non-compliant header.
+Two name-free raw fallbacks now back-stop bespoke headers — between them they cover
+both failure axes, so a custom-classed raw header no longer escapes unaudited:
+
+| Raw fallback (name-free) | What it catches | Opt-out |
+|---|---|---|
+| **R-VIS-RAW-TITLE-POS** | the de-facto title (tallest ≥32px text block) pushed *down* off the master baseline | — |
+| **R-VIS-RAW-TITLE-STACK** | a **two-layer title** — the de-facto title folds in a smaller eyebrow/kicker (own-text leaf ≤24px and ≤0.55× the title size); the R56 blind-spot on bespoke raw, since R56 keys on `.header .eyebrow` | `data-allow-title-stack` |
+
+R-VIS-RAW-TITLE-POS alone used to miss the "飞书 不合规的双层标题" pattern (invent
+`.r-head` + a kicker line — folding the kicker keeps the measured element-top at the
+baseline, so the geometry check passed). **R-VIS-RAW-TITLE-STACK (2026-06-05) closed
+that gap**: it detects the folded eyebrow/kicker by size ratio without needing any
+framework class name, and warns. Fold the marker into the single title line (or use
+the framework `.header > .title-zh`); only suppress with `data-allow-title-stack`
+when the second line is genuinely a deliberate sub-track, not a smuggled eyebrow.
 
 **Rules for raw content pages:**
 

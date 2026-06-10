@@ -135,6 +135,29 @@ silently points at the wrong slide.
 
 ### E1. Identifier sync on delete/insert — what's mandatory vs conditional
 
+> **Current正道 (read this first): structural edits go through `deck.json`,
+> NOT hand-edited `index.html`.** To add / remove / move a slide, mutate the
+> deck and re-render — the renderer regenerates frame indices and page numbers
+> for you, so there is no manual renumber ritual:
+>
+> ```bash
+> # delete / insert / reorder a slide (auto-backup + schema revalidate)
+> python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json delete <key> --yes
+> python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json insert 7 raw '{}' <new-key>
+> python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json move-key <key> 2
+> # then re-render; --renumber canonicalizes every slide's screen-label ordinal
+> python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/ --renumber
+> ```
+>
+> `data-screen-label` ordinals and `.slide-frame` indices are derived by the
+> renderer from deck order, so you never renumber by hand on the deck.json path.
+>
+> **The manual ritual below (hand-editing `index.html` for delete/insert/reorder
+> + hand-renumbering labels and `[data-page="NN"]` CSS) is a LEGACY fallback —
+> use it ONLY for a standalone HTML deck that has no sibling `deck.json`** (a
+> foreign / Path-B / lifted-standalone file). If a `deck.json` exists, editing
+> the HTML directly is post-render drift; go through the deck.
+
 A slide can carry up to three numeric identifiers, at different DOM levels:
 
 | Identifier | Lives on | Status | Used for |
@@ -247,10 +270,17 @@ behavior beyond just specificity.
 ### E4. Pre-delivery R06 / R20 enforcement is NOT optional
 
 The validator already enforces:
-- **R06** — body text ≥ 22 px on slide content; chrome ≥ 14 px.
+- **R06** — body text ≥ 24 px on slide content; chrome ≥ 16 px. (These two
+  floors are `--fs-body` and `--fs-foot` — see the ladder below.)
 - **R20** — every `font-size` in per-page `<style>` blocks must come from
-  the modular type-scale ladder `{10, 11, 12, 13, 14, 18, 22, 28, 38,
-  44, 52, 56, 64, 88, 100, 132, 160}`.
+  the 4-tier type-scale ladder **`{16, 24, 28, 48}`** (`--fs-foot:16 /
+  --fs-body:24 / --fs-sub:28 / --fs-title:48`). The ladder is the single
+  source of truth in `assets/feishu-deck.css`'s `:root --fs-*` tokens —
+  the validator DERIVES it (`_validate_common.py` `_FS_TOKENS`,
+  `audits.js` `TYPE_LADDER_PX` / `VIS_TIER`), it is not hard-typed. Hero
+  numbers (cover 100, section 88/160, big-stat 132+, quote 88+) opt out
+  per-rule with `/* allow:typescale */` (`data-allow-typescale` on the
+  element for raw pages).
 - **R-WHITE-TEXT** — content text on dark slides must be `#fff`, never
   `rgba(255,255,255,X<1)`. Low-opacity white reads as gray when
   projected.
@@ -274,9 +304,10 @@ font-size rules — what looks fine on a desktop preview vanishes on a
 projector. R06 / R20 / R-WHITE-TEXT exist exactly because human
 judgment fails on these consistently.
 
-Treat each violation as a delivery blocker. If you write 16 px because
-you think it fits, the rule still rejects — fix to 14 (chrome) or 18
-(pill) or 22 (body), not 16.
+Treat each violation as a delivery blocker. If you write 20 px because
+you think it fits, the rule still rejects — snap to a real rung: 16
+(chrome floor) or 24 (body) or 28 (sub) or 48 (title), nothing in
+between.
 
 ### E5. Delete an element → rebalance the rest in the same pass (mandatory)
 

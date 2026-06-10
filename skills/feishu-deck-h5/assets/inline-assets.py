@@ -31,6 +31,13 @@ ATTR_RE = re.compile(r"([:\w-]+)\s*=\s*([\"'])(.*?)\2", re.S)
 URL_RE = re.compile(r"url\(\s*([\"']?)([^)\"']+)\1\s*\)")
 
 
+# F-270: LOCAL refs that didn't resolve to a file. resolve_asset used to return
+# None for BOTH external and missing-local refs, so a missing image silently
+# stayed an external link (404 after the deck moves). Collect the missing-local
+# ones here and warn at the end of main().
+_MISSING_LOCAL_REFS: list[str] = []
+
+
 def is_external_ref(ref: str) -> bool:
     ref = ref.strip()
     return (
@@ -53,6 +60,9 @@ def resolve_asset(base_path: Path, ref: str) -> Path | None:
     candidate = (base_path.parent / raw).resolve()
     if candidate.is_file():
         return candidate
+    # Local ref but no file on disk — record it so main() can warn (was silent).
+    if ref not in _MISSING_LOCAL_REFS:
+        _MISSING_LOCAL_REFS.append(ref)
     return None
 
 
@@ -275,6 +285,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  style url() inlined: {n_style_img}")
     print(f"  image mode         : {'linked' if args.no_image_inline else 'base64'}")
     print(f"  output size        : {size_kb:.0f} KB")
+    if _MISSING_LOCAL_REFS:
+        # F-270: don't let a missing local asset disappear silently — it 404s
+        # the moment this file is moved/served elsewhere.
+        print(f"  ⚠ 未内联 {len(_MISSING_LOCAL_REFS)} 个本地引用(文件缺失,"
+              f"移动后将 404): {_MISSING_LOCAL_REFS}", file=sys.stderr)
     return 0
 
 

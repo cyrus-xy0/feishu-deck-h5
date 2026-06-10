@@ -54,6 +54,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -61,6 +62,38 @@ HERE          = Path(__file__).resolve().parent
 SCHEMA_FILE   = HERE / "deck-schema.json"
 VALIDATE_DECK = HERE / "validate-deck.py"
 RENDER_DECK   = HERE / "render-deck.py"
+
+
+# ---------------------------------------------------------------------------
+# Atomic file write (F-269) — shared so every writer in the pipeline (deck-cli,
+# render-deck, lift-slides) gets crash-safe, all-or-nothing writes. A plain
+# Path.write_text() truncates the target FIRST, then streams bytes; a kill /
+# disk-full / exception mid-write leaves a HALF-WRITTEN file on disk that looks
+# valid to the next reader. Writing to a sibling temp file and os.replace()-ing
+# it into place is atomic on POSIX + Windows: a reader sees either the complete
+# old file or the complete new one, never a torn one.
+# ---------------------------------------------------------------------------
+
+def atomic_write_text(path, text: str, encoding: str = "utf-8") -> None:
+    """Write `text` to `path` atomically (temp file in the same dir + os.replace).
+
+    os.replace requires the temp file and the destination to be on the SAME
+    filesystem, hence the sibling temp file (NOT /tmp). The temp file is cleaned
+    up on any failure so a crashed write never leaves a `.tmp` turd behind."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as fh:
+            fh.write(text)
+        os.replace(tmp, path)   # atomic rename over the destination
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +205,9 @@ def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
         bak = backup_path(deck_path, command)
         shutil.copy2(deck_path, bak)
 
-    # 2. Write
-    deck_path.write_text(json.dumps(deck, ensure_ascii=False, indent=2),
-                         encoding="utf-8")
+    # 2. Write (atomic — F-269: a kill mid-write must not leave a torn deck.json)
+    atomic_write_text(deck_path, json.dumps(deck, ensure_ascii=False, indent=2),
+                      encoding="utf-8")
 
     # 3. Re-validate
     rc = subprocess.run(

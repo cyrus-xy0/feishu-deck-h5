@@ -26,6 +26,11 @@ copied assets, validator rules, or business-rule text.
 
 ## Modes
 
+Mode names follow the single **Authoritative Mode Enum** in
+`../../references/request-router.md`. `CHECK-ONLY` is the validator's owning mode;
+post-render gating and scoped-edit validation run as the gate step of whatever
+generation/edit mode the controller locked.
+
 ### Check-only existing HTML
 
 When the user gives a finished `.html` and asks for review:
@@ -88,5 +93,9 @@ review.
 - `../../references/troubleshooting.md`
 - `../../assets/business-rules.yaml`
 
-Rules are implemented in `../../assets/validate.py` and
-`../../assets/_validate_audits.py`; do not maintain a separate rule source.
+Rules live in a SINGLE engine: `../../assets/audits.js` (the DOM rule engine)
+plus `../../assets/run-audits.py` (the byte / file-system domain). The
+`../../assets/validate.py` entry point only orchestrates them via
+`run_unified_audits`. Schema-shape validation is separate, in
+`../../deck-json/validate-deck.py`. Do not maintain a separate rule source.
+(The old `_validate_audits.py` static registry is retired.)

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://feishu-deck-h5/deck-schema.json",
   "title": "DeckJSON",
-  "description": "Single-source-of-truth data model for a feishu-deck-h5 slide deck. 10 base layouts (3 multi-variant) + 2 specials. The deterministic renderer turns this into HTML; the visual editor edits this in place; the LLM produces this instead of free-form HTML.",
+  "description": "Single-source-of-truth data model for a feishu-deck-h5 slide deck. 14 base layouts (content/stats/flow multi-variant) + 3 specials (replica/raw/canvas). The deterministic renderer turns this into HTML; the visual editor edits this in place; the LLM produces this instead of free-form HTML.",
   "type": "object",
   "required": ["version", "deck", "slides"],
   "additionalProperties": false,
@@ -79,6 +79,18 @@
           "type": "boolean",
           "default": false,
           "description": "OPT-IN · Keynote-style Magic Move on page turn via the View Transitions API. When true, the renderer emits data-magic-move on the deck root and feishu-deck.js wraps each present-mode slide change in document.startViewTransition() (feature-detected; gracefully instant on Firefox; gated by prefers-reduced-motion). Off by default so the fs-reveal entrance baseline is unchanged. To make an element MORPH between two pages, give the same `view-transition-name` to its counterpart on both slides via slide.custom_css (round-trips). See references/motion-system.md §7."
+        },
+        "style_contract": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "OPTIONAL · raw-first. The deck's OWN design decisions, declared ONCE so every page stays consistent with them and the deck-level consistency audits (R-DECK-*) can check against intent instead of inferring the mode. This does NOT dictate design — the model chooses freely; it only records the choice so pages don't each re-invent it. Omit it and the consistency audits fall back to statistical mode detection. Round-trips with the deck.",
+          "properties": {
+            "accent_plan": { "type": "string", "description": "How accent colors are assigned across the deck, e.g. 'blue throughout; section dividers teal'." },
+            "card_style": { "type": "string", "description": "The deck's card/panel convention: radius / border / background tint, e.g. 'radius 16px · 1px rgba border · no fill'." },
+            "title_baseline": { "type": "string", "description": "Where content-page titles sit, e.g. 'raw master coords top:61 left:73'." },
+            "motion": { "type": "string", "description": "The deck's bespoke motion language, if any, so later edits keep it consistent." },
+            "notes": { "type": "string", "description": "Any other deck-wide design constant a page should honor." }
+          }
         }
       }
     },
@@ -358,7 +370,7 @@
         "end",
         "replica", "raw", "canvas"
       ],
-      "description": "13 base layouts (content/stats/flow are multi-variant) + 3 specials (replica/raw/canvas). iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide. canvas = absolutely-positioned structured elements (the PPTX → structured-JSON intermediate; see DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3)."
+      "description": "14 base layouts (content/stats/flow are multi-variant) + 3 specials (replica/raw/canvas). iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide. canvas = absolutely-positioned structured elements (the PPTX → structured-JSON intermediate; see DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3)."
     },
 
     "accent_enum": {
@@ -1153,7 +1165,7 @@
     },
 
     "data_raw": {
-      "description": "ESCAPE HATCH. Renderer drops the html string verbatim into the .slide. Use ONLY when no layout fits and you can't compose with blocks. Bypasses most validators.",
+      "description": "First-class raw-first default. Per references/deck-generation-policy.md the design stance is raw-first: most content pages are layout:raw. The renderer drops the html string verbatim into the .slide; compose with the framework header, fs- component classes and --fs-* tokens. Universal name-free audits (R-OVERFLOW / R-VIS-* / R10 / R20 …) STILL run on raw — it is NOT an unaudited zone. Fall back to a schema layout only for a pure standard shape (the allowlist table in references/design-first.md is the single source).",
       "type": "object",
       "required": ["html"],
       "additionalProperties": false,

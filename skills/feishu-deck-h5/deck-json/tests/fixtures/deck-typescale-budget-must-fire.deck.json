@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "deck": {
+    "title": "R-DECK-TYPESCALE-BUDGET allow:typescale 滥用 · must-fire fixture",
+    "author": "validator-fixture",
+    "date": "2026-06"
+  },
+  "slides": [
+    {
+      "key": "ts-budget-a",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "blue",
+      "screen_label": "01 budget A",
+      "custom_css": ".n1 { font-size: 21px; /* allow:typescale */ }\n.n2 { font-size: 23px; /* allow:typescale */ }\n.n3 { font-size: 25px; /* allow:typescale */ }\n.n4 { font-size: 27px; /* allow:typescale */ }",
+      "data": {
+        "title": "页面一 · 满页 allow:typescale 逃生口",
+        "cards": [
+          {"num": "01", "icon": "zap", "title_zh": "豁免一", "body": "这一页 custom_css 里塞了 4 个 allow:typescale。"},
+          {"num": "02", "icon": "check", "title_zh": "豁免二", "body": "豁免本应只给罕见 hero 数字。"},
+          {"num": "03", "icon": "users", "title_zh": "豁免三", "body": "这里却成了 deck 级常态。"}
+        ]
+      }
+    },
+    {
+      "key": "ts-budget-b",
+      "layout": "content",
+      "variant": "3up",
+      "accent": "blue",
+      "screen_label": "02 budget B",
+      "custom_css": ".m1 { font-size: 22px; /* allow:typescale */ }\n.m2 { font-size: 26px; /* allow:typescale */ }\n.m3 { font-size: 30px; /* allow:typescale */ }\n.m4 { font-size: 34px; /* allow:typescale */ }",
+      "data": {
+        "title": "页面二 · 又是满页 allow:typescale",
+        "cards": [
+          {"num": "01", "icon": "zap", "title_zh": "豁免四", "body": "这一页又塞了 4 个 allow:typescale。"},
+          {"num": "02", "icon": "check", "title_zh": "豁免五", "body": "2 个内容页共 8 处 ≈ 4×/页。"},
+          {"num": "03", "icon": "users", "title_zh": "豁免六", "body": "远超 1.0×/页阈值。"}
+        ]
+      }
+    }
+  ]
+}

@@ -101,6 +101,7 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
 - `../../deck-json/validate-deck.py`
 - `../../deck-json/examples/phase-1a-demo.json`
 - `../../references/deck-generation-policy.md`
+- `../../references/design-first.md`
 - `../../references/assets-and-files.md`
 - `../../references/layout-recipes.md`
 - `../../references/extra-layouts-and-raw.md`
