@@ -986,7 +986,8 @@
     'R-VIS-SLACK-FLEX': { coverage: 'universal', signal: 'dom' },
     'R-FOCAL-CHECK': { coverage: 'universal', signal: 'dom' },
     'R-VIS-PEER-SIZE': { coverage: 'universal', signal: 'dom' },
-    'R-VIS-ALIGN': { coverage: 'stub', signal: 'dom', optout: 'migrated stub — evaluate() returns [] (no consumer); declared dead, not a gap' },
+    // R-VIS-ALIGN: removed 2026-06-10 — was an unimplemented stub; alignment audit deferred.
+    'R-LIFT-CSS-BUDGET': { coverage: 'universal', signal: 'dom', optout: 'fires ONLY on lifted slides (data-lifted provenance); clean/authored decks self-exempt — not a coverage narrowing but a scope inherent to the rule' },
     'R-VIS-LABEL-FLOOR': { coverage: 'partial', signal: 'dom', optout: 'card label floor keyed on .card/-card/-tile/-cell/-panel/-box' },
     'R-VIS-OPT-OUT-ABUSE': { coverage: 'universal', signal: 'dom' },
     'R-VIS-CARD-MIN-HEIGHT-SPARSE': { coverage: 'universal', signal: 'dom' },
@@ -2164,12 +2165,14 @@
               findings.push({
                 rule: 'R20', severity: sev, slide_idx, container_sel: sel80,
                 message: `font-size ${size}px on \`${sel80}\` is off-tier; `
-                  + `nearest tier = ${nearest}px `
+                  + `snap it to the nearest tier = ${nearest}px `
                   + '(allowed: 16 Foot / 24 Body / 28 Sub / 48 Title — '
                   + '4-tier strict per the canonical PPT→Web mapping). '
-                  + 'Add /* allow:typescale */ in the rule to override '
-                  + '(only for hero exceptions: cover 100, section 88/160, '
-                  + `big-stat 132+, quote 88+, or mockup-internal 10-13).${note}`,
+                  + '`/* allow:typescale */` is a NARROW escape hatch for a '
+                  + 'genuine HERO numeral only (cover 100, section 88/160, '
+                  + 'big-stat 132+, quote 88+, or mockup-internal 10-13) — '
+                  + 'it is not a way to silence this check. If this size is body / '
+                  + `label / heading text, pull it onto the ladder instead.${note}`,
               });
             }
           }
@@ -3497,10 +3500,11 @@
             selector: sel, computed_px: px, lifted,
             message:
               `slide ${slide_idx} · \`${sel}\` renders at ${px}px (off the `
-              + '4-tier ladder {16, 24, 28, 48} + hero whitelist). Snap to '
-              + 'nearest tier, OR add `/* allow:typescale */` if this is a '
-              + 'documented hero exception (cover hero / section chapter-num / '
-              + `big-stat / etc.).${note}`,
+              + '4-tier ladder {16, 24, 28, 48} + hero whitelist). Snap it to '
+              + 'the nearest tier. `/* allow:typescale */` is a narrow escape '
+              + 'hatch reserved for a genuine hero numeral (cover hero / section '
+              + 'chapter-num / big-stat / quote) — not a way to silence this '
+              + `check; only reach for it when the value really is hero scale.${note}`,
           });
         });
         return findings;
@@ -5070,38 +5074,63 @@
       },
     },
 
+    // R-VIS-ALIGN: removed 2026-06-10 — was an unimplemented stub; alignment audit deferred.
+    //   (F-282a) The migrated rule's evaluate() always returned [] (no consumer in the old
+    //   validate.py), so it was a registered code that audited nothing — a "rule list ≠ real
+    //   coverage" gap. Per the audit's name-free-coverage contract we delete the stub rather
+    //   than carry a permanently-silent entry. A real alignment audit is intentionally NOT
+    //   shipped here: same-container left-edge clustering is highly subjective and false-positive
+    //   prone (intentional staggered layouts read as misaligned), and this skill's stance is
+    //   "rather under-report than false-positive". The verbatim grid-equal-height geometry the
+    //   old stub preserved lives in git history (commit 8a54484 and earlier) if a future,
+    //   calibrated R-VIS-ALIGN is ever built.
+
     {
-      // R-VIS-ALIGN · grid 子等高(maxH-minH>4px)。(步骤 3 第十批迁自 visual-audit.js
-      // 的 align producer)。几何逐字搬:遍历 slide 内所有元素,命中 GRID_KEYS(=VIS_GRID_KEYS)
-      //   的当 grid;kids = grid.children;<2 跳;heights = 各 kid bbox 高 round(注:producer
-      //   用【渲染 px】不除 scale,verbatim 保留);maxH-minH>4 → push entry。
-      // ⚠️ NO-CONSUMER / DEAD-END(PRESERVE-EXACTLY):validate.py run_visual_audits 里
-      //   【没有】`report.get('align')` 消费段(全 report.get key 已核:overflow/tier/hier/
-      //   title_position/title_gap/opt_out_abuse/card_overflow/body_floor/abspos_dual_anchor/
-      //   orphan/balance/canvas_center/crowd/panel_top/slack_flex/card_min_height_sparse/focal/
-      //   peer_size/gutter/hero_floor/short_label_floor/band_collide/dead_anim/dead_rule —— 无
-      //   align)。_validate_audits.py 同样不消费(只有 align-content/align-items CSS 子串,无关)。
-      //   既无 id / severity / message,producer 跑出的 entry 在 validate.py 端【永远】被丢弃
-      //   → 端到端零 finding。其它批的"死 lifted 分支"是把死降级折成常量 severity verbatim;
-      //   本规则是【整条】死(连 finding 都不该 emit),所以这条规则【不 push 任何 finding】——
-      //   几何照搬求值(与 producer 行为同),但因无消费段可折叠的 id/severity/message,evaluate
-      //   返回 [],与 validate.py 现行端到端行为零漂移(老 validate.py 永不报 R-VIS-ALIGN)。
-      //   见迁移报告 / audits.js 第九批头注 "原 R-VIS-ALIGN(equal-height grid)未迁"。
-      // 备注:几何子串仍逐字保留在 reference 注释里,留 step 4 / 将来真要立 R-VIS-ALIGN 时复用。
-      //   geometry verbatim(若日后接消费段则解封):
-      //     slide.querySelectorAll('*').forEach(grid => {
-      //       if (!visHasAnyClass(grid, VIS_GRID_KEYS)) return;
-      //       const kids = [...grid.children]; if (kids.length < 2) return;
-      //       const heights = kids.map(k => Math.round(k.getBoundingClientRect().height));
-      //       const minH = Math.min(...heights), maxH = Math.max(...heights);
-      //       if (maxH - minH > 4) { /* entry: grid_sel, count, heights[:8], delta */ }
-      //     });
-      id: 'R-VIS-ALIGN',
+      // R-LIFT-CSS-BUDGET · 单张 lifted 页携带的 CSS 字节膨胀护栏 (F-281a)。lift 一张外来
+      // raw 页时,它的 custom_css(渲染成 .slide 首子 `<style data-fs-custom-css>`)+ 原始
+      // markup 里内嵌的 <style> 会把【源 deck 整页/整站】的 CSS 整团搬进来 —— 多数是死规则
+      // (本页用不到的选择器、@keyframes、reset)。攒多了拖慢渲染、污染 round-trip、把 deck.json
+      // 撑大。这条只对带 data-lifted 的 slide 统计其【后代全部 <style>】的 UTF-8 字节(custom_css
+      // 注入块 + 页内嵌样式都在 .slide 子树内),> 24KB → warn,> 64KB → error。
+      // name-free(锚 data-lifted 来源标记,非类名);非 lifted 页(干净/作者 deck,custom_css
+      // 通常为 0)天然零触发 —— 故 examples 全静默(实测 lifted=0 / custom_css=0)。
+      // 文案指向 clean-lifted-css.py(剔死 CSS)/手动裁剪用不到的规则。
+      id: 'R-LIFT-CSS-BUDGET',
       severity: 'warn',
-      evaluate() {
-        // No consumer in validate.py → no id/severity/message to fold in → emit nothing
-        // (preserves the existing end-to-end behavior: R-VIS-ALIGN never reported).
-        return [];
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (!slideIsLifted(slide)) return [];   // 仅 lifted 页;authored deck 天然豁免
+        const WARN_BYTES = 24 * 1024;
+        const ERR_BYTES = 64 * 1024;
+        // 这张 lifted slide 子树里的全部 <style>(= 注入的 custom_css 块 + 原始 markup 内嵌样式)。
+        const styleEls = slide.querySelectorAll('style');
+        if (!styleEls.length) return [];
+        let bytes = 0;
+        // UTF-8 字节(CSS 注释/content 里可能有 CJK,按字符数会低估)。无 TextEncoder 时退回
+        // 按 code unit 计数的保守上界(不影响阈值判定方向)。
+        const enc = (typeof TextEncoder !== 'undefined') ? new TextEncoder() : null;
+        for (const s of styleEls) {
+          const txt = s.textContent || '';
+          bytes += enc ? enc.encode(txt).length : txt.length;
+        }
+        if (bytes <= WARN_BYTES) return [];
+        const kb = (bytes / 1024).toFixed(1);
+        const severity = bytes > ERR_BYTES ? 'error' : 'warn';
+        const sel = shortSel(slide);
+        const cap = severity === 'error' ? '64KB' : '24KB';
+        return [{
+          rule: 'R-LIFT-CSS-BUDGET', severity, slide_idx,
+          slide_sel: sel, css_bytes: bytes,
+          message:
+            `slide ${slide_idx} · LIFTED slide \`${sel}\` carries ${kb}KB of CSS `
+            + `(custom_css + embedded <style>), over the ${cap} budget. Lifting a `
+            + 'raw page usually drags in the SOURCE deck\'s whole stylesheet — most '
+            + 'of those rules / @keyframes are dead on this page. Run '
+            + '`clean-lifted-css.py` to strip the unused CSS (or manually trim the '
+            + 'rules this slide never matches) so the lifted page only keeps the CSS '
+            + 'it actually uses — smaller deck.json, faster render, cleaner '
+            + (severity === 'error' ? 'round-trip.' : 'round-trip. (advisory)'),
+        }];
       },
     },
 

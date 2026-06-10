@@ -1236,11 +1236,50 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
               file=sys.stderr)
         sys.exit(4)
 
+    # F-281b (老 F-124/F-75): write-after-validate + rollback. Mirrors
+    # deck-cli.write_deck_with_validation — we write the dst deck.json then
+    # re-run `validate-deck.py <dst> --strict`; if it fails we restore the
+    # PRE-write bytes and exit non-zero. Without this, a lift that produced a
+    # schema-invalid deck.json (e.g. a residual R-KEY dup, a malformed entry)
+    # landed on disk silently and only blew up downstream at `render --strict`,
+    # AFTER the bad state was already committed. `_prev` is the exact previous
+    # content (None for a brand-new file) so the rollback is byte-faithful — no
+    # backup turd to clean up. Kept as a local copy of the deck-cli contract
+    # rather than an import to avoid the hyphenated-module importlib dance (same
+    # rationale as atomic_write_text above).
+    _prev = (dst_deck_json.read_text(encoding="utf-8")
+             if dst_deck_json.exists() else None)
     atomic_write_text(
         dst_deck_json,
         json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    validate_deck = (Path(__file__).resolve().parent.parent
+                     / "deck-json" / "validate-deck.py")
+    vr = subprocess.run(
+        [sys.executable, str(validate_deck), str(dst_deck_json), "--strict"],
+        capture_output=True, text=True)
+    if vr.returncode != 0:
+        # Roll back to the exact pre-write state (delete the file if it was new).
+        if _prev is not None:
+            atomic_write_text(dst_deck_json, _prev, encoding="utf-8")
+            restored = f"restored {dst_deck_json.name} to its pre-lift state"
+        else:
+            try:
+                dst_deck_json.unlink()
+            except OSError:
+                pass
+            restored = f"removed the freshly-created {dst_deck_json.name}"
+        print(f"\n✗ post-lift validation FAILED ({validate_deck.name} --strict) — "
+              f"rolling back ({restored}).", file=sys.stderr)
+        if vr.stdout:
+            print(vr.stdout, file=sys.stderr)
+        if vr.stderr:
+            print(vr.stderr, file=sys.stderr)
+        sys.exit(5)
+
     print(f"\n✓ {appended} slides appended to {dst_deck_json.name} "
           f"(total {len(deck['slides'])})")
+    print(f"✓ post-lift validation passed ({validate_deck.name} --strict)")
     print(f"Now run: python3 deck-json/render-deck.py {dst_deck_json} {output_dir}/ --visual")
 
 

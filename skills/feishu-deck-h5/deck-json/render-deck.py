@@ -2112,6 +2112,12 @@ def main(argv=None) -> int:
                          "(auto-backup .bak-pre-renumber-<ts>). Fixes stale labels after "
                          "lift/insert/reorder so the library label number matches the "
                          "on-screen page number / URL hash (#N).")
+    ap.add_argument("--debug", action="store_true",
+                    help="on a per-slide render crash, re-raise the original "
+                         "exception with its full traceback instead of the "
+                         "compact `slide[N] key=… layout=…: <error>` SystemExit "
+                         "(F-280b). Use when a slide's data triggers an internal "
+                         "error and you need the failing render code path.")
     args = ap.parse_args(argv)
 
     # Parse the locked edit scope (1-based page numbers) into a list of ints.
@@ -2259,9 +2265,25 @@ def main(argv=None) -> int:
             # original index in error context for debugging.
             slide_html = render_slide(slide, new_idx, total, asset_path, deck_dir=deck_dir)
         except SystemExit as e:
+            # F-280b · 1-based page index + variant in the locator (matches
+            # validate-deck / deck-cli list / URL #N). orig_idx is 0-based.
             raise SystemExit(
-                f"slide[{orig_idx}] key='{slide.get('key')}' "
-                f"layout='{slide.get('layout')}': {e}"
+                f"slide[{orig_idx + 1}] key='{slide.get('key')}' "
+                f"layout='{slide.get('layout')}' variant='{slide.get('variant')}': {e}"
+            )
+        except Exception as e:
+            # F-280b · a non-SystemExit exception inside render_slide used to
+            # escape as a bare traceback with NO page context (which slide? what
+            # data field?). Wrap it with the same 1-based locator so cross-model
+            # / self-repair flows can find the offending page. Full traceback is
+            # available via --debug for when the failing render code path matters.
+            if getattr(args, "debug", False):
+                raise
+            raise SystemExit(
+                f"slide[{orig_idx + 1}] key='{slide.get('key')}' "
+                f"layout='{slide.get('layout')}' variant='{slide.get('variant')}': "
+                f"{type(e).__name__}: {e}"
+                f"(检查该页 data 字段;完整栈用 --debug)"
             )
         slides_html.append(slide_html)
 

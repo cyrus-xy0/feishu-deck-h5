@@ -36,6 +36,13 @@ rely on cached chat summaries or earlier reads of `source-dossier.json`, local
    `input/runtime-library/assets/`, and any user-provided notes.
 3. Query the cloud Feishu Base only for relevant knowledge records. Use the
    controller's Base URL/token/table/view and the `lark-base` skill.
+   **Cloud-dependency downgrade (F-268):** if `lark-cli` is not installed, or
+   `lark-cli auth status` reports not-logged-in, do NOT block — enter local-only
+   mode. Record `cloud_assets: unavailable` in `DESIGN-PLAN.md`, draw assets only
+   from `assets/shared/` (the local products / clientlogo pools), and list any
+   missing logos explicitly for the user to supply. Never fall back to
+   hand-drawn shapes or emoji as a stand-in (forbidden in `assets-and-files.md`):
+   make the degradation explicit instead of silently shipping a degraded deck.
 4. Produce a narrative arc and slide outline. Default to Chinese-only unless the
    user explicitly asks for bilingual or external English-facing pitch.
 5. Apply the raw-first design stance: every slide defaults to `layout: "raw"`

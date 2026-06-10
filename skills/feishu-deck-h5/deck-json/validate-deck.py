@@ -367,9 +367,24 @@ def check_business_rules(deck: dict, result: Result, strict: bool) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
-def format_path(path: str) -> str:
+def format_path(path: str, slide_keys: dict[int, str] | None = None) -> str:
     # Strip the <allOf[N]> annotations to keep output readable.
-    return re.sub(r"<allOf\[\d+\]>", "", path)
+    path = re.sub(r"<allOf\[\d+\]>", "", path)
+    # F-280b · unified error-locator coordinate system. Every other surface
+    # (deck-cli list / URL #N / frame_index) is 1-based and carries the slide
+    # key; the validator alone reported a bare 0-based `slides[i]`. Keep the
+    # JSON-path body 0-based (tools/jq still resolve it) but append a
+    # human-readable annotation with the key + 1-based position right after the
+    # FIRST `slides[i]` segment so cross-model / self-repair flows can find the
+    # page without arithmetic. Done here (the single formatter applied to both
+    # schema errors AND business-rule errors) so the two can't drift apart.
+    if slide_keys is not None:
+        def _annotate(m: re.Match) -> str:
+            i = int(m.group(1))
+            key = slide_keys.get(i)
+            return f"$.slides[{i}] (key={key!r}, 第{i + 1}项)"
+        path = re.sub(r"\$\.slides\[(\d+)\]", _annotate, path, count=1)
+    return path
 
 
 def main(argv=None) -> int:
@@ -406,7 +421,15 @@ def main(argv=None) -> int:
 
     # Render output
     title = deck.get("deck", {}).get("title", "<no title>")
-    n_slides = len(deck.get("slides", []))
+    slides = deck.get("slides", [])
+    n_slides = len(slides)
+    # F-280b: idx → key map used by format_path to annotate `slides[i]` paths
+    # with the human-readable key + 1-based position. Use {} for non-list decks
+    # (a malformed top-level `slides`) so .get() stays safe.
+    slide_keys = {
+        i: (s.get("key") if isinstance(s, dict) else None)
+        for i, s in enumerate(slides)
+    } if isinstance(slides, list) else {}
     print(f"DeckJSON validation · {args.deck.name}")
     print(f"  deck: {title}")
     print(f"  slides: {n_slides}")
@@ -416,13 +439,13 @@ def main(argv=None) -> int:
     if result.errors:
         print(f"✗ {len(result.errors)} error(s):")
         for path, msg in result.errors:
-            print(f"  {format_path(path):<60}  {msg}")
+            print(f"  {format_path(path, slide_keys):<60}  {msg}")
         print()
 
     if result.warnings:
         print(f"! {len(result.warnings)} warning(s):")
         for path, msg in result.warnings:
-            print(f"  {format_path(path):<60}  {msg}")
+            print(f"  {format_path(path, slide_keys):<60}  {msg}")
         print()
 
     if result.ok:

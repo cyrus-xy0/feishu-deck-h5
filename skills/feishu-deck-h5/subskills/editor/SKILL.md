@@ -107,20 +107,44 @@ Designer + Renderer instead).
 - **Copy/text edit**: edit `deck.json` and rerender; do not revive the retired
   `texts.md` sidecar flow or mutate rendered HTML unless doing explicit
   round-trip recovery.
-- **Imported/raw deck repair**: if an imported deck has old head-level per-slide
-  CSS, use `deck-json/migrate-head-css-to-custom-css.py`; if it has readable
-  but too-small raw text, prefer `assets/grow-box-fit.py` after rebundling rather
-  than blind font-size snapping.
+- **Imported/raw deck repair**: for the common back-catalog defects of a
+  lifted/imported deck, run the one-command pipeline **`deck-json/repair-lifted.py`**
+  (see next section) instead of remembering the individual tools. If a deck has
+  readable but too-small raw text, that is a separate fix — prefer
+  `assets/grow-box-fit.py` after rebundling rather than blind font-size snapping
+  (`repair-lifted.py` does NOT grow tiny text; it only snaps OFF-LADDER values).
+
+### Lifted / imported deck repair pipeline (F-267)
+
+- **One command for a garbled imported deck: `deck-json/repair-lifted.py <deck>`.**
+  It is a thin orchestrator that decides which of the existing repair tools apply
+  (by file existence + a head-CSS scan) and runs them in the proven order:
+  `backfill` (sync-index-to-deck `--backfill`, only when there is no `deck.json`
+  yet) → `migrate-head-css-to-custom-css` (only when `index.html` has head/deck-level
+  per-slide CSS) → `heal-lifted` → `clean-lifted-css` → `reconcile-lifted` →
+  render + `validate-deck --strict`. `<deck>` may be the deck dir, its
+  `index.html`, or its `deck.json`.
+- **dry-run-FIRST — it defaults to `--dry-run`.** It prints the plan and previews
+  every step (writing nothing); add **`--apply`** to actually run. Always preview
+  first: `heal-lifted`'s "provably-safe" premise was once falsified and rolled
+  back (docs/archive), so never assume a blind direct run is safe.
+- Each step keeps its own `deck.json.bak-pre-<cmd>-<ts>` + re-validate-with-rollback,
+  and `lift-slides.py` now write-after-validates + rolls back too (F-281b), so a
+  lift/repair that would produce an invalid `deck.json` never lands on disk.
 
 ### Batch lift & lift-done gates (F-62 / F-63)
 
 - **F-62 — batch lift discipline.** Never "lift every page first, then fix in bulk".
   Lift in batches of **3–5 pages**; after each batch **immediately** reconcile font
-  sizes (4-tier) and run `validate.py` — a batch is NOT done while any ✗ remains, and
-  stacking the next batch with ✗ still open is wrong. Complex pages (phone mock /
-  chat UI / KPI bars — F-40 known to collapse) get rendered + screenshot-checked
-  **one page at a time**, not deferred. (A 24→46 bulk lift of 22 pages at once =
-  18✗ / 185 findings dumped at the end — exactly this rule's absence.)
+  sizes onto the 4 tiers and run `validate.py` — a batch is NOT done while any ✗
+  remains, and stacking the next batch with ✗ still open is wrong. **Do the font
+  snap with `deck-json/reconcile-lifted.py <deck.json>` (or the whole repair pass
+  `deck-json/repair-lifted.py <deck> --apply`), not by hand** — both snap `font:`
+  shorthand + `font-size` to {16,24,28,48} deterministically and idempotently
+  (`--dry-run`/dry-run-first to preview). Complex pages (phone mock / chat UI /
+  KPI bars — F-40 known to collapse) get rendered + screenshot-checked **one page
+  at a time**, not deferred. (A 24→46 bulk lift of 22 pages at once = 18✗ / 185
+  findings dumped at the end — exactly this rule's absence.)
 - **F-63 — lift done = 4 greens** (any non-green = lift not finished; do NOT say
   "done"):
   - [ ] **DOM balance** — `R-DOM` (`audit_dom_integrity`) no ✗; every `.slide-frame`
@@ -175,5 +199,10 @@ Designer + Renderer instead).
 - `../../references/delivery.md`
 - `../../LIFT-ARCHITECTURE-2026-05-30.md`
 - `../../IMPORT-RAW-DECK-LESSONS-2026-05-30.md`
+- `../../deck-json/repair-lifted.py` — one-command lifted/imported deck repair
+  pipeline (F-267); dry-run-first, `--apply` to run. Routes backfill →
+  migrate-head-css → heal → clean → reconcile → render+validate.
 - `../../deck-json/migrate-head-css-to-custom-css.py`
+- `../../deck-json/reconcile-lifted.py` — snap lifted-slide inline font sizes
+  onto the {16,24,28,48} tier ladder (the F-62 reconcile step).
 - `../../assets/grow-box-fit.py`
