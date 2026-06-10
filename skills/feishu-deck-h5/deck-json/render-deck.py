@@ -2393,6 +2393,36 @@ def main(argv=None) -> int:
         # uses — so the gate can't drift from the copier (and /tmp smoke tests +
         # tests/ temp renders stay advisory-only, keeping the suite green).
         _is_runs = _is_runs_output(args.output_dir)
+        # F-292 step 2: STOCK/IMPORTED-deck exemption. F-256's promotion of
+        # error-level R-VIS to a hard BLOCK over-blocks pre-existing decks: a
+        # legacy/imported deck carries historical violations that block on the
+        # FIRST re-render, with no edit in between — a wall, not a gate. So the
+        # _vis_block hard gate DEMOTES to advisory (prints, does NOT return 4)
+        # when EITHER:
+        #   (1) the deck opts in explicitly: deck_meta.gate == "advisory"; or
+        #   (2) the deck is IMPORTED — every (active) slide is lifted, OR the
+        #       freshly-rendered HTML carries <meta fs-deck-origin=imported>.
+        #       This is the SAME "imported" predicate the validator uses
+        #       (run-audits._deck_all_imported / audits.js deckAllImported:
+        #       origin-meta OR all-slides-lifted) so the two layers can't drift.
+        # NOTE: only the _vis_block (font/floor/tier/hier class) demotes. HARD
+        # GEOMETRY (_geom_block: overflow/overlap/card-overflow/band-collide)
+        # and the STATIC gate (rc != 0) stay full BLOCK even in advisory mode —
+        # content spilling past its box or overlapping a sibling is the most
+        # plainly user-visible breakage and is almost never intentional, so a
+        # stock deck shouldn't get a free pass on it (its own narrower escape
+        # hatch DECK_ALLOW_GEOM_OVERFLOW=1 still exists for a deliberate spill).
+        _deck_gate = deck["deck"].get("gate", "block")
+        _deck_origin_imported = bool(
+            re.search(r'<meta\s+name=["\']fs-deck-origin["\']\s+'
+                      r'content=["\']imported["\']', final))
+        _deck_all_lifted = bool(active_slides) and all(
+            s.get("lifted") for _, s in active_slides)
+        _imported_deck = _deck_origin_imported or _deck_all_lifted
+        # advisory mode → _vis_block prints but does NOT gate delivery.
+        _vis_advisory = (_deck_gate == "advisory") or _imported_deck
+        _vis_advisory_reason = ("deck-gate" if _deck_gate == "advisory"
+                                else "imported" if _imported_deck else "")
         # GATE-COVERAGE bookkeeping (F-255): record what ACTUALLY executed so a
         # silent "did not run" is always distinguishable from "ran clean" in the
         # one machine-readable summary line printed before every return below.
@@ -2506,23 +2536,65 @@ def main(argv=None) -> int:
                 # BLOCKING gate (warnings/soft items stay advisory per F-253).
                 # Escape hatch for a deck shipped with known visual errors:
                 # DECK_ALLOW_VIS_ERRORS=1.
+                #
+                # F-292 step 1: DEAD CODE is NOT user-visible breakage. A dead
+                # @keyframes / a never-matched CSS rule (R-VIS-DEAD-ANIM /
+                # R-VIS-DEAD-RULE) is CODE HYGIENE, not something a viewer can
+                # see on screen — it should be cleaned by clean-lifted-css.py /
+                # heal-lifted.py, NOT block delivery. (Real audit: 80/107 of an
+                # imported deck's "blocking" findings were these two; blocking
+                # them turned a hygiene chore into a delivery wall.) Exempt them
+                # from the hard _vis_block while STILL surfacing them in the
+                # advisory region below so they don't silently disappear.
+                _VIS_BLOCK_EXEMPT = {"R-VIS-DEAD-ANIM", "R-VIS-DEAD-RULE"}
                 _vis_errors = [f for f in _errs
                                if str(f.get("code", "")).startswith(
-                                   ("R-VIS", "R-OVERFLOW", "R-OVERLAP"))]
-                if _vis_errors and not os.environ.get("DECK_ALLOW_VIS_ERRORS"):
-                    print("\n❌ BLOCKING · error-level visual defects (content "
-                          "below the readability floor / overflow / overlap / "
-                          "tier inversion — real, user-visible breakage):",
+                                   ("R-VIS", "R-OVERFLOW", "R-OVERLAP"))
+                               and str(f.get("code", "")) not in _VIS_BLOCK_EXEMPT]
+                # The exempted dead-code errors still get an advisory print so a
+                # human knows to run the cleaner — they just never gate delivery.
+                _vis_dead = [f for f in _errs
+                             if str(f.get("code", "")) in _VIS_BLOCK_EXEMPT]
+                if _vis_dead:
+                    print("\n🧹 死代码(advisory · 代码卫生,不挡交付 · F-292):",
                           file=sys.stderr)
-                    for f in _vis_errors[:12]:
+                    for f in _vis_dead[:12]:
                         print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
-                    if len(_vis_errors) > 12:
-                        print(f"  … +{len(_vis_errors) - 12} more", file=sys.stderr)
-                    print("  ↳ fix the flagged element(s); focus one page: python3 "
-                          f"{VALIDATE_HTML.name} <html> --visual --slide <key>. "
-                          "Ship anyway with known visual errors → "
-                          "DECK_ALLOW_VIS_ERRORS=1.", file=sys.stderr)
-                    _vis_block = True
+                    if len(_vis_dead) > 12:
+                        print(f"  … +{len(_vis_dead) - 12} more", file=sys.stderr)
+                    print("  ↳ 跑 clean-lifted-css.py / heal-lifted.py 清掉死 CSS/"
+                          "死动画(放映不可见,无需阻断交付)。", file=sys.stderr)
+                if _vis_errors and not os.environ.get("DECK_ALLOW_VIS_ERRORS"):
+                    if _vis_advisory:
+                        # F-292 step 2: stock/imported (or deck_meta.gate=
+                        # advisory) — surface the visual errors but do NOT gate
+                        # delivery. The coverage line records visual=advisory(…)
+                        # so the demotion is never silent.
+                        _gc_visual = f"advisory({_vis_advisory_reason})"
+                        print("\n⚠ 视觉错误(advisory 模式,未阻断交付 · F-292 · "
+                              f"{_vis_advisory_reason}):", file=sys.stderr)
+                        for f in _vis_errors[:12]:
+                            print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
+                        if len(_vis_errors) > 12:
+                            print(f"  … +{len(_vis_errors) - 12} more", file=sys.stderr)
+                        print("  ↳ 存量/导入 deck 历史 violation 不挡交付;新 deck "
+                              "默认 block。逐项修可 focus 一页:python3 "
+                              f"{VALIDATE_HTML.name} <html> --visual --slide <key>。",
+                              file=sys.stderr)
+                    else:
+                        print("\n❌ BLOCKING · error-level visual defects (content "
+                              "below the readability floor / overflow / overlap / "
+                              "tier inversion — real, user-visible breakage):",
+                              file=sys.stderr)
+                        for f in _vis_errors[:12]:
+                            print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
+                        if len(_vis_errors) > 12:
+                            print(f"  … +{len(_vis_errors) - 12} more", file=sys.stderr)
+                        print("  ↳ fix the flagged element(s); focus one page: python3 "
+                              f"{VALIDATE_HTML.name} <html> --visual --slide <key>. "
+                              "Ship anyway with known visual errors → "
+                              "DECK_ALLOW_VIS_ERRORS=1.", file=sys.stderr)
+                        _vis_block = True
                 # HARD geometry breakage is NOT a soft readability nit. A box whose
                 # content is clipped / spills visibly past its border / overlaps a
                 # sibling (R-VIS-CARD-OVERFLOW / R-OVERLAP / R-OVERFLOW /

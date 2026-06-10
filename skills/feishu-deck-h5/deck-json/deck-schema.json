@@ -80,6 +80,11 @@
           "default": false,
           "description": "OPT-IN · Keynote-style Magic Move on page turn via the View Transitions API. When true, the renderer emits data-magic-move on the deck root and feishu-deck.js wraps each present-mode slide change in document.startViewTransition() (feature-detected; gracefully instant on Firefox; gated by prefers-reduced-motion). Off by default so the fs-reveal entrance baseline is unchanged. To make an element MORPH between two pages, give the same `view-transition-name` to its counterpart on both slides via slide.custom_css (round-trips). See references/motion-system.md §7."
         },
+        "gate": {
+          "enum": ["block", "advisory"],
+          "default": "block",
+          "description": "F-292 · Delivery-gate strictness for the error-level VISUAL audits (the font-size/floor/tier/hier class promoted to a hard BLOCK by F-256). 'block' (default, for NEW decks) = an error-level visual defect on a real (runs/) render BLOCKS delivery (return 4). 'advisory' = those visual errors are PRINTED but do NOT block — for STOCK / IMPORTED decks carrying historical violations, so a first re-render isn't walled by pre-existing nits with no edit in between. NOTE: 'advisory' only relaxes the visual class; HARD GEOMETRY (overflow / overlap / card-overflow / band-collide) and the static validator gate stay full-block regardless (overflow/overlap is the most plainly user-visible breakage and is almost never intentional). An imported deck (every slide lifted, or <meta fs-deck-origin=imported>) is treated as 'advisory' automatically even without this field."
+        },
         "style_contract": {
           "type": "object",
           "additionalProperties": true,
