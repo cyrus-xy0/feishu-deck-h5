@@ -319,6 +319,58 @@ else
   echo "CAPABILITY visual-audit: OFF — install: pip install playwright && python -m playwright install chromium (gates degrade to static-only; runs/ delivery will BLOCK unless DECK_ALLOW_NO_VISUAL=1)"
 fi
 
+# ---- Check 8: CJK preferred-font probe (F-283 step 1) — non-fatal ----
+# The framework's CJK face (方正兰亭黑 Pro GB18030) is a LOCALLY-LICENSED font
+# with NO @font-face / NO bundling, so visual-audit geometry (overflow / balance
+# / title-position) is measured against whatever CJK face THIS host actually has.
+# On a host missing the master font, Chromium falls back (Noto / PingFang / tofu)
+# and the same deck measures DIFFERENTLY → a silent "passes here, fails there".
+# Surface which CJK face this host would paint with so that source is VISIBLE.
+# Informational only — NEVER changes preflight's exit code, NEVER swaps the font
+# (full @font-face packaging is F-283 B, TBD). The font name list comes from
+# assets/feishu-deck.css's --fs-font-cjk (read-only) so it stays in sync with
+# the framework cascade.
+if command -v fc-list >/dev/null 2>&1; then
+  _cjk_names() {
+    # Extract the --fs-font-cjk value (may span several lines) from the CSS,
+    # split on commas, strip quotes/whitespace. CSS is the single source of truth.
+    awk '/--fs-font-cjk:/{f=1} f{printf "%s ", $0; if(/;/){exit}}' \
+        "$SKILL_ROOT/assets/feishu-deck.css" 2>/dev/null \
+      | sed 's/.*--fs-font-cjk:[[:space:]]*//; s/;.*//' \
+      | tr ',' '\n' \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^"//; s/"$//' \
+      | grep -v '^$'
+  }
+  _fam_installed() {
+    # exact (case-insensitive) match of a CSS family name against installed
+    # fc-list families. -a guards BSD grep treating CJK output as binary.
+    fc-list --format='%{family}\n' 2>/dev/null | tr ',' '\n' \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+      | grep -aqixF "$1"
+  }
+  _CJK_PREFERRED_PRESENT=0
+  _CJK_FIRST_AVAIL=""
+  while IFS= read -r _name; do
+    [ -z "$_name" ] && continue
+    # generics never count as the "actual face"
+    case "$_name" in system-ui|sans-serif|serif|monospace) continue ;; esac
+    if _fam_installed "$_name"; then
+      [ -z "$_CJK_FIRST_AVAIL" ] && _CJK_FIRST_AVAIL="$_name"
+      # all 方正兰亭黑 / FZLanTingHei* names are aliases of the licensed master
+      case "$_name" in 方正兰亭黑*|FZLanTingHei*) _CJK_PREFERRED_PRESENT=1 ;; esac
+    fi
+  done < <(_cjk_names)
+  if [ "$_CJK_PREFERRED_PRESENT" -eq 1 ]; then
+    echo "CAPABILITY cjk-font: 方正兰亭黑 present"
+  elif [ -n "$_CJK_FIRST_AVAIL" ]; then
+    echo "CAPABILITY cjk-font: MISSING → 回落 $_CJK_FIRST_AVAIL (视觉几何与作者机器会有偏差; full packaging = F-283 B)"
+  else
+    echo "CAPABILITY cjk-font: MISSING → 无 CJK 回落字体, Chromium 将渲染 tofu (视觉几何与截图均失真; install fonts-noto-cjk)"
+  fi
+else
+  echo "CAPABILITY cjk-font: UNKNOWN — fc-list (fontconfig) not installed; cannot verify CJK face (视觉几何依赖字体, 跨机器对比 verdict 前先核对字体)"
+fi
+
 # ---- All checks passed ----
 echo "PREFLIGHT OK"
 echo "  skill root: $SKILL_ROOT"

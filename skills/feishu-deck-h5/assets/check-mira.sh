@@ -338,6 +338,44 @@ if command -v fc-list >/dev/null 2>&1; then
   else
     mark_warn "no CJK fonts — Chromium renders 中文 as tofu, corrupting screenshots + geometry audits; apt-get install fonts-noto-cjk (INSTALL-CLOUD.md §7)"
   fi
+  # F-283 step 1 · the framework's CJK face (方正兰亭黑 Pro GB18030) is a
+  # LOCALLY-LICENSED font (no @font-face / no bundling), so visual-audit geometry
+  # is measured against whatever CJK face this host actually has. "Any CJK font
+  # present" above is NOT enough: a host with only Noto/PingFang measures the deck
+  # DIFFERENTLY than the author's machine → silent "passes here, fails there".
+  # Probe the PREFERRED face specifically (names read from feishu-deck.css's
+  # --fs-font-cjk, the single source of truth). WARN-only — never fails the check
+  # (full @font-face packaging is F-283 B, TBD).
+  _mira_cjk_names() {
+    awk '/--fs-font-cjk:/{f=1} f{printf "%s ", $0; if(/;/){exit}}' \
+        "$SKILL_ROOT/assets/feishu-deck.css" 2>/dev/null \
+      | sed 's/.*--fs-font-cjk:[[:space:]]*//; s/;.*//' \
+      | tr ',' '\n' \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^"//; s/"$//' \
+      | grep -v '^$'
+  }
+  _mira_fam_installed() {
+    fc-list --format='%{family}\n' 2>/dev/null | tr ',' '\n' \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+      | grep -aqixF "$1"
+  }
+  _mira_cjk_preferred=0
+  _mira_cjk_first=""
+  while IFS= read -r _mname; do
+    [ -z "$_mname" ] && continue
+    case "$_mname" in system-ui|sans-serif|serif|monospace) continue ;; esac
+    if _mira_fam_installed "$_mname"; then
+      [ -z "$_mira_cjk_first" ] && _mira_cjk_first="$_mname"
+      case "$_mname" in 方正兰亭黑*|FZLanTingHei*) _mira_cjk_preferred=1 ;; esac
+    fi
+  done < <(_mira_cjk_names)
+  if [ "$_mira_cjk_preferred" -eq 1 ]; then
+    mark_ok "preferred CJK face 方正兰亭黑 present — visual-audit geometry matches author machine"
+  elif [ -n "$_mira_cjk_first" ]; then
+    mark_warn "preferred CJK face 方正兰亭黑 MISSING → falls back to '$_mira_cjk_first' — visual-audit geometry (overflow/balance/title-pos) will DIFFER from the author's machine; cross-machine verdicts need the same font (full packaging = F-283 B)"
+  else
+    mark_warn "no CJK fallback face from the framework stack is installed — Chromium will render 中文 as tofu; geometry + screenshots both corrupted"
+  fi
 else
   mark_skip "fc-list (fontconfig) not installed — can't verify CJK fonts; install it if you run visual audits on this host"
 fi

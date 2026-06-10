@@ -222,6 +222,35 @@ L1:
     - "只在 section 章节页 / 强 glow 背景的 slide 上, 给 .wordmark 加 class='is-mono' 单色"
     - "content / agenda / stats 这类内容页一律彩色 logo"
 
+# ---- C · 跨页一致性 (F-257 deck-level; 入库门必修 —— 不一致最坑复用) ----
+
+R-DECK-TITLE-DRIFT:
+  concern:     "C · 复用时会打架"
+  symptom:     "内容页之间标题位置 / 字号对不齐 (某页标题比其余页高或低了一截)"
+  consequence: "客户翻页时标题忽上忽下 / 忽大忽小, 像每页单独排的; 抽到别的 deck 拼接更乱"
+  fix:
+    - "把偏离的那页标题对齐到全 deck 多数页共用的基线 (位置 + 字号), 让翻页时标题稳住"
+    - "通常是某页 .header 被单独改了 margin / padding 或标题字号, 改回跟其余内容页一致"
+    - "确属有意 (如某页就是要特殊版式): 给该页或整 deck 加 data-allow-title-drift, 或在 custom_css 写 /* allow:title-drift */"
+
+R-DECK-PALETTE-DRIFT:
+  concern:     "C · 复用时会打架"
+  symptom:     "全 deck 出现 3 个以上肉眼几乎一样的强调色 (同一个青 / 蓝手调出了好几个近似色号)"
+  consequence: "看着是同一个色其实是手调变体, 抽到别处拼接时这些'同色不同号'会接不上, 品牌色显脏"
+  fix:
+    - "把每一簇近重复色统一成同一个值, 优先用 --fs-* 品牌色 token, 让全 deck 的强调色完全一致"
+    - "别每页重新目测调色; 蓝 #3C7FFF / 青 #33D6C0 / 紫 #5C3FFB / 粉紫 #9F6FF1 / 橘 #FE7F00 直接复用"
+    - "确属有意: 给整 deck 加 data-allow-palette, 或在 CSS 写 /* allow:palette */"
+
+R-DECK-TYPESCALE-BUDGET:
+  concern:     "C · 复用时会打架"
+  symptom:     "全 deck 滥用 /* allow:typescale */ 字号豁免 (内容页平均每页都开了不止一次)"
+  consequence: "字号阶梯 {16,24,28,48} 形同虚设, 字号实际失控; 抽到别的 deck 字号高低乱跳读着不齐"
+  fix:
+    - "allow:typescale 只留给罕见的 hero 大数字 (封面 100 / 章节 88,160 / big-stat 132+ / 金句 88+)"
+    - "内容页的字号回到 4 档阶梯 {16 脚注 / 24 正文 / 28 小标题 / 48 标题}, 删掉多余的豁免注释"
+    - "确属整 deck 有意 (如数据大屏): 给整 deck 加 data-allow-typescale-budget, 或写 /* allow:typescale-budget */"
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  补全 (2026-05-31) — 逐页业务报告 (默认输出) 需要每条会触发的规则都有

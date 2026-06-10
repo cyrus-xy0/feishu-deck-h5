@@ -1129,6 +1129,13 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
                 "src_key": info["key"],
                 "src_index": one_indexed,
                 "lifted_at": None,
+                # F-287 (injection-surface provenance): the lifted page's markup
+                # comes from a FOREIGN deck — arbitrary inline <script> / on*
+                # handlers can ride along and, via slide-library ingest, spread
+                # cross-deck. Mark the origin untrusted so downstream
+                # (validator's R-FOREIGN-SCRIPT, publish, ingest) knows this
+                # content is from an external source and must be sanitized.
+                "untrusted": True,
             },
             "data": {"html": inner},
         }

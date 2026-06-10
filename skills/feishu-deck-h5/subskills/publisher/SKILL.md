@@ -76,6 +76,50 @@ python3 skills/feishu-deck-h5/subskills/publisher/publish.py \
   --dry-run
 ```
 
+## 发布后自检 (F-285 · 最后一公里)
+
+发布的最后一公里到拿到最终 URL 就结束了,但**没人以受众身份打开那个 URL** 确认字节真的活着:
+断链 / 图 404 / 字体回落 / 关键页视觉走样,本地校验全看不见(validate.py 查的是本地字节,
+不是接收服务器实际吐出来的东西 —— F-76 的图标 404 就是发布后才暴露)。所以发布成功、拿到
+**最终 app_url** 后,`publish.py` 会自动再跑一步自检(`subskills/publisher/self_check.py`):
+
+- 用 playwright 打开**最终发布 URL**,截前 N 页(默认 3);同时打开**本地渲染产物**截同样的页。
+- 三类红牌:
+  1. **资源断链 / 404** —— 监听发布页的 failed requests + HTTP≥400 响应,任一真资源
+     (图 / 字体 / CSS / JS / 媒体)挂了即红牌。这是唯一没有 validator 的维度。
+  2. **字体回落** —— 对比同页主文字的 effective font;本地用了真字体而远程回落成
+     generic / 系统兜底字体(PingFang / YaHei / Arial 等)即红牌。
+  3. **关键页视觉差异** —— 逐页按感知哈希(aHash+dHash)+ 下采样像素差(取大)算差异比例,
+     某页超阈值(默认 6%)即红牌。算法与 `log-tool/deck-log.py diff` 同源。
+- 任一红牌 → `publish-manifest.json` 的 `self_check.ok=false`,**整个发布判非零**(不把断掉的
+  交付说成"已发布")。处理:照红牌列出的断链 / 回落页 / 走样页修源,**重新 render → 重新发布 →
+  自检复跑**;别手改发布物。确属设计差异可 `--self-check-soft` 把红牌降级为告警,或
+  `--skip-self-check` 整步跳过(只在你已人工确认远程 OK 时用)。
+
+### 真实远程 URL 自检需要登录态
+
+端到端"真发布 + 打开真 URL 自检"需要对 Magic Page / Cloudflare viewer 的**已登录会话**,
+本工具链(无登录态的环境)跑不了真实远程那一段。因此:
+
+- `publish.py` 在**真实发布成功**时自动对 `app_url` 跑自检 —— 有登录态、URL 可达时这一步会真跑。
+- **自检逻辑本身本地可验**:`self_check.py` 可独立调用,`--remote` 既接 `https://` 真 URL,
+  也接 `file://` / 本地路径 / 本地 http 副本。本地用「本地产物 vs 本地副本」即可验证断链检测
+  (造一个引用缺失资源的副本)、视觉对比、差异阈值,无需真发布:
+
+```bash
+# 独立自检:本地产物 vs 最终 URL(真发布后,需登录态可达)
+python3 skills/feishu-deck-h5/subskills/publisher/self_check.py \
+  --local runs/<task-id>/output \
+  --remote https://magic.solutionsuite.cn/html-box/<id> \
+  --out runs/<task-id>/output --pages 3
+
+# 本地验证自检逻辑:把 --remote 指向本地副本(改一页 / 删一个资源就能看红牌)
+python3 skills/feishu-deck-h5/subskills/publisher/self_check.py \
+  --local runs/<task-id>/output --remote /path/to/remote-copy/index.html
+```
+
+浏览器(playwright/chromium)缺失时自检报「skipped」而不阻断真发布(`--allow-skip` 控制退出码)。
+
 ## 输出
 
 默认写到 `runs/<task-id>/output/`:
@@ -85,6 +129,9 @@ magic-page-publish.json
 cloud-publish.json
 MAGIC_PAGE_PUBLISH.md
 publish-manifest.json
+publish-self-check.json      # F-285 发布后自检机读结果 (self_check.ok / verdict)
+PUBLISH_SELF_CHECK.md        # F-285 发布后自检红牌报告
+self-check/local|remote/*.png  # 本地 vs 远程逐页截图
 publisher-*.log
 ```
 
@@ -96,4 +143,6 @@ publisher-*.log
   `data:`、`file:`、绝对/相对本地资源路径或第三方运行时依赖。
 - 不手工替代 `feishu-slide-library` 的任何入库逻辑。
 - 不在聊天或日志里泄露 GitHub / 飞书 / Magic token。
+- 发布成功后必须跑发布后自检(F-285):有登录态时对**最终 URL** 验断链 / 字体 / 视觉;自检红牌
+  不算发布完成,要修源重发。`--skip-self-check` 只在已人工确认远程无误时用。
 - 发布完成后的准确话术是“已发布到 Magic Page”。如用户还要求入库,交给 importer。

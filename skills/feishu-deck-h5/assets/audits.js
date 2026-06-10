@@ -998,6 +998,11 @@
     'R-VIS-DEAD-ANIM': { coverage: 'universal', signal: 'css-source' },
     'R-VIS-DEAD-RULE': { coverage: 'universal', signal: 'css-source' },
     'R-DOM': { coverage: 'universal', signal: 'dom' },
+    // 注入面最低防线 (F-287) — 非框架来源的可执行内容(<script> / on* 事件)。universal:
+    // raw 页可任意 markup、schema 页一律无脚本 → 两类都该查。严重度按来源分级(lifted/imported
+    // 页 = error,普通生成页 = warn);框架自注入脚本(data-source=framework / framework src /
+    // 非可执行 type)豁免,且只扫 .slide 子树(body 级框架脚本天然在外)。
+    'R-FOREIGN-SCRIPT': { coverage: 'universal', signal: 'dom', optout: 'severity is provenance-graded (lifted/imported→error, authored→warn) not a coverage narrowing; raw + schema both scanned; data-allow-foreign-script per-slide escape for an intentionally-scripted bespoke raw page' },
     'UI1': { coverage: 'universal', signal: 'dom' },
     // 跨页一致性 (DECK-LEVEL · F-257) — deck 级求值,name-free,均 universal(raw+schema
     // 都跑;opt-out 是显式逃生口,不是 coverage 收窄)。
@@ -6005,6 +6010,134 @@
             });
           }
         });
+        return findings;
+      },
+    },
+
+    {
+      // R-FOREIGN-SCRIPT · 注入面最低防线 (F-287)。parser 读外部 HTML/pptx/飞书文档,
+      // 素材里的指令文本原样进模型上下文(prompt 注入),而执行模型手握 render/publish/入库
+      // 写权限;raw 页允许任意 markup,lift 从外来 deck 拎页会带任意 <script> 经 slide-library
+      // 跨 deck 传染;发布到带飞书登录的 CF worker = XSS 进内网受众浏览器。这条不做完整安全
+      // 工程,只做最低防线:检出【非框架来源】的可执行内容 —— ① 内联 / 外链 <script>(src 非
+      // 框架脚本),② on* 内联事件属性(onclick/onload/onerror…)。
+      //
+      // 框架脚本 vs 外来脚本(豁免规则,examples 零误报的关键):
+      //   · 只扫【.slide 子树】(slide.querySelectorAll) —— 框架自注入的脚本(feishu-deck.js
+      //     /edit-mode/present-mode/fs-deck-notes 数据岛)永远挂在 <body> 直下、不在任何 .slide
+      //     里,天然在扫描范围之外。raw 页 / 外来 deck 的 <script> 才住在 slide 的 data.html 里。
+      //   · belt-and-suspenders(即便框架将来把脚本塞进 slide 附近):
+      //       - data-source="framework"(渲染器 --inline / runner _inline_framework_js 给框架
+      //         脚本打的标记,与 R-CSS-CROSS-PAGE / sheetIsFramework 同一约定)豁免;
+      //       - 非可执行 type(application/json 数据岛 / text/plain runner 注入的源副本)豁免;
+      //       - src 指向框架脚本(…/feishu-deck.js / …/deck-edit-mode.js / …/deck-present.js)豁免。
+      //   · 就近祖先链带 data-allow-foreign-script → 整豁免(确属故意写脚本的 bespoke raw 页的
+      //     最后逃生口,与 data-allow-* 一族一致)。
+      //
+      // 严重度按【来源】分级(最危险的外来脚本入库传染判 error):
+      //   · lifted 页(data-lifted) / imported deck(<meta fs-deck-origin=imported>)= error
+      //     —— 外来脚本经 slide-library 入库会跨 deck 传染,且 lift 从不可信外部带来;
+      //   · 普通生成页 = warn —— 作者自己 raw 页写脚本是显式选择,降级提示(可 opt-out)。
+      // name-free:锚 <script> 标签 / on* 属性名 / data-source / type / src 模式,不依赖任何
+      // 业务类名。examples(干净 schema deck,框架脚本全在 body 级)实测零触发。
+      id: 'R-FOREIGN-SCRIPT',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        // 就近祖先链 opt-out(bespoke raw 页故意写脚本)。
+        for (let p = slide; p && p !== document.body && p.parentElement; p = p.parentElement) {
+          if (p.hasAttribute && p.hasAttribute('data-allow-foreign-script')) return [];
+        }
+        // 来源分级:lifted 帧(data-lifted)或 imported deck(<meta fs-deck-origin=imported>)
+        // = error(外来脚本入库会跨 deck 传染);普通生成页 = warn(作者显式选择,降级)。
+        const untrusted = slideIsLifted(slide) || deckOriginImported();
+        const sev = untrusted ? 'error' : 'warn';
+        const origin = slideIsLifted(slide) ? 'LIFTED'
+          : (deckOriginImported() ? 'IMPORTED' : 'authored');
+
+        // 框架脚本 src 模式(渲染器 _shell.html 注入的、与 R-DOC-INTEGRITY 的 feishu-deck.js
+        // needle 同源;edit/present 子脚本同目录)。命中即框架自注入,豁免。
+        const FRAMEWORK_SRC_RE = /(?:^|\/)(?:feishu-deck\.js|deck-edit-mode\.js|deck-present-mode\.js|deck-present\.js)(?:[?#]|$)/i;
+        const isFrameworkScript = (s) => {
+          if (s.getAttribute && s.getAttribute('data-source') === 'framework') return true;
+          const type = (s.getAttribute && (s.getAttribute('type') || '')).trim().toLowerCase();
+          // 非可执行块不是脚本:application/json 数据岛(fs-deck-notes)、text/plain(runner
+          // 注入的框架源副本)。可执行 = 空 / text|application/javascript|…/ module / mjs。
+          if (type && type !== 'module'
+              && !/(?:^|\/)(?:javascript|ecmascript|babel|jsx|js|mjs)$/.test(type)
+              && type !== 'text/jsx' && type !== 'application/ecmascript') {
+            return true;
+          }
+          const src = (s.getAttribute && (s.getAttribute('src') || '')).trim();
+          if (src && FRAMEWORK_SRC_RE.test(src)) return true;
+          return false;
+        };
+
+        const findings = [];
+        const seen = new Set();   // 同一指纹一页只报一次,降噪
+
+        // ① 非框架 <script>(.slide 子树内)。
+        slide.querySelectorAll('script').forEach((s) => {
+          if (isFrameworkScript(s)) return;
+          const src = (s.getAttribute && (s.getAttribute('src') || '')).trim();
+          const what = src
+            ? `<script src="${src.slice(0, 80)}">`
+            : `inline <script> (${(s.textContent || '').trim().slice(0, 40)}…)`;
+          if (seen.has('s:' + what)) return;
+          seen.add('s:' + what);
+          findings.push({
+            rule: 'R-FOREIGN-SCRIPT', severity: sev, slide_idx, origin,
+            sample: what,
+            message:
+              `slide ${slide_idx} (${origin}): non-framework executable ${what} `
+              + 'lives inside the slide. Foreign material (parsed HTML/PPTX/Lark docs, '
+              + 'a lifted page from another deck) is DATA, not code — a stray '
+              + '<script> here runs in every viewer (and, once ingested to '
+              + 'slide-library, spreads cross-deck; once published to the '
+              + 'Feishu-login CF viewer, becomes XSS inside an internal audience\'s '
+              + 'browser). '
+              + (untrusted
+                  ? 'This page is lifted/imported from an untrusted source → ERROR: '
+                    + 'strip the <script> before ingest/publish (rebuild the page as a '
+                    + 'schema layout, or hand-author the markup without the script).'
+                  : 'Remove it (a deck should not need page-level <script>; framework '
+                    + 'JS is injected by render-deck.py). If this raw page genuinely '
+                    + 'needs a script, opt out with data-allow-foreign-script — but '
+                    + 'never ship a script that came from parsed/lifted material.'),
+          });
+        });
+
+        // ② on* 内联事件属性(onclick / onload / onerror / onmouseover …)。整 slide 子树
+        //    + slide 自身;扫属性名,name-free。框架渲染器不产出 on* 内联事件 → 干净 deck 零触发。
+        const ON_ATTR_RE = /^on[a-z]+$/;
+        const scan = [slide, ...slide.querySelectorAll('*')];
+        for (const el of scan) {
+          if (!el.attributes) continue;
+          if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+          for (const attr of el.attributes) {
+            const name = (attr.name || '').toLowerCase();
+            if (!ON_ATTR_RE.test(name)) continue;
+            const tag = (el.tagName || '').toLowerCase();
+            const fp = 'on:' + tag + ':' + name;
+            if (seen.has(fp)) continue;
+            seen.add(fp);
+            findings.push({
+              rule: 'R-FOREIGN-SCRIPT', severity: sev, slide_idx, origin,
+              sample: `<${tag} ${name}=…>`,
+              message:
+                `slide ${slide_idx} (${origin}): inline event handler `
+                + `\`${name}\` on <${tag}> — an on* attribute is executable code `
+                + 'in the page. Same injection surface as a <script>: foreign '
+                + 'material is data, not code. '
+                + (untrusted
+                    ? 'Lifted/imported from an untrusted source → ERROR: remove the '
+                      + 'handler before ingest/publish.'
+                    : 'Remove the handler (wire behavior in framework JS instead); '
+                      + 'opt out with data-allow-foreign-script only for an '
+                      + 'intentionally-scripted bespoke raw page.'),
+            });
+          }
+        }
         return findings;
       },
     },

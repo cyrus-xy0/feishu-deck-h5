@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -23,6 +24,7 @@ from typing import Any
 
 
 REPO = Path(__file__).resolve().parents[2]
+SELF_CHECK = Path(__file__).resolve().parent / "self_check.py"
 RUNS = REPO / "runs"
 MAGIC_PAGE_ASSETS = REPO / "assets/magic-page-assets.py"
 INLINE_ASSETS = REPO / "assets/inline-assets.py"
@@ -430,6 +432,63 @@ def summarize_step(step: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _load_self_check():
+    """Load subskills/publisher/self_check.py by path (sibling module)."""
+    spec = importlib.util.spec_from_file_location("publisher_self_check", SELF_CHECK)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def post_publish_self_check(
+    *,
+    html_path: Path,
+    publication: dict[str, Any],
+    output_dir: Path,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    """F-285 last-mile verification: re-open the *final published URL* as the
+    audience would and confirm the bytes survived publishing — no 404'd assets,
+    no silent font fallback, no per-page visual drift vs the local render.
+
+    Skipped (not failed) when: the user opted out (--skip-self-check), the
+    publish was a dry-run / produced no app_url, or there is no local HTML to
+    compare against. A red card here flips the publish to non-zero by default
+    (the whole point — do not call a broken delivery 'published'); pass
+    --self-check-soft to downgrade a red card to a warning."""
+    if args.skip_self_check:
+        return {"enabled": False, "ok": True, "reason": "self-check skipped by --skip-self-check"}
+    if not html_path:
+        return {"enabled": False, "ok": True, "reason": "no local HTML to compare; self-check skipped"}
+    app_url = str(publication.get("app_url") or "")
+    if publication.get("dry_run") or not publication.get("ok") or not app_url:
+        return {"enabled": False, "ok": True,
+                "reason": "no live published URL (dry-run / publish failed); self-check skipped"}
+
+    mod = _load_self_check()
+    try:
+        payload = mod.run_self_check(
+            local=html_path,
+            remote=app_url,
+            out_dir=output_dir,
+            pages=args.self_check_pages,
+            threshold=args.self_check_threshold,
+        )
+    except SystemExit as exc:
+        return {"enabled": True, "ok": True if args.self_check_soft else False,
+                "reason": f"self-check could not start: {exc}"}
+    payload["enabled"] = True
+    if payload.get("skipped"):
+        # browser unavailable: report, never block (real publish stays green)
+        payload["ok"] = True
+        return payload
+    if not payload.get("ok") and args.self_check_soft:
+        payload["soft"] = True
+        payload["ok"] = True
+    return payload
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--task-id")
@@ -444,6 +503,16 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--magic-page-dry-run", action="store_true")
     ap.add_argument("--magic-page-open-source", action="store_true")
     ap.add_argument("--skip-magic-asset-prepare", action="store_true")
+
+    # F-285 post-publish self-check (verify the final URL the audience opens).
+    ap.add_argument("--skip-self-check", action="store_true",
+                    help="do not re-open the published URL to verify delivery (404 / font / visual)")
+    ap.add_argument("--self-check-soft", action="store_true",
+                    help="a self-check red card warns instead of failing the publish")
+    ap.add_argument("--self-check-pages", type=int, default=3,
+                    help="how many leading slides the post-publish self-check verifies (default 3)")
+    ap.add_argument("--self-check-threshold", type=float, default=0.06,
+                    help="per-slide diff ratio that red-cards a page in the post-publish self-check (default 0.06)")
 
     return ap
 
@@ -473,17 +542,25 @@ def main(argv: list[str] | None = None) -> int:
     else:
         publication = publish_magic_page(html_path=html_path, output_dir=output_dir, title=title, task_id=task_id, args=args)
 
+    self_check = post_publish_self_check(
+        html_path=html_path,
+        publication=publication,
+        output_dir=output_dir,
+        args=args,
+    )
+
     manifest = {
         "task_id": task_id,
         "source": repo_rel(html_path) if html_path else "",
         "dry_run": args.dry_run,
         "publication": publication,
+        "self_check": self_check,
         "skipped": [{"type": "library_ingest", "reason": "publisher only publishes to Magic Page; use subskills/importer/ingest.py for library ingest"}],
     }
     manifest_path = output_dir / "publish-manifest.json"
     write_json(manifest_path, manifest)
     print(json.dumps({"manifest": str(manifest_path), **manifest}, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if bool(publication.get("ok")) else 1
+    return 0 if (bool(publication.get("ok")) and bool(self_check.get("ok"))) else 1
 
 
 if __name__ == "__main__":

@@ -236,6 +236,145 @@ def _archive_screenshots(html_path):
         pass  # archival is best-effort; never break validation
 
 
+# ---------------------------------------------------------------------------
+#  F-283 step 1 · CJK font-fingerprint (DIAGNOSTIC, not a rule)
+# ---------------------------------------------------------------------------
+# The framework's CJK face (方正兰亭黑 Pro GB18030) is a LOCALLY-LICENSED font
+# with NO @font-face / NO bundling. Consequence: every visual-audit geometry
+# number (overflow / balance / title-position) is measured against THIS
+# machine's glyph metrics. The same deck on a host WITHOUT that font (e.g. a
+# cloud Linux box that falls back to Noto / a tofu box) measures DIFFERENTLY —
+# a silent, physical source of "passes here, fails there". This probe makes the
+# actually-rendered CJK face VISIBLE so a cross-machine verdict carries its own
+# font fingerprint. It changes NO gate and emits NO finding — pure metadata for
+# the --json payload. (Full subsetting / @font-face packaging is F-283 B, TBD.)
+
+# Sentinel returned when the probe cannot run (no Chromium) — keeps the field a
+# string for downstream consumers rather than silently absent.
+_CJK_FONT_UNKNOWN = 'unknown(no-engine)'
+
+# In-page measureText fingerprint. NOTE on method: the classic width-diff trick
+# must use a LATIN probe string, NOT CJK. CJK ideographs are uniformly full-width
+# (em-square), so measureText() reports an IDENTICAL advance for every face —
+# even a bogus family or a plain generic — and cannot discriminate. The Latin
+# glyphs inside each CJK-stack family (方正兰亭黑 / PingFang / Noto / YaHei all
+# ship Latin) DO have face-specific advances, so we measure those. For each
+# candidate family we compare "<family>, <baseline>" against the bare baseline
+# over THREE generics (monospace / sans-serif / serif); the family is "available"
+# when at least one comparison DIFFERS — i.e. the named family resolved and its
+# (Latin) metrics replaced the generic's rather than falling through. We walk the
+# deck's real computed CJK font-family list (read off a rendered element, else the
+# --fs-font-cjk custom property) IN ORDER and return the first available name —
+# the face the browser actually paints, the one ALL geometry was measured against.
+# (document.fonts.check() is useless here: it returns true even for a nonexistent
+# family / a not-installed name, because it reports loaded @font-face faces, not
+# which locally-installed family wins the cascade. Verified — so we measure.)
+_CJK_FINGERPRINT_JS = r"""
+() => {
+  // Latin probe — wide spread of glyph widths so face differences surface.
+  const PROBE = 'ABCWMlijgpqy 0123456789 ABCWMlijgpqy ABCWMlijgpqy';
+  const BASELINES = ['monospace', 'sans-serif', 'serif'];
+  const PX = '64px';
+  const cv = document.createElement('canvas');
+  const ctx = cv.getContext('2d');
+  const widthOf = (family) => {
+    ctx.font = PX + ' ' + family;
+    return ctx.measureText(PROBE).width;
+  };
+  // Quote a family token for the canvas font shorthand unless it's already
+  // quoted or a bare CSS keyword (generic family / system-ui).
+  const KEYWORDS = new Set(['system-ui','sans-serif','serif','monospace',
+                            'ui-sans-serif','ui-serif','ui-monospace',
+                            'cursive','fantasy','-apple-system']);
+  const q = (name) => {
+    name = name.trim().replace(/^['"]|['"]$/g, '');
+    if (!name) return null;
+    if (KEYWORDS.has(name.toLowerCase())) return name;
+    return '"' + name.replace(/"/g, '\\"') + '"';
+  };
+  const isAvailable = (name) => {
+    const fam = q(name);
+    if (!fam) return false;
+    if (KEYWORDS.has(name.trim().toLowerCase())) return true;  // generic always 'resolves'
+    return BASELINES.some((base) => {
+      const baseW = widthOf(base);
+      const testW = widthOf(fam + ', ' + base);
+      return Math.abs(testW - baseW) > 0.5;
+    });
+  };
+  // Read the real cascade the deck uses: prefer a rendered CJK element's
+  // computed font-family, else the framework custom property, else the literal.
+  const sampleEl = document.querySelector(
+    '.title-zh, .slide .title, .slide h1, .slide h2, .slide') || document.body;
+  let famList = getComputedStyle(sampleEl).fontFamily || '';
+  if (!famList || !/[一-鿿]/.test(famList)) {
+    const v = getComputedStyle(document.documentElement)
+                .getPropertyValue('--fs-font-cjk');
+    if (v && v.trim()) famList = v.trim();
+  }
+  // Split on top-level commas (font-family names have no nested commas).
+  const families = famList.split(',').map((s) => s.trim()).filter(Boolean);
+  let effective = null;
+  for (const name of families) {
+    if (isAvailable(name)) { effective = name.replace(/^['"]|['"]$/g, ''); break; }
+  }
+  // Last resort: report whatever the cascade head was, marked as a guess.
+  if (!effective && families.length) {
+    effective = families[families.length - 1].replace(/^['"]|['"]$/g, '');
+  }
+  return {
+    effective_cjk_font: effective || null,
+    cjk_font_stack: families,
+  };
+}
+"""
+
+
+def probe_effective_cjk_font(html_path):
+    """F-283 step 1 · return the CJK font-family the browser ACTUALLY paints for
+    this deck on THIS machine (a fingerprint for cross-machine verdict diffing).
+
+    Renders the deck in a short headless Chromium pass (separate from the audit
+    engine, mirroring _archive_screenshots), awaits fonts, then runs an in-page
+    measureText fingerprint that walks the deck's computed CJK font-family list
+    and returns the first family that actually resolves on this host.
+
+    Returns the family name (str), or `_CJK_FONT_UNKNOWN` when no engine is
+    available, or None if the page exposes no CJK cascade. NEVER raises — a probe
+    failure must not break validation (it is metadata, not a gate)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return _CJK_FONT_UNKNOWN
+    try:
+        url = Path(html_path).resolve().as_uri()
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                page = browser.new_context(
+                    viewport={'width': 1920, 'height': 1080}).new_page()
+                page.goto(url, wait_until='domcontentloaded', timeout=60_000)
+                # Await fonts (bounded) so we fingerprint the settled face, not a
+                # mid-swap fallback — same pattern as _archive_screenshots.
+                try:
+                    page.evaluate(
+                        "() => Promise.race(["
+                        "(document.fonts && document.fonts.ready) || Promise.resolve(),"
+                        " new Promise(r => setTimeout(r, 2000))])")
+                except Exception:
+                    pass
+                result = page.evaluate(_CJK_FINGERPRINT_JS)
+            finally:
+                browser.close()
+        if isinstance(result, dict):
+            return result.get('effective_cjk_font')
+        return None
+    except Exception:
+        # Chromium launch flake / nav timeout / eval error → environment glitch,
+        # not a deck defect. Mark unknown rather than crashing validate.
+        return _CJK_FONT_UNKNOWN
+
+
 def inline_linked(html_text, base_dir):
     """Inline <link rel=stylesheet> / <script src> into the HTML so audits can
     see framework CSS/JS content. External (http/https/data:) refs and missing
@@ -436,9 +575,19 @@ def main():
                 'slide': int(s.group(1)) if s else None,
                 'selector_hint': sel.group(1) if sel else None,
             }
+        # F-283 step 1 · CJK font fingerprint. Only meaningful on the visual
+        # path (Chromium rendered the deck); on --no-visual we did not measure,
+        # so report the no-engine sentinel rather than a guess. This stamps each
+        # cross-machine verdict with the CJK face geometry was actually measured
+        # against (the silent "passes here / fails there" font-metric source).
+        if args.visual:
+            effective_cjk_font = probe_effective_cjk_font(path)
+        else:
+            effective_cjk_font = _CJK_FONT_UNKNOWN
         payload = {
             'deck': str(path),
             'slides': len(slides),
+            'effective_cjk_font': effective_cjk_font,
             'errors': [_entry(c, m, 'error') for c, m in iss.errors],
             'warnings': (
                 [_entry(c, m, 'warning') for c, m in iss.warnings]

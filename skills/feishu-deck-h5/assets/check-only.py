@@ -39,6 +39,7 @@ import validate as V
 
 FAMILIES = [
     ('结构 / DOM',           ['R02', 'R07', 'R-DOM', 'R-DOC-INTEGRITY', 'R-BAKED-DOM']),
+    ('安全 / 注入面',        ['R-FOREIGN-SCRIPT']),
     ('排版 / 文案',          ['R05', 'R06', 'R13', 'R20', 'R56',
                               'R-WHITE-TEXT', 'R-HIERARCHY', 'R-ECHO',
                               'R-BULLET-DASH', 'R-ESC-HTML']),
@@ -78,6 +79,11 @@ CONTEXT_NOTES = {
     'R-SELF-CONTAINED': '老 deck 把每页 CSS 放在 head <style> 里很常见; 这条只是 '
                         '提醒「该页 CSS 没跟着 slide 走, lift/republish 会丢」. '
                         '非阻塞 (warn_soft); 迁到 deck.json 的 custom_css 即可消除.',
+    'R-FOREIGN-SCRIPT': '注入面最低防线: 非框架来源的 <script> / on* 内联事件. 严重度按来源 '
+                        '分级 —— lifted/imported 页 = error(外来脚本经入库会跨 deck 传染、'
+                        '发布到带飞书登录的 CF viewer = XSS), 普通生成页 = warn. 框架自注入脚本 '
+                        '(data-source=framework / framework src / 非可执行 type)与 body 级脚本 '
+                        '豁免; 确属故意写脚本的 bespoke raw 页用 data-allow-foreign-script opt-out.',
     'R-RAW-LOOKS-SCHEMA': 'raw-first 立场下的过度处理兜底: 一张手搓 raw 页若其实只是 '
                         '一排标准卡片 (图标+标题+正文, 无示意图/动画/箭头连接), 提醒 '
                         '改用 content/3up·blocks 更省更稳. 非阻塞 (warn_soft); 这页若有 '

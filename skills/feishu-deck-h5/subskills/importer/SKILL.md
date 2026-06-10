@@ -35,8 +35,13 @@ state.
 
 ## 职责边界
 
-- **质检**:先复用已有 validator PASS 证据;没有 PASS 证据时对确认 HTML 运行
+- **质检 (入库前门禁)**:先复用已有 validator PASS 证据;没有 PASS 证据时对确认 HTML 运行
   `check-only.py --gate ingest` 并写 `IMPORT_QUALITY_REPORT.md`。质检不过不得入库。
+  入库门会把 warn 升 error,且**覆盖跨页一致性规则**
+  `R-DECK-TITLE-DRIFT` / `R-DECK-PALETTE-DRIFT` / `R-DECK-TYPESCALE-BUDGET`(F-257/F-285):
+  标题跨页漂移、近重复强调色、`allow:typescale` 滥用都会拦在库门外 —— 不一致的 deck 入库后
+  最坑复用(抽到别处拼接接不上)。注意门禁只 block `business-rules.yaml` 里有条目的规则码,
+  这三条已补进字典;新增跨页规则务必同步补 yaml,否则会被门禁静默丢掉(F-18 漂移)。
 - **PR 入库**:调用 `feishu-slide-library` 的权威脚本:
   `bootstrap-library.py -> ingest-package.py -> confirm-ingest.py`。不要手写
   fingerprint、判重、候选包、PR、merge 或 viewer index 逻辑。
