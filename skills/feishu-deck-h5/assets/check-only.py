@@ -876,6 +876,11 @@ def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None,
         except json.JSONDecodeError as exc:
             errors.append(f'ingestion-manifest.json 不是有效 JSON: {exc}')
             manifest = {}
+        deck_id = str(manifest.get('deck_id') or '').strip() if isinstance(manifest, dict) else ''
+        if not deck_id:
+            errors.append('ingestion-manifest.json.deck_id 缺失；library 入库无法继承稳定素材 ID')
+        elif not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,95}', deck_id):
+            errors.append(f'ingestion-manifest.json.deck_id 不是安全 ID: {deck_id}')
         primary = safe_manifest_path(manifest.get('primary_html')) if isinstance(manifest, dict) else None
         if not primary:
             errors.append('ingestion-manifest.json.primary_html 缺失或不是安全相对路径')
