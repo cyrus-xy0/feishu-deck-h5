@@ -46,6 +46,54 @@ visual gate only fires for `runs/<ts>/output/` paths, so an elsewhere-render is
 advisory-only and proves nothing (render-deck now prints a loud warning when
 that happens).
 
+### E0c. Editing a dirty lifted page and your CSS change has NO effect? Append a high-specificity `!important` override — stop fighting the duplicates
+
+A lifted page often carries the SOURCE deck's kitchen-sink stylesheet: the same
+rules duplicated across many `<style>` blocks (8+), plus a large
+`<style data-faithful-add="<srckey>">` block that re-declares the live styling
+LAST. Two symptoms tell you you're in this situation:
+
+1. You edit a base rule (e.g. `.ts-tasks { line-height }`, `.timeline { row-gap }`)
+   and re-render, but the measured geometry is **byte-identical** — the value
+   never moves no matter what you set. A later duplicate (or the
+   `data-faithful-add` block) wins by source order, so your edit to an earlier
+   copy is dead.
+2. A container is pinned to an exact height (e.g. `.timeline` stuck at 658px)
+   that `flex:1 !important` does NOT grow, even though its parent has visible
+   slack below it — a higher-specificity selector (child combinator, or
+   `data-…-fix` override) is overriding flex-grow.
+
+Do NOT keep whack-a-moling the duplicate copies (replace_all helps but the
+winner is unpredictable across renders). Instead **append ONE authoritative
+override `<style>` at the very end of `data.html`** — last in source order AND
+highest specificity wins decisively:
+
+```html
+<style data-loosen-override="<key>">
+.slide[data-slide-key="<key>"] .stage > .timeline{   /* child combinator > bare class */
+  height:752px !important; flex:0 0 752px !important;  /* explicit height beats a flex that won't grow */
+  row-gap:4px !important; align-content:center !important;
+}
+.slide[data-slide-key="<key>"] .ts-tasks{ line-height:1.08 !important; }
+</style>
+```
+
+Method that converged in one pass after the duplicate-fighting failed
+(2026-06-11, claims-lead-day "loosen the row spacing"):
+- **Measure the box tree first** (force-render with `DECK_ALLOW_VIS_ERRORS=1
+  DECK_ALLOW_GEOM_OVERFLOW=1`, then Playwright-measure the container + its
+  children + parent slack) — don't eyeball, and don't trust that a base-rule
+  edit landed. If `content`/`container` px are identical across two renders with
+  different CSS, your edit isn't winning → go straight to the override.
+- **Reclaim real space before loosening.** A capped container won't grow from
+  spacing changes alone; give it an explicit height that claims the parent's
+  unused slack (measured `parent.bottom − container.bottom`), THEN spend that
+  height on row-gap / line-height.
+- Keep the override SMALL and scoped to the one `data-slide-key`; it is the
+  surgical exception, not a license to restyle. The durable fix for the
+  underlying duplication is `repair-lifted` (heal dedups dead rules); this
+  override is for the live-but-duplicated rules heal leaves behind.
+
 ## Adding content to a `raw` / `lifted` card — measure geometry, not the box
 
 When you ADD a visual element or extra text to a hand-authored `raw` slide
