@@ -1559,7 +1559,13 @@ body {
      CSS in per-page <style> blocks can adjust title margin normally;
      if you need to push a subtitle further from the title, prefer
      `margin-top` on the subtitle (see `.page-sub` default below). */
-  font: 600 var(--fs-title)/1.1 var(--fs-font-cjk);
+  /* 2026-06-11: line-height 1.1 → 1.2 — at 1.1 the line box (52.8px @48) was
+     shorter than a Latin glyph's full height, so the `overflow:hidden` below
+     (kept for the ellipsis-on-too-long-title feature) CLIPPED the descenders of
+     g/p/y/j on English titles. 1.2 gives the box room to contain descenders so
+     overflow no longer shaves them. CJK titles have no descenders → no visual
+     change beyond a ~5px taller title box. */
+  font: 600 var(--fs-title)/1.2 var(--fs-font-cjk);
   letter-spacing: -0.005em; color: #fff;
   white-space: nowrap;                      /* 规范: single line — no wrap */
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
