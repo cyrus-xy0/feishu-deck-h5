@@ -86,10 +86,18 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
 - For a raw **content page title**, use the framework header verbatim —
   `<div class="header"><h2 class="title-zh">…</h2></div>`, title-only, single line
   (section number inline). Do NOT invent `.r-head` / `.r-title`: the header guards
-  (R56 title-only, R-VIS-TITLE-POSITION, R-EMPTY-HEADER-ZONE, R-VIS-TITLE-GAP) only
+  (R56 no-eyebrow, R-VIS-TITLE-POSITION, R-EMPTY-HEADER-ZONE, R-VIS-TITLE-GAP) only
   fire on `.header`/`.title-zh` and silently skip a custom raw header. See
   `references/deck-generation-policy.md` → "Content Header Rule" for the full gap
   list of schema-only checks raw can bypass.
+- **Title subtitle = `.page-sub` (one canonical form).** If a content/raw page
+  needs a subtitle line under the title, write it as `<p class="page-sub">`
+  directly after the `<h2>` **inside `.header`** — the framework gives it one
+  uniform position (title +36px, `--fs-sub` 28px, #fff). Do NOT improvise it with
+  `.lede` / `.subtitle` / a bare `<div>` / inline `style="font-size:…"` (each
+  drifts position + size per page → "副标位置都不一样"). A *body* lead-in
+  paragraph is a different thing: that `.lede` goes inside `.stage`, not `.header`.
+  Enforced by R-VIS-SUBTITLE-CANON (name-free, scans `.header` only).
 - Do not use emoji or hand-drawn approximations for official Feishu product icons.
   Use the official asset pool described in `assets-and-files.md`.
 

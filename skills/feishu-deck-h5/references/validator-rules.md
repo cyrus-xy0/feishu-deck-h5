@@ -39,6 +39,7 @@ The validator covers programmable rules (last refreshed 2026-05-18):
 | Empty header zone | R-EMPTY-HEADER-ZONE | hiding framework `.header` requires `.stage top ≤32` (snap to edge) OR `top:61` (framework anchor) OR a visible top decoration; otherwise the gap reads as "missing bg" — see BF15 |
 | Cyan | R49 | cyan is inline-highlight only, not slide accent |
 | Header | R56 | content-page `.header` has only `<h2>` (no eyebrow); matching is class-list aware (`class="header is-tall"` works) |
+| Subtitle canonical | R-VIS-SUBTITLE-CANON | F-294 · WARN · name-free · the **title subtitle** has one canonical form: a `<p class="page-sub">` directly after the `<h2>` **inside `.header`** (framework `.slide .header .page-sub` = title +36px, `--fs-sub` 28px, #fff, one uniform position). Any text-bearing element **after the title inside `.header`** whose class isn't `page-sub` (an improvised `.lede` / `.subtitle` / bare `<div>` / inline-styled `<p>`) → warn (positions/sizes drift — "副标位置都不一样"). **Scoped to `.header` only**: a body lead-in `.lede` inside `.stage` is NOT a title subtitle and is never flagged. `.eyebrow` / `.pageno` (and empty logo divs) are skipped — eyebrow is R56's job (avoids double-report). Hero layouts (cover/section/image-text/end/quote) own their own title patterns and are skipped. Fix: use `<p class="page-sub">`; put body lead-ins as `.lede` in `.stage`, not `.header` |
 | Decor | R38 | `data-decor` tokens are from ship list — validated on the `.slide` AND any descendant carrying `data-decor` (parity with old `audit_data_decor` which scanned the whole frame markup) |
 | Runtime chrome | R29-R32 | present-mode bar/buttons + `requestFullscreen` wired |
 | Centering pattern | R36 | `margin: -540px 0 0 -960px`, NOT grid `place-items` |
@@ -149,8 +150,10 @@ Before declaring a deck "done":
      its inner container.
    - **Variant discipline** (R47): variants that change structural
      properties also redeclare `align-items` + `justify-content`.
-   - **Content header** (R56): a content-page `.header` carries only `<h2>` —
-     no eyebrow, no stacked subtitle.
+   - **Content header** (R56): a content-page `.header` carries no eyebrow above
+     the title. An optional title subtitle is allowed — but only as the canonical
+     `<p class="page-sub">` after the `<h2>` (R-VIS-SUBTITLE-CANON), never an
+     improvised `.lede` / `.subtitle` / bare `<div>`.
    - **UI mocks as HTML** (UI1): warns on any `<img>` in slide content that
      isn't a known brand asset or `data:` URI.
    - **Cyan as slide-accent** (R49): rejects `data-accent="cyan"` on

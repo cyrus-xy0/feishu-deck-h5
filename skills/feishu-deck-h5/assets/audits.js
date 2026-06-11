@@ -954,6 +954,7 @@
     'R-HIERARCHY': { coverage: 'schema-only', signal: 'css-source', optout: 'META_CLASS_RE hard gate (.owner/.kicker/.eyebrow); kicker vs caption indistinguishable by geometry — intrinsically name-bound' },
     'R05': { coverage: 'universal', signal: 'text' },
     'R56': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-SUBTITLE-CANON': { coverage: 'universal', signal: 'dom' },
     'R-ECHO': { coverage: 'universal', signal: 'text' },
     'R36': { coverage: 'partial', signal: 'css-source', optout: 'margin check name-free / grid check keyed on framework [data-mode=present]' },
     'R48': { coverage: 'schema-only', signal: 'css-source', optout: 'CSS regex keyed on [data-layout="<6 centerable>"]; raw via [data-role=stage] TODO (PR2)' },
@@ -2311,6 +2312,57 @@
             + 'CSS hides it visually but the markup should be removed too '
             + '— the content-page header is title-only.',
         }];
+      },
+    },
+
+    {
+      // R-VIS-SUBTITLE-CANON · 标题副标 canonical 统一(F-294)。框架早有 canonical:
+      //   `.header` 里 H2 之后一个 `<p class="page-sub">`(css `.slide .header .page-sub`:
+      //   标题下 36px、--fs-sub=28px、#fff、统一定位)。各页即兴写副标(`.lede` / `.subtitle` /
+      //   裸 <div> / inline-styled <p>)→ class/tag/位置/字号全不统一,用户实测「副标位置都不一样」。
+      //   这条 name-free 地守一致:**只看 `.header` 内**、`.title-zh`(或 H2)**之后**出现的、
+      //   带自有可见文字的副标元素(任意 tag),class 不是 `page-sub` → warn。
+      //   关键边界:**只扫 `.header` 内** —— 正文区(`.stage` 里)的 `.lede` 是正文引导段、
+      //   不是标题副标,这条一条不报(选择器钉死 .header)。R56 已管 `.header .eyebrow`(eyebrow
+      //   是标题上方的 kicker、本就该删),为避免与 R56 双报,带 eyebrow class 的元素这里跳过。
+      id: 'R-VIS-SUBTITLE-CANON',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, layout } = ctx;
+        if (HERO_TITLE_LAYOUTS.has(layout)) return [];   // hero 版式自管标题/副标
+        const findings = [];
+        const headers = slide.querySelectorAll('.header');
+        for (const hdr of headers) {
+          // 定位标题元素(canonical = .title-zh;兜底取首个 h1-h6)。
+          let title = hdr.querySelector('.title-zh');
+          if (!title) title = hdr.querySelector('h1,h2,h3,h4,h5,h6');
+          if (!title) continue;   // 无标题的 header 不在本规则范围
+          // 遍历 .header 的【直接元素子节点】,只看排在标题之后的那些(= 副标位)。
+          let afterTitle = false;
+          for (const el of hdr.children) {
+            if (el === title || (title.contains(el))) { afterTitle = true; continue; }
+            if (!afterTitle) continue;                    // 标题之前(eyebrow 位)→ 归 R56,不管
+            const cls = (el.getAttribute('class') || '').trim();
+            const clsLc = cls.toLowerCase();
+            // canonical 写法 → 放行。
+            if (/(^|\s)page-sub(\s|$)/.test(clsLc)) continue;
+            // eyebrow(R56 管)/ 框架抑制的 pageno → 跳过,避免双报。
+            if (/(^|\s)(eyebrow|pageno|deck-pageno)(\s|$)/.test(clsLc)) continue;
+            // 只逮「带自有可见文字」的副标元素 —— 空的 wordmark / logo div(无文字)放行。
+            const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!txt) continue;
+            const tag = el.tagName.toLowerCase();
+            findings.push({
+              rule: 'R-VIS-SUBTITLE-CANON', severity: 'warn', slide_idx,
+              message: `slide ${slide_idx} (${layout || '?'}): .header 内标题副标用了 `
+                + `<${tag} class="${cls || '(none)'}">("${txt.slice(0, 28)}…"),非 canonical。`
+                + '标题副标请用 `.header` 里 H2 后的 `<p class="page-sub">`(框架统一定位:'
+                + '标题下 36px、28px、#fff)—— 各页即兴写 .lede/.subtitle/裸 div/inline 会让副标'
+                + '位置/字号不一致。注:正文引导段用 `.lede` 放 `.stage`(不放 `.header`),这条只查 `.header` 内。',
+            });
+          }
+        }
+        return findings;
       },
     },
 
