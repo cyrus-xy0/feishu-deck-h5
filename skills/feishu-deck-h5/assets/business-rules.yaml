@@ -597,3 +597,89 @@ UI1:
   consequence: "投影放大后界面发虚, 不精致"
   fix:
     - "把界面用 HTML 元素重新画出来, 别贴截图"
+
+# ---- 2026-06-11 · 补齐 coverage 闸门欠账 (F-294/F-300/F-301 各波新规则的业务文案) ----
+
+R-VIS-DIM-TEXT:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页有正文文字发灰 (实际渲染亮度过低)"
+  consequence: "深色底上发灰的句子投影出来看不清, 客户读不到这段内容"
+  fix:
+    - "正文用纯白 #fff; 灰白档 (--fs-text-40 等) 只留给角标 / 页码等装饰"
+
+R-VIS-FILL:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页内容太稀, 撑不满版面 (居中的空洞)"
+  consequence: "页面大片留白, 显得没做完 / 信息量不足"
+  fix:
+    - "补充内容密度 (加要点 / 数据 / 配图), 或与相邻页合并"
+
+R-VIS-RAW-TITLE-POS:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页 (自定义版式) 标题位置偏低, 上方留空"
+  consequence: "标题没顶到标准位置, 全 deck 标题高度不齐"
+  fix:
+    - "把标题移回页面顶部标准带 (top ≈ 61px), 内容在标题带下方居中"
+
+R-VIS-RAW-TITLE-STACK:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页标题上叠了一层小字眉标, 形成双层标题"
+  consequence: "标题层级混乱, 与其他页的单层标题不一致"
+  fix:
+    - "把眉标并进标题一行, 或改用标准 .header 结构"
+
+R-VIS-SUBTITLE-CANON:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页副标题没用标准写法 (.page-sub)"
+  consequence: "各页副标题位置 / 字号漂移, 翻页时跳来跳去"
+  fix:
+    - "副标题统一写成 .header 里 <h2> 之后的 <p class=\"page-sub\">"
+
+R-DOC-INTEGRITY:
+  concern:     "D · 放映功能不全"
+  symptom:     "文件结构不完整 (被截断或容器未闭合)"
+  consequence: "打开放映就是坏的, 后面的页可能整体丢失"
+  fix:
+    - "从 deck.json 重新渲染一次, 别手工拼接 HTML 文件"
+
+R-BAKED-DOM:
+  concern:     "C · 复用时会打架"
+  symptom:     "这份 HTML 是运行后页面另存的, 不是渲染产物"
+  consequence: "烤死的运行时状态会让后续编辑 / 重渲染错乱"
+  fix:
+    - "回到 deck.json 用 render-deck 重新渲染, 不要另存浏览器页面"
+
+R-PROVENANCE:
+  concern:     "C · 复用时会打架"
+  symptom:     "这份 HTML 和旁边的 deck.json 对不上号 (缺渲染签章或内容已改)"
+  consequence: "下次重渲染会把绕过管线的手改全部盖掉"
+  fix:
+    - "把改动改回 deck.json 再渲染; HTML 永远是派生产物"
+
+R-CSS-CROSS-PAGE:
+  concern:     "C · 复用时会打架"
+  symptom:     "这一页的样式里写了别的页的选择器"
+  consequence: "删这页 / 拎这页复用时, 会把别的页样式一起带走或弄坏"
+  fix:
+    - "每页 CSS 只写本页 data-slide-key, 别的页的规则搬回它自己页里"
+
+R-CSS-INLINE-BUDGET:
+  concern:     "C · 复用时会打架"
+  symptom:     "这一页大量样式内嵌在页面 HTML 里, 没放进 custom_css"
+  consequence: "这些样式不随 deck.json 走, 编辑 / 翻译 / 复用时会丢"
+  fix:
+    - "跑 migrate-head-css-to-custom-css.py 把内嵌样式收进 slide.custom_css"
+
+R-LIFT-CSS-BUDGET:
+  concern:     "E · 文件偏大可能卡顿"
+  symptom:     "拎来复用的这一页带了一大包源 deck 的样式"
+  consequence: "大多是用不到的死规则, 文件膨胀 / 渲染变慢"
+  fix:
+    - "跑 repair-lifted.py 给这页的 CSS 瘦身, 只留本页用到的规则"
+
+R-FOREIGN-SCRIPT:
+  concern:     "F · 安全风险"
+  symptom:     "页面里混入了非框架来源的脚本或内联事件"
+  consequence: "发布 / 入库后脚本会在受众浏览器里执行, 有注入风险"
+  fix:
+    - "删掉外来 <script> 和 on* 内联事件; 动效只允许 custom_css 纯 CSS"
