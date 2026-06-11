@@ -260,6 +260,12 @@ For an existing deck:
   screenshots); a legacy HTML-only deck (no deck.json) is backfilled to deck.json
   from its real DOM before it is operated on. Editing is uniform across canvas /
   raw / schema slides: render → edit → sync back to `deck.json` → re-render.
+- Slide-level edits go through `deck-json/deck-cli.py` (`set-page` /
+  `set --from-file` for fragment payloads) — it carries the optimistic lock,
+  auto-backup, schema-fail rollback, and the pre-write lint. Ad-hoc scripts
+  that write deck.json directly are an anti-pattern (see editor subskill,
+  "canonical loop"). Iterate with `render-deck.py --iter`; deliver with
+  `--final`.
 - Bespoke entrance/emphasis motion ("高级感"动效) is **opt-in** and lives ONLY in
   `slide.custom_css` (CSS-only, round-trips). Never head `<style>`, `<script>`, or a
   JS lib (GSAP/anime.js/WAAPI) — deck.json has no JS slot, so any script is wiped on

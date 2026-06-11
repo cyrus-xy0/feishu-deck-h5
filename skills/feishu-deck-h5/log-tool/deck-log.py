@@ -553,6 +553,18 @@ def _shoot(html_path: Path, out_png_dir: Path, only_slide: int | None = None,
             fn = out_png_dir / f"s{m['idx']:02d}.png"
             page.screenshot(path=str(fn), clip={"x": 0, "y": 0, "width": DESIGN_W, "height": DESIGN_H})
             m["png"] = fn.name
+            # W5 (iteration-loop): also write a 640px thumbnail — an agent
+            # verifying layout reads sNN.thumb.png at ~1/6 the tokens of the
+            # full 1920×1080 frame, opening the full PNG only when needed.
+            try:
+                from PIL import Image
+                with Image.open(fn) as _im:
+                    _w = 640
+                    _h = max(1, round(_im.height * _w / _im.width))
+                    _im.resize((_w, _h), Image.LANCZOS).save(
+                        out_png_dir / f"s{m['idx']:02d}.thumb.png", optimize=True)
+            except Exception:
+                pass  # PIL missing / IO error — thumbs are best-effort
             shots.append(m)
         browser.close()
     return shots
