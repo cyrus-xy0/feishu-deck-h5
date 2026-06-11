@@ -68,7 +68,7 @@ RX_INPUT = re.compile(
 # left unchanged in --shared=skip mode and shouldn't be classified as
 # already-local refs.
 RX_LOCAL_ASSET = re.compile(
-    r'(?<!skills/feishu-deck-h5/)((?:\.\./)*)assets/([^\'")\s?#]+)'
+    r'((?:url\(\s*[\'"]?|(?:src|href|poster|data-src|data-poster)=["\']?))((?:\.\./)*)assets/([^\'")\s?#<]+)'
 )
 RX_LOCAL_INPUT = re.compile(
     r'(?<!skills/feishu-deck-h5/)((?:\.\./)*)input/([^\'")\s?#]+)'
@@ -336,6 +336,7 @@ def main():
             both fail) but the rewrite proceeds. Net effect: file moved once,
             every HTML correctly rewritten."""
             nonlocal bytes_copied
+            head = m.group(1)
             # Use the per-file depth-derived `prefix` (loop scope), NOT the
             # source ref's `m.group(1)`: an inside-skill run (output under
             # skills/feishu-deck-h5/runs/) emits `../../../assets/foo` whose
@@ -343,7 +344,7 @@ def main():
             # orphaned and the ref pointing out of the deck → 404 after
             # move/zip/publish. The loop `prefix` is the correct climb from this
             # HTML file's dir to output/assets/ regardless of the source form.
-            rest = m.group(2)
+            rest = m.group(3)
 
             # Compute canonical rest via legacy redirects (mirrors
             # resolve_asset but for already-local paths). If rest is the
@@ -373,10 +374,10 @@ def main():
             if new_rest.startswith(SHARED_PREFIX):
                 shared_refs.add(f"assets/{new_rest}")
                 if shared_mode == "skip":
-                    return f"{prefix}assets/{new_rest}"
+                    return f"{head}{prefix}assets/{new_rest}"
                 if shared_mode == "link":
                     ensure_shared_symlink(local_assets, skill_root)
-                    return f"{prefix}assets/{new_rest}"
+                    return f"{head}{prefix}assets/{new_rest}"
                 # copy mode falls through
 
             old_target = (out_dir / "assets" / rest).resolve()
@@ -398,7 +399,7 @@ def main():
                     bytes_copied += origin.stat().st_size
                     files_copied.add(str(new_target.relative_to(out_dir)))
 
-            return f"{prefix}assets/{new_rest}"
+            return f"{head}{prefix}assets/{new_rest}"
 
         src = RX_LOCAL_ASSET.sub(replace_local_asset, src)
         for m in RX_LOCAL_INPUT.finditer(src):

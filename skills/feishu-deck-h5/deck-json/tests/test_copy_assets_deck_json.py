@@ -86,6 +86,34 @@ class CopyAssetsDeckJsonTest(unittest.TestCase):
         manifest = (tmp_run / "assets-manifest.yaml").read_text(encoding="utf-8")
         self.assertIn("  - assets/deck-json/templates/extra-layouts.css", manifest)
 
+    def test_visible_asset_path_text_does_not_pollute_manifest(self):
+        asset = self.output / "assets" / "custom" / "probe.svg"
+        asset.parent.mkdir(parents=True)
+        asset.write_text("<svg xmlns=\"http://www.w3.org/2000/svg\" />\n", encoding="utf-8")
+        index = self.output / "index.html"
+        index.write_text(
+            "<!doctype html><html><head>"
+            "<style>.probe{background:url('assets/custom/probe.svg')}</style>"
+            "</head><body>"
+            "<p>可见说明文本: assets/missing-from-text.svg</p>"
+            "<div>CSS 背景图: assets/custom/probe.svg</div>"
+            "<div class=\"probe\"></div>"
+            "</body></html>",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [sys.executable, str(COPY_ASSETS), str(self.output), "--shared=copy"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        manifest = (self.output / "assets-manifest.yaml").read_text(encoding="utf-8")
+        self.assertIn("  - assets/custom/probe.svg", manifest)
+        self.assertNotIn("missing-from-text", manifest)
+        self.assertNotIn("</", manifest)
+
 
 if __name__ == "__main__":
     unittest.main()
