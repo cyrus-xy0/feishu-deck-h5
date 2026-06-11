@@ -1061,6 +1061,7 @@
     'R-VIS-CARD-MIN-HEIGHT-SPARSE': { coverage: 'universal', signal: 'dom' },
     'R-VIS-HERO-FLOOR': { coverage: 'schema-only', signal: 'dom', optout: 'HERO_FLOORS[layout] dict excludes raw; cheap name-free geometric twin TODO (PR2)' },
     'R-VIS-SHORT-LABEL-FLOOR': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-SVG-TEXT-FLOOR': { coverage: 'universal', signal: 'dom' },
     'R-VIS-DEAD-ANIM': { coverage: 'universal', signal: 'css-source' },
     'R-VIS-DEAD-RULE': { coverage: 'universal', signal: 'css-source' },
     'R-DOM': { coverage: 'universal', signal: 'dom' },
@@ -5795,6 +5796,76 @@
               + '< 18px,投影看不清。R-VIS-BODY-FLOOR 的「≥8 字」门槛放过了这种短轴标/'
               + '分类标签,这条专补(含 SVG 轴标)。Fix:放大到 ≥18(图表轴标)/24(正文);'
               + '若确为单位/装饰 → 元素加 `data-allow-body-floor`。',
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-SVG-TEXT-FLOOR · SVG <text>/<tspan> 的 8+ 字实词在【实效渲染】<18px → warn。
+      // 缝隙修补(2026-06-12,FWD essence-one-page 现场漏检复盘):R-VIS-BODY-FLOOR 显式
+      // skip SVG 文本,R-VIS-SHORT-LABEL-FLOOR 只收 1-7 字 —— 8+ 字的 SVG 文字(以 SVG 为
+      // 主内容的架构图/流程图页)恰好掉在两条规则之间:字号闸门全绿,投影上却只有 13-15px。
+      // 实效像素 = computed font-size(SVG user units)× viewBox→屏幕缩放(getScreenCTM)
+      //   ÷ 页面缩放(ctx.scale)—— 观众看到的是缩放后的字,不是 font-size 属性本身。
+      // 豁免与既有地板同口径:chrome 词表 / 静态 chrome / [data-allow-body-floor] 链 /
+      //   hero 版式;≤7 字短轴标仍归 R-VIS-SHORT-LABEL-FLOOR。warn 级:SVG 图内排版自由度
+      //   大,不阻断交付,但必须被看见。
+      id: 'R-VIS-SVG-TEXT-FLOOR',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout, scale } = ctx;
+        if (isHeroLayout) return [];
+        const findings = [];
+        const SVG_FLOOR = 18;
+        const _CHROME = /(^|[\s-])(eyebrow|kicker|pill|tag|chip|badge|source|pageno|footnote|attrib|copyright|wordmark|unit|legend|axis|tick)([\s-]|$)/i;
+        const _cls = (el) => { const r = el.className; return (r && r.baseVal !== undefined ? r.baseVal : (r || '')).toString(); };
+        const seen = new Set();
+        slide.querySelectorAll('text, tspan').forEach((el) => {
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          let directText = '';
+          for (const n of el.childNodes) if (n.nodeType === 3) directText += n.textContent;
+          directText = directText.trim();
+          if (!directText) return;
+          const cjk = (directText.match(/[一-鿿]/g) || []).length;
+          const latin = (directText.match(/[A-Za-z0-9%]/g) || []).length;
+          const len = Math.max(cjk, latin) || directText.length;
+          if (len < 8) return;                            // 1-7 字归 R-VIS-SHORT-LABEL-FLOOR
+          const attrPx = parseFloat(cs.fontSize) || 0;
+          if (!attrPx) return;
+          let ctmScale = 1;
+          try {
+            const m = el.getScreenCTM && el.getScreenCTM();
+            if (m) ctmScale = Math.hypot(m.a, m.b);
+          } catch (e) { /* detached — fall back to attr px */ }
+          const effPx = Math.round(attrPx * (ctmScale || 1) / (scale || 1));
+          if (!effPx || effPx >= SVG_FLOOR) return;
+          if (_CHROME.test(_cls(el))) return;
+          if (visIsStaticChrome(el)) return;
+          let allowOut = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (n.dataset && n.dataset.allowBodyFloor != null) { allowOut = true; break; }
+          }
+          if (allowOut) return;
+          const sel = shortSel(el);
+          const key = slide_idx + '::' + sel + '::' + effPx;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const text = directText.length > 24 ? directText.slice(0, 24) + '…' : directText;
+          const lifted = !!(el.closest && el.closest('[data-lifted]'));
+          findings.push({
+            rule: 'R-VIS-SVG-TEXT-FLOOR', severity: lifted ? 'warn_soft' : 'warn', slide_idx,
+            selector: sel, rendered_px: effPx, attr_px: Math.round(attrPx),
+            char_count: len, text, lifted,
+            message:
+              `slide ${slide_idx} · SVG \`${sel}\` "${text}"(${len} 字)实效渲染 `
+              + `${effPx}px(font-size 属性 ${Math.round(attrPx)} × viewBox 缩放)< 18px,`
+              + '投影看不清。SVG 文本不吃 HTML 字号阶梯/正文地板闸,以 SVG 为主内容的'
+              + '架构图/流程图页全靠这条看见。Fix:加大 <text> 的 font-size 属性,让实效 '
+              + '≥18(图内标注)/ ≥24(页面主内容);确为装饰 → 元素或祖先加 '
+              + '`data-allow-body-floor`。',
           });
         });
         return findings;
