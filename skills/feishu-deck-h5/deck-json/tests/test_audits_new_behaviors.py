@@ -20,6 +20,15 @@ render-deck use; requires Chromium, skips gracefully if unavailable):
   (e) R-VIS-TITLE-GAP still fires on REAL body crowding below a FOLDED subtitle
       (the M2 fix: the subtitle is folded into the title band, but a tall body
       block hugging the subtitle band bottom is still real crowding).
+  (f) R-VIS-BODY-FLOOR honors the STATIC chrome vocab (2026-06-11 alignment):
+      .ui-* mockup primitives (element or ancestor) and static chrome tokens
+      (.kicker etc.) are exempt in the VISUAL floor too; plain small body text
+      still fires.
+  (g) R-VIS-SHORT-LABEL-FLOOR: same vocab alignment (.ui-* self/ancestor exempt).
+  (h) R-VIS-CROWD: absolutely-positioned corner labels are not "flow content
+      jammed at the bottom" (flowOnly content union — kills the decor-thumbnail
+      false positive), and data-allow-imbalance now works on the BOX itself
+      (closest chain), not only on .slide. Real flow crowding still fires.
 
 These exercise the engine through the public engine_helpers surface; the exact
 HTML/CSS shapes were read from the live rules, not assumed.
@@ -180,6 +189,90 @@ def test_title_gap_quiet_when_only_folded_subtitle():
                'font-size:24px">正文内容区块,离副标题很远</div>')
     hits = _run("R-VIS-TITLE-GAP", _raw_slide(inner))
     assert hits == [], f"folded subtitle alone must not fire title-gap: {hits}"
+
+
+# ==========================================================================
+# (f) 静态↔视觉 chrome 词表对齐(2026-06-11)— R-VIS-BODY-FLOOR
+#     .ui-* mockup primitive(元素或祖先)与静态 chrome token(.kicker 等)
+#     在视觉地板同样豁免;裸正文照常 fire。
+# ==========================================================================
+
+_LONG16 = '<span style="font-size:16px">这是一段超过八个字的正文文字内容</span>'
+
+
+def test_body_floor_fires_on_plain_small_text():
+    # CONTROL: 16px ≥8 字裸正文(无 chrome/mock 类)必须照常 fire。
+    hits = _run("R-VIS-BODY-FLOOR", [_frame("content", f"<div>{_LONG16}</div>")])
+    assert len(hits) >= 1, f"plain 16px body text must still fire: {hits}"
+
+
+def test_body_floor_ui_mock_ancestor_exempt():
+    # .ui-row 祖先 = rung-8 mockup primitive(静态 \.ui-[a-z][\w-]* 臂)→ 内部
+    # 小字是 mock-internal,不报。修复前只认 VIS_TIER_MOCK 枚举的 10 个 ui-* 类。
+    hits = _run("R-VIS-BODY-FLOOR",
+                [_frame("content", f'<div class="ui-row">{_LONG16}</div>')])
+    assert hits == [], f".ui-* ancestor must exempt body-floor: {hits}"
+
+
+def test_body_floor_static_chrome_class_exempt():
+    # .kicker 在静态 _CHROME_CLASS_RE 里,视觉层必须同样豁免(对齐前会误报)。
+    body = ('<span class="kicker" style="font-size:16px">'
+            '这是一段超过八个字的正文文字内容</span>')
+    hits = _run("R-VIS-BODY-FLOOR", [_frame("content", body)])
+    assert hits == [], f"static chrome class (.kicker) must exempt body-floor: {hits}"
+
+
+# ==========================================================================
+# (g) 同一词表对齐 — R-VIS-SHORT-LABEL-FLOOR(.ui-* 自身或祖先豁免)
+# ==========================================================================
+
+def test_short_label_floor_fires_on_plain_short_label():
+    # CONTROL: 裸 16px 短标签照常 fire。
+    hits = _run("R-VIS-SHORT-LABEL-FLOOR",
+                [_frame("content", '<span style="font-size:16px">SG</span>')])
+    assert len(hits) >= 1, f"plain 16px short label must still fire: {hits}"
+
+
+def test_short_label_floor_ui_mock_exempt():
+    # mock 表格行(.ui-row)里的 16px 单元格短标签 = mockup-internal,不报。
+    body = '<div class="ui-row"><span style="font-size:16px">SG</span></div>'
+    hits = _run("R-VIS-SHORT-LABEL-FLOOR", [_frame("content", body)])
+    assert hits == [], f"short label inside .ui-* must be exempt: {hits}"
+
+
+# ==========================================================================
+# (h) R-VIS-CROWD 误报修复(2026-06-11)— flowOnly 内容范围 + 框级 opt-out
+# ==========================================================================
+
+def test_crowd_skips_absolute_corner_label_only_box():
+    # decor 缩略图:唯一文本是绝对定位的右下角标(".pptx" 这类)→ 刻意摆放,
+    # 不是流式内容被挤;flowOnly 后 contentUnion 为空 → 整盒跳过,不报。
+    body = ('<div style="position:relative;width:600px;height:220px;'
+            'background:#101826;border:1px solid #888">'
+            '<span style="position:absolute;right:8px;bottom:6px;'
+            'font-size:16px">.pptx</span></div>')
+    hits = _run("R-VIS-CROWD", [_frame("content", body)])
+    assert hits == [], f"absolute-corner-label-only box must not fire CROWD: {hits}"
+
+
+def test_crowd_still_fires_on_flow_text_at_bottom():
+    # CONTROL: 真·流式正文贴底(顶部大片空)必须照常 fire。
+    body = ('<div style="width:600px;height:220px;background:#101826;'
+            'display:flex;flex-direction:column;justify-content:flex-end">'
+            '<p style="font-size:24px;margin:0">真实流式正文内容贴在框底</p></div>')
+    hits = _run("R-VIS-CROWD", [_frame("content", body)])
+    assert len(hits) >= 1, f"flow text jammed at bottom must still fire CROWD: {hits}"
+
+
+def test_crowd_box_level_allow_imbalance_suppresses():
+    # 修复前 data-allow-imbalance 只认 .slide 级 — 加在框上静默无效;现在框级
+    # (closest 链)同样生效。
+    body = ('<div data-allow-imbalance style="width:600px;height:220px;'
+            'background:#101826;display:flex;flex-direction:column;'
+            'justify-content:flex-end">'
+            '<p style="font-size:24px;margin:0">真实流式正文内容贴在框底</p></div>')
+    hits = _run("R-VIS-CROWD", [_frame("content", body)])
+    assert hits == [], f"data-allow-imbalance on the BOX must suppress CROWD: {hits}"
 
 
 if __name__ == "__main__":

@@ -56,6 +56,16 @@ Designer + Renderer instead).
   Use `--quick` instead when you don't need the making-of updated this run (skips the
   snapshot entirely, ~12-18s). Full render (no flag) only for a new deck or a
   whole-deck change. See `references/editing-discipline.md` → "Re-render speed".
+- **`EDIT` insert a NEW page you authored (html+css fragment)**: use
+  **`deck-json/import-html-slide.py`** (Mode A, target = deck.json) — it wraps the
+  fragment as a raw slide, validates each candidate, inserts at a numeric index /
+  `end` / after-key, and auto re-renders. `--yes` for non-interactive. Do NOT
+  hand-roll a one-off "load deck.json → splice → dump" insert script per run —
+  this wheel exists and already does backup + validate + re-render. After any
+  insert/reorder, `render-deck.py --renumber` refreshes stale `screen_label`
+  prefixes. For pages with bespoke entrance motion, verify with
+  `assets/capture-frames.py <output>/index.html <key>` (mid+settled frames,
+  settle assertions — see `references/motion-system.md` §3.4).
 - **EDIT_IMPORTED_HTML**: user wants to modify the uploaded/current HTML itself.
   Require existing-state artifacts first: `input/source.html`,
   `input/runtime-library/source-dossier.json`, `output/DESIGN-PLAN.md`,
@@ -243,3 +253,8 @@ Designer + Renderer instead).
   `repair-lifted.py`, and is the source-of-truth for the soft `R-FAMILY-DRIFT`
   advisory in `validate-deck.py`.
 - `../../assets/grow-box-fit.py`
+- `../../deck-json/import-html-slide.py` — insert authored html+css fragments as
+  raw slides (per-fragment validate + position pick + auto re-render); the
+  sanctioned path for "add one new page to an existing deck".
+- `../../assets/capture-frames.py` — bespoke-motion pages: one command for
+  mid+settled frame capture + §3.5 settle assertions (motion-system.md §3.4).

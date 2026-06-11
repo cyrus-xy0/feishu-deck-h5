@@ -130,6 +130,19 @@ Parser output gates Designer, Designer output gates Renderer, Renderer output
 gates Validator. Simulator may run only after Validator/local delivery, and
 Publisher / Importer only run after explicit user confirmation.
 
+**Queued page-adds are the canonical parallel case.** When the user queues a
+SECOND independent page request while the first is still being built (multi-page
+streaming asks: "再加一页…"), do not serialize 50 minutes of single-threaded
+work: spawn a worker for the queued page's authoring (design + html/css
+fragment) while the main thread finishes the current page. Authoring is the
+expensive, conflict-free part; only the deck.json mutation must stay
+single-writer — the main thread merges each finished fragment via
+`deck-json/import-html-slide.py` (insert + validate + re-render), one at a
+time, in user order. Workers hand back fragments, never touch `deck.json` /
+`index.html` themselves. Page-N styling conventions the workers need (title
+block, palette, ladder) come from the controller's one-time sibling extraction,
+passed in the worker prompt — do not make each worker re-archaeologize the deck.
+
 Run a step inline instead of spawning when any of these are true:
 
 - The environment lacks a callable spawn mechanism.

@@ -879,6 +879,38 @@
     'demo-label', 'caption-meta', 'cite',
   ];
 
+  // ── 静态↔视觉 chrome 词表对齐(2026-06-11)─────────────────────────────────
+  // 此前是两套词表:静态检查(R06/R20,_validate_common.py 的 _CHROME_CLASS_RE)
+  // 豁免 .kicker/.legend/.meta/…/.ui-* 全命名空间;视觉地板(R-VIS-BODY-FLOOR /
+  // R-VIS-SHORT-LABEL-FLOOR)只认上面 16 个子串 → 作者按静态词表写的 chrome
+  // (.ui-row 表格 mock、.kicker 等)静态全绿、视觉层却被误报,被迫逐个 data-allow。
+  // 这里把静态词表整套搬进视觉层(只放宽、不收紧:旧子串集原样保留在前)。
+  // ⚠️ 匹配语义:token 全等(class 拆分后逐个比对),不能用 visHasAnyClass 的子串
+  // includes —— 'n'/'fix'/'tip' 这类短 token 用子串会把 'note'/'prefix' 全误豁免。
+  // 同步约定:改 _validate_common._CHROME_CLASS_RE 必须同步这里;两边集合相等由
+  // test_visual_audit_parity.py::test_chrome_vocab_aligned_with_static 锁定。
+  const VIS_STATIC_CHROME_TOKENS = new Set([
+    'eyebrow', 'footnote', 'pageno', 'deck-pageno', 'attrib', 'source',
+    'source-footer', 'pill', 'chip', 'tag', 'tag-chip', 'badge', 'label-small',
+    'chrome', 'kicker', 'overline', 'meta', 'trend', 'axis', 'axis-cap',
+    'hint', 'tip', 'legend', 'nav-hint', 'mode-toggle', 'phase-pill',
+    'status', 'status-dot', 'fmt', 'fix', 'disclaim', 'fineprint',
+    'sc-cap', 'cfoot', 'stnum', 'chapter-num', 'stat-unit', 'kpi-unit',
+    'unit', 'iframe-hint', 'count', 'n',
+  ]);
+  const visClassTokens = (el) => {
+    const raw = el.className;
+    return (raw && raw.baseVal !== undefined ? raw.baseVal : (raw || ''))
+      .toString().toLowerCase().split(/\s+/).filter(Boolean);
+  };
+  // 元素自身 class 命中静态 chrome 词表(token 全等)。
+  const visIsStaticChrome = (el) =>
+    visClassTokens(el).some((c) => VIS_STATIC_CHROME_TOKENS.has(c));
+  // .ui-* 前缀 = SKILL.md rung-8 mockup primitive(静态侧 `\.ui-[a-z][\w-]*`):
+  // 元素或祖先命中都算 mockup-internal(调用处配合祖先 walk 使用)。
+  const visIsUiMock = (el) =>
+    visClassTokens(el).some((c) => /^ui-[a-z][\w-]*$/.test(c));
+
   // class 子串包含判定(逐字搬 visual-audit.js hasAnyClass —— 小写化、子串 includes,
   // 与 audits.js 既有的 classList.contains 不同语义:这是 visual 的"宽松子串"匹配)。
   const visHasAnyClass = (el, keys) => {
@@ -893,7 +925,13 @@
     return VIS_CARD_SUFFIXES.some((suf) => cls.split(/\s+/).some((c) => c.endsWith(suf)));
   };
   // 可见 text-bearing 叶的并集 bbox(逐字搬 _contentUnion)。
-  const visContentUnion = (root) => {
+  // opts.flowOnly(2026-06-11,CROWD/PANEL-TOP 误报修复):跳过 position:absolute/
+  // fixed 的文本元素 —— 绝对定位的角标(mock 缩略图右下 ".pptx"、水印、徽标)是刻意
+  // 摆放,不是"流式内容被挤到框底";把它们算进内容范围会让 decor 缩略图在 CROWD 上
+  // 必报(其唯一文本=贴底角标 → distBottom<10 恒成立)。默认 false = 原语义,
+  // 其余消费者(visGrowBox / R-VIS-BAND 系)行为零变。
+  const visContentUnion = (root, opts) => {
+    const flowOnly = !!(opts && opts.flowOnly);
     let t = Infinity, b = -Infinity, any = false;
     for (const el of root.querySelectorAll('*')) {
       if (el.tagName === 'SVG' || el.tagName === 'svg'
@@ -901,6 +939,7 @@
       if (!hasOwnText(el)) continue;
       const cs = getComputedStyle(el);
       if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+      if (flowOnly && (cs.position === 'absolute' || cs.position === 'fixed')) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) continue;
       any = true; t = Math.min(t, r.top); b = Math.max(b, r.bottom);
@@ -3686,9 +3725,10 @@
           directTextStr = directTextStr.trim();
           if (directTextStr.length < 8) return;
           if (visHasAnyClass(el, VIS_CONTENT_CHROME_CLASSES)) return;
+          if (visIsStaticChrome(el)) return;   // 静态词表对齐(kicker/legend/meta/… 见 VIS_STATIC_CHROME_TOKENS)
           let inMock = false;
           for (let n = el; n && n !== slide; n = n.parentElement) {
-            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+            if (visHasAnyClass(n, VIS_TIER_MOCK) || visIsUiMock(n)) { inMock = true; break; }
           }
           if (inMock) return;
           let allowOut = false;
@@ -3732,7 +3772,8 @@
               + 'containers and chrome classes) must be ≥ 24 px on projector.'
               + fix
               + ' (Or rename to a chrome class .eyebrow/.footnote/.source/.pill/'
-              + '.tag/.chip/.badge/.pageno/.demo-tag if it really is chrome, OR set '
+              + '.tag/.chip/.badge/.pageno/.demo-tag — or put it inside a .ui-* '
+              + 'mockup primitive — if it really is chrome, OR set '
               + '`data-allow-body-floor` for a documented exception.)',
           });
         });
@@ -4344,7 +4385,12 @@
           && el.getBoundingClientRect().height > 80 * _scale);
         const _boxes = _framed.filter((el) => !_framed.some((o) => o !== el && o.contains(el)));
         for (const box of _boxes) {
-          const cu = visContentUnion(box); if (!cu) continue;
+          // 框级/祖先 opt-out(2026-06-11):此前只认 .slide 级,作者按直觉把
+          // data-allow-imbalance 加在框上会静默无效 → 两级都认。
+          if (box.closest('[data-allow-imbalance]')) continue;
+          // flowOnly(2026-06-11):绝对定位角标(mock 缩略图的 ".pptx" 等)是刻意
+          // 摆放,不算"被挤到底"的流式内容;唯一文本=角标的 decor 盒整体跳过。
+          const cu = visContentUnion(box, { flowOnly: true }); if (!cu) continue;
           const r = box.getBoundingClientRect();
           const distTop = (cu.top - r.top) / _scale;
           const distBottom = (r.bottom - cu.bottom) / _scale;
@@ -4361,7 +4407,7 @@
                 + `只剩 ${bottomPx}px,顶部却留 ${topPx}px,文字被挤到框底。`
                 + 'Fix: 让卡片按内容尺寸 + 垂直居中(参考 content-3up `align-self: center; '
                 + 'justify-content: center`),或给框一个最小下内距 / 减少该框内容;'
-                + '若等高框内文字贴底是刻意设计 → 在 `.slide` 加 `data-allow-imbalance`。',
+                + '若等高框内文字贴底是刻意设计 → 在该框(或 `.slide`)加 `data-allow-imbalance`。',
             });
           }
         }
@@ -4389,7 +4435,9 @@
           && el.getBoundingClientRect().height > 80 * _scale);
         const _boxes = _framed.filter((el) => !_framed.some((o) => o !== el && o.contains(el)));
         for (const box of _boxes) {
-          const cu = visContentUnion(box); if (!cu) continue;
+          // 同 R-VIS-CROWD(2026-06-11):框级 opt-out + flowOnly 内容范围。
+          if (box.closest('[data-allow-imbalance]')) continue;
+          const cu = visContentUnion(box, { flowOnly: true }); if (!cu) continue;
           const r = box.getBoundingClientRect();
           const distTop = (cu.top - r.top) / _scale;
           const distBottom = (r.bottom - cu.bottom) / _scale;
@@ -4414,7 +4462,7 @@
                 + 'Fix: 给该面板容器(panel/pane/col-visual 类)加 `display:flex; '
                 + 'flex-direction:column; justify-content:center`,让单内容在框内垂直居中'
                 + '(框架已对 content-2col `.col-visual` 单子默认居中;lifted/raw 页的自定义 '
-                + 'panel 需在该页 `custom_css` 补这条);若刻意顶对齐 → `.slide` 加 '
+                + 'panel 需在该页 `custom_css` 补这条);若刻意顶对齐 → 在该框(或 `.slide`)加 '
                 + '`data-allow-imbalance`。',
             });
           }
@@ -5719,9 +5767,10 @@
           const len = Math.max(cjk, latin) || directText.length;
           if (len < 1 || len > 7) return;                 // 8+ 归 R-VIS-BODY-FLOOR
           if (_SL_CHROME.test(_slClass(el))) return;
+          if (visIsStaticChrome(el) || visIsUiMock(el)) return;   // 静态词表对齐 + .ui-* 自身即 mockup primitive
           let skip = false;
           for (let n = el; n && n !== slide; n = n.parentElement) {
-            if (n !== el && (_SL_MOCK.test(_slClass(n)) || visIsMediaBox(n))) { skip = true; break; }
+            if (n !== el && (_SL_MOCK.test(_slClass(n)) || visIsMediaBox(n) || visIsUiMock(n))) { skip = true; break; }
             if (n.dataset && n.dataset.allowBodyFloor != null) { skip = true; break; }
           }
           if (skip) return;

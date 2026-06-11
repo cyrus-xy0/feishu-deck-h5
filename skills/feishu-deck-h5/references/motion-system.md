@@ -61,13 +61,24 @@ custom_css **可以**直接 `var(--fs-ease-out)`、`calc(var(--i,0) * var(--fs-s
 3. **现场设计**:结合 deck 调性(沉稳 vs 科技)、页面角色、它的真实结构来设计。
    下面的词汇表是**起点调色板**——重混、改参、按需新增命名效果。**别照抄、别求一模一样。**
 4. **应用 + 重渲染 + 视觉验证**:写进 custom_css → `render-deck.py` 重渲(自带 validator)→
-   **playwright 抓动画过程帧**(导航到该页后在几个时刻截图):落定帧证明没破版,中间帧证明动起来了。
-   "静态看着对"不算完成(见 [[feedback_visual_review_before_done]]、[[feedback_measure_dont_eyeball_tighten_loop]])。
+   抓动画过程帧:落定帧证明没破版,中间帧证明动起来了。**用现成工具,别手写 playwright 脚本**:
+
+   ```bash
+   python3 assets/capture-frames.py <output>/index.html <key> [<key>...] \
+       --settle-ms 4500   # > 页内最长 delay+duration
+   ```
+
+   一条命令产出每页 `<key>_mid.png` + `<key>_settled.png` 并自动跑 §3.5 落定断言
+   (exit 0 = 过;多 key 共用一个浏览器会话)。抓完仍要**亲眼看**这两张图——断言只管
+   "落定干净",动得好不好看是审美判断。"静态看着对"不算完成
+   (见 [[feedback_visual_review_before_done]]、[[feedback_measure_dont_eyeball_tighten_loop]])。
 5. **"卡半透明"落定断言(HTML PPT 最常见翻车点)**:动画播完后,该页所有入场元素必须真正落定,
    绝不能定格在半透明 / 偏移态(delay 算错、`both` 漏写、keyframe 终值不是 1 都会导致)。
-   抓帧时**等动画结束**(导航后停 ~1.2s,>最长 `delay+duration`),断言:该页每个 `.reveal` /
-   入场 hook 的 computed `opacity === 1` 且无残留 `transform`。任一不满足 = 该页动效不合格,回去修终值
-   / `both` / delay,别交付。这条是 §3.4 抓帧的**硬判据**,不是"看一眼"。
+   `capture-frames.py` 已把这条做成硬断言:settled 帧上检查该页每个 `.reveal` / 入场 hook
+   (`--assert-class` 可换)computed `opacity === 1` 且无残留 `transform`,瞬态元素
+   (`--transient-class`,默认 `fly`)必须已退场,且无元素溢出 `.slide` 边界。
+   任一不满足 = exit 1 = 该页动效不合格,回去修终值 / `both` / delay,别交付。
+   这条是 §3.4 抓帧的**硬判据**,不是"看一眼"。
 
 ## 4. 种子词汇表(可扩展,非封闭集)
 
