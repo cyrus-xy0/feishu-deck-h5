@@ -44,12 +44,14 @@ of bytes copied and HTML files patched.
 import os, re, sys, shutil
 from pathlib import Path
 
-# Match any reference of form *path*?/skills/feishu-deck-h5/(assets|...)/<file>
+# Match any reference of form:
+#   *path*?/skills/feishu-deck-h5/(assets|...)/<file>
+#   *path*?/(assets|deck-json/templates|...)/<file> when output lives inside skill root
 # and any input/ reference. Captures: prefix path back-tracking + the asset path.
 # Path char class excludes ? and # so cache-busting query strings (e.g.
 # `assets/foo.png?v=3`) don't get glued onto the captured rest.
 RX_SKILL = re.compile(
-    r'((?:\.\./)+)skills/feishu-deck-h5/(assets|examples|templates|deck-json/templates)/([^\'")\s?#]+)'
+    r'((?:\.\./)+)(?:skills/feishu-deck-h5/)?(assets|examples|templates|deck-json/templates)/([^\'")\s?#]+)'
 )
 RX_INPUT = re.compile(
     r'((?:\.\./)*)input/([^\'")\s?#]+)'
@@ -505,13 +507,19 @@ def main():
 
             if not target.is_relative_to(out_dir):
                 return m.group(0)
+            new_ref = os.path.relpath(target, css_dir).replace(os.sep, "/")
+            if new_ref.startswith("../"):
+                # Library ZIP gate rejects any packaged reference that climbs
+                # with ../. Keep non-assets CSS self-contained by placing its
+                # transitive asset beside the copied CSS.
+                target = css_dir / origin.name
+                new_ref = origin.name
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists() or target.stat().st_size != origin.stat().st_size:
                 shutil.copy2(origin, target)
                 bytes_copied += origin.stat().st_size
                 files_copied.add(str(target.relative_to(out_dir)))
             referenced.add(str(target.relative_to(out_dir)))
-            new_ref = os.path.relpath(target, css_dir).replace(os.sep, "/")
             if new_ref != ref:
                 return f'url("{new_ref}")'
             return m.group(0)
