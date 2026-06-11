@@ -2434,8 +2434,10 @@ def main(argv=None) -> int:
                          "changes — those need the full visual pass.")
     ap.add_argument("--scope", default=None,
                     help="LOCKED EDIT SCOPE — comma-separated 1-based page numbers "
-                         "(= URL #N = frame_index) that this edit touched, e.g. "
-                         "`--scope 1` or `--scope 3,5`. Makes the locked range the "
+                         "(= URL #N = frame_index) AND/OR slide keys, e.g. "
+                         "`--scope 1`, `--scope 3,5`, `--scope closing-film`. "
+                         "An unresolvable token ABORTS (exit 2) instead of "
+                         "silently running the full pass. Makes the locked range the "
                          "boundary for the post-render making-of snapshot: it shoots "
                          "ONLY those pages (`deck-log snapshot --slide N`), skipping "
                          "the whole-deck geometry audit and the re-shoot of unchanged "
@@ -2484,18 +2486,24 @@ def main(argv=None) -> int:
         # explicitly via --final (or a manual deck-log snapshot).
         os.environ.setdefault("DECK_LOG_NO_AUTOSNAP", "1")
 
-    # Parse the locked edit scope (1-based page numbers) into a list of ints.
+    # Parse the locked edit scope — 1-based page numbers and/or slide keys.
+    # Numbers resolve immediately; key tokens are resolved against the deck's
+    # ACTIVE slides right after the deck loads below (same numbering as URL #N).
+    # An unresolvable token is a HARD ERROR (exit 2), not a warning: silently
+    # falling back to a full render costs minutes and reads as "scoping worked".
     scope_pages = []
+    _scope_key_tokens: list[str] = []
     if args.scope:
         for tok in str(args.scope).split(","):
             tok = tok.strip()
+            if not tok:
+                continue
             if tok.isdigit() and int(tok) >= 1:
                 scope_pages.append(int(tok))
-        if not scope_pages:
-            print(f"render-deck: --scope '{args.scope}' 解析不出有效页号(要 1-based 整数,"
-                  f"逗号分隔),忽略。", file=sys.stderr)
+            else:
+                _scope_key_tokens.append(tok)
 
-    if args.quick or scope_pages:
+    if args.quick or args.scope:
         # Quick mode / scope-locked edit = "this edit is confined". Drop the
         # generation-era fit-check; the snapshot behaviour (skip vs scoped) is
         # decided at the _maybe_auto_snapshot call site below.
@@ -2530,6 +2538,29 @@ def main(argv=None) -> int:
     except json.JSONDecodeError as e:
         print(f"render-deck: invalid JSON: {e}", file=sys.stderr); return 2
 
+    # Resolve --scope slide-key tokens → 1-based page numbers (ACTIVE slides
+    # only, matching URL #N / frame_index). Any token that is neither a valid
+    # page number nor an existing key aborts the render — never silently
+    # widen a "scoped" edit into a minutes-long full pass.
+    if args.scope:
+        _active_keys = [s.get("key", "") for s in deck.get("slides", [])
+                        if not s.get("_disabled")]
+        _bad_tokens = []
+        for tok in _scope_key_tokens:
+            try:
+                scope_pages.append(_active_keys.index(tok) + 1)
+            except ValueError:
+                _bad_tokens.append(tok)
+        _n_active = len(_active_keys)
+        _bad_tokens += [str(p) for p in scope_pages if p > _n_active]
+        if _bad_tokens or not scope_pages:
+            print(f"render-deck: --scope '{args.scope}' — 解析不出有效页:"
+                  f" {', '.join(_bad_tokens) or '(空)'}。接受 1-based 页号"
+                  f"(1..{_n_active})或 slide key,逗号分隔。"
+                  f" key 速查: deck-json/locate-slide.py。", file=sys.stderr)
+            return 2
+        scope_pages = sorted(set(scope_pages))
+
     # W3 + F-310 · auto-scope: lock the edit scope to the pages whose content
     # actually changed since the last successful render (.slide-hashes.json
     # sidecar diff — ONE system, two entrances):
@@ -2546,6 +2577,18 @@ def main(argv=None) -> int:
     # Scope never affects WHAT gets rendered (index.html is always rebuilt in
     # full) — only gate/snapshot/fit-check coverage,判错页号的最坏后果是闸门
     # 覆盖偏窄,绝不会产出残缺 deck。
+    # --final with only a few dirty pages: still honor the full-pass contract,
+    # but SAY what an --iter loop would have cost — the habit of "--final every
+    # intermediate edit" is the #1 cause of minutes-long one-page iterations.
+    if args.final:
+        _fin_pages, _ = _auto_scope_pages(deck, args.output_dir / _SIDECAR_NAME)
+        if _fin_pages and len(_fin_pages) <= AUTO_SCOPE_MAX_PAGES:
+            print(f"render-deck --final: full pass as requested — note only "
+                  f"{len(_fin_pages)} page(s) changed since the last render "
+                  f"({','.join(map(str, _fin_pages))}); for intermediate edits "
+                  f"`--iter` audits just those (~seconds). Keep --final for "
+                  f"delivery checkpoints.", file=sys.stderr)
+
     _auto_scoped = False
     _iter_auto = (getattr(args, "iter", False) and not scope_pages
                   and not args.renumber)
