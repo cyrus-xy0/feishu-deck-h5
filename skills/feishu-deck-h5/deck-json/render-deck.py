@@ -2179,6 +2179,13 @@ def main(argv=None) -> int:
                          "(auto-backup .bak-pre-renumber-<ts>). Fixes stale labels after "
                          "lift/insert/reorder so the library label number matches the "
                          "on-screen page number / URL hash (#N).")
+    ap.add_argument("--strict-baseline", action="store_true",
+                    help="F-302: disable the baseline demotion on --scope renders — "
+                         "block on EVERY error-level visual finding, even ones that "
+                         "byte-match the shipped baseline (validate-findings.json). "
+                         "Default scoped behavior: findings already present in the "
+                         "shipped baseline are PRE-EXISTING and do not re-block a "
+                         "scoped edit; only NEW findings block.")
     ap.add_argument("--debug", action="store_true",
                     help="on a per-slide render crash, re-raise the original "
                          "exception with its full traceback instead of the "
@@ -2506,6 +2513,8 @@ def main(argv=None) -> int:
         _geom_block = False
         _dist_block = False
         _vis_block = False
+        _baseline_ready = False    # F-302: did the visual advisory produce a
+        _baseline_now = []         # findings snapshot we can persist on success?
         # F-255: the delivery gate must be a PATH/FLAG INVARIANT, not something
         # that silently turns off. `_is_runs` decides "is this a real delivery
         # render under runs/<ts>/output/" via the SAME predicate copy-assets
@@ -2583,6 +2592,40 @@ def main(argv=None) -> int:
         # the previous advisory-only behaviour, so the existing test suite is
         # unaffected. --visual already ran the audits in the static gate above
         # (rc), so this block is for the default no-visual path only.
+        # ---- F-302 · findings baseline (new-vs-pre-existing diff) -----------
+        # A page that shipped via an accept-risk render carries findings that are
+        # NOT this edit's fault. Diff against the shipped baseline so a scoped
+        # edit re-blocks only on NEW findings (CI diff-lint semantics); the
+        # baseline file is (re)written further down on every render whose
+        # index.html actually lands. Fingerprint = (code, slide-KEY, selector or
+        # msg-head) — keyed, so insert/reorder doesn't shift identity.
+        _BASELINE_FILE = out_html.parent / "validate-findings.json"
+        _fi2key = {}
+        try:
+            _fi = 0
+            for _s in (deck.get("slides") or []):
+                if _s.get("_disabled"):
+                    continue
+                _fi += 1
+                _fi2key[_fi] = _s.get("key") or f"#%d" % _fi
+        except Exception:
+            pass
+
+        def _finding_fp(f):
+            code = str(f.get("code", ""))
+            sl = f.get("slide")
+            key = _fi2key.get(sl, sl if sl is not None else "deck")
+            anchor = (f.get("selector_hint") or "").strip() \
+                or re.sub(r"\s+", " ", str(f.get("msg", "")))[:120]
+            return [code, str(key), anchor]
+
+        def _load_baseline_fps():
+            try:
+                _bl = json.loads(_BASELINE_FILE.read_text(encoding="utf-8"))
+                return {tuple(fp) for fp in _bl.get("fingerprints", [])}
+            except Exception:
+                return None      # no/invalid baseline → no demotion
+
         if (not args.visual and _is_runs and not args.quick):
             # F-293 · for a single-page `--scope` render, feed the scope INTO the
             # engine (--scope-frames) so audits.js only evaluates the changed
@@ -2711,19 +2754,47 @@ def main(argv=None) -> int:
                               f"{VALIDATE_HTML.name} <html> --visual --slide <key>。",
                               file=sys.stderr)
                     else:
-                        print("\n❌ BLOCKING · error-level visual defects (content "
-                              "below the readability floor / overflow / overlap / "
-                              "tier inversion — real, user-visible breakage):",
-                              file=sys.stderr)
-                        for f in _vis_errors[:12]:
-                            print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
-                        if len(_vis_errors) > 12:
-                            print(f"  … +{len(_vis_errors) - 12} more", file=sys.stderr)
-                        print("  ↳ fix the flagged element(s); focus one page: python3 "
-                              f"{VALIDATE_HTML.name} <html> --visual --slide <key>. "
-                              "Ship anyway with known visual errors → "
-                              "DECK_ALLOW_VIS_ERRORS=1.", file=sys.stderr)
-                        _vis_block = True
+                        # F-302 · baseline demotion (scoped renders only): findings
+                        # that byte-match the SHIPPED baseline are pre-existing —
+                        # this edit did not introduce them, so they don't re-block
+                        # it. Only NEW findings block. Full renders and
+                        # --strict-baseline keep the hard behavior.
+                        _bl_fps = (_load_baseline_fps()
+                                   if (scope_pages and not args.strict_baseline)
+                                   else None)
+                        if _bl_fps is not None:
+                            _new = [f for f in _vis_errors
+                                    if tuple(_finding_fp(f)) not in _bl_fps]
+                            _pre = len(_vis_errors) - len(_new)
+                        else:
+                            _new, _pre = _vis_errors, 0
+                        if not _new and _pre:
+                            _gc_visual += f"·baseline({_pre} pre-existing)"
+                            print(f"\nℹ {_pre} error-level visual finding(s) are "
+                                  "PRE-EXISTING (byte-match the shipped baseline "
+                                  f"{_BASELINE_FILE.name}) — this scoped edit did "
+                                  "not introduce them, NOT re-blocking. Cleanup is "
+                                  "a separate pass; force the old hard behavior "
+                                  "with --strict-baseline.", file=sys.stderr)
+                        else:
+                            if _pre:
+                                print(f"\n({_pre} additional finding(s) are "
+                                      "pre-existing per the shipped baseline and "
+                                      "not listed — only the NEW ones below "
+                                      "block.)", file=sys.stderr)
+                            print("\n❌ BLOCKING · error-level visual defects (content "
+                                  "below the readability floor / overflow / overlap / "
+                                  "tier inversion — real, user-visible breakage):",
+                                  file=sys.stderr)
+                            for f in _new[:12]:
+                                print(f"  • [{f['code']}] {f['msg']}", file=sys.stderr)
+                            if len(_new) > 12:
+                                print(f"  … +{len(_new) - 12} more", file=sys.stderr)
+                            print("  ↳ fix the flagged element(s); focus one page: python3 "
+                                  f"{VALIDATE_HTML.name} <html> --visual --slide <key>. "
+                                  "Ship anyway with known visual errors → "
+                                  "DECK_ALLOW_VIS_ERRORS=1.", file=sys.stderr)
+                            _vis_block = True
                 # HARD geometry breakage is NOT a soft readability nit. A box whose
                 # content is clipped / spills visibly past its border / overlaps a
                 # sibling (R-VIS-CARD-OVERFLOW / R-OVERLAP / R-OVERFLOW /
@@ -2743,6 +2814,11 @@ def main(argv=None) -> int:
                               "R-VIS-BAND-COLLIDE"}
                 _geom = [f for f in _errs
                          if str(f.get("code", "")) in _HARD_GEOM]
+                # F-302: snapshot the error-level findings NOW (engine output in
+                # hand); persisted on the success path only — a blocked render
+                # rolls back index.html, so its findings never become baseline.
+                _baseline_now = [_finding_fp(f) for f in _vis_errors + _geom]
+                _baseline_ready = True
                 if _geom and not os.environ.get("DECK_ALLOW_GEOM_OVERFLOW"):
                     print("\n❌ BLOCKING · geometry breakage (content clipped / "
                           "spilled past its box / overlapping a sibling — real "
@@ -2841,6 +2917,16 @@ def main(argv=None) -> int:
         if args.quick and not args.visual:
             print("\n⚠ 几何/视觉硬闸未跑(--quick 纯文本快路)——交付前必须全量 "
                   "render 一次。", file=sys.stderr)
+        # not-runs/: equally LOUD (F-301). A /tmp or tests/ render is advisory-only
+        # by design, but an agent rendering a BACKUP elsewhere "to check the gate"
+        # gets no gate at all and proves nothing — say so explicitly instead of
+        # leaving the fact buried in the GATE-COVERAGE line. To prove findings are
+        # pre-existing, validate the SHIPPED index.html directly.
+        if not args.quick and not args.visual and not _is_runs:
+            print("\n⚠ 视觉/几何硬闸未跑(输出不在 runs/<ts>/output/ 下,advisory-only)"
+                  "——此渲染不能用来验证闸门行为。要证明 findings 是存量,直接对线上 "
+                  "index.html 跑: python3 assets/validate.py <index.html> --visual "
+                  "--slide <key>", file=sys.stderr)
 
         def _print_gate_coverage():
             # F-255: ONE machine-readable line so "did not run" is always
@@ -2899,6 +2985,36 @@ def main(argv=None) -> int:
         # clean render is provably distinguishable from a render whose gate
         # silently did not run.
         _print_gate_coverage()
+
+        # F-302: persist the findings baseline — THIS index.html is what ships,
+        # so its findings are the next edit's "pre-existing" set (incl. findings
+        # shipped via DECK_ALLOW_VIS_ERRORS — exactly the accept-risk state a
+        # later scoped edit should inherit, not re-litigate). Scoped render saw
+        # only in-scope frames, so MERGE: replace entries for in-scope page keys
+        # (+ deck-level), keep the rest; full render replaces wholesale. Written
+        # only when the engine actually ran (`_baseline_ready`) — a --quick /
+        # engine-down render must not clobber a real baseline with emptiness.
+        if _baseline_ready:
+            try:
+                _kept = []
+                if scope_pages and _BASELINE_FILE.exists():
+                    _prev = json.loads(_BASELINE_FILE.read_text(encoding="utf-8"))
+                    _scope_keys = ({str(_fi2key.get(p, p)) for p in scope_pages}
+                                   | {"deck"})
+                    _kept = [fp for fp in _prev.get("fingerprints", [])
+                             if not (isinstance(fp, list) and len(fp) > 1
+                                     and str(fp[1]) in _scope_keys)]
+                _BASELINE_FILE.write_text(json.dumps({
+                    "schema": 1,
+                    "note": "F-302 shipped-findings baseline — fingerprints of "
+                            "error-level visual/geometry findings present in the "
+                            "delivered index.html. A --scope re-render blocks "
+                            "only on findings NOT in this list. Auto-written by "
+                            "render-deck.py; do not hand-edit.",
+                    "fingerprints": _kept + _baseline_now,
+                }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            except Exception:
+                pass   # baseline bookkeeping must never break a render
 
     # F-269: gate passed (or was skipped via --skip-validate-html) — the new
     # index.html is the one we keep, so drop the pre-render backup. We're past

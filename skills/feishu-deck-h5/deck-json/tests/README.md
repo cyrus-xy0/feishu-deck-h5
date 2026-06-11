@@ -20,6 +20,13 @@ cd skills/feishu-deck-h5/deck-json/
 python3 -m unittest discover tests/ -v
 ```
 
+**Slow suites: run FOREGROUND to completion and read the result once.** Do not
+launch in background and poll/sleep/re-read the output file — the poll loop has
+burned more wall-clock than the tests themselves (and has caused duplicate
+re-runs of the 2-3 min doc suites when the output read came back empty). If you
+must background, redirect to a file and read it ONLY after the completion
+notification. Quick logic checks: run the relevant file(s), not the whole tree.
+
 Or single file:
 
 ```bash
