@@ -9,10 +9,11 @@ Contract:
   3. Digest survives the caller discarding stderr (2>/dev/null equivalent).
 """
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 HERE = Path(__file__).resolve().parent
 DECK_JSON = HERE.parent
@@ -46,7 +47,34 @@ def test_pass_render_writes_log_and_digest(tmp_path):
 
 
 def test_blocked_render_digest_extracts_errors_even_without_stderr(tmp_path):
-    # runs/<ts>/output path → real delivery render → visual gate active
+    # A STATIC block (unbalanced <div> → R-DOC-INTEGRITY) blocks WITHOUT a
+    # browser, so this runs everywhere — incl. CI with no Playwright. Proves the
+    # core contract: a blocked render still names its findings in the stdout
+    # digest even when the caller discards stderr, and the full detail lands in
+    # last-render.log.
+    out = tmp_path / "out"
+    out.mkdir()
+    d = json.loads(DEMO.read_text(encoding="utf-8"))
+    d["slides"] = [d["slides"][0], {
+        "key": "bad", "layout": "raw", "screen_label": "02 Bad",
+        "data": {"html": '<div class="header"><h2 class="title-zh">Bad</h2></div>'
+                         '<div class="stage"><div>unbalanced'},
+    }]
+    deck = out / "deck.json"
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    r = _render(deck, out)
+    assert r.returncode != 0, "a doc-integrity break must block the render"
+    assert "✗ BLOCKED" in r.stdout or "✗ FAIL" in r.stdout
+    assert "[R-DOC-INTEGRITY]" in r.stdout, \
+        "digest (stdout) must name the blocking finding even with stderr discarded"
+    assert "R-DOC-INTEGRITY" in (out / "last-render.log").read_text(encoding="utf-8")
+
+
+def test_visual_gate_block_digest_when_available(tmp_path):
+    # The visual gate (R-VIS-*) prints its findings to STDERR — this proves they
+    # still reach the STDOUT digest. Needs a real browser; adaptively skips
+    # where the visual gate can't run (e.g. CI without Playwright).
     out = tmp_path / "runs" / "20260611-000000-w2digest" / "output"
     out.mkdir(parents=True)
     d = json.loads(DEMO.read_text(encoding="utf-8"))
@@ -61,11 +89,11 @@ def test_blocked_render_digest_extracts_errors_even_without_stderr(tmp_path):
     deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
 
     r = _render(deck, out)
+    if "visual=ran" not in (r.stdout + r.stderr):
+        pytest.skip("visual gate did not run (no Playwright) — cannot block on R-VIS")
     assert r.returncode == 4, "visual-gate block must exit 4"
-    # stdout digest alone (stderr ignored!) names the rule + slide
     assert "✗ BLOCKED" in r.stdout
-    assert "[R-VIS-" in r.stdout, "digest must list the blocking findings"
-    # full detail is in the log: gate sections (printed to stderr) captured too
+    assert "[R-VIS-" in r.stdout, "stderr gate findings must reach the stdout digest"
     log_text = (out / "last-render.log").read_text(encoding="utf-8")
     assert "❌ BLOCKING" in log_text
     assert "GATE-COVERAGE" in log_text
