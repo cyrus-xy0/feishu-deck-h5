@@ -86,7 +86,7 @@ jobs:
         # their `_chromium_ok()` / `skip_if_no_engine()` graceful-degrade guards —
         # the byte/source + logic tests (contracts, golden, byte rules) all run.
         run: |
-          pip install pytest pyyaml jsonschema
+          pip install pytest pyyaml jsonschema beautifulsoup4
           python3 -m pytest deck-json/tests/ -q
 
       - name: Summary

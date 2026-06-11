@@ -1,22 +1,12 @@
 ---
 name: feishu-deck-h5
 description: |
-  总控 skill for Feishu / Lark-style HTML decks. Use when the user asks for
-  飞书风格 PPT, Lark deck, 汇报材料, 客户提案, h5 deck, 16:9 网页演示, HTML deck
-  generation/editing/validation/publishing/importing, or material parsing for this deck
-  pipeline. Also use when the user asks to publish a finished HTML deck to
-  妙笔 / 秒笔 / Miaobi / MagicBook / Magic Page / html-box /
-  magic.solutionsuite.cn. For 妙笔/MagicBook/html-box publishing, route to this
-  skill's publisher subskill, not lark-apps/Miaoda; 妙搭/Miaoda is only a
-  compatibility target when explicitly requested. This controller does not do
-  worker implementation itself: it routes workflow steps to subskills under
-  subskills/. Default output is a dark, cinematic 1920x1080 HTML deck with
-  validated local delivery and optional Magic Page publishing /
-  slide-library importing via PR and Cloudflare viewer sync. Generation is DeckJSON/render-deck first:
-  run design before render, default slides to raw-first unless they are pure
-  standard schema shapes, and always validate before handoff. Do not use for
-  producing a real `.pptx`; route that to an appropriate PowerPoint/keynote
-  workflow if available.
+  总控 skill for Feishu / Lark-style HTML decks. Use for 飞书风格 PPT, Lark deck,
+  汇报材料, 客户提案, h5 deck, 16:9 网页演示, HTML deck generation/editing/validation,
+  source parsing, Magic Page/Miaobi/html-box publishing, and feishu-slide-library
+  importing. Routes work to subskills; generation is DeckJSON/render-deck first,
+  normally raw-first, with validation before handoff or publish. For real `.pptx`,
+  use a PowerPoint/keynote workflow instead.
 ---
 
 # feishu-deck-h5

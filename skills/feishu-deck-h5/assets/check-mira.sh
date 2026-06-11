@@ -374,10 +374,10 @@ if command -v fc-list >/dev/null 2>&1; then
   elif [ -n "$_mira_cjk_first" ]; then
     mark_warn "preferred CJK face 方正兰亭黑 MISSING → falls back to '$_mira_cjk_first' — visual-audit geometry (overflow/balance/title-pos) will DIFFER from the author's machine; cross-machine verdicts need the same font (full packaging = F-283 B)"
   else
-    mark_warn "no CJK fallback face from the framework stack is installed — Chromium will render 中文 as tofu; geometry + screenshots both corrupted"
+    mark_warn "preferred CJK face 方正兰亭黑 MISSING; no CJK fallback face from the framework stack is installed — Chromium will render 中文 as tofu; geometry + screenshots both corrupted"
   fi
 else
-  mark_skip "fc-list (fontconfig) not installed — can't verify CJK fonts; install it if you run visual audits on this host"
+  mark_skip "preferred CJK face unchecked: fc-list (fontconfig) not installed — can't verify CJK fonts; install it if you run visual audits on this host"
 fi
 group_end
 
