@@ -228,6 +228,38 @@ def test_zip_package_contract_rejects_missing_asset_reference():
         assert any("HTML 引用资产缺失: assets/missing.png" in item for item in errors)
 
 
+def test_zip_package_contract_accepts_viewer_download_roundtrip_manifest():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "download.zip"
+        members = _base_zip_members(
+            """<!doctype html>
+<html><head><link rel="stylesheet" href="assets/feishu-deck.css"></head>
+<body><div class="slide" data-slide-key="cover">Cover</div></body></html>
+"""
+        )
+        members["assets-manifest.yaml"] = "framework:\n  - assets/feishu-deck.css\n  - assets/feishu-deck.js\n"
+        members["ingestion-manifest.json"] = json.dumps({
+            "schema_version": "1.0",
+            "package_type": "feishu-deck-h5-library",
+            "deck_id": "download-roundtrip",
+            "primary_html": "index.html",
+            "generated_by": "feishu-slide-library viewer download",
+            "source": "viewer-download",
+        })
+        members["assets/feishu-deck.css"] = "body{margin:0}"
+        members["assets/feishu-deck.js"] = ""
+        members.pop("assets/style.css", None)
+        members.pop("assets/local.png", None)
+
+        _write_library_zip(archive, members)
+        primary, errors, warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert errors == []
+        assert any("缺软必需文件: README.md" in item for item in warnings)
+
+
 def test_zip_package_contract_rejects_local_and_escape_paths():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)

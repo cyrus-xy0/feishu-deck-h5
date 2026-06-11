@@ -29,6 +29,8 @@ Requires a deck.json (slide-index.json carries no body content).
 
 Exit: 0 found · 4 not found · 2 bad input
 """
+from __future__ import annotations
+
 import argparse
 import json
 import re
