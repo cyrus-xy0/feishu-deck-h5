@@ -3,12 +3,12 @@
 
 ## CHECK-ONLY MODE
 
-The user gave you an HTML file (own deck, foreign deck, downloaded sample,
-PR for review) and just wants to know what's non-compliant. The skill ships
-a dedicated entry point for this:
+The user gave you an HTML file or a material-library `deck.zip` (own deck,
+foreign deck, downloaded sample, PR for review) and just wants to know what's
+non-compliant. The skill ships a dedicated entry point for this:
 
 ```bash
-bash skills/feishu-deck-h5/assets/check-only.sh <html-path> [--strict] [--no-visual] [--report PATH]
+bash skills/feishu-deck-h5/assets/check-only.sh <html-or-zip-path> [--strict] [--no-visual] [--report PATH]
 ```
 
 What it does:
@@ -103,6 +103,29 @@ schema 形状校验另在 `deck-json/validate-deck.py`:
   forward it on Lark / email as a review note.
 - **`--gate ingest`** — 入库门禁模式 (业务语言, A/B/C 业务关切分组).
   See "Gate ingest mode" below.
+
+### ZIP package mode (`deck.zip`)
+
+When the input is `.zip`, `check-only.py` first checks the package contract
+before running the normal HTML gate:
+
+- ZIP root must directly contain `index.html`, `deck.json`, `assets/`,
+  `assets-manifest.yaml`, and `ingestion-manifest.json`; a top-level
+  `output/` wrapper is rejected.
+- `ingestion-manifest.json.primary_html` must point to an existing safe
+  relative HTML path, normally `index.html`.
+- Symlinks, `.DS_Store`, `__MACOSX`, `../`, absolute paths, Windows drive
+  paths, backslash paths, `file://` / local machine references, and missing
+  referenced assets are hard failures.
+- Remote URLs, `data:`, anchors, `mailto:`, and `tel:` references are ignored
+  for ZIP asset existence checks.
+
+The standard library upload flow is:
+
+```bash
+bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>
+python3 assets/check-only.py runs/<ts>/output/deck.zip --gate ingest
+```
 
 ### Gate ingest mode (入库门禁)
 
@@ -221,4 +244,3 @@ When the user asks "what does [Rxx] mean", look up the rule in `validate.py`
 explains the fix.
 
 ---
-

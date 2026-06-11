@@ -24,13 +24,47 @@
     适合 ingest-package.py 调来做 slide-library 准入扫描.
 """
 
+from __future__ import annotations
+
 import argparse
+import html as html_lib
+import json
 import re
+import shutil
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import validate as V
+
+
+HTML_SUFFIXES = {'.html', '.htm'}
+ZIP_HARD_REQUIRED = (
+    'index.html',
+    'deck.json',
+    'assets',
+    'assets-manifest.yaml',
+    'ingestion-manifest.json',
+)
+ZIP_SOFT_REQUIRED = (
+    'outline.json',
+    'DESIGN-PLAN.md',
+    'texts.md',
+    'README.md',
+)
+REMOTE_REF_SCHEMES = {'http', 'https', 'data', 'blob', 'mailto', 'tel', 'javascript'}
+LOCAL_PATH_SCHEMES = {'file'}
+REFERENCE_ATTRS = ('src', 'href', 'poster', 'data-src', 'data-original', 'xlink:href')
+ATTR_REF_RE = re.compile(
+    r'''(?P<attr>src|href|poster|data-src|data-original|xlink:href)\s*=\s*(?P<q>["'])(?P<value>.*?)(?P=q)''',
+    re.I | re.S,
+)
+CSS_URL_RE = re.compile(r'''url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)''', re.I | re.S)
+STYLE_BLOCK_RE = re.compile(r'<style\b[^>]*>(.*?)</style>', re.I | re.S)
+LINK_TAG_RE = re.compile(r'<link\b[^>]*>', re.I | re.S)
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +671,245 @@ def _run_all_audits(html: str, slides: list, path: Path,
 
 
 # ---------------------------------------------------------------------------
+#  ZIP package mode
+# ---------------------------------------------------------------------------
+
+def is_windows_drive_path(value: str) -> bool:
+    return bool(re.match(r'^[A-Za-z]:[/\\]', value or ''))
+
+
+def is_zip_symlink(info: zipfile.ZipInfo) -> bool:
+    mode = (info.external_attr >> 16) & 0o170000
+    return mode == 0o120000
+
+
+def normalize_zip_member_name(info: zipfile.ZipInfo) -> str:
+    name = info.filename
+    if '\\' in name:
+        raise ValueError(f'反斜杠路径不允许: {name}')
+    if is_windows_drive_path(name):
+        raise ValueError(f'Windows 盘符路径不允许: {name}')
+    if not name or name.endswith('/'):
+        raise ValueError(f'空路径或目录项不允许作为文件: {name}')
+    if name.startswith('/') or Path(name).is_absolute():
+        raise ValueError(f'绝对路径不允许: {name}')
+    parts = [part for part in name.split('/') if part]
+    if not parts or any(part in {'.', '..'} for part in parts):
+        raise ValueError(f'不安全 ZIP 路径: {name}')
+    if any(part == '__MACOSX' for part in parts) or any(part == '.DS_Store' for part in parts):
+        raise ValueError(f'ZIP 不允许包含系统元数据: {name}')
+    if any(part.startswith('._') for part in parts):
+        raise ValueError(f'ZIP 不允许包含 AppleDouble 元数据: {name}')
+    if is_zip_symlink(info):
+        raise ValueError(f'ZIP 不允许包含 symlink: {name}')
+    return '/'.join(parts)
+
+
+def safe_manifest_path(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if '\\' in text or text.startswith('/') or is_windows_drive_path(text):
+        return None
+    parts = [part for part in text.split('/') if part]
+    if not parts or any(part in {'.', '..'} for part in parts):
+        return None
+    return '/'.join(parts)
+
+
+def is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def should_ignore_reference(reference: str) -> bool:
+    if not reference or reference.startswith('#') or reference in {'...', '…'}:
+        return True
+    parsed = urlparse(reference)
+    if re.match(r'^[A-Za-z]$', parsed.scheme) and len(reference) >= 2 and reference[1] == ':':
+        return False
+    return parsed.scheme.lower() in REMOTE_REF_SCHEMES
+
+
+def extract_html_references(html: str) -> list[str]:
+    refs: list[str] = []
+    for match in ATTR_REF_RE.finditer(html):
+        refs.append(html_lib.unescape(match.group('value')).strip())
+    for style_body in STYLE_BLOCK_RE.findall(html):
+        refs.extend(extract_css_references(style_body))
+    return refs
+
+
+def extract_css_references(css: str) -> list[str]:
+    refs: list[str] = []
+    for single, double, bare in CSS_URL_RE.findall(css or ''):
+        refs.append(html_lib.unescape(single or double or bare or '').strip().strip('"\''))
+    return refs
+
+
+def linked_stylesheet_refs(html: str) -> list[str]:
+    refs: list[str] = []
+    for tag in LINK_TAG_RE.findall(html):
+        if not re.search(r'\brel\s*=\s*(["\']?)stylesheet\1', tag, re.I):
+            continue
+        match = re.search(r'\bhref\s*=\s*(["\'])(.*?)\1', tag, re.I | re.S)
+        if match:
+            refs.append(html_lib.unescape(match.group(2)).strip())
+    return refs
+
+
+def resolve_package_reference(reference: str, *, source_dir: Path, package_root: Path) -> tuple[Path | None, str | None]:
+    ref = (reference or '').strip().strip('"\'')
+    if should_ignore_reference(ref):
+        return None, None
+    if is_windows_drive_path(ref):
+        return None, f'HTML 引用包含 Windows 盘符路径: {ref}'
+    if '\\' in ref:
+        return None, f'HTML 引用包含反斜杠路径: {ref}'
+
+    parsed = urlparse(ref)
+    scheme = parsed.scheme.lower()
+    if scheme in LOCAL_PATH_SCHEMES:
+        return None, f'HTML 引用本机路径: {ref}'
+    if scheme and scheme not in REMOTE_REF_SCHEMES:
+        return None, f'HTML 引用不支持的本机/自定义 scheme: {ref}'
+
+    path_text = unquote(parsed.path or ref)
+    if not path_text:
+        return None, None
+    if path_text.startswith('/') or Path(path_text).is_absolute():
+        return None, f'HTML 引用绝对路径: {ref}'
+    parts = [part for part in path_text.split('/') if part]
+    if any(part == '..' for part in parts):
+        return None, f'HTML 引用包含 ../ 越界路径: {ref}'
+
+    target = (source_dir / path_text).resolve()
+    if not is_relative_to(target, package_root):
+        return None, f'HTML 引用逃逸 ZIP 根目录: {ref}'
+    return target, None
+
+
+def inspect_asset_references(primary_html: Path, package_root: Path) -> list[str]:
+    errors: list[str] = []
+    html = primary_html.read_text(encoding='utf-8')
+    css_to_scan: list[Path] = []
+    for ref in sorted(set(extract_html_references(html))):
+        target, error = resolve_package_reference(ref, source_dir=primary_html.parent, package_root=package_root)
+        if error:
+            errors.append(error)
+            continue
+        if target and not target.exists():
+            errors.append(f'HTML 引用资产缺失: {ref}')
+            continue
+        if target and Path(unquote(urlparse(ref).path or ref)).suffix.lower() == '.css':
+            css_to_scan.append(target)
+
+    for ref in linked_stylesheet_refs(html):
+        target, error = resolve_package_reference(ref, source_dir=primary_html.parent, package_root=package_root)
+        if error or not target or not target.exists():
+            continue
+        if target not in css_to_scan:
+            css_to_scan.append(target)
+
+    for css_path in sorted(set(css_to_scan)):
+        try:
+            css = css_path.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            css = css_path.read_text(encoding='utf-8', errors='ignore')
+        for ref in sorted(set(extract_css_references(css))):
+            target, error = resolve_package_reference(ref, source_dir=css_path.parent, package_root=package_root)
+            if error:
+                errors.append(error)
+            elif target and not target.exists():
+                errors.append(f'CSS 引用资产缺失: {ref}')
+    return errors
+
+
+def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None, list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    names: list[str] = []
+
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            infos = [info for info in archive.infolist() if not info.is_dir()]
+            for info in infos:
+                try:
+                    names.append(normalize_zip_member_name(info))
+                except ValueError as exc:
+                    errors.append(str(exc))
+            if errors:
+                return None, errors, warnings
+            for info, name in zip(infos, names):
+                target = extract_dir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as src, target.open('wb') as dst:
+                    shutil.copyfileobj(src, dst)
+    except zipfile.BadZipFile:
+        return None, ['不是有效 ZIP 文件'], warnings
+
+    top_level = {name.split('/', 1)[0] for name in names}
+    if top_level == {'output'}:
+        errors.append('ZIP 顶层只有 output/；deck.zip 顶层必须直接包含 index.html、deck.json、assets/、assets-manifest.yaml、ingestion-manifest.json')
+
+    for item in ZIP_HARD_REQUIRED:
+        target = extract_dir / item
+        if item == 'assets':
+            if not target.is_dir():
+                errors.append('缺硬必需目录: assets/')
+        elif not target.is_file():
+            errors.append(f'缺硬必需文件: {item}')
+
+    for item in ZIP_SOFT_REQUIRED:
+        if not (extract_dir / item).exists():
+            warnings.append(f'缺软必需文件: {item}')
+
+    manifest_path = extract_dir / 'ingestion-manifest.json'
+    primary_html: Path | None = None
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        except json.JSONDecodeError as exc:
+            errors.append(f'ingestion-manifest.json 不是有效 JSON: {exc}')
+            manifest = {}
+        primary = safe_manifest_path(manifest.get('primary_html')) if isinstance(manifest, dict) else None
+        if not primary:
+            errors.append('ingestion-manifest.json.primary_html 缺失或不是安全相对路径')
+        else:
+            primary_html = extract_dir / primary
+            if not primary_html.is_file():
+                errors.append(f'primary_html 不存在: {primary}')
+            elif primary_html.suffix.lower() not in HTML_SUFFIXES:
+                errors.append(f'primary_html 不是 HTML 文件: {primary}')
+
+    if primary_html and primary_html.is_file():
+        errors.extend(inspect_asset_references(primary_html, extract_dir))
+    return primary_html, errors, warnings
+
+
+def build_zip_package_report(path: Path, errors: list[str], warnings: list[str]) -> str:
+    lines = [
+        '# feishu-deck-h5 deck.zip 入库包检查',
+        '',
+        f'- 文件: `{path}`',
+        '',
+    ]
+    if errors:
+        lines.append('## 🔴 阻塞问题')
+        lines.extend(f'- {item}' for item in errors)
+    else:
+        lines.append('## ✅ 包结构通过')
+    if warnings:
+        lines.extend(['', '## 🟡 非阻塞提醒'])
+        lines.extend(f'- {item}' for item in warnings)
+    return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
 #  main
 # ---------------------------------------------------------------------------
 
@@ -651,11 +924,12 @@ def build_parser() -> argparse.ArgumentParser:
 
   # 入库门禁模式: 业务必修规则, 业务语言报告, 任一违规即 exit 1
   python3 check-only.py /path/to/deck.html --gate ingest
+  python3 check-only.py /path/to/deck.zip --gate ingest
 
   # 写报告到文件 (默认或 gate 模式都可)
   python3 check-only.py /path/to/deck.html --gate ingest --report report.md
 """)
-    p.add_argument('html', help='待检查的 HTML 文件路径')
+    p.add_argument('html', help='待检查的 HTML 或 deck.zip 文件路径')
     p.add_argument('--strict', action='store_true',
                    help='把 warn 升级为 error (与 --gate 互斥)')
     p.add_argument('--visual', action=argparse.BooleanOptionalAction,
@@ -675,15 +949,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main() -> int:
-    p = build_parser()
-    args = p.parse_args()
-
-    path = Path(args.html).resolve()
-    if not path.is_file():
-        print(f'ERROR: 找不到文件 {path}', file=sys.stderr)
-        return 2
-
+def run_html_check(path: Path, args: argparse.Namespace) -> tuple[int, str]:
     html = path.read_text(encoding='utf-8')
     html = V.inline_linked(html, path.parent)
     slides = V.extract_slides(html)
@@ -730,14 +996,46 @@ def main() -> int:
                                           mode_hints)
         rc = 1 if iss.errors else 0
 
-    if args.report:
-        out = Path(args.report).resolve()
+    return rc, report
+
+
+def emit_report(report: str, report_path: str | None) -> None:
+    if report_path:
+        out = Path(report_path).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(report + '\n', encoding='utf-8')
         print(f'✓ 报告已写到 {out}', file=sys.stderr)
     else:
         print(report)
 
+
+def main() -> int:
+    p = build_parser()
+    args = p.parse_args()
+
+    path = Path(args.html).resolve()
+    if not path.is_file():
+        print(f'ERROR: 找不到文件 {path}', file=sys.stderr)
+        return 2
+
+    if path.suffix.lower() == '.zip':
+        with tempfile.TemporaryDirectory(prefix='feishu-check-only-zip.') as td:
+            primary, errors, warnings = inspect_zip_package(path, Path(td) / 'package')
+            for warning in warnings:
+                print(f'WARNING: {warning}', file=sys.stderr)
+            if errors or primary is None:
+                emit_report(build_zip_package_report(path, errors, warnings), args.report)
+                return 1
+            rc, report = run_html_check(primary, args)
+            emit_report(report, args.report)
+            return rc
+
+    if path.suffix.lower() not in HTML_SUFFIXES:
+        print(f'ERROR: unsupported check-only input: {path.suffix or "<none>"}', file=sys.stderr)
+        return 2
+
+    rc, report = run_html_check(path, args)
+    emit_report(report, args.report)
     return rc
 
 

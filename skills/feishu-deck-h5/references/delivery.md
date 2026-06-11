@@ -69,13 +69,14 @@ afterthought. This complements the precise-measurement gate (computed
 This is a **hard rule, no exceptions**. Before any artifact crosses
 the agent → user boundary (chat reply attachment, remote-codex
 transport-back, harness "download to user" hook, manual file-pick),
-verify the artifact form. Pick exactly **one** of three valid shapes:
+verify the artifact form. Pick exactly **one** valid shape for the destination:
 
 | Shape | When | What goes back |
 |---|---|---|
-| **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. 90% of cases. | `bash build.sh --inline` → ship `examples/sample-deck-inline.html` (or its renamed copy under `runs/<ts>/output/`). Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. |
+| **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. Use for customer preview, IM forwarding, and single-file viewing. | `bash build.sh --inline` → ship `examples/sample-deck-inline.html` (or its renamed copy under `runs/<ts>/output/`). Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. Not a slide-library ingest format. |
 | **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + assets + optional `deck.json` + `assets-manifest.yaml` + `README.txt`. Recipient unzips, opens `index.html`, presses **E** for the built-in visual editor, edits text in-browser, saves with ⌘/Ctrl+S. |
 | **C · hosted URL** *(when the user already deploys to Pages / a CDN)* | Deck lives at a stable web URL. | Ship the URL string. No file attachment. |
+| **D · `deck.zip` for slide-library ingest** *(required for "入库素材库 / 上传素材网站 / 网页入库 / slide library ingest")* | The destination is the material library web ingest pipeline. | `bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>` → upload `runs/<ts>/output/deck.zip`. This is the only standard upload format for the material library. |
 
 **Banned form · single linked HTML**: never hand back just one
 `*.html` file that points to sibling `assets/` / `input/` /
@@ -89,8 +90,23 @@ naked unstyled DOM and call it "乱码".
 **Why this rule exists**: the skill's linked-output mode is meant
 for **in-skill iteration** (fast browser cache, small HTML diffs),
 not for delivery. The delivery boundary is where linked must convert
-to one of A/B/C. The author of the skill knows the convention; the
+to the destination-appropriate shape. The author of the skill knows the convention; the
 agent doing the hand-back must enforce it.
+
+**Material-library ingest rule**: linked `index.html` is local iteration
+only and must not be uploaded to the material library by itself. Inline
+HTML remains supported for customer preview, IM forwarding, and
+single-file review, but it is not a material-library ingest format. When
+the user says "入库素材库" / "上传素材网站" / "网页入库" / "slide library
+ingest", produce `runs/<ts>/output/deck.zip` with:
+
+```bash
+bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>
+```
+
+Do not manually compress `runs/<ts>/output/`. Do not upload
+`runs/<ts>/output/index.html`. Do not use inline HTML for material-library
+ingest.
 
 **Specific failure mode this rule prevents** (remote codex / web
 sandbox): an agent runs the skill in a remote container, finishes
@@ -132,8 +148,8 @@ python3 skills/feishu-deck-h5/assets/copy-assets.py runs/<ts>/output/
 # Full self-contained copy — use for archival or non-symlink-following destinations
 python3 skills/feishu-deck-h5/assets/copy-assets.py runs/<ts>/output/ --shared=copy
 
-# Library-ingest mode — skip shared/* (manifest still lists them)
-python3 skills/feishu-deck-h5/assets/copy-assets.py runs/<ts>/output/ --shared=skip
+# Library-ingest mode — full copy, no symlinks, ready for deck.zip
+python3 skills/feishu-deck-h5/assets/copy-assets.py runs/<ts>/output/ --shared=copy
 ```
 
 The script:
@@ -169,14 +185,16 @@ The script:
   per run vs. copy mode. Auto-migrates a real `shared/` directory from a prior
   copy-mode run into a symlink on first re-run.
 - `--shared=copy` — full self-contained copy: every referenced shared file is
-  duplicated into `output/assets/shared/`. Use only when the destination tool
+  duplicated into `output/assets/shared/`. Required for library mode
+  (`finalize.sh ... library --deck-id ...`) and useful when the destination tool
   doesn't follow symlinks (rsync without `-L`, archival snapshots, etc.) or
   when you explicitly need an on-disk copy independent of the skill.
 - `--shared=skip` — leave `assets/shared/*` references skill-relative;
   don't copy or link those files. Saves ~50–500 KB per deck. Output runs only
   while next to the skill folder OR when a downstream tool (like the
   slide library ingest) rewrites the shared/* paths against its own
-  pool. Use this when piping the run straight into the library.
+  pool. Do not use this for new material-library uploads; library mode now
+  requires `--shared=copy` and packages `deck.zip`.
 
 After running with link or copy mode, `runs/<ts>/output/` is **send-friendly**:
 cut/copy the folder anywhere on disk (link mode keeps symlinks intact on the
@@ -218,7 +236,9 @@ presented / shared / posted), NOT the generation timestamp. Apply
 this convention to:
 
 - The HTML you copy into a public site (e.g. `feishusolution/<...>`)
-- The HTML you drop into the slide-library inbox
+- The inline HTML you send for customer preview / IM forwarding
+- The `deck.zip` produced for slide-library ingest (`--deck-id` should follow
+  the same `lark-<customer>-<date>` identity)
 - The zip name from `package-deliverable.sh` (`--name lark-<customer>-<date>`)
 - Any "send this to the customer" copy
 
@@ -248,8 +268,11 @@ so 1 deck → 1 deck_id without rename surgery.
 
 `finalize.sh` accepts `--name <slug>` to emit the named copy
 alongside `index.html` automatically. Pass it whenever you're
-delivering — the working `index.html` stays in place for further
-edits, and the named copy goes out to the recipient.
+delivering HTML preview/public-site artifacts — the working `index.html`
+stays in place for further edits, and the named copy goes out to the
+recipient. For slide-library ingest, keep the generated file name
+`runs/<ts>/output/deck.zip` and carry the same identity through
+`--deck-id <deck-id>`.
 
 ### Mode 1 · Claude Code on the user's local machine
 
@@ -257,12 +280,15 @@ Default. The user has filesystem access to `runs/<timestamp>/output/`
 already. Just tell them the path:
 
 > 已生成：
-> · `runs/<ts>/output/index.html` — 浏览器双击打开（按 E 可在浏览器里直接改文字）
+> · `runs/<ts>/output/index.html` — 本地迭代 / HTTP 预览用（按 E 可在浏览器里直接改文字，不可单独上传素材库）
 > · `runs/<ts>/output/deck.json` — 改文案的正道：`deck-cli set slides.N.data.<field> "…"` 再 re-render
 > · `runs/<ts>/output/lark-<customer>-<YYYY-MM-DD>.html` — 命名规范副本，
->   投递 / 入库 / 同步公网就用这个名字（`finalize.sh --name lark-<...>` 自动产出）
+>   客户预览 / IM 转发 / 单文件查看用（inline HTML，不作为素材库入库格式）
+> · `runs/<ts>/output/deck.zip` — 素材库网页上传唯一标准格式：
+>   `bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>`
 
-No packaging step needed.
+No packaging step needed for local preview. If the destination is the material
+library, run the library finalize command and upload `deck.zip`.
 
 ### Mode 2 · OpenClaw / OpenCode / remote agent / Feishu bot
 
@@ -330,4 +356,3 @@ copy tweaks; shipping the edit kit pre-empts a round-trip back to you.
 >    flagged with 〔TODO〕 and must be replaced before external use."
 
 ---
-

@@ -7,9 +7,12 @@ Also a light guard that the shared V.inline_linked (F-14) is importable.
 import contextlib
 import importlib.util
 import io
+import json
 import re
 import sys
 import pathlib
+import tempfile
+import zipfile
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
 sys.path.insert(0, str(ASSETS))
@@ -156,6 +159,93 @@ def test_visual_defaults_on_parity_with_validate():
     vsrc = (ASSETS / "validate.py").read_text(encoding="utf-8")
     assert re.search(r"--visual.*BooleanOptionalAction", vsrc, re.S), \
         "validate.py --visual must stay BooleanOptionalAction default-on"
+
+
+def _write_library_zip(path, members):
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in members.items():
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            zf.writestr(name, data)
+
+
+def _base_zip_members(html=None):
+    html = html or """<!doctype html>
+<html><head><link rel="stylesheet" href="assets/style.css"></head>
+<body><img src="assets/local.png"></body></html>
+"""
+    return {
+        "index.html": html,
+        "deck.json": json.dumps({"schema_version": "1.0", "slides": []}),
+        "assets-manifest.yaml": "assets:\n  - assets/local.png\n",
+        "ingestion-manifest.json": json.dumps({
+            "deck_id": "lark-test-2026-06-11",
+            "package_type": "feishu-deck-h5-library",
+            "primary_html": "index.html",
+        }),
+        "assets/style.css": "body{background:url(local.png)}",
+        "assets/local.png": b"fake-png",
+    }
+
+
+def test_zip_package_contract_accepts_top_level_deck_zip():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        _write_library_zip(archive, _base_zip_members())
+        primary, errors, warnings = CO.inspect_zip_package(archive, td / "extract")
+        assert errors == []
+        assert primary.name == "index.html"
+        assert "缺软必需文件: README.md" in warnings
+
+
+def test_zip_package_contract_rejects_output_wrapper():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        _write_library_zip(archive, {
+            "output/index.html": "<html></html>",
+            "output/deck.json": "{}",
+            "output/assets-manifest.yaml": "assets: []\n",
+            "output/ingestion-manifest.json": '{"primary_html":"index.html"}',
+            "output/assets/local.png": b"x",
+        })
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+        assert primary is None
+        assert any("顶层只有 output/" in item for item in errors)
+
+
+def test_zip_package_contract_rejects_missing_asset_reference():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members(
+            '<!doctype html><html><body><img src="assets/missing.png"></body></html>'
+        )
+        _write_library_zip(archive, members)
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+        assert primary is not None
+        assert any("HTML 引用资产缺失: assets/missing.png" in item for item in errors)
+
+
+def test_zip_package_contract_rejects_local_and_escape_paths():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members(
+            '<!doctype html><html><body>'
+            '<img src="../outside.png">'
+            '<img src="file:///Users/me/secret.png">'
+            '<img src="C:\\\\tmp\\\\x.png">'
+            '</body></html>'
+        )
+        _write_library_zip(archive, members)
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+        assert primary is not None
+        joined = "\n".join(errors)
+        assert "../ 越界路径" in joined
+        assert "本机路径" in joined
+        assert "Windows 盘符路径" in joined
 
 
 if __name__ == "__main__":

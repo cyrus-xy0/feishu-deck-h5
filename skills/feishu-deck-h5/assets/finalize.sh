@@ -6,15 +6,18 @@
 # Idempotent — safe to re-run after edits.
 #
 # Usage:
-#     bash assets/finalize.sh <output-dir> [mode] [--strict] [--name <slug>]
-#         mode:           local (default) | remote
+#     bash assets/finalize.sh <output-dir> [mode] [--strict] [--name <slug>] [--deck-id <deck-id>]
+#         mode:           local (default) | remote | library
 #         --strict        promote validator warnings to errors (final delivery)
 #         --name <slug>   emit a delivery-named copy alongside index.html
 #                         convention: lark-<customer>-<presentation-date>
 #                         e.g. --name lark-boyu-starbucks-2026-05-08
+#         --deck-id       required in library mode; stable material-library id
 #
 #     local   = copy-assets + validate (+ named copy if --name)
 #     remote  = local steps + package-deliverable.sh (zip kit, zip name from --name)
+#     library = copy-assets --shared=copy + validate --strict
+#               + check-only gate + package-ingest.sh + deck.zip gate
 #
 # For single-file inline delivery (base64-inlined CSS/JS/images into one
 # .html file for email/IM attachment), run `bash build.sh --inline` from
@@ -26,6 +29,7 @@
 #     2  copy-assets failed
 #     4  validate failed (errors — fix the deck and re-run)
 #     5  packaging failed
+#     6  ingest gate failed
 
 set -euo pipefail
 
@@ -33,11 +37,12 @@ OUT_DIR="${1:-}"
 MODE="local"
 STRICT=""
 NAME=""
+DECK_ID=""
 
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
-        local|remote) MODE="$1"; shift ;;
+        local|remote|library) MODE="$1"; shift ;;
         inline)
             echo "✗ 'inline' mode is no longer a finalize.sh subcommand." >&2
             echo "  For single-file inline delivery, run from the skill root:" >&2
@@ -46,9 +51,21 @@ while [ $# -gt 0 ]; do
             ;;
         --strict) STRICT="--strict"; shift ;;
         --name) NAME="${2:?--name requires a value}"; shift 2 ;;
+        --deck-id) DECK_ID="${2:?--deck-id requires a value}"; shift 2 ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
+
+if [ "$MODE" = "library" ]; then
+    if [ -n "$NAME" ]; then
+        echo "✗ library mode does not accept --name; it always writes deck.zip" >&2
+        exit 1
+    fi
+    if [ -z "$DECK_ID" ]; then
+        echo "✗ library mode requires --deck-id <deck-id>" >&2
+        exit 1
+    fi
+fi
 
 # Validate --name against the convention if provided
 if [ -n "$NAME" ]; then
@@ -60,9 +77,10 @@ if [ -n "$NAME" ]; then
 fi
 
 if [ -z "$OUT_DIR" ] || [ ! -d "$OUT_DIR" ]; then
-    echo "usage: bash $(basename "$0") <output-dir> [local|remote] [--strict] [--name <slug>]" >&2
+    echo "usage: bash $(basename "$0") <output-dir> [local|remote|library] [--strict] [--name <slug>] [--deck-id <deck-id>]" >&2
     echo "       output-dir must exist (typically runs/<ts>/output/)" >&2
     echo "       --name convention: lark-<customer>-<YYYY-MM-DD>" >&2
+    echo "       library mode: bash $(basename "$0") <output-dir> library --deck-id <deck-id>" >&2
     exit 1
 fi
 
@@ -96,19 +114,31 @@ run_step() {
 }
 
 # ---------- 1 · copy-assets (make output portable) ----------
-echo "  · copy-assets …"
-if ! run_step "copy-assets" python3 "$SCRIPT_DIR/copy-assets.py" "$OUT_DIR"; then
+COPY_ARGS=("$OUT_DIR")
+if [ "$MODE" = "library" ]; then
+    COPY_ARGS+=("--shared=copy")
+fi
+if [ "$MODE" = "library" ]; then
+    echo "  · copy-assets --shared=copy …"
+else
+    echo "  · copy-assets …"
+fi
+if ! run_step "copy-assets" python3 "$SCRIPT_DIR/copy-assets.py" "${COPY_ARGS[@]}"; then
     exit 2
 fi
 
 # ---------- 2 · validate ----------
-if [ -n "$STRICT" ]; then
+VALIDATE_STRICT="$STRICT"
+if [ "$MODE" = "library" ]; then
+    VALIDATE_STRICT="--strict"
+fi
+if [ -n "$VALIDATE_STRICT" ]; then
     echo "  · validate --strict …"
 else
     echo "  · validate …"
 fi
-if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $STRICT; then
-    if [ -n "$STRICT" ]; then
+if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $VALIDATE_STRICT; then
+    if [ -n "$VALIDATE_STRICT" ]; then
         echo "✗ validator failed under --strict — fix the warnings/errors above" >&2
     else
         echo "✗ validator errors — fix above and re-run" >&2
@@ -120,12 +150,19 @@ fi
 # slide-library ingest, because the ingest gate (`check-only.py --gate ingest`)
 # forces strict (warn→error) + visual audit. Surface that stricter bar here so a
 # "done" deck doesn't surprise-fail on hand-off. Only nag when not already strict.
-if [ -z "$STRICT" ]; then
+if [ -z "$STRICT" ] && [ "$MODE" != "library" ]; then
     echo ""
     echo "  ℹ️  slide-library 入库门禁更严:strict(warn→error) + 视觉审计。"
     echo "      入库前想按同一档门槛预检,任选其一:"
     echo "        bash $(basename "$0") \"$OUT_DIR\" $MODE --strict"
     echo "        python3 \"$SCRIPT_DIR/check-only.py\" \"$HTML\" --gate ingest"
+fi
+
+if [ "$MODE" = "library" ]; then
+    echo "  · check-only --gate ingest (HTML) …"
+    if ! run_step "check-only HTML gate" python3 "$SCRIPT_DIR/check-only.py" "$HTML" --gate ingest; then
+        exit 6
+    fi
 fi
 
 # ---------- 3 · delivery-named copy (if --name provided) ----------
@@ -172,5 +209,19 @@ case "$MODE" in
             echo "  TIP: pass --name lark-<customer>-<YYYY-MM-DD> for a named zip"
             echo "       instead of the generic deck-editable.zip."
         fi
+        ;;
+    library)
+        echo "  · package-ingest …"
+        if ! run_step "package-ingest" bash "$SCRIPT_DIR/package-ingest.sh" "$OUT_DIR" --deck-id "$DECK_ID"; then
+            exit 5
+        fi
+        ZIP="$OUT_DIR/deck.zip"
+        echo "  · check-only --gate ingest (deck.zip) …"
+        if ! run_step "check-only ZIP gate" python3 "$SCRIPT_DIR/check-only.py" "$ZIP" --gate ingest; then
+            exit 6
+        fi
+        echo ""
+        echo "✓ ready (library) — upload this zip to feishu-slide-library:"
+        echo "    $ZIP"
         ;;
 esac
