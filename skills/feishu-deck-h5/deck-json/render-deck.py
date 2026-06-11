@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 # Story-case fit primitives are single-sourced in _story_case_fit.py (F-15) so
@@ -2111,6 +2112,133 @@ def _maybe_auto_snapshot(out_html, scope=None) -> None:
         pass
 
 
+# ============================================================================
+#  W2 (iteration-loop plan) · render log + digest
+#  Every render tees its FULL stdout (fd-level, so subprocess output like the
+#  static validator and deck-log autosnapshot is captured too) into
+#  <output_dir>/last-render.log (overwritten per run). After main() returns,
+#  a compact DIGEST (verdict + one line per error finding + log path) is
+#  printed, so a BLOCKED render never needs a second run just to re-read the
+#  ❌ section, and greps can't eat the detail — it's all in the log file.
+#  stderr is left untouched (shell 2>-redirection semantics preserved).
+# ============================================================================
+_RLOG = {"path": None, "tees": [], "file": None}
+
+
+def _start_render_log(log_path: Path) -> None:
+    """fd-level tee of stdout AND stderr into log_path (gate findings print to
+    stderr — F-253/F-256 sections — so both streams must land in the log).
+    Each stream keeps writing to its original fd, so shell `2>`-redirection
+    semantics are preserved. Idempotent; never raises."""
+    try:
+        if _RLOG["path"] is not None:          # already started
+            return
+        f = open(log_path, "wb", buffering=0)
+        sys.stdout.flush(); sys.stderr.flush()
+        tees = []
+        for fd in (1, 2):
+            r, w = os.pipe()
+            orig = os.dup(fd)
+            os.dup2(w, fd)
+            os.close(w)
+
+            def _pump(r=r, orig=orig):
+                while True:
+                    chunk = os.read(r, 65536)
+                    if not chunk:
+                        break
+                    os.write(orig, chunk)
+                    f.write(chunk)
+                os.close(r)
+
+            t = threading.Thread(target=_pump, daemon=True)
+            t.start()
+            tees.append({"fd": fd, "orig": orig, "pump": t})
+        try:  # line-buffer python-level streams so prints land promptly
+            sys.stdout.reconfigure(line_buffering=True)
+            sys.stderr.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+        _RLOG.update(path=Path(log_path), tees=tees, file=f)
+    except Exception:
+        pass  # logging must never break a render
+
+
+def _digest_from_log(text: str, rc: int) -> str:
+    """Extract a compact errors-only digest from the captured render output."""
+    errors, info = [], []
+    in_block = False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s.startswith("✗"):
+            errors.append(s)
+            continue
+        if "❌ BLOCKING" in s:
+            in_block = True
+            continue
+        if in_block:
+            if s.startswith("•"):
+                errors.append(s)
+                continue
+            in_block = False
+        if "pre-existing — NOT re-blocking" in s or "NOT re-blocking" in s:
+            info.append(s)
+    # de-dup, keep order; findings print twice (advisory + blocking sections)
+    seen, uniq = set(), []
+    for e in errors:
+        k = e[:120]
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(e)
+    MAXLEN, MAXN = 220, 15
+    lines = []
+    verdict = "✔ PASS" if rc == 0 else ("✗ BLOCKED" if rc == 4 else "✗ FAIL")
+    lines.append(f"{verdict} (rc={rc}) · {len(uniq)} error(s) · log: {_RLOG['path']}")
+    for e in uniq[:MAXN]:
+        lines.append("  " + (e[:MAXLEN] + " …" if len(e) > MAXLEN else e))
+    if len(uniq) > MAXN:
+        lines.append(f"  (+{len(uniq) - MAXN} more — see log)")
+    for i in info[:2]:
+        lines.append("  ℹ " + i[:MAXLEN])
+    return "\n".join(lines)
+
+
+def _finish_render_log(rc: int) -> None:
+    """Restore both fds, then print the digest to the REAL stdout + append to log."""
+    try:
+        if _RLOG["path"] is None:
+            return
+        sys.stdout.flush(); sys.stderr.flush()
+        for tee in _RLOG["tees"]:
+            os.dup2(tee["orig"], tee["fd"])    # closes pipe write end → pump EOF
+        for tee in _RLOG["tees"]:
+            tee["pump"].join(timeout=5)
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+            sys.stderr.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+        text = ""
+        try:
+            text = _RLOG["path"].read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+        digest = _digest_from_log(text, rc)
+        out = "\n──── render digest ────\n" + digest + "\n"
+        os.write(1, out.encode("utf-8", "replace"))
+        try:
+            _RLOG["file"].write(out.encode("utf-8", "replace"))
+            _RLOG["file"].close()
+        except Exception:
+            pass
+        for tee in _RLOG["tees"]:
+            os.close(tee["orig"])
+        _RLOG.update(path=None, tees=[], file=None)
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="render-deck.py",
@@ -2281,6 +2409,7 @@ def main(argv=None) -> int:
     # 3. Setup output dir
     args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    _start_render_log(args.output_dir / "last-render.log")   # W2: full output → file
     asset_path = relpath_from_to(args.output_dir, ASSETS_DIR)
 
     # 4. Render each slide
@@ -3337,4 +3466,13 @@ def _resolve_bg(out_html: Path, url: str, on_missing=None) -> str:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        _rc = main()
+    except SystemExit as _e:                       # compact per-slide crash path
+        _finish_render_log(_e.code if isinstance(_e.code, int) else 1)
+        raise
+    except BaseException:                          # tracebacks: keep log, no digest noise
+        _finish_render_log(1)
+        raise
+    _finish_render_log(_rc)
+    sys.exit(_rc)
