@@ -76,6 +76,11 @@ def fail(message: str) -> None:
     sys.exit(f"ERROR: {message}")
 
 
+def is_packaged_metadata(path: Path) -> bool:
+    parts = path.relative_to(out_dir).parts
+    return any(part.startswith(".") for part in parts)
+
+
 for path in out_dir.rglob("*"):
     r = rel(path)
     parts = path.relative_to(out_dir).parts
@@ -148,9 +153,16 @@ try:
     for item in sorted(out_dir.iterdir(), key=lambda p: p.name):
         if item.name == "deck.zip":
             continue
+        if is_packaged_metadata(item):
+            continue
         target = stage / item.name
         if item.is_dir():
-            shutil.copytree(item, target, symlinks=False)
+            shutil.copytree(
+                item,
+                target,
+                symlinks=False,
+                ignore=lambda _dir, names: [name for name in names if name.startswith(".")],
+            )
         else:
             shutil.copy2(item, target)
 

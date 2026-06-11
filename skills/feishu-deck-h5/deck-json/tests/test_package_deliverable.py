@@ -31,6 +31,10 @@ class PackageDeliverableTest(unittest.TestCase):
             json.dumps({"schema_version": "1.0", "slides": []}),
             encoding="utf-8",
         )
+        (self.output / ".slide-hashes.json").write_text(
+            json.dumps({"cover": "hash"}),
+            encoding="utf-8",
+        )
         (self.output / "assets-manifest.yaml").write_text(
             "deck_local:\n  - assets/local.png\n",
             encoding="utf-8",
@@ -127,6 +131,7 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertIn("ingestion-manifest.json", names)
         self.assertIn("README.md", names)
         self.assertIn("assets/local.png", names)
+        self.assertNotIn(".slide-hashes.json", names)
         self.assertFalse(any(name.startswith("output/") for name in names))
 
     def test_package_ingest_rejects_name(self):
