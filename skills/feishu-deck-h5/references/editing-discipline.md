@@ -7,6 +7,45 @@ These four failure modes recurred in the 2026-05-14 CTG run and burned
 30+ minutes of debug time each. Read this section BEFORE doing any
 delete-slide / insert-slide / reorder-slide / custom-layout work.
 
+### E0a. "Delete the XX block" — grep the literal text FIRST (scope lock)
+
+When the user points at a page and says delete/change "the XX blocks", elements
+whose VISIBLE TEXT literally reads "XX" are the primary interpretation — grep
+the slide's `data.html` for that literal string before anything else. Only when
+no literal match exists do structural readings ("the XX-themed rows/sections")
+come into play; if both readings exist, ask, and frame the question around BOTH
+interpretations. (2026-06-11 lesson: "删 Tier1/2/3 三个 block" — the page had
+72×72 badges literally labeled TIER 1/2/3; the agent instead proposed deleting
+the three whole tier ROWS and burned a clarification round.)
+
+### E0b. Visual gate blocked a scoped edit? The baseline usually handles it (F-302)
+
+The gate is **baseline-aware** on `--scope` renders: every render whose
+`index.html` actually ships writes the error-level findings' fingerprints to
+`output/validate-findings.json`; the next scoped render blocks ONLY on findings
+NOT in that baseline. So a page that shipped with known accept-risk findings
+does not re-block an unrelated edit — you'll see
+`ℹ N error-level visual finding(s) are PRE-EXISTING … NOT re-blocking` and the
+`GATE-COVERAGE` line records `·baseline(N pre-existing)`. New findings still
+block (listed separately from the pre-existing count). `--strict-baseline`
+forces the old block-on-everything behavior; full (non-scope) renders are
+always strict.
+
+If a deck has NO baseline yet (never shipped through the new gate), the first
+blocked render is bootstrap: prove the findings are pre-existing with ONE
+command against the shipped HTML — NOT a re-render of a backup:
+
+```bash
+python3 assets/validate.py <run>/output/index.html --visual --slide <key>
+```
+
+Same findings there → pre-existing; ship once with `DECK_ALLOW_VIS_ERRORS=1`
+(which writes the baseline, so this is needed only once) and offer the cleanup
+as a SEPARATE pass. Do NOT render a backup copy under /tmp to compare — the
+visual gate only fires for `runs/<ts>/output/` paths, so an elsewhere-render is
+advisory-only and proves nothing (render-deck now prints a loud warning when
+that happens).
+
 ## Adding content to a `raw` / `lifted` card — measure geometry, not the box
 
 When you ADD a visual element or extra text to a hand-authored `raw` slide

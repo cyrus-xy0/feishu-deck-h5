@@ -35,6 +35,17 @@ Mode names follow the single **Authoritative Mode Enum** in
 NOT open a new run (a fresh run artifact is `GENERATION`, which routes to
 Designer + Renderer instead).
 
+- **`EDIT` fast-text (pure copy swap)**: when the request is ONLY changing words
+  — a label, a sentence, a title's wording, zero DOM/layout implication — use
+  **`deck-json/fast-text.py <deck-dir> "OLD" "NEW"`**: a sub-second dual-write
+  that updates deck.json AND the rendered index.html in one deterministic swap
+  (count==1 asserted on both sides; JSON-escape handled; refuses `<`/`>`), with
+  NO render and NO validation. This is the sanctioned exception to
+  "rerender after edits" — round-trip integrity holds because both
+  representations changed by the same literal string. It exits 3 (deck.json
+  updated, html refused) when the renderer entity-escaped the text — then sync
+  with a `--quick` render. If NEW is much longer than OLD the tool warns about
+  overflow; eyeball or do a `--scope` render when the page was already tight.
 - **`EDIT` (small edit)**: lock slide key/scope, edit `deck.json`, render, validate only
   locked slide(s). The locked scope is the boundary for the re-render too — pass it
   to `render-deck.py` so downstream steps don't re-process the whole deck. For an
@@ -184,6 +195,12 @@ Designer + Renderer instead).
 - For raw slides, `data.html` is the inner content of `.slide`; it does not
   include `.slide` or `.slide-frame` wrappers. If you need a complete renderable
   frame, extract it from rendered `index.html`, not from `deck.json` `data.html`.
+- **Never print a whole raw `data.html` to find one element** — raw pages run to
+  100s of KB. Excerpt instead:
+  `deck-json/locate-slide.py <deck> <page|key|all> --grep PATTERN [--context N]`
+  searches the selected slides' `data.html` + `custom_css` and prints each hit
+  with source + char offset + ±context. Then do the edit with an exact-string
+  replace anchored on what the grep showed (assert match-count==1 first).
 
 ## References To Load As Needed
 
@@ -214,6 +231,9 @@ Designer + Renderer instead).
 - `../../deck-json/migrate-head-css-to-custom-css.py`
 - `../../deck-json/reconcile-lifted.py` — snap lifted-slide inline font sizes
   onto the {16,24,28,48} tier ladder (the F-62 reconcile step).
+- `../../deck-json/fast-text.py` — F-303 sub-second pure-copy edit: dual-write
+  deck.json + index.html, no render/validation; hard guardrails (count==1 both
+  sides, refuses DOM chars, JSON-corruption refused-and-restored).
 - `../../deck-json/conform-to-deck.py` — F-300 family-drift detector + conformer
   for a page ADOPTED into an existing deck. Read-only drift table by default
   (D1 page-bg / D2 title placement / D3 pre-title chrome / D4 font ladder / D5

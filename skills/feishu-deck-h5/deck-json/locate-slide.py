@@ -18,6 +18,14 @@ deck.json (synthesizes the index, honoring _disabled skips for frame_index).
 
 Usage:
   locate-slide.py <deck-dir | slide-index.json | deck.json> <query> [-v] [--json]
+  locate-slide.py <deck-dir | deck.json> <query|all> --grep PATTERN [--context N]
+
+--grep (F-301): excerpt INSIDE the matched slides' data.html + custom_css —
+a raw slide's html can be 100s of KB, so never print the whole thing to find
+one element; grep it. PATTERN is a regex (an invalid regex degrades to literal
+substring). Each hit prints source (html|custom_css), char offset, and ±N chars
+of whitespace-collapsed context (default 120). Query `all` greps every slide.
+Requires a deck.json (slide-index.json carries no body content).
 
 Exit: 0 found · 4 not found · 2 bad input
 """
@@ -196,14 +204,88 @@ def _fmt(e: dict, verbose: bool) -> str:
     return line
 
 
+# ---------------------------------------------------------------------------
+# --grep: excerpt inside slide bodies (F-301) — raw data.html can be 100s of KB;
+# locating an element must not require printing the whole slide.
+# ---------------------------------------------------------------------------
+
+def _find_deck_json(src: Path) -> Path | None:
+    """--grep needs body content, which only deck.json has."""
+    if src.is_dir():
+        p = src / "deck.json"
+        return p if p.exists() else None
+    if src.name == "deck.json":
+        return src
+    p = src.parent / "deck.json"      # sibling of slide-index.json / index.html
+    return p if p.exists() else None
+
+
+def _grep_slides(deck_json: Path, keys: set | None, pattern: str, ctx: int) -> int:
+    """Print matches of `pattern` inside data.html + custom_css of the selected
+    slides (keys=None → all). Returns number of hits."""
+    try:
+        rx = re.compile(pattern)
+    except re.error:
+        rx = re.compile(re.escape(pattern))      # invalid regex → literal
+    deck = json.loads(deck_json.read_text(encoding="utf-8"))
+    hits = 0
+    for i, s in enumerate(deck.get("slides") or [], 1):
+        key = s.get("key")
+        if keys is not None and key not in keys:
+            continue
+        sources = [("html", (s.get("data") or {}).get("html") or ""),
+                   ("custom_css", s.get("custom_css") or "")]
+        slide_hdr_printed = False
+        for src_name, text in sources:
+            for m in rx.finditer(text):
+                if not slide_hdr_printed:
+                    print(f"slides[{i - 1}] · key={key} · "
+                          f"\"{s.get('screen_label', '')}\"")
+                    slide_hdr_printed = True
+                a, b = max(0, m.start() - ctx), min(len(text), m.end() + ctx)
+                seg = re.sub(r"\s+", " ", text[a:b]).strip()
+                print(f"  [{src_name} @{m.start()}] …{seg}…")
+                hits += 1
+                if hits >= 200:
+                    print(f"  (cap: 200 hits — narrow the pattern)")
+                    return hits
+    return hits
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Fast slide locator — page N = frame_index N = slides[N-1].")
     ap.add_argument("src", type=Path, help="deck dir, slide-index.json, or deck.json")
-    ap.add_argument("query", help="frame_index / #N / URL#N / 46-48 / 46,2 / key / title substring")
+    ap.add_argument("query", help="frame_index / #N / URL#N / 46-48 / 46,2 / key / title substring / all (with --grep)")
     ap.add_argument("-v", "--verbose", action="store_true", help="show title + full asset list")
     ap.add_argument("--json", dest="as_json", action="store_true", help="emit matched entries as JSON")
+    ap.add_argument("--grep", metavar="PATTERN", default=None,
+                    help="excerpt matches inside the selected slides' data.html + "
+                         "custom_css (regex; invalid regex = literal)")
+    ap.add_argument("--context", type=int, default=120,
+                    help="±chars of context around each --grep hit (default 120)")
     args = ap.parse_args(argv)
+
+    if args.grep is not None:
+        dj = _find_deck_json(args.src)
+        if dj is None:
+            print("locate: --grep needs a deck.json (slide-index.json has no "
+                  "body content)", file=sys.stderr)
+            return 2
+        if args.query.strip().lower() in ("all", "*"):
+            keys = None
+        else:
+            entries, _ = _load_index(dj)
+            kind, val = _parse_query(args.query)
+            sel = [e for e in _match(entries, kind, val) if "_missing" not in e]
+            if not sel:
+                print(f"locate: no slide matches '{args.query}'", file=sys.stderr)
+                return 4
+            keys = {e.get("key") for e in sel}
+        n = _grep_slides(dj, keys, args.grep, args.context)
+        if not n:
+            print(f"locate: 0 hits for --grep '{args.grep}'", file=sys.stderr)
+        return 0 if n else 4
 
     entries, _title = _load_index(args.src)
     any_hidden = _annotate_visible_ordinals(entries)
