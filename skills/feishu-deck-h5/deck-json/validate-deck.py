@@ -49,12 +49,22 @@ class Result:
     def __init__(self):
         self.errors: list[tuple[str, str]] = []   # (instance_path, message)
         self.warnings: list[tuple[str, str]] = [] # (instance_path, message)
+        # Soft (advisory) warnings are SURFACED but NEVER promoted to errors by
+        # --strict and never affect `ok`. They're for heuristic, design-relative
+        # findings (e.g. R-FAMILY-DRIFT consensus drift) that must not break a
+        # render — render-deck calls validate-deck --strict and aborts on a hard
+        # error, so a hard family-drift rule would false-fail legitimate per-page
+        # design variation. See check_family_drift.
+        self.soft_warnings: list[tuple[str, str]] = []
 
     def err(self, path: str, msg: str):
         self.errors.append((path, msg))
 
     def warn(self, path: str, msg: str):
         self.warnings.append((path, msg))
+
+    def warn_soft(self, path: str, msg: str):
+        self.soft_warnings.append((path, msg))
 
     @property
     def ok(self) -> bool:
@@ -364,6 +374,72 @@ def check_business_rules(deck: dict, result: Result, strict: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# R-FAMILY-DRIFT (F-300) — SOFT backstop for the "adopt a foreign page into a
+# house-styled deck" gap. A page joining a deck should match the conventions of
+# its sibling content pages; the siblings ARE the spec. This surfaces (never
+# blocks) raw content pages that diverge on the structural house-chrome trio so
+# a reskinned/rebuilt outlier doesn't reach delivery un-noticed even when the
+# conform step was skipped. The deterministic fixes live in conform-to-deck.py.
+# ---------------------------------------------------------------------------
+
+_FAMILY_DRIFT_MIN_PAGES = 3   # need >= 3 raw content pages to form a consensus
+
+
+def check_family_drift(deck: dict, result: Result) -> None:
+    """Emit SOFT R-FAMILY-DRIFT advisories for content pages diverging from the
+    sibling consensus on: D1 own page-background, D2 title placement, D3 pre-title
+    chrome. Cheap boolean signals only (no font-snap / luminance pass) so it adds
+    negligible cost to the render-time validate. D4 (font ladder) is R20's job;
+    D5 (body luminance) needs the composited bg and is left to a visual rule."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "conform_to_deck",
+            Path(__file__).resolve().parent / "conform-to-deck.py")
+        conform = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(conform)
+    except Exception:
+        return  # detector unavailable → skip silently (never block validation)
+
+    slides = deck.get("slides", [])
+    if not isinstance(slides, list):
+        return
+    sigs = [(i,
+             conform.sets_own_page_bg(s)[0],
+             conform.title_in_header(s),
+             conform.has_pretitle_chrome(s)[0])
+            for i, s in enumerate(slides)
+            if isinstance(s, dict) and conform.is_content_raw(s)]
+    if len(sigs) < _FAMILY_DRIFT_MIN_PAGES:
+        return  # no family consensus to conform against
+
+    FIX = " — `conform-to-deck.py --apply` fixes this"
+    for idx, bg, hdr, chrome in sigs:
+        bg_c = conform._bool_consensus([x[1] for x in sigs if x[0] != idx])
+        hdr_c = conform._bool_consensus([x[2] for x in sigs if x[0] != idx])
+        chrome_c = conform._bool_consensus([x[3] for x in sigs if x[0] != idx])
+        sp = f"slides[{idx}]"
+        if bg_c is not None and bg != bg_c:
+            result.warn_soft(sp, (
+                "D1 page-background: page "
+                f"{'paints its own background' if bg else 'inherits the master bg'}, "
+                f"but the family {'paints its own' if bg_c else 'inherits the master content-bg'} "
+                "(R-FAMILY-DRIFT)" + (FIX if bg and not bg_c else "")))
+        if hdr_c is not None and hdr != hdr_c:
+            result.warn_soft(sp, (
+                "D2 title placement: page uses "
+                f"{'the framework .header' if hdr else 'a bespoke title block'}, "
+                f"but the family uses {'the framework .header > .title-zh' if hdr_c else 'bespoke titles'} "
+                "(R-FAMILY-DRIFT)"))
+        if chrome_c is not None and chrome != chrome_c:
+            result.warn_soft(sp, (
+                "D3 pre-title chrome: page "
+                f"{'carries an eyebrow/topbar above the title' if chrome else 'has no pre-title chrome'}, "
+                f"but the family {'carries one' if chrome_c else 'has none'} "
+                "(R-FAMILY-DRIFT)" + (FIX if chrome and not chrome_c else "")))
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -418,6 +494,7 @@ def main(argv=None) -> int:
 
     if not args.no_business_rules:
         check_business_rules(deck, result, args.strict)
+        check_family_drift(deck, result)   # SOFT — never blocks; surfaces drift
 
     # Render output
     title = deck.get("deck", {}).get("title", "<no title>")
@@ -445,6 +522,12 @@ def main(argv=None) -> int:
     if result.warnings:
         print(f"! {len(result.warnings)} warning(s):")
         for path, msg in result.warnings:
+            print(f"  {format_path(path, slide_keys):<60}  {msg}")
+        print()
+
+    if result.soft_warnings:
+        print(f"ℹ {len(result.soft_warnings)} advisory (non-blocking):")
+        for path, msg in result.soft_warnings:
             print(f"  {format_path(path, slide_keys):<60}  {msg}")
         print()
 

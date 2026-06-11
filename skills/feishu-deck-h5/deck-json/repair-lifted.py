@@ -79,6 +79,7 @@ MIGRATE = HERE / "migrate-head-css-to-custom-css.py"
 HEAL = HERE / "heal-lifted.py"
 CLEAN = HERE / "clean-lifted-css.py"
 RECONCILE = HERE / "reconcile-lifted.py"
+CONFORM = HERE / "conform-to-deck.py"
 RENDER = HERE / "render-deck.py"
 VALIDATE = HERE / "validate-deck.py"
 
@@ -270,6 +271,17 @@ def main(argv=None):
     else:
         print("  · heal/clean/reconcile  SKIP in dry-run — deck.json would be "
               "created by backfill first (re-run with --apply, or after backfill)")
+
+    # --- Step 5.5: family-drift report (F-300, DETECTION ONLY) ----------------
+    # Surface pages that diverge from the deck's sibling house style (own page-bg,
+    # bespoke title, pre-title chrome, off-ladder fonts, muted body text). This is
+    # READ-ONLY here on purpose: stripping a page background is a visible design
+    # change, not a mechanical defect repair, so the actual conform stays an
+    # explicit opt-in (`conform-to-deck.py <deck> --apply`). conform-to-deck
+    # self-skips when there are < 3 raw content pages (no family to conform to).
+    if deck_will_exist:
+        plan.append(("conform drift report (read-only — fix via conform-to-deck "
+                     "--apply)", [sys.executable, str(CONFORM), str(deck_json)]))
 
     # --- Step 6: render + validate -------------------------------------------
     if not args.no_render and deck_will_exist and not dry:

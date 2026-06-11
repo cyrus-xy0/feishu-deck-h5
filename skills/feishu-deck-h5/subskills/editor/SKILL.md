@@ -56,7 +56,16 @@ Designer + Renderer instead).
   for explicit round-trip recovery or when the controller has accepted a
   non-DeckJSON fallback.
 - **RESKIN**: user wants Feishu chrome on an existing foreign HTML without content
-  redesign. Use `assets/reskin.sh`.
+  redesign. Use `assets/reskin.sh`. **First ask the F-300 second question** — is
+  this a STANDALONE reskin, or is the page being ADOPTED into an existing deck?
+  If adopted, the page must match its NEW SIBLINGS, not its source: after the
+  reskin/rebuild lands in the deck, run the conform pass
+  `deck-json/conform-to-deck.py <deck.json>` (read-only drift table first, then
+  `--apply` for the deterministic D1/D3/D4 conforms; D2 title-move + D5 contrast
+  stay manual). The sibling raw content pages ARE the house-style spec; this
+  collapses the otherwise-serial "fix the bg / move the title / drop the eyebrow /
+  fix the font size / un-grey the text" feedback rounds into one. The soft
+  `R-FAMILY-DRIFT` advisory in `validate-deck.py` is the render-time backstop.
 - **LIFT+SWAP**: user wants source deck layout preserved and only copy/client
   swapped. Use `deck-cli.py paste` for DeckJSON-native sources; use
   `assets/lift-slides.py --shake` for foreign or older HTML sources; use
@@ -205,4 +214,12 @@ Designer + Renderer instead).
 - `../../deck-json/migrate-head-css-to-custom-css.py`
 - `../../deck-json/reconcile-lifted.py` — snap lifted-slide inline font sizes
   onto the {16,24,28,48} tier ladder (the F-62 reconcile step).
+- `../../deck-json/conform-to-deck.py` — F-300 family-drift detector + conformer
+  for a page ADOPTED into an existing deck. Read-only drift table by default
+  (D1 page-bg / D2 title placement / D3 pre-title chrome / D4 font ladder / D5
+  body luminance, each vs the sibling-content-page consensus); `--apply` runs the
+  three deterministic conforms (D1/D3/D4) with backup + optimistic-lock +
+  validate-with-rollback. D2/D5 are report-only. Also runs read-only as a step in
+  `repair-lifted.py`, and is the source-of-truth for the soft `R-FAMILY-DRIFT`
+  advisory in `validate-deck.py`.
 - `../../assets/grow-box-fit.py`
