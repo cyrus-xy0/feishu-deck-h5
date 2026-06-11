@@ -40,6 +40,32 @@
     return false;
   };
 
+  // F-301 · 找本页的「页头标题带」容器。直接子 `.header` 优先(框架 canonical);
+  // 没有时接受【嵌一层】的 .header —— bespoke 满幅 raw 页常把 header 包进全幅
+  // wrapper(.land > .header,fwd-founder #8),`:scope > .header` 一律摸空导致
+  // TITLE-GAP / CANVAS-CENTER 整条通道静默。嵌套候选要过严闸,防止把内容区的
+  // mock-UI「header」(手机/窗口 chrome)认成页头:
+  //   ① 不在 .stage 内(schema 正文里的都是内容);② 必须含框架标题元素
+  //   (.title-zh/.title-en/h1/h2 —— bespoke 页也沿用这个约定);③ 顶部带内
+  //   (top ≤ 200 design px);④ 宽 ≥ 40% 画布(mock chrome 是窄条)。
+  const findSlideHeader = (slide) => {
+    const direct = slide.querySelector(':scope > .header');
+    if (direct) return direct;
+    const sr = slide.getBoundingClientRect();
+    if (sr.height < 30) return null;
+    const scale = sr.height / 1080;
+    for (const el of slide.querySelectorAll('.header')) {
+      if (el.closest('.stage')) continue;
+      if (!el.querySelector('.title-zh, .title-en, h1, h2')) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      if ((r.top - sr.top) / scale > 200) continue;
+      if (r.width < sr.width * 0.4) continue;
+      return el;
+    }
+    return null;
+  };
+
   // 元素自己 + 任一祖先(至 slide 边界)的全部 class 列表(用于 chrome-class /
   // hero 类豁免:与 _validate_audits.py 里"selector 命中某 chrome class"等价 ——
   // 渲染后没有 selector,改成沿元素的 class 链查同义类)。
@@ -935,7 +961,7 @@
   //  raw 兜底计划)。新规则【默认 universal】(name-free,raw+schema 同覆盖);收窄要在此交
   //  可审查的税。测试 deck-json/tests/test_rule_contract.py 在 CI 阻断未登记/未辩护的规则。
   const RULE_META = {
-    'R-VIS-CANVAS-CENTER': { coverage: 'schema-only', signal: 'dom', optout: 'geometry needs framework .header; raw twin via [data-role=header] TODO (PR2)' },
+    'R-VIS-CANVAS-CENTER': { coverage: 'universal', signal: 'dom' },
     'R-VIS-FILL': { coverage: 'raw-only', signal: 'dom', optout: 'layout!=="raw" early-return — name-free fill check, raw by design' },
     'R-ESC-HTML': { coverage: 'universal', signal: 'text' },
     'R12': { coverage: 'universal', signal: 'dom' },
@@ -1032,12 +1058,18 @@
   const RULES = [
     {
       // R-VIS-CANVAS-CENTER · 内容并集相对"画布"垂直居中 (2026-05-31)
-      // 画布 = [主标题 .header 底边 → 屏幕底 1080];内容并集(排除 .header / 绝对定位 /
+      // 画布 = [标题带 .header 底边 → 屏幕底 1080];内容并集(排除 .header / 绝对定位 /
       // 隐藏 / 过小 / 被裁)的垂直中心 content_mid 应 ≈ 画布中心 (hb+1080)/2。
       //   offset = canvas_mid - content_mid   (>0 偏上, <0 偏下)
       //   is_full = 内容比可用带还高 → 居中必溢出画布 → 顶对齐是对的,豁免。
       // |offset| > 40 判失衡(warn,留白判断主观,可 data-allow-imbalance opt-out)。
       // 几何全部先减 slide 顶、再 / scale 还原成设计 px,与 1080 同系。
+      // F-301 (2026-06-11):锚点语义明确为「标题带底边」—— header bbox 天然含
+      // .page-sub 副标,所以带底=副标底(有副标)/主标底(无副标),与框架运行时
+      // setBandAnchor / canvas-center 同口径;header 改用 findSlideHeader 探测,
+      // 兼容 .land>.header 嵌一层的 bespoke 满幅 raw 页(旧 `:scope>.header` 摸空
+      // → hb=0 → 错用全画布中心 540 评带下内容,raw twin TODO(PR2) 由此关闭,
+      // coverage 升 universal)。
       id: 'R-VIS-CANVAS-CENTER',
       severity: 'warn',
       evaluate(slide, ctx) {
@@ -1046,7 +1078,7 @@
 
         const _ccSr = slide.getBoundingClientRect();
         const _ccSlideTop = _ccSr.top;
-        const ccHeader = slide.querySelector(':scope > .header');
+        const ccHeader = findSlideHeader(slide);
         const ccHeaderRendered = !!ccHeader && ccHeader.getClientRects().length > 0;
         const _ccHb = ccHeaderRendered
           ? (ccHeader.getBoundingClientRect().bottom - _ccSlideTop) / scale
@@ -4075,7 +4107,9 @@
         // See validator-rules.md. (Precision is also improved by subtitle-folding
         // in the name-free branch, so this opt-out is the last resort, not routine.)
         if (slide.hasAttribute('data-allow-title-gap')) return [];
-        const header = slide.querySelector(':scope > .header');
+        // F-301:header 用 findSlideHeader 找(直接子优先,兼容 .land>.header 嵌一层
+        // 的 bespoke 满幅页 —— 旧 `:scope > .header` 在那类页上摸空,整条规则静默)。
+        const header = findSlideHeader(slide);
         const headerRendered = !!header && header.getClientRects().length > 0;
         let tgTitleRect = null, tgTitleSel = null, tgContentTop = Infinity;
         let tgBandBottom = null;   // bottom of the title band (title, or title+subtitle)
@@ -4094,6 +4128,57 @@
             if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
             const r = el.getBoundingClientRect();
             if (r.width > 40 && r.height > 16) tgContentTop = Math.min(tgContentTop, r.top);
+          }
+        } else if (headerRendered) {
+          // F-301 third channel: the header EXISTS and renders, but there is NO
+          // `:scope > .stage` — bespoke full-bleed raw pages put content in a
+          // custom wrapper (.land/.canvas/…), usually fully absolute-positioned.
+          // Before this channel, such a page hit NEITHER branch (header channel
+          // requires .stage, name-free requires !header) and 0–24px crowding
+          // under the subtitle shipped silently (fwd-founder #8: 14px). The
+          // header bbox still defines the title band (it encloses any .page-sub),
+          // so measure the gap from header.bottom to the topmost visible content
+          // block BELOW the band: own-text leaves, media, or FRAMED boxes — a
+          // bordered/filled card frame crowds a subtitle just as much as text
+          // does (on #8 the crowding object is the 2×2 grid's .cell border, 24px
+          // above its first text). Excluded: the header's own ancestors (the
+          // full-bleed wrapper contains the header), unframed empty wrappers,
+          // near-canvas-size background panels, and anything overlapping the
+          // band itself (that is R-OVERLAP's job — same below-band semantics as
+          // the name-free channel).
+          tgTitleRect = header.getBoundingClientRect();
+          tgTitleSel = shortSel(header);
+          tgBandBottom = tgTitleRect.bottom;
+          const sr3 = slide.getBoundingClientRect();
+          for (const el of slide.querySelectorAll('*')) {
+            if (el === header || header.contains(el) || el.contains(header)) continue;
+            if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+            if (el.namespaceURI === 'http://www.w3.org/2000/svg' && el.tagName.toLowerCase() !== 'svg') continue; // 形状由所属 <svg> 的墨迹并集代表
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 40 || r.height <= 16) continue;
+            const isMedia3 = el.tagName === 'IMG' || el.tagName === 'CANVAS'
+              || el.tagName === 'VIDEO' || el.tagName.toLowerCase() === 'svg';
+            let effTop = r.top;
+            if (el.tagName.toLowerCase() === 'svg') {
+              // SVG 外框 bbox 含透明画布区(viewBox 边距)—— 一张「空气感」图表的
+              // 外框可以贴着 header 底而墨迹离它很远(本 deck #7:外框 top=带底 0px,
+              // 真实节点低 ~50px)。改用墨迹并集顶(可见子图形 bbox 的最小 top),
+              // 空 svg 当装饰跳过。
+              let ink = Infinity;
+              el.querySelectorAll('path,rect,circle,ellipse,line,polyline,polygon,text,image,use,foreignObject')
+                .forEach((sh) => {
+                  const b2 = sh.getBoundingClientRect();
+                  if (b2.width > 2 && b2.height > 2 && b2.top < ink) ink = b2.top;
+                });
+              if (ink === Infinity) continue;
+              effTop = ink;
+            }
+            if (effTop < tgBandBottom - 2) continue;            // band overlap → R-OVERLAP's job
+            if (r.width > sr3.width * 0.9 && r.height > sr3.height * 0.65) continue; // bg panel
+            if (!hasOwnText(el) && !isMedia3 && !visIsFramedBox(el)) continue;
+            tgContentTop = Math.min(tgContentTop, effTop);
           }
         } else if (!header) {
           const sr = slide.getBoundingClientRect();
@@ -4180,8 +4265,8 @@
               if (r.top < tgTitleRect.bottom - 2) continue;            // must sit below title
               const fs = parseFloat(cs.fontSize) || 0;
               const isSubtitle = fs > 0 && fs < titleFs
-                && r.height <= fs * 2.0 * _scale                       // ~single line — rect height is SCALED (getBoundingClientRect), fs is UNSCALED computed px, so multiply the fs budget by _scale to compare like-for-like (same fix the sibling-distance test already applies below)
-                && (r.top - tgTitleRect.bottom) < 24 * _scale;         // hugging the title
+                && r.height <= fs * 3.2 * _scale                       // ≤2 行(行高 1.45 × 2 行 = 2.9×fs;F-301:旧 2.0 只放单行,2 行 page-sub(81px = 2.9×28)折不进带,被当成「假内容」量出 36px 假 gap 放行真拥挤)— rect height is SCALED (getBoundingClientRect), fs is UNSCALED computed px, so multiply the fs budget by _scale to compare like-for-like (same fix the sibling-distance test already applies below)
+                && (r.top - tgTitleRect.bottom) < 44 * _scale;         // hugging the title(F-301:canonical .page-sub 间距 36px,旧 24 把按规范排的副标全排除在折叠外 → 36 + 8 容差)
               if (isSubtitle && r.top < subTop) { subTop = r.top; subEl = el; }
             }
             if (subEl) { tgBandBottom = subEl.getBoundingClientRect().bottom; }  // fold subtitle into the band; body floor still measured from this band bottom (M2)

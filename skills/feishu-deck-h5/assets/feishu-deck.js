@@ -256,6 +256,12 @@
   };
   function _ccApply(slide) {
     const layout = slide.getAttribute('data-layout') || '';
+    // F-301 · re-true the band anchor now that entrance animations have settled
+    // (centerSlideInCanvas defers to this point): the maybeBalance-time measure
+    // can catch the header mid-reveal (translateY in flight → bbox ~10px low).
+    // Idempotent, runs even for hero/opted-out slides — the stage anchor must be
+    // right regardless of whether the centering pass below is allowed to act.
+    try { setBandAnchor(slide); } catch (e) { /* best-effort */ }
     if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return;
     if (slide.getBoundingClientRect().height < 30) return;          // not laid out / navigated away
     const m = _ccMeasure(slide);
@@ -375,6 +381,29 @@
       im.src = url;
     })));
   }
+  // F-301 · subtitle-aware band anchor: measure the rendered `.header` bbox
+  // bottom (design px — the bbox encloses any .page-sub subtitle) into the
+  // slide's `--fs-band-bottom` custom property. The framework `.stage` rule
+  // derives its `top` from this var (top = band bottom + 56, see
+  // feishu-deck.css), so the body band starts below the REAL title band
+  // (title + subtitle) instead of an assumed main-title-only height. Runs
+  // before balanceSlide so every later measure/center pass (balance, columns,
+  // canvas-center, audits) sees the final stage geometry; re-applied on
+  // fonts.ready because a late font swap can rewrap the title. Idempotent and
+  // write-only-on-change, so re-running never invalidates applied fixes.
+  function setBandAnchor(slide) {
+    if (!slide) return;
+    const header = slide.querySelector(':scope > .header');
+    if (!header || !header.getClientRects().length) return;
+    const sr = slide.getBoundingClientRect();
+    if (sr.height < 30) return;                           // not laid out
+    const hb = (header.getBoundingClientRect().bottom - sr.top) / (sr.height / 1080);
+    if (!(hb > 40 && hb < 420)) return;                   // degenerate/hero header → keep fallback
+    const v = Math.round(hb) + 'px';
+    if (slide.style.getPropertyValue('--fs-band-bottom') !== v) {
+      slide.style.setProperty('--fs-band-bottom', v);
+    }
+  }
   function maybeBalance(slide) {
     if (!slide || slide.hasAttribute('data-fs-balanced')) return;
     const deck = slide.closest('.deck');
@@ -389,6 +418,7 @@
     const probe = slide.querySelector('.stage, .grid, .flow, .nodes, .toc, .stack, .header, [class*="card"]');
     if (!probe || probe.getBoundingClientRect().height < 30) return;
     slide.setAttribute('data-fs-balanced', '');
+    try { setBandAnchor(slide); } catch (e) { /* never break the deck over layout */ }
     try { balanceSlide(slide); } catch (e) { /* never break the deck over layout */ }
     // columns first (tightens letterboxed media → internally-balanced cols), then the
     // whole-block canvas-center on the tightened layout. balanceColumns resolves after
@@ -592,6 +622,17 @@
     // are balanced on first enter by the observer below (a retry, not the
     // primary path).
     requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => maybeBalance(f.querySelector('.slide'))); });
+    // F-301 · re-measure the band anchor once webfonts settle: a late font swap
+    // can rewrap the title/subtitle and change the header bbox bottom. Cheap,
+    // idempotent, and skipped for opted-out decks (same data-no-autobalance
+    // contract as maybeBalance). Slides canvas-center already pinned with an
+    // inline top keep their pin — the var only feeds the stylesheet fallback.
+    if (document.fonts && document.fonts.ready && !deck.hasAttribute('data-no-autobalance')) {
+      document.fonts.ready.then(() => {
+        if (signal.aborted) return;
+        frames.forEach((f) => { try { setBandAnchor(f.querySelector('.slide')); } catch (e) { /* best-effort */ } });
+      });
+    }
     const mediaObserver = new MutationObserver((muts) => {
       for (const m of muts) {
         const i = frames.indexOf(m.target);
