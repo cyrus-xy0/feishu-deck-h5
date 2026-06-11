@@ -62,6 +62,13 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
   runs/<ts>/output/
 ```
 
+   While iterating on individual pages, add `--iter` (auto-scopes audits to the
+   changed pages via the `.slide-hashes.json` sidecar, skips the autosnapshot,
+   prints a text echo of changed slides). Before any handoff, render once with
+   `--final` (full audits + autosnapshot). Every render writes its complete
+   output to `<output_dir>/last-render.log` and ends with an errors-only
+   digest — on a BLOCK, read the log instead of re-running.
+
 6. Confirm the render actually updated `index.html` by checking renderer output,
    mtime, or expected slide key/content.
    If schema validation fails before render, inspect with

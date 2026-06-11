@@ -1,0 +1,179 @@
+"""iteration-loop W1/W3/W4/W5/W8 — set-page, pre-write lint, auto-scope, echo, add-asset.
+
+Replay-set anchors (docs/PLAN-ITERATION-LOOP-2026-06-11.md §7): the lint cases
+mirror the real first-render gate failures of the FWD-deck session
+(77px/21px typescale, .kicker 16px, inset:0 dual-anchor, P50 base64-in-style).
+"""
+import base64
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+DECK_JSON = HERE.parent
+CLI = DECK_JSON / "deck-cli.py"
+RENDER = DECK_JSON / "render-deck.py"
+DEMO = DECK_JSON / "examples" / "phase-1a-demo.json"
+
+sys.path.insert(0, str(DECK_JSON))
+from _lint_fragment import lint_fragment  # noqa: E402
+
+
+# ---------------------------------------------------------------- helpers ----
+def _mk_deck(tmp_path: Path) -> Path:
+    d = json.loads(DEMO.read_text(encoding="utf-8"))
+    d["slides"].append({
+        "key": "rawpage", "layout": "raw", "screen_label": "07 Raw",
+        "data": {"html": '<div class="header"><h2 class="title-zh">Old</h2>'
+                         '</div><div class="stage"><p class="body">old</p></div>'}})
+    p = tmp_path / "deck.json"
+    p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def _cli(deck: Path, *argv):
+    return subprocess.run(
+        [sys.executable, str(CLI), str(deck), "--no-backup", *argv],
+        capture_output=True, text=True)
+
+
+def _render(deck: Path, out: Path, *flags):
+    import os
+    env = dict(os.environ); env["DECK_LOG_NO_AUTOSNAP"] = "1"
+    return subprocess.run(
+        [sys.executable, str(RENDER), str(deck), str(out) + "/", *flags],
+        capture_output=True, text=True, env=env)
+
+
+# ------------------------------------------------------------- W4 · lint ----
+def test_lint_catches_fwd_session_failures():
+    css = """
+    .x .h1{ font-size:77px; }
+    .x .sub{ font-size:21px; }
+    .x .strip{ position:absolute; top:838px; bottom:44px; }
+    .x .full{ position:absolute; inset:0; }
+    """
+    codes = [f["code"] for f in lint_fragment(css=css) if f["sev"] == "err"]
+    assert codes.count("L-TYPESCALE") == 2
+    assert codes.count("L-DUAL-ANCHOR") == 2
+
+
+def test_lint_respects_ladder_hero_and_optouts():
+    ok = ".x .num{font-size:72px} .x .b{font-size:24px} .x .f{font-size:16px}"
+    assert [f for f in lint_fragment(css=ok) if f["sev"] == "err"] == []
+    # opt-outs silence their classes
+    css = ".x .h{font-size:77px} .x .o{position:absolute;inset:0}"
+    html = '<div data-allow-typescale data-allow-dual-anchor></div>'
+    assert [f for f in lint_fragment(html=html, css=css) if f["sev"] == "err"] == []
+
+
+def test_lint_p50_base64_in_style():
+    blob = base64.b64encode(b"x" * 300 * 1024).decode()
+    css = f'.x{{background:url("data:image/png;base64,{blob}")}}'
+    codes = [f["code"] for f in lint_fragment(css=css) if f["sev"] == "err"]
+    assert "L-P50-INLINE" in codes
+
+
+# --------------------------------------------------------- W1 · set-page ----
+def test_set_page_writes_html_css_lifted(tmp_path):
+    deck = _mk_deck(tmp_path)
+    h = tmp_path / "f.html"
+    h.write_text('<div class="header"><h2 class="title-zh">New</h2></div>'
+                 '<div class="stage"><p class="body">new body</p></div>',
+                 encoding="utf-8")
+    c = tmp_path / "f.css"
+    c.write_text('.slide[data-slide-key="rawpage"] .body{font-size:24px;}',
+                 encoding="utf-8")
+    r = _cli(deck, "set-page", "rawpage", "--html", str(h), "--css", str(c),
+             "--lifted", "--title", "T")
+    assert r.returncode == 0, r.stdout + r.stderr
+    s = json.loads(deck.read_text(encoding="utf-8"))["slides"][-1]
+    assert "New" in s["data"]["html"]
+    assert s["custom_css"].startswith(".slide[")
+    assert s["lifted"] is True and s["data"]["title"] == "T"
+
+
+def test_set_page_refuses_bad_fragment_then_skip_lint(tmp_path):
+    deck = _mk_deck(tmp_path)
+    bad = tmp_path / "bad.css"
+    bad.write_text(".x{font-size:21px}", encoding="utf-8")
+    r = _cli(deck, "set-page", "rawpage", "--css", str(bad))
+    assert r.returncode == 5
+    assert "L-TYPESCALE" in r.stdout + r.stderr
+    s = json.loads(deck.read_text(encoding="utf-8"))["slides"][-1]
+    assert "custom_css" not in s, "refused write must not touch the deck"
+    r2 = _cli(deck, "set-page", "rawpage", "--css", str(bad), "--skip-lint")
+    assert r2.returncode == 0
+
+
+def test_set_from_file_raw_string(tmp_path):
+    deck = _mk_deck(tmp_path)
+    f = tmp_path / "v.css"
+    f.write_text('.slide .body{color:#fff}', encoding="utf-8")
+    r = _cli(deck, "set", "slides.6.custom_css", "--from-file", str(f))
+    assert r.returncode == 0, r.stdout + r.stderr
+    s = json.loads(deck.read_text(encoding="utf-8"))["slides"][6]
+    assert s["custom_css"] == '.slide .body{color:#fff}'
+
+
+def test_rollback_restores_even_with_no_backup(tmp_path):
+    deck = _mk_deck(tmp_path)
+    before = deck.read_text(encoding="utf-8")
+    r = _cli(deck, "set", "slides.0.layout", "not-a-layout")
+    assert r.returncode == 3
+    assert deck.read_text(encoding="utf-8") == before, \
+        "--no-backup schema-fail must restore the pre-write content"
+
+
+# ----------------------------------------------- W3/W5 · auto-scope + echo ----
+def test_iter_auto_scope_and_text_echo(tmp_path):
+    deck = _mk_deck(tmp_path)
+    out = tmp_path / "out"
+    r0 = _render(deck, out, "--iter")
+    assert r0.returncode == 0
+    assert "no sidecar" in r0.stdout
+    assert (out / ".slide-hashes.json").exists()
+
+    # edit the raw page only → next --iter must scope to page 7 + echo its text
+    d = json.loads(deck.read_text(encoding="utf-8"))
+    d["slides"][-1]["data"]["html"] = d["slides"][-1]["data"]["html"].replace(
+        "old", "ECHO-MARKER")
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r1 = _render(deck, out, "--iter")
+    assert r1.returncode == 0
+    assert "auto-scope → pages 7" in r1.stdout
+    assert "text echo" in r1.stdout and "ECHO-MARKER" in r1.stdout
+
+    # no change → full (cheap) again
+    r2 = _render(deck, out, "--iter")
+    assert "no slide changed" in r2.stdout
+
+    # structural change → full
+    d["slides"].pop()
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r3 = _render(deck, out, "--iter")
+    assert "added/removed/reordered" in r3.stdout
+
+    # --final overrides --iter
+    r4 = _render(deck, out, "--iter", "--final")
+    assert r4.returncode == 0 and "--iter:" not in r4.stdout
+
+
+# ------------------------------------------------------------ W8 · asset ----
+def test_add_asset_places_and_compresses(tmp_path):
+    try:
+        from PIL import Image
+    except ImportError:
+        import pytest
+        pytest.skip("PIL not available")
+    deck = _mk_deck(tmp_path)
+    src = tmp_path / "big.png"
+    Image.new("RGB", (2400, 1200), (200, 30, 30)).save(src)
+    r = _cli(deck, "add-asset", str(src), "--max-width", "1200")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "reference it as:  input/big.jpg" in r.stdout
+    placed = tmp_path / "input" / "big.jpg"
+    assert placed.exists()
+    with Image.open(placed) as im:
+        assert im.width == 1200

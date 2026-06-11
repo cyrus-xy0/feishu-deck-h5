@@ -199,11 +199,20 @@ def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
                   file=sys.stderr)
             return False
 
-    # 1. Backup current state
+    # 1. Backup current state. Even with --no-backup, keep the original TEXT in
+    #    memory — the schema-fail rollback below must always have something to
+    #    restore from (pre-W1 this path silently left the INVALID content on
+    #    disk while printing "Rolling back").
     bak = None
-    if not no_backup and deck_path.exists():
-        bak = backup_path(deck_path, command)
-        shutil.copy2(deck_path, bak)
+    orig_text = None
+    if deck_path.exists():
+        try:
+            orig_text = deck_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+        if not no_backup:
+            bak = backup_path(deck_path, command)
+            shutil.copy2(deck_path, bak)
 
     # 2. Write (atomic — F-269: a kill mid-write must not leave a torn deck.json)
     atomic_write_text(deck_path, json.dumps(deck, ensure_ascii=False, indent=2),
@@ -222,6 +231,10 @@ def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
         if bak and bak.exists():
             shutil.copy2(bak, deck_path)
             print(f"deck-cli: restored from {bak.name}", file=sys.stderr)
+        elif orig_text is not None:
+            atomic_write_text(deck_path, orig_text, encoding="utf-8")
+            print("deck-cli: restored pre-write content (in-memory copy — "
+                  "--no-backup run)", file=sys.stderr)
         return False
 
     if bak:
@@ -283,6 +296,48 @@ def cmd_show(deck: dict, args) -> int:
     return 0
 
 
+def cmd_add_asset(deck: dict, args) -> int:
+    """W8 (iteration-loop): compress + place an image next to the deck and print
+    the relative URL to reference — the alternative to hand-base64'ing photos
+    into fragments (deck.json bloat + the P50 250KB in-style cap)."""
+    src = args.file
+    if not src.is_file():
+        print(f"deck-cli: add-asset — no such file: {src}", file=sys.stderr)
+        return 1
+    dest_dir = args.deck.parent / "input"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    name = args.name or src.name
+    out = dest_dir / name
+    orig_kb = src.stat().st_size // 1024
+    try:
+        from PIL import Image
+        with Image.open(src) as im:
+            has_alpha = im.mode in ("RGBA", "LA", "P") and (
+                im.mode != "P" or "transparency" in im.info)
+            if im.width > args.max_width:
+                h = max(1, round(im.height * args.max_width / im.width))
+                im = im.resize((args.max_width, h), Image.LANCZOS)
+            if has_alpha:
+                out = out.with_suffix(".png")
+                im.save(out, optimize=True)
+            else:
+                out = out.with_suffix(".jpg")
+                im.convert("RGB").save(out, quality=args.quality, optimize=True)
+    except ImportError:
+        shutil.copy2(src, out)          # no PIL — place verbatim, still linked
+    except Exception as e:              # not an image / decode error — verbatim
+        print(f"deck-cli: add-asset — not processable as image ({e}); "
+              f"copying verbatim.", file=sys.stderr)
+        shutil.copy2(src, out)
+    new_kb = out.stat().st_size // 1024
+    print(f"  {src.name} ({orig_kb}KB) → {out} ({new_kb}KB)")
+    print(f"  reference it as:  input/{out.name}")
+    if new_kb > 500:
+        print(f"  ⚠ still {new_kb}KB — consider --max-width below "
+              f"{args.max_width} or stronger --quality.")
+    return 0
+
+
 def cmd_lint(deck_path: Path, args) -> int:
     rc = subprocess.run(
         [sys.executable, str(VALIDATE_DECK), str(deck_path),
@@ -301,15 +356,83 @@ def cmd_set(deck: dict, args) -> tuple[int, dict | None]:
         old = get_path(deck, args.path)
     except (KeyError, IndexError, ValueError):
         old = "<unset>"
-    value = parse_value(args.value)
+    if getattr(args, "from_file", None):
+        # W1 (iteration-loop): large payloads (data.html / custom_css) come from
+        # a file, verbatim — argv can't carry 100KB fragments and ad-hoc heredoc
+        # injectors lose the optimistic lock. NO parse_value: raw string.
+        try:
+            value = args.from_file.read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"deck-cli: can't read --from-file: {e}", file=sys.stderr)
+            return 1, None
+    else:
+        value = parse_value(args.value)
     try:
         set_path(deck, args.path, value)
     except (KeyError, IndexError, ValueError) as e:
         print(f"deck-cli: can't set '{args.path}': {e}", file=sys.stderr)
         return 1, None
     print(f"  {args.path}:")
-    print(f"    old: {old!r}")
-    print(f"    new: {value!r}")
+    _ostr, _nstr = repr(old), repr(value)
+    print(f"    old: {_ostr if len(_ostr) <= 200 else _ostr[:200] + '…'}")
+    print(f"    new: {_nstr if len(_nstr) <= 200 else _nstr[:200] + '…'}")
+    return 0, deck
+
+
+def cmd_set_page(deck: dict, args) -> tuple[int, dict | None]:
+    """W1 (iteration-loop): one-shot page payload update — data.html / custom_css
+    from files, plus title / lifted — with the W4 static pre-write lint so the
+    known first-render gate failures (off-ladder font-size, dual-anchor,
+    P50 base64-in-style …) are rejected BEFORE they reach deck.json."""
+    try:
+        idx = find_slide_index(deck, args.key)
+    except KeyError as e:
+        print(f"deck-cli: {e}", file=sys.stderr); return 1, None
+    slide = deck["slides"][idx]
+
+    html_txt = css_txt = None
+    try:
+        if args.html:
+            html_txt = args.html.read_text(encoding="utf-8")
+        if args.css:
+            css_txt = args.css.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"deck-cli: can't read fragment file: {e}", file=sys.stderr)
+        return 1, None
+    if html_txt is None and css_txt is None and args.title is None \
+            and not args.lifted:
+        print("deck-cli: set-page — nothing to set "
+              "(--html/--css/--title/--lifted)", file=sys.stderr)
+        return 1, None
+
+    # W4 pre-write lint on the NEW payloads (subset of the render gate;
+    # geometry still belongs to the browser). --skip-lint to override.
+    if (html_txt is not None or css_txt is not None) and not args.skip_lint:
+        from _lint_fragment import lint_fragment, format_findings
+        fs = lint_fragment(html_txt or "", css_txt or "")
+        errs = [f for f in fs if f["sev"] == "err"]
+        if fs:
+            print(format_findings(fs))
+        if errs:
+            print(f"deck-cli: set-page REFUSED — {len(errs)} lint error(s) "
+                  f"above would block the render gate anyway. Fix them, or "
+                  f"--skip-lint if you really know better.", file=sys.stderr)
+            return 5, None
+
+    changed = []
+    if html_txt is not None:
+        slide.setdefault("data", {})["html"] = html_txt
+        changed.append(f"data.html ({len(html_txt)} chars)")
+    if css_txt is not None:
+        slide["custom_css"] = css_txt
+        changed.append(f"custom_css ({len(css_txt)} chars)")
+    if args.title is not None:
+        slide.setdefault("data", {})["title"] = args.title
+        changed.append("data.title")
+    if args.lifted:
+        slide["lifted"] = True
+        changed.append("lifted=true")
+    print(f"  slides[{idx}] (key={args.key}) ← {', '.join(changed)}")
     return 0, deck
 
 
@@ -1006,7 +1129,26 @@ def main(argv=None) -> int:
                     help="promote warnings to errors (default: lenient)")
 
     sp = sub.add_parser("set", help="set value at dotted path")
-    sp.add_argument("path"); sp.add_argument("value")
+    sp.add_argument("path"); sp.add_argument("value", nargs="?", default=None)
+    sp.add_argument("--from-file", dest="from_file", type=Path, default=None,
+                    help="read the value VERBATIM from this file (raw string, "
+                         "no JSON coercion) — the channel for large payloads "
+                         "like data.html / custom_css")
+
+    sp = sub.add_parser("set-page",
+                        help="one-shot page payload: --html/--css from files "
+                             "(+ --title/--lifted), pre-write linted (W4)")
+    sp.add_argument("key")
+    sp.add_argument("--html", type=Path, default=None,
+                    help="file whose content becomes data.html")
+    sp.add_argument("--css", type=Path, default=None,
+                    help="file whose content becomes custom_css")
+    sp.add_argument("--title", default=None, help="set data.title")
+    sp.add_argument("--lifted", action="store_true",
+                    help="mark slide lifted:true (verbatim from another deck — "
+                         "font-tier findings downgrade to warnings)")
+    sp.add_argument("--skip-lint", action="store_true",
+                    help="bypass the W4 static pre-write lint (NOT recommended)")
 
     sp = sub.add_parser("set-accent", help="set slide accent color")
     sp.add_argument("key"); sp.add_argument("color")
@@ -1058,6 +1200,17 @@ def main(argv=None) -> int:
     sp.add_argument("--inline", action="store_true")
     sp.add_argument("--skip-copy-assets", action="store_true")
 
+    sp = sub.add_parser("add-asset",
+                        help="compress + place an image into <deck-dir>/input/ "
+                             "and print the relative URL (vs hand-base64'ing "
+                             "into fragments — deck bloat + P50)")
+    sp.add_argument("file", type=Path)
+    sp.add_argument("--max-width", dest="max_width", type=int, default=1600)
+    sp.add_argument("--quality", type=int, default=85)
+    sp.add_argument("--name", default=None,
+                    help="output filename (default: source name; extension "
+                         "follows the chosen format)")
+
     args = ap.parse_args(argv)
 
     # 无感自动 backfill (spec §10 decision 3): paste into a LEGACY HTML-only deck
@@ -1088,7 +1241,8 @@ def main(argv=None) -> int:
     except json.JSONDecodeError as e:
         print(f"deck-cli: invalid JSON: {e}", file=sys.stderr); return 2
 
-    READ_CMDS = {"list": cmd_list, "get": cmd_get, "show": cmd_show}
+    READ_CMDS = {"list": cmd_list, "get": cmd_get, "show": cmd_show,
+                 "add-asset": cmd_add_asset}
     if args.cmd in READ_CMDS:
         return READ_CMDS[args.cmd](deck, args)
     if args.cmd == "lint":
@@ -1099,6 +1253,7 @@ def main(argv=None) -> int:
     # Write commands return (rc, deck_or_None)
     WRITE_CMDS = {
         "set":         cmd_set,
+        "set-page":    cmd_set_page,
         "set-accent":  cmd_set_accent,
         "set-decor":   cmd_set_decor,
         "set-notes":   cmd_set_notes,

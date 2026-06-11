@@ -46,13 +46,36 @@ Designer + Renderer instead).
   updated, html refused) when the renderer entity-escaped the text — then sync
   with a `--quick` render. If NEW is much longer than OLD the tool warns about
   overflow; eyeball or do a `--scope` render when the page was already tight.
-- **`EDIT` (small edit)**: lock slide key/scope, edit `deck.json`, render, validate only
-  locked slide(s). The locked scope is the boundary for the re-render too — pass it
-  to `render-deck.py` so downstream steps don't re-process the whole deck. For an
-  edit confined to specific pages, re-render with `--scope N` (1-based page numbers,
-  e.g. `--scope 1` or `--scope 3,5`): it refreshes only those pages in the making-of
-  and skips the whole-deck readability advisory + geometry audit, cutting a 50-page
-  re-render from ~2m12s to ~12s while still capturing the changed page's screenshot.
+- **`EDIT` (fragment edit) — the canonical loop (W1/W3, iteration-loop)**:
+
+  ```
+  1. Write the fragment files   input/<key>.body.html / input/<key>.css
+  2. deck-cli.py <deck.json> set-page <key> --html f.html --css f.css [--lifted]
+       ↳ runs the W4 static pre-write lint (off-ladder font-size, dual-anchor,
+         P50 base64-in-style …) and REFUSES known gate failures before they
+         reach deck.json; optimistic lock + auto-backup included.
+  3. render-deck.py <deck.json> <out>/ --iter
+       ↳ auto-scopes to the pages whose content changed (sidecar diff — no page
+         numbers to compute), skips the autosnapshot, prints a text echo of the
+         changed slides + an errors-only digest; full output in
+         <out>/last-render.log.
+  4. Verify cheap-first: text echo for copy · sNN.thumb.png for layout · full
+     sNN.png only when the thumb is ambiguous.
+  5. Before any handoff/publish: render-deck.py … --final  (full audits +
+     autosnapshot; --iter renders intentionally defer whole-deck checks).
+  ```
+
+  **Anti-pattern**: ad-hoc python/heredoc scripts that write deck.json directly.
+  They bypass the optimistic lock (concurrent-session clobbering), the auto
+  backup, schema-fail rollback, and the pre-write lint — every one of which
+  exists because a real session paid for its absence. `set-page` /
+  `set --from-file` is the sanctioned write path for fragment payloads.
+
+- **`EDIT` (manual scope)**: when you DO know the page numbers, `--scope N`
+  (1-based, e.g. `--scope 3,5`) gives the same scoped render without the
+  sidecar diff — it refreshes only those pages in the making-of and skips the
+  whole-deck readability advisory + geometry audit, cutting a 50-page re-render
+  from ~2m12s to ~12s while still capturing the changed page's screenshot.
   Use `--quick` instead when you don't need the making-of updated this run (skips the
   snapshot entirely, ~12-18s). Full render (no flag) only for a new deck or a
   whole-deck change. See `references/editing-discipline.md` → "Re-render speed".
@@ -241,6 +264,8 @@ Designer + Renderer instead).
 - `../../deck-json/migrate-head-css-to-custom-css.py`
 - `../../deck-json/reconcile-lifted.py` — snap lifted-slide inline font sizes
   onto the {16,24,28,48} tier ladder (the F-62 reconcile step).
+- `../../deck-json/_lint_fragment.py` — W4 static pre-write lint (also a CLI:
+  `--html f --css f`); constants parsed from `assets/audits.js`, single source
 - `../../deck-json/fast-text.py` — F-303 sub-second pure-copy edit: dual-write
   deck.json + index.html, no render/validation; hard guardrails (count==1 both
   sides, refuses DOM chars, JSON-corruption refused-and-restored).

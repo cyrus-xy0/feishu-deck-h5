@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 # Story-case fit primitives are single-sourced in _story_case_fit.py (F-15) so
@@ -2111,6 +2112,229 @@ def _maybe_auto_snapshot(out_html, scope=None) -> None:
         pass
 
 
+# ============================================================================
+#  W2 (iteration-loop plan) · render log + digest
+#  Every render tees its FULL stdout (fd-level, so subprocess output like the
+#  static validator and deck-log autosnapshot is captured too) into
+#  <output_dir>/last-render.log (overwritten per run). After main() returns,
+#  a compact DIGEST (verdict + one line per error finding + log path) is
+#  printed, so a BLOCKED render never needs a second run just to re-read the
+#  ❌ section, and greps can't eat the detail — it's all in the log file.
+#  stderr is left untouched (shell 2>-redirection semantics preserved).
+# ============================================================================
+_RLOG = {"path": None, "tees": [], "file": None}
+
+
+def _start_render_log(log_path: Path) -> None:
+    """fd-level tee of stdout AND stderr into log_path (gate findings print to
+    stderr — F-253/F-256 sections — so both streams must land in the log).
+    Each stream keeps writing to its original fd, so shell `2>`-redirection
+    semantics are preserved. Idempotent; never raises."""
+    try:
+        if _RLOG["path"] is not None:          # already started
+            return
+        f = open(log_path, "wb", buffering=0)
+        sys.stdout.flush(); sys.stderr.flush()
+        tees = []
+        for fd in (1, 2):
+            r, w = os.pipe()
+            orig = os.dup(fd)
+            os.dup2(w, fd)
+            os.close(w)
+
+            def _pump(r=r, orig=orig):
+                while True:
+                    chunk = os.read(r, 65536)
+                    if not chunk:
+                        break
+                    os.write(orig, chunk)
+                    f.write(chunk)
+                os.close(r)
+
+            t = threading.Thread(target=_pump, daemon=True)
+            t.start()
+            tees.append({"fd": fd, "orig": orig, "pump": t})
+        try:  # line-buffer python-level streams so prints land promptly
+            sys.stdout.reconfigure(line_buffering=True)
+            sys.stderr.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+        _RLOG.update(path=Path(log_path), tees=tees, file=f)
+    except Exception:
+        pass  # logging must never break a render
+
+
+def _digest_from_log(text: str, rc: int) -> str:
+    """Extract a compact errors-only digest from the captured render output."""
+    errors, info = [], []
+    in_block = False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s.startswith("✗"):
+            errors.append(s)
+            continue
+        if "❌ BLOCKING" in s:
+            in_block = True
+            continue
+        if in_block:
+            if s.startswith("•"):
+                errors.append(s)
+                continue
+            in_block = False
+        if "pre-existing — NOT re-blocking" in s or "NOT re-blocking" in s:
+            info.append(s)
+    # de-dup, keep order; findings print twice (advisory + blocking sections)
+    seen, uniq = set(), []
+    for e in errors:
+        k = e[:120]
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(e)
+    MAXLEN, MAXN = 220, 15
+    lines = []
+    verdict = "✔ PASS" if rc == 0 else ("✗ BLOCKED" if rc == 4 else "✗ FAIL")
+    lines.append(f"{verdict} (rc={rc}) · {len(uniq)} error(s) · log: {_RLOG['path']}")
+    for e in uniq[:MAXN]:
+        lines.append("  " + (e[:MAXLEN] + " …" if len(e) > MAXLEN else e))
+    if len(uniq) > MAXN:
+        lines.append(f"  (+{len(uniq) - MAXN} more — see log)")
+    for i in info[:2]:
+        lines.append("  ℹ " + i[:MAXLEN])
+    return "\n".join(lines)
+
+
+def _finish_render_log(rc: int) -> None:
+    """Restore both fds, then print the digest to the REAL stdout + append to log."""
+    try:
+        if _RLOG["path"] is None:
+            return
+        sys.stdout.flush(); sys.stderr.flush()
+        for tee in _RLOG["tees"]:
+            os.dup2(tee["orig"], tee["fd"])    # closes pipe write end → pump EOF
+        for tee in _RLOG["tees"]:
+            tee["pump"].join(timeout=5)
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+            sys.stderr.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+        text = ""
+        try:
+            text = _RLOG["path"].read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+        digest = _digest_from_log(text, rc)
+        out = "\n──── render digest ────\n" + digest + "\n"
+        os.write(1, out.encode("utf-8", "replace"))
+        try:
+            _RLOG["file"].write(out.encode("utf-8", "replace"))
+            _RLOG["file"].close()
+        except Exception:
+            pass
+        for tee in _RLOG["tees"]:
+            os.close(tee["orig"])
+        _RLOG.update(path=None, tees=[], file=None)
+    except Exception:
+        pass
+
+
+# ============================================================================
+#  W3/W6 (iteration-loop plan) · auto-scope sidecar + --iter profile
+#  <output_dir>/.slide-hashes.json records a content hash per slide (in order)
+#  plus a deck-meta hash, written on every successful render. An --iter render
+#  diffs the current deck against it and locks --scope to the CHANGED pages
+#  only — the agent never has to compute page numbers, and "forgot --scope"
+#  stops being a failure mode. Structural changes (keys added/removed/
+#  reordered, deck-meta edits) or a missing sidecar fall back to a full render.
+# ============================================================================
+_SIDECAR_NAME = ".slide-hashes.json"
+
+
+def _slide_hash(slide: dict) -> str:
+    return hashlib.sha1(json.dumps(slide, ensure_ascii=False,
+                                   sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _deck_meta_hash(deck: dict) -> str:
+    meta = {k: v for k, v in deck.items() if k != "slides"}
+    return hashlib.sha1(json.dumps(meta, ensure_ascii=False,
+                                   sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _sidecar_state(deck: dict) -> dict:
+    return {
+        "schema": 1,
+        "note": "iteration-loop auto-scope sidecar — per-slide content hashes "
+                "of the last successfully rendered deck.json. --iter diffs "
+                "against this to lock --scope to changed pages. Auto-written "
+                "by render-deck.py; do not hand-edit.",
+        "deck_meta": _deck_meta_hash(deck),
+        "slides": [[s.get("key", f"#{i}"), _slide_hash(s)]
+                   for i, s in enumerate(deck.get("slides", []))],
+    }
+
+
+def _slide_echo_text(slide: dict, max_chars: int = 360) -> str:
+    """W5 · the slide's visible text, flattened — lets a copy edit be verified
+    from the console/log with zero screenshot reads."""
+    data = slide.get("data", {}) or {}
+    if isinstance(data.get("html"), str):
+        t = re.sub(r"<style[^>]*>.*?</style>", " ", data["html"], flags=re.S)
+        t = re.sub(r"<script[^>]*>.*?</script>", " ", t, flags=re.S)
+        t = re.sub(r"<[^>]+>", " ", t)
+        t = html.unescape(t)
+    else:
+        vals: list[str] = []
+
+        def _walk(v):
+            if isinstance(v, str):
+                vals.append(v)
+            elif isinstance(v, list):
+                for x in v:
+                    _walk(x)
+            elif isinstance(v, dict):
+                for x in v.values():
+                    _walk(x)
+
+        _walk(data)
+        t = " · ".join(vals)
+    t = re.sub(r"\s+", " ", t).strip()
+    if len(t) > max_chars:
+        t = t[:max_chars] + " …"
+    # wrap to ~90-char lines for readability
+    out, line = [], ""
+    for w in t.split(" "):
+        if len(line) + len(w) + 1 > 90:
+            out.append("  " + line)
+            line = w
+        else:
+            line = (line + " " + w).strip()
+    if line:
+        out.append("  " + line)
+    return "\n".join(out)
+
+
+def _auto_scope_pages(deck: dict, sidecar_path: Path):
+    """Return (pages, reason). pages=None → full render required."""
+    try:
+        prev = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, "no sidecar (first render here) — full"
+    cur = _sidecar_state(deck)
+    if prev.get("deck_meta") != cur["deck_meta"]:
+        return None, "deck-level fields changed — full"
+    pk = [k for k, _ in prev.get("slides", [])]
+    ck = [k for k, _ in cur["slides"]]
+    if pk != ck:
+        return None, "slides added/removed/reordered — full"
+    ph = dict(prev["slides"])
+    pages = [i + 1 for i, (k, h) in enumerate(cur["slides"]) if ph.get(k) != h]
+    if not pages:
+        return None, "no slide changed — full (cheap anyway)"
+    return pages, f"{len(pages)} changed page(s)"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="render-deck.py",
@@ -2192,7 +2416,27 @@ def main(argv=None) -> int:
                          "compact `slide[N] key=… layout=…: <error>` SystemExit "
                          "(F-280b). Use when a slide's data triggers an internal "
                          "error and you need the failing render code path.")
+    ap.add_argument("--iter", action="store_true",
+                    help="ITERATION PROFILE (W6): auto-scope to the pages whose "
+                         "content changed since the last successful render "
+                         "(diffed via the .slide-hashes.json sidecar — no page "
+                         "numbers to compute) + skip the deck-log autosnapshot. "
+                         "Structural changes fall back to a full render. Run "
+                         "--final before delivery.")
+    ap.add_argument("--final", action="store_true",
+                    help="DELIVERY PROFILE (W6): force a FULL render — ignore "
+                         "--iter/--scope, all audits on every page, "
+                         "autosnapshot on. Use before any handoff/publish.")
     args = ap.parse_args(argv)
+
+    if args.final:                       # delivery profile beats iteration profile
+        args.iter = False
+        args.scope = None
+        args.quick = False
+    if getattr(args, "iter", False):
+        # --iter: rapid loop — no version churn in deck-log; checkpoint
+        # explicitly via --final (or a manual deck-log snapshot).
+        os.environ.setdefault("DECK_LOG_NO_AUTOSNAP", "1")
 
     # Parse the locked edit scope (1-based page numbers) into a list of ints.
     scope_pages = []
@@ -2240,6 +2484,22 @@ def main(argv=None) -> int:
     except json.JSONDecodeError as e:
         print(f"render-deck: invalid JSON: {e}", file=sys.stderr); return 2
 
+    # W3 · --iter auto-scope: lock the edit scope to the pages whose content
+    # actually changed since the last successful render (sidecar diff). An
+    # explicit --scope wins; structural change / missing sidecar → full.
+    if getattr(args, "iter", False) and not scope_pages and not args.renumber:
+        _auto_pages, _auto_reason = _auto_scope_pages(
+            deck, args.output_dir / _SIDECAR_NAME)
+        if _auto_pages:
+            scope_pages = _auto_pages
+            args.skip_fit_check = True          # same implication as --scope/--quick
+            print(f"render-deck --iter: auto-scope → pages "
+                  f"{','.join(map(str, scope_pages))} ({_auto_reason}); "
+                  f"unchanged pages keep their last audit — run --final "
+                  f"before delivery.")
+        else:
+            print(f"render-deck --iter: {_auto_reason} render.")
+
     # 2.45 Deck identity — stamp a per-deck id (data-deck-id on <div class="deck">)
     # so the in-browser edit mode can refuse to overwrite a DIFFERENT deck's file.
     # Every deck in this pipeline is named index.html, so the edit-mode save guard
@@ -2281,6 +2541,7 @@ def main(argv=None) -> int:
     # 3. Setup output dir
     args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    _start_render_log(args.output_dir / "last-render.log")   # W2: full output → file
     asset_path = relpath_from_to(args.output_dir, ASSETS_DIR)
 
     # 4. Render each slide
@@ -3016,6 +3277,21 @@ def main(argv=None) -> int:
             except Exception:
                 pass   # baseline bookkeeping must never break a render
 
+        # W3 · auto-scope sidecar — written on EVERY successful render (we're
+        # past every gate `return 4`), so the next --iter has fresh hashes even
+        # after a full/--final render. Hash the deck AS RE-READ FROM DISK — the
+        # in-memory object is normalized/enriched during render (deck_id stamp,
+        # injected defaults), so hashing it would mismatch the next load and
+        # silently force --iter back to full every time. Same never-break
+        # policy as the baseline.
+        try:
+            _disk_deck = json.loads(args.deck.read_text(encoding="utf-8"))
+            (args.output_dir / _SIDECAR_NAME).write_text(
+                json.dumps(_sidecar_state(_disk_deck), ensure_ascii=False,
+                           indent=1) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
     # F-269: gate passed (or was skipped via --skip-validate-html) — the new
     # index.html is the one we keep, so drop the pre-render backup. We're past
     # every `return 4`, so reaching here means no rollback is needed.
@@ -3032,6 +3308,19 @@ def main(argv=None) -> int:
     #        zip/move/share)
     #    (c) --skip-copy-assets: leave skill-relative paths (works only inside
     #        the repo's runs/<ts>/output/ structure)
+    # W5 · text echo — for a scoped render, print the changed slides' visible
+    # text so a pure-copy edit can be verified from the console/log alone,
+    # with no screenshot read at all.
+    if scope_pages:
+        for _p in scope_pages[:4]:
+            try:
+                _s = deck["slides"][_p - 1]
+                _t = _slide_echo_text(_s)
+                print(f"\n── text echo · slide {_p} ({_s.get('key','?')}) ──")
+                print(_t if _t else "  (no text content)")
+            except Exception:
+                pass
+
     if args.inline:
         _missing = inline_html(out_html, deck)
         if _missing:
@@ -3337,4 +3626,13 @@ def _resolve_bg(out_html: Path, url: str, on_missing=None) -> str:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        _rc = main()
+    except SystemExit as _e:                       # compact per-slide crash path
+        _finish_render_log(_e.code if isinstance(_e.code, int) else 1)
+        raise
+    except BaseException:                          # tracebacks: keep log, no digest noise
+        _finish_render_log(1)
+        raise
+    _finish_render_log(_rc)
+    sys.exit(_rc)
