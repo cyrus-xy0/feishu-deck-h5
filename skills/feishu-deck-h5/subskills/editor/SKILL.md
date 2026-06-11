@@ -278,6 +278,13 @@ Designer + Renderer instead).
   `repair-lifted.py`, and is the source-of-truth for the soft `R-FAMILY-DRIFT`
   advisory in `validate-deck.py`.
 - `../../assets/grow-box-fit.py`
+- `../../assets/shoot-page.py` — F-304 deterministic ad-hoc page screenshot:
+  route-aborts external http(s) by default, so a deck embedding a LIVE iframe
+  (larkoffice doc / web dashboard) still shoots in ~2s instead of hanging the
+  30s `load` timeout / "waiting for fonts" stall. Use this (or render's
+  deck-log auto-snapshot) for quick looks; never hand-roll a
+  `wait_until='load'` Playwright shot against such decks. See
+  prototype-embed.md F-304 for whether a live iframe belongs in the deck at all.
 - `../../deck-json/import-html-slide.py` — insert authored html+css fragments as
   raw slides (per-fragment validate + position pick + auto re-render); the
   sanctioned path for "add one new page to an existing deck".
