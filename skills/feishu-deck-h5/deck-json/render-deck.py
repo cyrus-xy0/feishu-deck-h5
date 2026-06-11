@@ -428,12 +428,16 @@ def _build_data_attrs(slide: dict) -> str:
     if slide.get("logo_position"):
         parts.append(f'data-logo-position="{_esc_br(slide["logo_position"])}"')
     # Slide-level visual-audit opt-outs → data-allow-<token> on .slide. This is the
-    # ONLY authoring channel for the three slide-scoped opt-outs the visual engine
+    # ONLY authoring channel for the slide-scoped opt-outs the visual engine
     # checks via slide.hasAttribute (imbalance / no-focal / title-gap); without it a
     # raw/schema slide that is by-design parallel or asymmetric had no way to mark
-    # intent through deck.json. Allowlisted to those three (element-level opt-outs
-    # like body-floor/typescale are authored inline in data.html instead).
-    _ALLOW_TOKENS = ("imbalance", "no-focal", "title-gap")
+    # intent through deck.json. `no-iframe` is consumed deck.json-side by
+    # validate-deck.py (R-DEMO-IFRAME — accept that an iframe-embed demo page was
+    # deliberately rebuilt static); emitted as data-allow-no-iframe for parity and
+    # kept in the allowlist so a legitimate token never trips the unknown-token
+    # warning. Element-level opt-outs (body-floor/typescale …) are authored inline
+    # in data.html instead.
+    _ALLOW_TOKENS = ("imbalance", "no-focal", "title-gap", "no-iframe")
     for tok in slide.get("allow", []) or []:
         if tok in _ALLOW_TOKENS:
             parts.append(f'data-allow-{tok}')
@@ -2249,6 +2253,9 @@ def _finish_render_log(rc: int) -> None:
 #  reordered, deck-meta edits) or a missing sidecar fall back to a full render.
 # ============================================================================
 _SIDECAR_NAME = ".slide-hashes.json"
+_SIDECAR_SCHEMA = 2     # 2 = + framework hash + _disabled-skip enumeration (F-310)
+AUTO_SCOPE_MAX_PAGES = 4  # F-310: DEFAULT-ON entrance engages only when ≤4 pages dirty
+                          # (--iter is explicit opt-in and takes any count)
 
 
 def _slide_hash(slide: dict) -> str:
@@ -2262,16 +2269,50 @@ def _deck_meta_hash(deck: dict) -> str:
                                    sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def _framework_hash() -> str:
+    """F-310 · sha1 over the framework bytes every rendered page depends on: the
+    three runtime assets (feishu-deck.css / feishu-deck-patterns.css /
+    feishu-deck.js) PLUS the whole templates/ tree (_shell.html +
+    *.fragment.html + blocks/ + extra-layouts.css) — a template edit reshapes
+    every page of its layout, so it must invalidate the sidecar exactly like a
+    framework-CSS edit (~40 small files, one-pass read, negligible).
+    _SIDECAR_SCHEMA is folded in so a renderer-logic change can invalidate
+    sidecars without touching any asset."""
+    h = hashlib.sha1()
+    h.update(f"sidecar-schema-{_SIDECAR_SCHEMA}".encode("utf-8"))
+    files = [ASSETS_DIR / "feishu-deck.css",
+             ASSETS_DIR / "feishu-deck-patterns.css",
+             ASSETS_DIR / "feishu-deck.js"]
+    files += sorted(TEMPLATES_DIR.rglob("*.html")) + \
+             sorted(TEMPLATES_DIR.rglob("*.css"))
+    for p in files:
+        h.update(p.name.encode("utf-8"))
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            h.update(b"<missing>")
+    return h.hexdigest()
+
+
 def _sidecar_state(deck: dict) -> dict:
+    # ACTIVE slides only (`_disabled` skipped): list position i ↔ frame_index
+    # i+1 — the SAME 1-based numbering --scope / URL #N / `deck-log snapshot
+    # --slide N` use (main()'s render loop applies the same skip). Toggling
+    # _disabled changes the key list → structural → full render, which is
+    # right: page numbers shifted. (F-310; schema 1 hashed RAW indexes and
+    # mis-numbered any deck with a _disabled slide.)
+    active = [s for s in deck.get("slides", []) if not s.get("_disabled")]
     return {
-        "schema": 1,
+        "schema": _SIDECAR_SCHEMA,
         "note": "iteration-loop auto-scope sidecar — per-slide content hashes "
-                "of the last successfully rendered deck.json. --iter diffs "
-                "against this to lock --scope to changed pages. Auto-written "
-                "by render-deck.py; do not hand-edit.",
+                "of the last successfully rendered deck.json. --iter and the "
+                "default-on auto-scope diff against this to lock --scope to "
+                "changed pages. Auto-written by render-deck.py; do not "
+                "hand-edit.",
         "deck_meta": _deck_meta_hash(deck),
+        "framework": _framework_hash(),
         "slides": [[s.get("key", f"#{i}"), _slide_hash(s)]
-                   for i, s in enumerate(deck.get("slides", []))],
+                   for i, s in enumerate(active)],
     }
 
 
@@ -2324,6 +2365,11 @@ def _auto_scope_pages(deck: dict, sidecar_path: Path):
     cur = _sidecar_state(deck)
     if prev.get("deck_meta") != cur["deck_meta"]:
         return None, "deck-level fields changed — full"
+    # F-310: framework/template bytes shape EVERY page — a CSS/template edit
+    # must bust the diff. A schema-1 sidecar has no "framework" field →
+    # mismatch → one-time full render, then the rewritten sidecar upgrades.
+    if prev.get("framework") != cur["framework"]:
+        return None, "framework/templates changed — full"
     pk = [k for k, _ in prev.get("slides", [])]
     ck = [k for k, _ in cur["slides"]]
     if pk != ck:
@@ -2484,21 +2530,59 @@ def main(argv=None) -> int:
     except json.JSONDecodeError as e:
         print(f"render-deck: invalid JSON: {e}", file=sys.stderr); return 2
 
-    # W3 · --iter auto-scope: lock the edit scope to the pages whose content
-    # actually changed since the last successful render (sidecar diff). An
-    # explicit --scope wins; structural change / missing sidecar → full.
-    if getattr(args, "iter", False) and not scope_pages and not args.renumber:
-        _auto_pages, _auto_reason = _auto_scope_pages(
-            deck, args.output_dir / _SIDECAR_NAME)
-        if _auto_pages:
-            scope_pages = _auto_pages
-            args.skip_fit_check = True          # same implication as --scope/--quick
-            print(f"render-deck --iter: auto-scope → pages "
-                  f"{','.join(map(str, scope_pages))} ({_auto_reason}); "
-                  f"unchanged pages keep their last audit — run --final "
-                  f"before delivery.")
-        else:
-            print(f"render-deck --iter: {_auto_reason} render.")
+    # W3 + F-310 · auto-scope: lock the edit scope to the pages whose content
+    # actually changed since the last successful render (.slide-hashes.json
+    # sidecar diff — ONE system, two entrances):
+    #   • --iter (W6 iteration profile): explicit opt-in — engages on ANY
+    #     number of changed pages, plus the --iter snapshot/log behaviour.
+    #   • DEFAULT-ON (F-310): a bare re-render with no scope-ish flag gets the
+    #     same --scope treatment automatically when ≤ AUTO_SCOPE_MAX_PAGES
+    #     pages changed — announced loudly on stderr, never silently. First
+    #     render here (no sidecar) stays silent-full; structural change /
+    #     framework or deck-meta change / too many dirty pages announce why.
+    #     --final / --visual / --renumber / explicit --scope/--quick always
+    #     win; env DECK_NO_AUTO_SCOPE=1 kills this entrance (the sidecar is
+    #     still maintained).
+    # Scope never affects WHAT gets rendered (index.html is always rebuilt in
+    # full) — only gate/snapshot/fit-check coverage,判错页号的最坏后果是闸门
+    # 覆盖偏窄,绝不会产出残缺 deck。
+    _auto_scoped = False
+    _iter_auto = (getattr(args, "iter", False) and not scope_pages
+                  and not args.renumber)
+    # NB: gate on args.scope(旗子本身)而不是 scope_pages(解析结果)—— 一个
+    # 解析不出来的 `--scope abc` 也算「caller 已表态」,auto-scope 不得接管。
+    _default_auto = (not getattr(args, "iter", False) and not args.scope
+                     and not args.quick and not args.final and not args.visual
+                     and not getattr(args, "renumber", False)
+                     and not os.environ.get("DECK_NO_AUTO_SCOPE"))
+    if _iter_auto or _default_auto:
+        _sidecar_path = args.output_dir / _SIDECAR_NAME
+        _auto_pages, _auto_reason = _auto_scope_pages(deck, _sidecar_path)
+        if _iter_auto:
+            if _auto_pages:
+                scope_pages = _auto_pages
+                args.skip_fit_check = True      # same implication as --scope/--quick
+                print(f"render-deck --iter: auto-scope → pages "
+                      f"{','.join(map(str, scope_pages))} ({_auto_reason}); "
+                      f"unchanged pages keep their last audit — run --final "
+                      f"before delivery.")
+            else:
+                print(f"render-deck --iter: {_auto_reason} render.")
+        elif _sidecar_path.is_file():   # default entrance: first render = silent full
+            if _auto_pages and len(_auto_pages) <= AUTO_SCOPE_MAX_PAGES:
+                scope_pages = _auto_pages
+                _auto_scoped = True
+                args.skip_fit_check = True  # same implication as explicit --scope
+                print(f"AUTO-SCOPE: {len(_auto_pages)} changed page(s) → --scope "
+                      f"{','.join(map(str, _auto_pages))} (scoped gates + F-302 "
+                      "baseline demotion; pass --final to force the whole-deck "
+                      "pass)", file=sys.stderr)
+            elif _auto_pages:
+                print(f"AUTO-SCOPE: off ({len(_auto_pages)} changed pages > "
+                      f"{AUTO_SCOPE_MAX_PAGES}) — full render", file=sys.stderr)
+            else:
+                print(f"AUTO-SCOPE: off ({_auto_reason}) — full render",
+                      file=sys.stderr)
 
     # 2.45 Deck identity — stamp a per-deck id (data-deck-id on <div class="deck">)
     # so the in-browser edit mode can refuse to overwrite a DIFFERENT deck's file.
@@ -2819,7 +2903,11 @@ def main(argv=None) -> int:
         _gc_visual = "ran" if args.visual else "skipped"
         _gc_geometry = "ran" if args.visual else "skipped"
         _gc_distribution = "skipped"
-        _gc_scope = (",".join(map(str, scope_pages)) if scope_pages
+        # F-310: an auto-scoped render records scope=auto:N,… (vs the bare page
+        # list of an explicit --scope) so coverage forensics can tell the two
+        # apart without re-parsing the AUTO-SCOPE announcement line.
+        _gc_scope = ((("auto:" if _auto_scoped else "")
+                      + ",".join(map(str, scope_pages))) if scope_pages
                      else ("--quick" if args.quick else "full"))
         validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html)]
         if not args.visual:

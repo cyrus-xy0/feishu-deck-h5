@@ -367,6 +367,27 @@ def check_business_rules(deck: dict, result: Result, strict: bool) -> None:
         if slide.get("accent") == "cyan":
             result.err(f"{sp}.accent", "cyan is inline-highlight only, not slide accent (R49)")
 
+        # R-DEMO-IFRAME: a slide imported/lifted from an iframe-embed page keeps
+        # the `_orig_layout: "iframe-embed"` marker — it WAS an embedded
+        # interactive demo. If its html no longer contains an <iframe>, the live
+        # demo has been silently rewritten into a static mock, which is exactly
+        # the loss the marker exists to guard against. Slide-level
+        # `"allow": ["no-iframe"]` accepts the replacement explicitly (same
+        # channel as the other slide-scoped opt-outs).
+        if slide.get("_orig_layout") == "iframe-embed" \
+                and "no-iframe" not in (slide.get("allow") or []):
+            html_src = data.get("html")
+            html_text = html_src if isinstance(html_src, str) \
+                else json.dumps(data, ensure_ascii=False)
+            if "<iframe" not in html_text.lower():
+                result.err(f"{sp}.data.html",
+                           "this page was originally an embedded interactive demo "
+                           "(_orig_layout='iframe-embed') but its html no longer "
+                           "contains an <iframe> — the live demo has been removed/"
+                           "replaced by a static mock. Restore the iframe embed, or "
+                           "accept the static replacement explicitly with "
+                           "\"allow\": [\"no-iframe\"] (R-DEMO-IFRAME)")
+
     # 6. Strict mode: promote warnings to errors
     if strict and result.warnings:
         result.errors.extend(result.warnings)

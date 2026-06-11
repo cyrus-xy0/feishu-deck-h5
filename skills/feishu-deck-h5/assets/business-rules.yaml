@@ -683,3 +683,11 @@ R-FOREIGN-SCRIPT:
   consequence: "发布 / 入库后脚本会在受众浏览器里执行, 有注入风险"
   fix:
     - "删掉外来 <script> 和 on* 内联事件; 动效只允许 custom_css 纯 CSS"
+
+R-IFRAME-REMOTE:
+  concern:     "D · 放映功能不全"
+  symptom:     "页面内嵌了指向远程地址 (http/https) 的 iframe"
+  consequence: "现场无网或未登录时这块内容打不开 / 一片白, 离线下页面 load 事件还会挂死, 截图和审计工具跟着超时"
+  fix:
+    - "把远程内容本地化: 截图静态化, 或抓取后用本地 HTML 重建"
+    - "确认现场必有网络且已登录, 在 iframe 上加 data-allow-remote-iframe 显式接受"

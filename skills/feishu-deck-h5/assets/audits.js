@@ -1069,6 +1069,9 @@
     // 页 = error,普通生成页 = warn);框架自注入脚本(data-source=framework / framework src /
     // 非可执行 type)豁免,且只扫 .slide 子树(body 级框架脚本天然在外)。
     'R-FOREIGN-SCRIPT': { coverage: 'universal', signal: 'dom', optout: 'severity is provenance-graded (lifted/imported→error, authored→warn) not a coverage narrowing; raw + schema both scanned; data-allow-foreign-script per-slide escape for an intentionally-scripted bespoke raw page' },
+    // 离线可用性最低防线 (2026-06-11) — 远程 iframe 让 load 事件在离线/headless 下挂死,
+    // 现场无网/未登录时 live demo 静默失效。name-free,raw + schema 同覆盖。
+    'R-IFRAME-REMOTE': { coverage: 'universal', signal: 'dom' },
     'UI1': { coverage: 'universal', signal: 'dom' },
     // 跨页一致性 (DECK-LEVEL · F-257) — deck 级求值,name-free,均 universal(raw+schema
     // 都跑;opt-out 是显式逃生口,不是 coverage 收窄)。
@@ -6328,9 +6331,51 @@
       },
     },
 
+    {
+      // R-IFRAME-REMOTE · 远程 iframe = 离线/headless 哑弹 (2026-06-11)。
+      // <iframe src="http(s)://…"> 指向外网:① 离线/headless 下页面 load 事件
+      // 永远挂起(截图/审计工具逐张烧满超时 —— larkoffice docx 内嵌页实测 3×30s),
+      // ② 现场无网/未登录时 live demo 静默变白块,讲到这页才发现。
+      //
+      // 判定读【原始属性】getAttribute('src'),不读 resolved 的 el.src ——
+      // file:// 下相对路径会被浏览器 resolve 成 file://…,用 .src 判会把本地
+      // 资源的协议前缀搅进来;原始字节才是作者写了什么的真相。只认 ^https?://
+      // (协议相对 // 与 data:/相对路径都不是这条要抓的"指望现场有外网"形态)。
+      //
+      // 豁免:iframe 自身或就近祖先链(至 slide)带 data-allow-remote-iframe ——
+      // 显式接受"现场必有网络+已登录"的前提(与 data-allow-* 一族同约定)。
+      // name-free,raw + schema 同覆盖;warn(是否能接受联网依赖是人的判断)。
+      id: 'R-IFRAME-REMOTE',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        slide.querySelectorAll('iframe').forEach((fr) => {
+          const rawSrc = (fr.getAttribute('src') || '').trim();
+          if (!/^https?:\/\//i.test(rawSrc)) return;     // 本地/相对/data: 不抓
+          // 显式接受:iframe 自身或祖先(至 slide 边界)带 data-allow-remote-iframe。
+          for (let p = fr; p; p = p.parentElement) {
+            if (p.hasAttribute && p.hasAttribute('data-allow-remote-iframe')) return;
+            if (p === slide) break;
+          }
+          findings.push({
+            rule: 'R-IFRAME-REMOTE', severity: 'warn', slide_idx,
+            src: rawSrc.slice(0, 120),
+            message:
+              `slide ${slide_idx}: <iframe src="${rawSrc.slice(0, 80)}"> 指向远程地址 — `
+              + '远程 iframe 会让页面 load 事件在离线/headless 下永远挂起'
+              + '(截图/审计工具逐张烧满超时),现场无网或未登录时这块内容静默变白,'
+              + 'live demo 当场失效。把内容本地化(截图静态化 / 抓取后用本地 HTML 重建),'
+              + '或确认现场必有网络+已登录后,用 data-allow-remote-iframe 显式接受。',
+          });
+        });
+        return findings;
+      },
+    },
+
     // ========================================================================
     //  跨页一致性 (DECK-LEVEL consistency · F-257 cross-page half) —— 至此全部
-    //  62 条规则都是【单页】判定,页与页之间零比较,所以"风格逐页漂移"完全隐形:
+    //  63 条规则都是【单页】判定,页与页之间零比较,所以"风格逐页漂移"完全隐形:
     //  标题基线一页一个位置、强调色每页一个近重复色号(肉眼目测调色)、
     //  allow:typescale 豁免全 deck 越攒越多(northregion 实测 161 条)。下面三条
     //  做 deck 级求值(只在 ctx.isFirstInScope 锚帧报一次,内部自己扫整 deck),

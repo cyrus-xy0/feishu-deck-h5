@@ -18,6 +18,8 @@
       [--mid-ms N]             # 中间帧时刻,默认 900
       [--assert-class NAME]    # 落定断言的入场 hook class,默认 reveal
       [--transient-class NAME] # 必须退场的瞬态 class,默认 fly
+      [--allow-remote]         # 不拦外部 http(s) 请求(默认拦:deck 资产应本地化,
+                               # 远程 iframe/字体会把 load/fonts.ready 永久挂死,F-311)
 
 退出码:0 = 全部 key 通过断言;1 = 任一 key 不通过(详情在 stdout JSON);2 = 环境问题。
 截图命名:<out-dir>/<key>_mid.png / <key>_settled.png。
@@ -41,6 +43,9 @@ def main() -> int:
     ap.add_argument("--mid-ms", type=int, default=900)
     ap.add_argument("--assert-class", default="reveal")
     ap.add_argument("--transient-class", default="fly")
+    ap.add_argument("--allow-remote", action="store_true",
+                    help="don't abort external http(s) requests (default aborts them: "
+                         "remote iframes/fonts hang load+fonts.ready forever offline, F-311)")
     args = ap.parse_args()
 
     html = Path(args.html).resolve()
@@ -52,6 +57,7 @@ def main() -> int:
 
     try:
         from playwright.sync_api import sync_playwright
+        from playwright.sync_api import TimeoutError as PWTimeoutError
     except ImportError:
         print("✗ needs playwright (pip install playwright && playwright install chromium)",
               file=sys.stderr)
@@ -92,11 +98,34 @@ def main() -> int:
       return out;
     }"""
 
+    def _shot(page, path: Path) -> None:
+        """截图带兜底(F-311):正常走 page.screenshot(等 fonts.ready,最准),
+        但若页面里有永不落定的资源(典型:远程 iframe 文档的字体)导致超时,
+        降级走 CDP Page.captureScreenshot——不等待、立刻出图,宁可拿到帧也别挂死。"""
+        try:
+            page.screenshot(path=str(path), timeout=8000)
+        except PWTimeoutError:
+            print(f"  ! screenshot wait timed out — CDP fallback for {path.name}"
+                  f"(页内有永不落定的资源,常见=远程 iframe;截图内容不受影响)",
+                  file=sys.stderr)
+            import base64
+            cdp = page.context.new_cdp_session(page)
+            data = cdp.send("Page.captureScreenshot", {"format": "png"})["data"]
+            path.write_bytes(base64.b64decode(data))
+            cdp.detach()
+
     failed = False
     report = {}
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_context(viewport={"width": 1920, "height": 1080}).new_page()
+        ctx = browser.new_context(viewport={"width": 1920, "height": 1080})
+        if not args.allow_remote:
+            # F-311: deck 资产应当本地化(R-SELF-CONTAINED);外部请求只会拖慢/挂死
+            # (远程 iframe 让 load 与 fonts.ready 永不触发)。默认全拦,要看远程内容
+            # 用 --allow-remote。
+            ctx.route("**/*", lambda r: r.abort()
+                      if r.request.url.startswith(("http://", "https://")) else r.continue_())
+        page = ctx.new_page()
         page.goto(html.as_uri() + "#" + args.keys[0],
                   wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(300)
@@ -111,9 +140,9 @@ def main() -> int:
             # 换页触发动画从头重放(is-current 祖先类切换 = 框架自身的重放机制)
             page.evaluate(f"window.location.hash = '#{key}'")
             page.wait_for_timeout(args.mid_ms)
-            page.screenshot(path=str(out_dir / f"{key}_mid.png"))
+            _shot(page, out_dir / f"{key}_mid.png")
             page.wait_for_timeout(max(0, args.settle_ms - args.mid_ms))
-            page.screenshot(path=str(out_dir / f"{key}_settled.png"))
+            _shot(page, out_dir / f"{key}_settled.png")
             res = page.evaluate(assert_js, [key, args.assert_class, args.transient_class])
             report[key] = res
             ok = (not res.get("error") and not res.get("notSettled")

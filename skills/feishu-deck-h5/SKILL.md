@@ -112,6 +112,12 @@ For every spawned worker:
   status, and blockers.
 - If the step writes files, require the worker to re-read the latest on-disk
   file immediately before editing.
+- Tell it NOT to run its own end-to-end verification (full deck renders,
+  Playwright load tests, whole-page screenshot passes). Unit-level checks on its
+  own artifact are fine; the controller runs ONE consolidated render + visual
+  verification after integration. Worker self-verification + render gate +
+  controller review = triple-verifying the same thing, and it is the main source
+  of multi-agent latency.
 
 Use parallel workers only for independent steps, such as parsing separate source
 bundles, reviewing different slide ranges, or running validation while the main

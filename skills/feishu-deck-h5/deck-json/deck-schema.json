@@ -130,9 +130,9 @@
         },
         "allow": {
           "type": "array",
-          "items": { "enum": ["imbalance", "no-focal", "title-gap"] },
+          "items": { "enum": ["imbalance", "no-focal", "title-gap", "no-iframe"] },
           "uniqueItems": true,
-          "description": "Slide-level visual-audit opt-outs, emitted as `data-allow-<token>` on the `.slide` element. The ONLY authoring channel for the three slide-scoped opt-outs the visual engine checks via `slide.hasAttribute`: `imbalance` (R-VIS-BALANCE / CROWD / PANEL-TOP / CANVAS-CENTER — by-design asymmetry/whitespace), `no-focal` (R-FOCAL-CHECK — by-design N-way parallel/equal-weight comparison with no single hero), `title-gap` (R-VIS-TITLE-GAP — bespoke header-less title+subtitle spacing). Use ONLY when the design is genuinely intentional; it is a documented exception, not a silence button. Element-level opt-outs (data-allow-body-floor / typescale / drop-shadow / peer-size …) are authored inline in `data.html`, NOT here."
+          "description": "Slide-level visual-audit opt-outs, emitted as `data-allow-<token>` on the `.slide` element. The ONLY authoring channel for the slide-scoped opt-outs the visual engine checks via `slide.hasAttribute`: `imbalance` (R-VIS-BALANCE / CROWD / PANEL-TOP / CANVAS-CENTER — by-design asymmetry/whitespace), `no-focal` (R-FOCAL-CHECK — by-design N-way parallel/equal-weight comparison with no single hero), `title-gap` (R-VIS-TITLE-GAP — bespoke header-less title+subtitle spacing); plus `no-iframe` (R-DEMO-IFRAME, checked deck.json-side by validate-deck.py — explicitly accept that a page originally imported as an iframe-embed live demo has been deliberately rebuilt without its <iframe>). Use ONLY when the design is genuinely intentional; it is a documented exception, not a silence button. Element-level opt-outs (data-allow-body-floor / typescale / drop-shadow / peer-size …) are authored inline in `data.html`, NOT here."
         },
         "language_override": {
           "enum": ["zh-only", "zh-en"],
