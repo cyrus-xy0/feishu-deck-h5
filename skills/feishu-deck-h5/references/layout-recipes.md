@@ -560,6 +560,53 @@ failure modes:
 ---
 
 
+## Vertical anchor: the title band bottom (subtitle-aware) — F-301
+
+All vertical math on a content page anchors on the **title-band bottom**,
+NOT on the main title's bottom and NOT on a hardcoded constant
+(200 / 220 / 250 are all main-title-era folklore — copy-pasting them under a
+subtitle is exactly how fwd-founder #8 shipped with a chart 14px under the
+subtitle and 184px of dead floor).
+
+Definition:
+
+```
+title-band bottom = real rendered bottom of the .header bbox
+                  = main title bottom               (no subtitle)
+                  = .page-sub bottom                (subtitle present)
+content top      ≥ title-band bottom + 24px        (validator floor, R-VIS-TITLE-GAP)
+content band     = [title-band bottom, 1080]        — center content on its mid
+                    (R-VIS-CANVAS-CENTER measures exactly this)
+```
+
+Estimating the band bottom when authoring (design px, before render):
+
+```
+61 (header top)
++ title lines × 55      (48px / 1.15)
++ if .page-sub: 36 (canonical margin) + sub lines × 41   (28px / 1.45)
+```
+
+So: 1-line title ≈ 119 · 1-line title + 1-line sub ≈ 196 · + 2-line sub ≈ 236.
+ALWAYS re-measure after render (playwright computed px) instead of trusting
+the estimate — line counts wrap differently in Latin vs CJK.
+
+Who handles this for you, and when you are on your own:
+
+- **Schema / stage-based slides**: the framework measures the rendered header
+  into `--fs-band-bottom` (feishu-deck.js `setBandAnchor`) and the unified
+  `.stage` rule derives `top: calc(var(--fs-band-bottom, 112px) + 56px)` —
+  the stage's flex center lands exactly on the band mid. You do nothing.
+- **Raw full-bleed pages (absolute positioning, own wrapper)**: the framework
+  cannot reach in. Compute every `top:` from the band-bottom formula above and
+  center the composition in `[band bottom, 1080]`. The validator floor still
+  covers you (R-VIS-TITLE-GAP third channel + R-VIS-CANVAS-CENTER both find
+  nested `.land > .header` headers), but only at warn/err level — get the
+  numbers right at authoring time.
+- Keep the header inside the canonical pattern (`.header > h2.title-zh` +
+  `p.page-sub`) even on bespoke raw pages — that is what the validator's
+  nested-header detection keys on.
+
 ## Variant override discipline
 
 When a `data-variant` re-skins an existing `data-layout`, the variant CSS does

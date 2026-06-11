@@ -42,6 +42,7 @@ FAMILIES = [
                               'R-PROVENANCE']),
     ('安全 / 注入面',        ['R-FOREIGN-SCRIPT']),
     ('排版 / 文案',          ['R05', 'R06', 'R13', 'R20', 'R56',
+                              'R-VIS-SUBTITLE-CANON',
                               'R-WHITE-TEXT', 'R-HIERARCHY', 'R-ECHO',
                               'R-BULLET-DASH', 'R-ESC-HTML']),
     ('品牌 / 调色板',        ['L1', 'R10', 'R12', 'R38', 'R49', 'R-LANG']),

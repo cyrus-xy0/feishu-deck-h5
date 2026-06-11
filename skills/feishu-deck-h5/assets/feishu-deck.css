@@ -1559,7 +1559,13 @@ body {
      CSS in per-page <style> blocks can adjust title margin normally;
      if you need to push a subtitle further from the title, prefer
      `margin-top` on the subtitle (see `.page-sub` default below). */
-  font: 600 var(--fs-title)/1.1 var(--fs-font-cjk);
+  /* 2026-06-11: line-height 1.1 → 1.2 — at 1.1 the line box (52.8px @48) was
+     shorter than a Latin glyph's full height, so the `overflow:hidden` below
+     (kept for the ellipsis-on-too-long-title feature) CLIPPED the descenders of
+     g/p/y/j on English titles. 1.2 gives the box room to contain descenders so
+     overflow no longer shaves them. CJK titles have no descenders → no visual
+     change beyond a ~5px taller title box. */
+  font: 600 var(--fs-title)/1.2 var(--fs-font-cjk);
   letter-spacing: -0.005em; color: #fff;
   white-space: nowrap;                      /* 规范: single line — no wrap */
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
@@ -1695,9 +1701,22 @@ body {
      bottom ≈ 151); bottom:56 keeps a small floor margin → band mid
      (168 + 1024)/2 ≈ 596. This REVERSES the 2026-05-15 CTG "reads slightly low"
      change — owner re-decided 2026-05-31. Dense slides that genuinely want the
-     legacy canvas-center (y=540) opt back via `.stage--center540` (see below). */
+     legacy canvas-center (y=540) opt back via `.stage--center540` (see below).
+
+     F-301 (2026-06-11) · subtitle-aware band anchor. The fixed `top:168px` was
+     MAIN-TITLE-ONLY math — a `.page-sub` subtitle pushes the real title-band
+     bottom to ~196 (1 line) / ~236 (2 lines), so 168 started the stage ABOVE
+     the subtitle and the centering mid read ~40–60px too high. The runtime now
+     measures each rendered `.header` bbox bottom (which encloses .page-sub)
+     into the slide's `--fs-band-bottom` (design px — see setBandAnchor in
+     feishu-deck.js); stage top = band bottom + 56 keeps the flex center
+     EXACTLY on the canonical band mid (headerBottom+1080)/2 — the same anchor
+     canvas-center uses — because bottom is also 56. The 112px fallback
+     reproduces the legacy 168 for header-less slides / no-JS rendering, so
+     nothing moves unless a real header was measured. */
   position: absolute;
-  top: 168px; left: 96px; right: 96px; bottom: 56px;
+  top: calc(var(--fs-band-bottom, 112px) + 56px);
+  left: 96px; right: 96px; bottom: 56px;
   display: flex; flex-direction: column;
   justify-content: center;
   gap: 24px;

@@ -12,6 +12,33 @@ chrome rewrite**, NOT a content-design pass.
 > "你要换 chrome(标题位置 / 字体 / 字号 / 配色 / logo / 背景) 还是重画内容 /
 > 换 layout?" — RESKIN does the first; GENERATION mode (or Pattern H+ etc.)
 > does the second.
+>
+> **The SECOND clarifying question — ask it whenever the page is going INTO an
+> existing deck** (F-300): "这页是**独立换皮**,还是要**并入某个已有 deck**、跟邻页
+> 对齐?" The two answers route differently:
+>
+> - **Standalone reskin** → this doc's Mode 2: keep the source's own title at its
+>   native coords, keep its self-contained chrome. The page stands alone.
+> - **Adopt into a deck** → the page must match its NEW SIBLINGS, not its source.
+>   A faithful reskin/rebuild is faithful to the SOURCE but divergent from the
+>   siblings, and every divergence (own page-bg vs master content-bg / bespoke
+>   title vs framework `.header` / a leftover page-label eyebrow / off-ladder
+>   fonts / muted source greys on the dark master bg) then surfaces as a SEPARATE
+>   manual round. Route adopt-into-deck through lift/import **+ the conform pass**
+>   so those are fixed in round one, not discovered one at a time.
+>
+> **The conform pass** (`deck-json/conform-to-deck.py <deck.json>`): the sibling
+> raw content pages ARE the house-style spec. Run it read-only first for the
+> drift table (D1 page-bg / D2 title / D3 pre-title chrome / D4 font ladder / D5
+> body luminance, each vs the family consensus), then `--apply` to run the three
+> DETERMINISTIC conforms (strip own page-bg, strip the pre-title eyebrow/topbar
+> via a real HTML parser, snap fonts to {16,24,28,48}); D2 (title move, DOM
+> rework) and D5 (a contrast call) stay report-only for you to do by eye. The
+> render-time backstop is the SOFT `R-FAMILY-DRIFT` advisory in
+> `validate-deck.py` — it surfaces (never blocks) an outlier even if the conform
+> pass was skipped. This whole pass exists because a single P1-page adopt took
+> ~5 serial feedback rounds that were really one rule: **a page joining a deck
+> matches its siblings.**
 
 ### Entry — one command
 

@@ -142,7 +142,7 @@ from the asset pools in `assets-and-files.md`.
 
 ## Content Header Rule
 
-Content-page headers are title-only:
+Content-page headers default to **title-only**:
 
 ```html
 <div class="header">
@@ -150,9 +150,52 @@ Content-page headers are title-only:
 </div>
 ```
 
-No eyebrow above, no subtitle below, no inner wrapper, and no inline page number.
-Hero layouts such as cover/image-text/end own their own title patterns and are the
-exception. Validator R56 enforces this, but authors should construct it correctly.
+No eyebrow above the title, no inner wrapper, and no inline page number. Hero
+layouts such as cover/image-text/end own their own title patterns and are the
+exception. Validator R56 enforces the no-eyebrow rule, but authors should
+construct it correctly.
+
+### When you need a title subtitle — one canonical form only
+
+A content/raw page may carry **one** subtitle line under the title. There is
+exactly **one** way to write it: a `<p class="page-sub">` directly after the
+`<h2>`, **inside `.header`**:
+
+```html
+<div class="header">
+  <h2 class="title-zh">飞书与企微,已经不是同一类产品</h2>
+  <p class="page-sub">下一代协同 vs 上一代 IM</p>
+</div>
+```
+
+The framework (`.slide .header .page-sub`, see `feishu-deck.css`) gives it **one
+uniform position**: title + 36px, `--fs-sub` (28px), #fff. Because every page
+uses the same class, every subtitle lands at the same baseline and size.
+
+**Do NOT improvise the subtitle.** Inside `.header`, forbidden alternatives:
+
+- `.lede` — that class is for the **section** layout's master subtitle, and for a
+  **body lead-in paragraph** (see below). It is not a header-subtitle class.
+- `.subtitle` — cover-only.
+- a bare `<div>` or an inline-styled `<p style="font-size:22px;…">`.
+
+Each of these positions/sizes the subtitle differently per page, so a deck ends
+up with subtitles at different tops and font-sizes ("副标位置都不一样").
+Validator **R-VIS-SUBTITLE-CANON** (name-free, WARN) flags any text-bearing
+element after the title inside `.header` whose class isn't `page-sub`.
+
+**Body lead-in vs. title subtitle — keep them apart.** A *body* lead-in
+paragraph (the `.lede` that introduces the content area) belongs **inside
+`.stage`**, NOT in `.header`. R-VIS-SUBTITLE-CANON only scans `.header`, so a
+`.lede` in `.stage` is correctly left alone — that is exactly where it goes:
+
+```html
+<div class="header"><h2 class="title-zh">…</h2></div>
+<div class="stage">
+  <p class="lede">A one-line lead-in that introduces the body below.</p>
+  …
+</div>
+```
 
 ### This applies to `layout: "raw"` pages too — use the framework header, not a bespoke one
 
@@ -166,7 +209,8 @@ and **silently skip any raw page that uses custom header classes**:
 
 | Guard | What it enforces | Selector it needs |
 |---|---|---|
-| **R56** | title-only header (no eyebrow / no subtitle stacked above/below the title) | `.header .eyebrow` |
+| **R56** | no eyebrow in the header (the eyebrow above the title is suppressed) | `.header .eyebrow` |
+| **R-VIS-SUBTITLE-CANON** | the **title subtitle** is the canonical `<p class="page-sub">` after the `<h2>` inside `.header` — not an improvised `.lede` / `.subtitle` / bare `<div>` / inline-styled `<p>` (name-free, so it also covers raw) | `.header` (scans elements after the title) |
 | **R-VIS-TITLE-POSITION** | title sits at the master baseline (~top:61) | `:scope > .header > h2.title-zh` |
 | **R-EMPTY-HEADER-ZONE** | header band isn't left visually empty | `:scope > .header` |
 | **R-VIS-TITLE-GAP** | body doesn't crowd/overlap the title | `.header` + `.stage` |
