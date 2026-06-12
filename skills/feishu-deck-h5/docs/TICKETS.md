@@ -1,8 +1,9 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-293**
+> **下一可用号 = F-306**
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-292 已分配。
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-305 已分配
+(F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
 **撞号**(同一个号在不同文档里指两件不同的事)。下表把已知撞号一次性钉死。
@@ -28,6 +29,25 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 > 归属规律:`AUDIT-LIFT-IMPORT-2026-06-01.md` 自己声明「续号 F-50 起 / F-40~F-49 撞号请并入」,
 > 是撞号的主源头;`AUDIT-2026-06-01-skill-review.md` 的 F-80~F-85 与它**同日各起一套**导致正面冲突。
 > 这正是设此登记处的原因。
+
+## 登记流水(F-293 起)
+
+> 2026-06-12 对账:F-293~F-304 是各 session 在登记处之外自行取的号
+> (PLAN-ITERATION-LOOP-2026-06-11 跳号到 F-300+,F-303/304 又被新工具领走),
+> 本次回填钉死;F-295~F-299 **从未被分配,作废勿用**(防空号与流水撞车)。
+> 此后回到「先领号再开工」的规矩。
+
+| 号 | 一句话 | 归属 |
+| --- | --- | --- |
+| F-293 | `--scope-frames`:把 render scope 喂进统一审计引擎(单页 scope 渲染规则同源) | `deck-json/render-deck.py` / `tests/test_scoped_audit.py` |
+| F-294 | R-VIS-SUBTITLE-CANON:标题副标 canonical 统一(`.header` 内只认 `.page-sub`) | `assets/audits.js` / `tests/test_subtitle_canon.py` |
+| F-295~299 | —(跳号空洞,作废勿用) | — |
+| F-300 | family-drift 探测 + conformer(同族页漂移检测/归位) | `deck-json/conform-to-deck.py` / `docs/PLAN-ITERATION-LOOP-2026-06-11.md` |
+| F-301 | 标题带锚点=副标底 + `findSlideHeader` 三通道(canvas-center/crowd 口径统一) | `assets/audits.js` / `docs/PLAN-ITERATION-LOOP-2026-06-11.md` |
+| F-302 | baseline-aware 视觉闸:new-vs-pre-existing findings diff(--scope 豁免存量红) | `deck-json/render-deck.py` / `tests/test_baseline_gate.py` |
+| F-303 | fast-text.py:亚秒级纯文案双写编辑(no render, no validation) | `deck-json/fast-text.py` |
+| F-304 | shoot-page.py:确定性单页截图(外链 iframe route-ABORT) | `assets/shoot-page.py` |
+| **F-305** | **「raw unless ceremonial」:冻结全部正文 schema 版式,只留仪式五件套+机制页;deck.json 保留裁决记录在案。REGISTERED 未动工** | **`docs/F-305-RAW-UNLESS-CEREMONIAL-2026-06-12.md`** |
 
 ## 已裁决(WONTFIX / DONE)
 

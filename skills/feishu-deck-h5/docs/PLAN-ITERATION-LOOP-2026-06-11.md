@@ -1,7 +1,7 @@
 # 方案 · feishu-deck-h5 迭代循环提速(iteration-loop)
 
 > 2026-06-11 · 基于 FWD deck(runs/20260610-185242-fwd-founder-ai-layer)53 轮渲染的实测复盘。
-> 工单编号待对齐流水(最近见 F-302),建议从 F-303 起领号。
+> 工单编号已对账回填 `docs/TICKETS.md`(2026-06-12:F-300~F-302 属本计划;F-303/304 已被 fast-text/shoot-page 领走)。新号一律去 TICKETS.md 领,勿再从此处推算。
 
 ## 0. 背景与实测
 
