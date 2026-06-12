@@ -156,7 +156,27 @@ touched.
 
 Default to `--scope N` for scope-locked edits — it now matches `--quick` on speed
 while ALSO keeping the changed-page screenshot. Use the full render (no flag) only
-for a new deck or a change that spans the whole deck.
+for a new deck or a change that spans the whole deck. `--iter` is the zero-thought
+variant: it auto-diffs the sidecar and scopes to whatever actually changed
+(`--scope` now also accepts slide KEYS, and an unresolvable token hard-fails
+instead of silently running the full pass).
+
+### Publish cadence for an already-delivered deck (owner-approved 2026-06-12)
+
+Once a deck is live and iterating in small steps, do NOT pay the full `--final`
+gate on every round-trip — on a 40+ page deck that is 2-3 minutes of re-auditing
+pages nobody touched, and it dominated the wall-clock of a 2-line CSS fix
+(~6 min total, 60-70% of it the final+snapshot tax).
+
+- **Small edit (single-page copy/style):** `--iter` render (the changed page
+  still gets its FULL per-page audit) + screenshot-verify the changed page →
+  **publish directly**.
+- **`--final` (whole-deck gate) only at checkpoints:** first delivery of a new
+  page / structural change (insert, reorder, cross-page CSS), or when the owner
+  says "定稿" / before a real presentation.
+
+The scoped gates make this safe: unchanged pages keep their last full-audit
+verdict; the only thing skipped is re-verifying pages that did not change.
 
 > **Why `--scope N` is ~12s and not ~60s (2026-06-06):** the headless-browser
 > entry points used to `goto(wait_until='load')`, which stalls ~31s on this deck
@@ -513,3 +533,26 @@ nudge.
 
 ---
 
+
+### E7. Series / sibling elements: copy the neighbor VERBATIM, never re-style from memory (mandatory)
+
+When adding an element that joins an existing **series** (Best Practice 01-04
+eyebrows, chapter dividers, numbered story cards, recurring captions), the
+ONLY correct source of truth is the sibling's actual markup + CSS:
+
+1. **Grep the sibling page's `data.html` / `custom_css` and copy the relevant
+   block byte-for-byte**, then trim — do NOT re-author "the same look" from
+   memory. A re-authored version always drifts on the details nobody remembers
+   (the `::before` dash, the exact letter-spacing, the gap).
+2. **Copy the PLACEMENT too.** The same class in a different DOM slot inherits
+   different framework rules. (2026-06-12: a series eyebrow placed inside the
+   framework `.header` — siblings keep theirs in their own `.ttl-block` —
+   inherited `.header > div:first-child { flex-direction: column-reverse }`
+   and rendered its dash BELOW the text.)
+3. The validator cannot catch series drift — "looks like its siblings" is a
+   design-consistency judgment, not a geometric rule. The verbatim-copy habit
+   is the only gate.
+
+Cost of skipping this: two extra render-verify-publish round-trips for a
+2-line eyebrow (2026-06-12, fwd-founder BP03 — the user caught the missing
+dash, then the flipped dash).
