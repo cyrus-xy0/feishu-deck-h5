@@ -785,7 +785,7 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     canvas_srcs = _canvas_element_srcs(slide)
     if canvas_srcs:
         text = text + "\n" + "\n".join(canvas_srcs)
-    copied = {"input": [], "prototypes": [], "local": [], "missing": []}
+    copied = {"input": [], "prototypes": [], "shared": [], "local": [], "missing": []}
     for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "input" / fname
         d = dst_dir / "input" / fname
@@ -816,6 +816,16 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
             copied["prototypes"].append(seg)
         else:
             copied["missing"].append(f"prototypes/{seg}")
+    for ref in sorted(set(re.findall(r"assets/shared/([^\s\"'<>()\\?#]+)", text))):
+        s = src_dir / "assets" / "shared" / ref
+        d = dst_dir / "assets" / "shared" / ref
+        if s.is_file():
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
+                shutil.copy2(s, d)
+            copied["shared"].append(ref)
+        else:
+            copied["missing"].append(f"assets/shared/{ref}")
     # Bare/relative deck-local media refs (scene.png, ./img.jpg, deck-local
     # assets/foo.png, replica page_image, image.src, …): NOT under input/ or
     # prototypes/, NOT framework (assets/shared·lark-)/http/data, NOT escaping

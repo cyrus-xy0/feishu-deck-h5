@@ -86,13 +86,16 @@ class DeckCliPasteDriftTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="deck-cli-paste-test-"))
         self.src_dir = self.tmp / "src"
         (self.src_dir / "prototypes").mkdir(parents=True)
+        (self.src_dir / "assets" / "shared").mkdir(parents=True)
         (self.src_dir / "prototypes" / "demo.html").write_text(
             "<!doctype html><body>demo</body>", encoding="utf-8")
+        (self.src_dir / "assets" / "shared" / "logo.png").write_bytes(b"PNG")
         src_deck = {
             "version": "1.0",
             "deck": {"title": "s", "author": "a", "date": "2026-06"},
             "slides": [{
                 "key": "src-raw", "layout": "raw", "accent": "blue",
+                "custom_css": '.brand{background-image:url("assets/shared/logo.png")}',
                 "data": {"html": '<div class="lead">'
                                  '<b style="color:var(--fs-accent4)">x</b></div>'
                                  '<iframe src="prototypes/demo.html"></iframe>'},
@@ -133,6 +136,14 @@ class DeckCliPasteDriftTest(unittest.TestCase):
                          "paste did not remap retired var(--fs-accent4).")
         self.assertIn("var(--fs-teal)", html,
                       "var(--fs-accent4) should map to var(--fs-teal).")
+
+    def test_shared_asset_copied(self):
+        proc = self._paste()
+        self.assertEqual(proc.returncode, 0,
+                         f"paste failed: {proc.stderr}\n{proc.stdout}")
+        self.assertTrue((self.dst_dir / "assets" / "shared" / "logo.png").is_file(),
+                        "assets/shared refs in custom_css must be copied from "
+                        "downloaded library packages before re-render/publish.")
 
 
 class DeckCliPasteCanvasAssetTest(unittest.TestCase):
