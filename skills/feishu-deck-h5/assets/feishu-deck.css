@@ -220,7 +220,8 @@ body {
    arch-stack / logo-wall / content-before-after) are handled in
    extra-layouts.css, not duplicated here. */
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="raw"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="iframe-embed"]) {
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="iframe-embed"]),
+.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="canvas"]) {
   background: #000 var(--fs-asset-content-bg) center/cover no-repeat;
 }
 .deck[data-mode="present"] .slide-frame.is-current {
@@ -1511,7 +1512,8 @@ body {
 .slide[data-layout="timeline"],
 .slide[data-layout="process"],
 .slide[data-layout="big-stat"],
-.slide[data-layout="quote"] {
+.slide[data-layout="quote"],
+.slide[data-layout="canvas"] {
   background: #000 var(--fs-asset-content-bg) center/cover no-repeat;
 }
 
@@ -1533,7 +1535,10 @@ body {
    automatically get the master title coord (top:61, left:73, right:320)
    instead of falling to top:0 static flow. Lifts that want a custom header
    position can override via the slide's inline <style>. */
-.slide[data-layout="raw"] .header {
+.slide[data-layout="raw"] .header,
+/* 2026-06-12 · `canvas` joins too — imported PPTX pages can opt into the
+   framework chrome title (data.title/subtitle) and land on master coords. */
+.slide[data-layout="canvas"] .header {
   position: absolute; top: 61px; left: 73px; right: 320px;  /* matches logo top */
   padding-bottom: 0; border-bottom: 0;
   display: block;

@@ -1746,6 +1746,23 @@ def _enrich_canvas(ctx, slide):
     W = data.get("canvas_w") or 1920
     H = data.get("canvas_h") or 1080
 
+    # Optional framework chrome (schema: data.title / data.subtitle) — the
+    # standard wordmark + .header so an imported page adopts the deck's
+    # native title instead of its baked-in PPTX heading. Emitted ABOVE the
+    # canvas plane; the unified master header coords come from feishu-deck.css
+    # (canvas joins the unified .header list).
+    _t = data.get("title")
+    if _t:
+        chrome = ('<div class="wordmark"></div>\n        '
+                  f'<div class="header"><h2 class="title-zh">{html.escape(str(_t))}</h2>')
+        _sub = data.get("subtitle")
+        if _sub:
+            chrome += f'\n          <p class="page-sub">{html.escape(str(_sub))}</p>'
+        chrome += '</div>'
+        ctx["chrome_html"] = chrome
+    else:
+        ctx["chrome_html"] = ""
+
     # Unreconstructable page → a centered "待重做" notice (SPEC §10.1).
     if data.get("placeholder"):
         src = data.get("source_page")

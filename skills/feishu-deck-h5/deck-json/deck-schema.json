@@ -1204,6 +1204,8 @@
         "canvas_h":    { "type": "integer", "default": 1080, "description": "Canvas height in px the element geometry is expressed against." },
         "placeholder": { "type": "boolean", "default": false, "description": "If true the page could not be reconstructed; renderer shows a '待重做' notice instead of elements." },
         "source_page": { "type": "integer", "description": "Original page number in the source PPTX/PDF (for traceability + the placeholder notice)." },
+        "title": { "type": "string", "description": "Optional framework chrome: when present the renderer emits the standard wordmark + .header > h2.title-zh above the canvas plane (master title coords), so an imported page adopts the deck's native title instead of its baked-in PPTX heading. Remove the imported heading elements from `elements` when using this." },
+        "subtitle": { "type": "string", "description": "Optional .page-sub line under the chrome title (requires `title`)." },
         "elements": {
           "type": "array",
           "description": "Absolutely-positioned elements. Empty allowed when placeholder:true.",
