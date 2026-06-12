@@ -368,3 +368,31 @@ item below has bitten us before:
 
 ---
 
+## 在线 URL 嵌入(云文档 / dashboard / 任何 https 活页)— 静态图优先同样适用 (F-304)
+
+> 用户说「把这篇 larkoffice 文档 / 这个看板 **embedded** 进来」时,上面的静态图默认
+> **同样成立**,而且多了三条 iframe 没有的硬风险。除非用户明确要「放映时在页内滚动 /
+> 实时数据」**且确认会场网络可靠**,默认做法是:**headless 截全文 → 静态图铺进面板 +
+> 角落放一个「Live doc ↗」链接(或二维码)**——演示者真要现场滚动,点开浏览器看真文档
+> 反而更体面。
+
+**live iframe 的三条硬风险(2026-06-11 FWD deck #23 实测):**
+
+1. **会场网络 = 单点故障**:断网 / 目标域不可达时这页就是一块白板(对外汇报零容错场合
+   尤其致命)。`--inline` 单文件交付同样加载不出(同上节 iframe 老问题)。
+2. **加载时机两难**:`loading="lazy"` → 翻到这页才开始加载,观众面前转 spinner;去掉
+   lazy → 框架所有 frame 常驻 DOM,**deck 一打开就吃网络**。
+3. **拖垮整套工具链**:live embed **永不 settle**(long-poll / webfonts 不停),一个
+   iframe 让**全 deck 每一页**的 naive Playwright 截图都挂死(`load` 超时;
+   `domcontentloaded` 后 screenshot 又卡 "waiting for fonts")。settled-state 视觉
+   管线和「活内容」本质冲突。
+
+**保留 live iframe 时(特例)必做:**
+- 留一份静态截图备份页(或随时可切换的图),会场断网时能换;
+- 分享范围用**无登录 headless 实测**(截图看内容,`contentDocument` 跨域读不出来);
+- 任何 ad-hoc 截图改用 `assets/shoot-page.py`(默认 route-abort 外网,live 页秒拍成
+  确定性空面板)或 render 的 deck-log 自动快照;**永远别再手写 `wait_until='load'`**。
+
+**好消息**:链接可见的 larkoffice 文档无登录 headless 也能渲出全文 → 截静态图不需要
+登录态,「静态图 + Live 链接」方案没有实现障碍。
+
