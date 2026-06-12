@@ -994,7 +994,12 @@ def _custgeom_svg(shape) -> Optional[str]:
         except Exception:
             pass
         if fill == "none" and stroke == "none":
-            fill = "#888888"  # at least show the silhouette
+            # Unresolvable fill (theme color / alpha fill python-pptx can't
+            # surface). An OPAQUE gray silhouette turns large plates into flat
+            # gray slabs that wreck the page (FWD panorama 2026-06-12); a
+            # low-alpha wash keeps the silhouette visible without painting
+            # over the deck background.
+            fill = "rgba(136,136,136,.18)"
         d_parts: list[str] = []
         for path in path_lst.findall(qn("a:path")):
             pw = float(path.get("w") or 0) or 1.0

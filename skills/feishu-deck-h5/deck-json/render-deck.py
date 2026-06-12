@@ -1786,7 +1786,13 @@ def _enrich_canvas(ctx, slide):
                 if run.get("font"):
                     # per-run font-family (real PPTX typeface). The value is a
                     # CSS family list ('"A", "B"'); escape it for the attribute.
-                    rs += f";font-family:{html.escape(str(run['font']), quote=True)}"
+                    # Append a CJK-capable fallback chain: the named PPT face is
+                    # rarely installed where the deck is viewed, and an implicit
+                    # browser-default fallback both swaps metrics AND (with
+                    # line-height:normal) shoves glyphs into the bottom half of
+                    # an oversized line box — the "all text sits low" defect.
+                    fam = str(run["font"]) + ', "PingFang SC", "Microsoft YaHei", sans-serif'
+                    rs += f";font-family:{html.escape(fam, quote=True)}"
                 if run.get("grad"):
                     # gradient TEXT: paint the gradient and clip it to the glyphs.
                     # -webkit-text-fill-color:transparent makes the glyph fill
@@ -1814,7 +1820,11 @@ def _enrich_canvas(ctx, slide):
             # format-split runs flow + wrap normally and "\n"→<br> gives paragraph
             # breaks. Paragraph alignment (algn) maps to the wrapper's text-align.
             align = _CANVAS_TEXT_ALIGN.get(el.get("align"))
-            inner_style = "max-width:100%"
+            # line-height:1.2 ≈ PowerPoint single spacing. Browser `normal`
+            # with CJK faces (esp. PingFang fallback) builds a 1.4–2.0× line
+            # box and seats glyphs in its lower half — every text on the page
+            # renders visibly below its PPT position (and below its icon).
+            inner_style = "max-width:100%;line-height:1.2"
             if align:
                 inner_style += f";text-align:{align}"
             inner = (f'<div class="tb-inner" style="{inner_style}">'
