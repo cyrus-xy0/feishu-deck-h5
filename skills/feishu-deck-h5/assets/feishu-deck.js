@@ -516,10 +516,49 @@
           e.preventDefault(); goTo(deck, frames, lastVisible(frames)); break;
         case 'Escape':
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+          else osFsHint(); // F-305: Esc can't reach OS-level fullscreen — guide instead
           break;
       }
       nudgeIdle();
     }, { signal });
+
+    // ---- F-305 · OS-fullscreen escape hint -------------------------------
+    // Esc exits HTML5 (page) fullscreen, but a browser page CANNOT exit the
+    // macOS window-level fullscreen Space (green button / ⌃⌘F) — security
+    // boundary. Presenters who mixed the two get "I pressed Esc but my demo
+    // still owns a whole desktop". We can't fix it; we CAN say the magic key.
+    // Heuristic for "window occupies an OS fullscreen Space": window fills the
+    // physical screen AND sits at y=0 (a normal macOS window can't cover the
+    // menu bar; auto-hidden-menubar users may see a rare false hint — 4s,
+    // truthful, harmless).
+    function osFsLikely() {
+      return !document.fullscreenElement
+        && window.screenY === 0
+        && window.outerWidth >= screen.width
+        && window.outerHeight >= screen.height;
+    }
+    function osFsHint() {
+      if (!osFsLikely()) return;
+      let t = document.getElementById('fs-os-hint');
+      if (!t) {
+        t = document.createElement('div');
+        t.id = 'fs-os-hint';
+        t.style.cssText =
+          'position:fixed;top:28px;left:50%;transform:translateX(-50%);' +
+          'z-index:99999;padding:10px 22px;border-radius:10px;' +
+          'background:rgba(10,14,24,.92);border:1px solid rgba(255,255,255,.18);' +
+          'color:#fff;font:600 15px/1.4 -apple-system,sans-serif;' +
+          'box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:none;' +
+          'transition:opacity .3s;';
+        document.body.appendChild(t);
+      }
+      t.textContent = /Mac/i.test(navigator.platform)
+        ? '已退出页面全屏 — 窗口仍处于系统全屏,按 ⌃⌘F(或绿色按钮)退出'
+        : '已退出页面全屏 — 窗口仍处于系统全屏,按 F11 退出';
+      t.style.opacity = '1';
+      clearTimeout(osFsHint._t);
+      osFsHint._t = setTimeout(() => { t.style.opacity = '0'; }, 4000);
+    }
 
     // ---- Fullscreen change handler (debounced single refit, was 3 refits) ----
     let fsRefitTimer;
@@ -528,6 +567,9 @@
       fsRefitTimer = setTimeout(() => {
         frames.forEach(scaleFrame);
         updateUI(deck, frames);
+        // F-305: just exited page fullscreen but the WINDOW still owns a
+        // fullscreen Space → tell the presenter the one key that works.
+        if (osFsLikely()) osFsHint();
       }, FS_REFIT_DEBOUNCE);
     }
     document.addEventListener('fullscreenchange',       onFsChange, { signal });
