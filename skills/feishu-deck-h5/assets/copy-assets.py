@@ -202,6 +202,15 @@ def main():
     css_origins = {}        # copied CSS path -> original skill CSS path, for internal url(...) rewrites
 
     for html_path in out_dir.rglob("*.html"):
+        # Prototype bundles are self-contained worlds (R-SELF-CONTAINED):
+        # their internal `assets/...` refs are THEIR OWN files, not the deck's
+        # framework assets. Depth-prefixing them (`../../assets/...`) pointed
+        # e.g. a profile demo's ud-tokens.css at output/assets/ — which never
+        # receives it — so the demo's styles died silently on file:// AND on
+        # the published site (FWD people-profile, 2026-06-12). Never rewrite
+        # inside prototypes/.
+        if html_path.relative_to(out_dir).parts[:1] == ("prototypes",):
+            continue
         # Compute relative depth for new local paths
         # output/index.html             → assets/  / input/
         # output/single-pages/p01.html  → ../assets/ / ../input/
