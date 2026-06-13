@@ -89,6 +89,15 @@ def find_skill_root() -> Path:
 # (CSS/JS/lark brand) that every deck self-contains.
 SHARED_PREFIX = "shared/"
 
+# 字体缺失不算硬伤：@font-face 找不到字体文件会回退到系统字体，deck 仍可正常渲染。
+# 打包时字体未找到只做温和提示，不当成“上传会被拦”的资源缺失（与素材网入库口径一致）。
+FONT_EXTS = {".otf", ".ttf", ".ttc", ".woff", ".woff2", ".eot"}
+
+
+def _is_font_ref(value: str) -> bool:
+    base = str(value or "").split("?", 1)[0].split("#", 1)[0]
+    return os.path.splitext(base)[1].lower() in FONT_EXTS
+
 # Back-compat for old decks that still reference the pre-reorg paths
 # (assets/clientlogo/foo.png instead of assets/shared/clientlogo/foo.png).
 # When the original location is missing, retry with these prefixes.
@@ -200,6 +209,7 @@ def main():
     shared_refs = set()     # all assets/shared/* logical refs (for manifest, regardless of mode)
     shared_skipped = 0      # count of shared/* refs left as skill-relative under --shared=skip
     css_origins = {}        # copied CSS path -> original skill CSS path, for internal url(...) rewrites
+    missing_sources = set() # 被 HTML/CSS 引用、但打包时找不到源文件的资源（打包结尾汇总，左移到打包阶段暴露）
 
     for html_path in out_dir.rglob("*.html"):
         # Prototype bundles are self-contained worlds (R-SELF-CONTAINED):
@@ -264,6 +274,7 @@ def main():
             else:
                 # Origin missing — leave reference unchanged so author notices
                 print(f"  [WARN] missing asset: {origin}")
+                missing_sources.add(str(target.relative_to(out_dir)))
                 return m.group(0)
 
         def replace_input(m):
@@ -293,6 +304,7 @@ def main():
                         files_copied.add(str(target.relative_to(out_dir)))
                     return f'{prefix}input/{rest}'
             print(f"  [WARN] missing input: {input_root / rest}")
+            missing_sources.add(str(target.relative_to(out_dir)))
             return m.group(0)
 
         src = RX_SKILL.sub(replace_skill, src)
@@ -407,6 +419,12 @@ def main():
                     shutil.copy2(origin, new_target)
                     bytes_copied += origin.stat().st_size
                     files_copied.add(str(new_target.relative_to(out_dir)))
+                else:
+                    # 引用了 assets/<...> 但 output/ 和 skill 里都没有源文件（典型：
+                    # 从别的 deck 克隆过来、却没带上对应封面/图）。以前这里静默放过，
+                    # 文件被写进 manifest 却不在包里，直到上传才报错——左移到打包暴露。
+                    print(f"  [WARN] missing asset: {new_target}")
+                    missing_sources.add(str(new_target.relative_to(out_dir)))
 
             return f"{head}{prefix}assets/{new_rest}"
 
@@ -417,13 +435,16 @@ def main():
             if not target.is_relative_to(out_dir):
                 continue
             referenced.add(str(target.relative_to(out_dir)))
-            if not target.exists() and input_root.exists():
-                origin = input_root / rest
-                if origin.exists():
+            if not target.exists():
+                origin = input_root / rest if input_root.exists() else None
+                if origin is not None and origin.exists():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(origin, target)
                     bytes_copied += origin.stat().st_size
                     files_copied.add(str(target.relative_to(out_dir)))
+                else:
+                    print(f"  [WARN] missing input: {target}")
+                    missing_sources.add(str(target.relative_to(out_dir)))
 
         if src != original:
             html_path.write_text(src, encoding="utf-8")
@@ -513,6 +534,8 @@ def main():
             if origin is None:
                 if target.is_relative_to(out_dir):
                     print(f"  [WARN] CSS-referenced asset not found in skill: {target}")
+                    if not target.exists():
+                        missing_sources.add(str(target.relative_to(out_dir)))
                 return m.group(0)
 
             if not target.is_relative_to(out_dir):
@@ -621,6 +644,25 @@ def main():
             print(f"Output had no shared/* references — no symlink created.")
     else:
         print(f"Output runs only while next to the skill folder (shared/* refs are skill-relative). Use --shared=copy before zipping/sending.")
+
+    # ── 打包结论：把“引用了但找不到源文件”的资源汇总成醒目结尾，左移到打包阶段 ──
+    # （以前这些只在循环里零散 [WARN] 一行、容易淹没，且文件照样写进 manifest，
+    #   结果漏到素材网上传才被资源检查拦下。现在打包时就一次性告诉作者。）
+    if missing_sources:
+        real_missing = sorted(p for p in missing_sources if not _is_font_ref(p))
+        font_missing = sorted(p for p in missing_sources if _is_font_ref(p))
+        if real_missing:
+            print()
+            print(f"  ❌ {len(real_missing)} 个被引用的资源找不到源文件 —— 不补齐这些，打包上传素材网会被资源检查拦下：")
+            for p in real_missing:
+                print(f"       - {p}")
+            print(f"     修法：把对应文件放到 output/ 里该路径下（常见于从别的 deck 克隆却没带上封面/配图），")
+            print(f"           或在 deck.json / CSS 里去掉这些引用，然后重跑本脚本。")
+        if font_missing:
+            print()
+            print(f"  ⚠️ {len(font_missing)} 个字体未找到，将回退系统字体（不影响上传，可忽略）：")
+            for p in font_missing:
+                print(f"       - {p}")
 
 if __name__ == "__main__":
     main()
