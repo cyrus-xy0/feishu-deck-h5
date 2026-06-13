@@ -582,7 +582,32 @@ def _renumber_text_ids(html: str, new_slide_no: int) -> str:
 
 
 def insert_into_json(deck_path: Path, fragments: list[str], position: int,
-                     lifted: bool = True) -> None:
+                     lifted: bool = True, allow_unsynced: bool = False) -> None:
+    # F-315 (Option A): this mutates deck.json then re-renders, which regenerates
+    # index.html. If the sibling index.html carries un-synced browser/hand edits,
+    # that re-render would silently destroy them. Resolve BEFORE reading deck.json
+    # (so an auto-sync's folded edits are picked up by the read below):
+    #   ok → proceed · autosync (all-lossless) → fold into deck.json first ·
+    #   refuse (canvas/baked/chrome/error) → stop. --force skips & discards.
+    if not allow_unsynced:
+        import sys as _sys
+        _sys.path.insert(0, str(HERE))
+        from _index_sig import resolve_clobber as _idx_resolve, auto_sync as _idx_auto_sync
+        _idx = deck_path.parent / "index.html"
+        _action, _reason = _idx_resolve(deck_path, _idx)
+        if _action == "refuse":
+            _sync = HERE / "sync-index-to-deck.py"
+            raise SystemExit(
+                f"import-html-slide: REFUSING — {_reason}\n"
+                f"  → Inspect: python3 {_sync} --dry-run {_idx} {deck_path}\n"
+                f"  → Or re-run with --force to import anyway and DISCARD them.")
+        if _action == "autosync":
+            _info("index.html has un-synced (lossless) browser edits — folding them "
+                  "into deck.json before import…")
+            _ok, _out = _idx_auto_sync(deck_path, _idx)
+            if not _ok:
+                raise SystemExit(f"import-html-slide: auto-sync FAILED:\n{_out}")
+            # folded; the json.loads below now sees the synced deck.json
     deck = json.loads(deck_path.read_text(encoding="utf-8"))
     if not isinstance(deck.get("slides"), list):
         raise SystemExit(f"{deck_path.name}: malformed deck.json — missing/invalid "
@@ -730,6 +755,11 @@ def main(argv=None) -> int:
     ap.add_argument("--no-copy-assets", action="store_true",
                     help="Do NOT copy + rewrite the slide's local assets into the "
                          "target deck (leave refs as-authored).")
+    ap.add_argument("--force", action="store_true",
+                    help="F-315: import even if the target's index.html carries "
+                         "un-synced browser/hand edits (the clobber guard would "
+                         "otherwise refuse, since the post-import re-render would "
+                         "destroy them). Use only after syncing or discarding them.")
     args = ap.parse_args(argv)
 
     # Resolve target
@@ -828,7 +858,7 @@ def main(argv=None) -> int:
     # Apply
     if mode == "A":
         insert_into_json(target, accepted_frags, position,
-                         lifted=not args.no_lifted)
+                         lifted=not args.no_lifted, allow_unsynced=args.force)
         rc = re_render(target)
         if rc != 0:
             _err("import mutated deck.json but the re-render FAILED — the deck "

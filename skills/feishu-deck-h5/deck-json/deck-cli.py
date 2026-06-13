@@ -1281,6 +1281,44 @@ def main(argv=None) -> int:
     if not handler:
         print(f"deck-cli: unknown command '{args.cmd}'", file=sys.stderr); return 1
 
+    # F-315: CLOBBER GUARD (Option A — auto-sync-if-lossless, else refuse) — before
+    # mutating deck.json, handle a sibling index.html that carries edits made after
+    # its last render (browser edit-mode ⌘S / hand-patch) and never synced back.
+    # Editing deck.json now and re-rendering would silently destroy them (deck.json
+    # is the source; index.html is regenerated from it). Checked here, where
+    # deck.json still matches the last render, so the verdict is unambiguous.
+    #   ok       → no un-synced edit; proceed (fast path).
+    #   autosync → edits are ALL lossless → fold them into deck.json FIRST (then the
+    #              command's edit layers on top; both survive), and RELOAD deck.
+    #   refuse   → lossy (canvas) / baked / chrome-only / error → stop and tell the
+    #              user. --force skips the whole guard and DISCARDS the edits.
+    if not getattr(args, "force", False):
+        from _index_sig import resolve_clobber, auto_sync as _idx_auto_sync
+        _idx = args.deck.parent / "index.html"
+        _action, _reason = resolve_clobber(args.deck, _idx)
+        if _action == "refuse":
+            _sync = Path(__file__).resolve().parent / "sync-index-to-deck.py"
+            print(f"deck-cli: REFUSING '{args.cmd}' — {_reason}", file=sys.stderr)
+            print("  → Inspect / recover first:", file=sys.stderr)
+            print(f"      python3 {_sync} --dry-run {_idx} {args.deck}", file=sys.stderr)
+            print("  → Or pass --force to edit deck.json anyway and DISCARD the "
+                  "un-synced index.html edits.", file=sys.stderr)
+            return 6
+        if _action == "autosync":
+            print(f"deck-cli: index.html has un-synced (lossless) browser edits — "
+                  f"folding them into deck.json before '{args.cmd}'…", file=sys.stderr)
+            _ok, _out = _idx_auto_sync(args.deck, _idx)
+            if not _ok:
+                print(f"deck-cli: auto-sync FAILED — refusing to proceed:\n{_out}",
+                      file=sys.stderr)
+                return 6
+            # auto-sync rewrote deck.json on disk → reload so the command's handler
+            # (and the optimistic-lock mtime) operate on the freshly-synced source.
+            deck = json.loads(args.deck.read_text(encoding="utf-8"))
+            deck_mtime = args.deck.stat().st_mtime
+            print("deck-cli: ✓ folded browser edits into deck.json; continuing.",
+                  file=sys.stderr)
+
     rc, updated = handler(deck, args)
     if rc != 0 or updated is None:
         return rc

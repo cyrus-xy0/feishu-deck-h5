@@ -80,6 +80,11 @@
           "default": false,
           "description": "OPT-IN · Keynote-style Magic Move on page turn via the View Transitions API. When true, the renderer emits data-magic-move on the deck root and feishu-deck.js wraps each present-mode slide change in document.startViewTransition() (feature-detected; gracefully instant on Firefox; gated by prefers-reduced-motion). Off by default so the fs-reveal entrance baseline is unchanged. To make an element MORPH between two pages, give the same `view-transition-name` to its counterpart on both slides via slide.custom_css (round-trips). See references/motion-system.md §7."
         },
+        "hide_progress": {
+          "type": "boolean",
+          "default": false,
+          "description": "OPT-IN · Hide the thin top present-mode reading-progress keyline (.deck-progress, a 3px brand-gradient bar) deck-wide, WITHOUT needing the per-URL #clean / #kiosk hash (those also hide the bottom controls + nav hints). Renderer emits data-hide-progress on the deck root; CSS hides only the progress bar (controls/hints stay). Use for formal client/exec decks where that top gradient line reads as an unwanted top border. Default false."
+        },
         "gate": {
           "enum": ["block", "advisory"],
           "default": "block",
@@ -1190,7 +1195,8 @@
         "src":          { "type": "string", "minLength": 1, "description": "Path to the embedded HTML, relative to the deck's output directory (e.g. 'prototypes/foo.html')." },
         "iframe_title": { "type": "string", "description": "iframe `title` attr for a11y. Defaults to data.title when omitted." },
         "hint":         { "type": "string", "description": "Bottom-right pill caption, e.g. '报告可滚动查阅'. Omit / empty to hide the pill." },
-        "zoom":         { "type": "number", "minimum": 0.5, "maximum": 2.5, "description": "Optional content scaling. 1.0 = native (default); >1 enlarges (use when embedded text is hard to read at slide scale); <1 shrinks (use when prototype is wider than the iframe). Implemented via CSS transform + width/height compensation, so the iframe always fills its container regardless of zoom." }
+        "zoom":         { "type": "number", "minimum": 0.5, "maximum": 2.5, "description": "Optional content scaling. 1.0 = native (default); >1 enlarges (use when embedded text is hard to read at slide scale); <1 shrinks (use when prototype is wider than the iframe). Implemented via CSS transform + width/height compensation, so the iframe always fills its container regardless of zoom. PREFER `fit_width` for a fixed-width prototype — it derives the right zoom for you." },
+        "fit_width":    { "type": "number", "minimum": 320, "maximum": 4096, "description": "PREFERRED for embedding a fixed-width foreign prototype/H5. Set to the prototype's DESIGN width in px (its `max-width` / container width, e.g. 1320). The renderer derives `zoom` = 1800 / fit_width so the prototype renders AT its design width then scales up to fill the ~1800px embed body — bigger text, no empty side gaps. Fills by width; a taller-than-frame app stays scrollable. Ignored if `zoom` is set explicitly. Do NOT resize the iframe via custom_css !important (framework rule out-specifies it → clips/de-centers)." }
       }
     },
 

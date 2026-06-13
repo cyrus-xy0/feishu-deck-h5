@@ -107,6 +107,19 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
   Enforced by R-VIS-SUBTITLE-CANON (name-free, scans `.header` only).
 - Do not use emoji or hand-drawn approximations for official Feishu product icons.
   Use the official asset pool described in `assets-and-files.md`.
+- **Budget heights before you place absolutely-positioned raw panels — and PIN
+  `line-height`.** Canvas is 1920×1080; the framework header eats ~61→~200px, so
+  body content lives in ~220–1010px. When you give a `.qc-panel`-style box a fixed
+  `height`, the content inside it must fit *that* box. The #1 way the math goes
+  wrong: **CJK `line-height: normal` ≈ 2.0×** — a 24px pill / tag / kicker renders
+  ~58px tall, not ~34px, so a 4-row card silently doubles past its box. ALWAYS set
+  an explicit `line-height` on every text element (≈1.1 for single-line
+  chips/pills/labels, ≈1.2 for body), or your height estimate is off by ~2×. And a
+  box with `justify-content:center` / `flex-end` does NOT hide overflow — content
+  taller than the box spills out **both** the top and bottom borders (the title row
+  pokes *above* the panel). Keep content ≤ box inner height. The render gate's
+  `R-VIS-CARD-OVERFLOW` (F-317) now catches both-edge spills, but compute up front
+  so you land it in one pass instead of iterating against the gate.
 
 ## References To Load As Needed
 

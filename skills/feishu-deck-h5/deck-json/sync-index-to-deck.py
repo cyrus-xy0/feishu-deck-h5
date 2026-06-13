@@ -870,6 +870,14 @@ def main() -> int:
     ap.add_argument("--slide-key", help="sync only this slide (key match)")
     ap.add_argument("--dry-run", action="store_true",
                     help="report drift without writing")
+    ap.add_argument("--check-drift", action="store_true",
+                    help="read-only GUARD (F-315): exit 10 if index.html carries "
+                         "authored edits / baked-DOM traces NOT present in deck.json "
+                         "(un-synced browser edit-mode / hand-patch that the next "
+                         "re-render would silently destroy), exit 0 if in sync, 2 on "
+                         "error. Writes nothing, applies no direction guard. deck-cli "
+                         "calls this before mutating deck.json; render-deck calls it "
+                         "before overwriting a same-source index.html.")
     ap.add_argument("--force", action="store_true",
                     help="convert template-layout slides (cover/quote/etc) to raw")
     ap.add_argument("--backfill", action="store_true",
@@ -913,6 +921,12 @@ def main() -> int:
                          "for a plain browser 'save page' or an externally-baked file.")
     args = ap.parse_args()
 
+    if args.check_drift:
+        # Read-only guard: never write, never apply the direction guard (the
+        # CALLER decides what to do based on the verdict). dry_run keeps every
+        # `if not args.dry_run` write-branch below inert.
+        args.dry_run = True
+
     if not args.index_html.exists():
         print(f"sync-index-to-deck: {args.index_html} not found", file=sys.stderr)
         return 2
@@ -927,6 +941,12 @@ def main() -> int:
     _baked_hits = _baked_dom_fingerprints(
         args.index_html.read_text(encoding="utf-8", errors="replace"))
     if _baked_hits and not args.sanitize:
+        if args.check_drift:
+            # A baked live DOM = index.html was opened in the browser and saved
+            # (runtime traces present) → touched OUTSIDE the renderer AND needs
+            # --sanitize judgement before a reverse-feed → report as LOSSY (11):
+            # un-synced state present, but NOT safe to auto-sync.
+            return 11
         print("⚠ R-BAKED-DOM: index.html looks like a saved/'baked' live DOM, "
               "not a render-deck.py output.", file=sys.stderr)
         print("  Runtime traces present: " + "；".join(_baked_hits) + "。",
@@ -1001,6 +1021,10 @@ def main() -> int:
     deck = json.loads(args.deck_json.read_text(encoding="utf-8"))
 
     drift_count = 0
+    lossy_drift = False   # F-315: set when a canvas slide drifts (reverse-map is
+                          # non-idempotent — geometry/multi-run text). raw / custom_css
+                          # / order / hidden / notes reverse losslessly. Used by
+                          # --check-drift to tell the caller whether auto-sync is safe.
     skipped_template = []
     skipped_missing = []
     synced = []
@@ -1053,6 +1077,7 @@ def main() -> int:
                json.dumps(cur_data, ensure_ascii=False, sort_keys=True):
                 continue  # no real drift
             drift_count += 1
+            lossy_drift = True   # F-315: canvas reverse-map is lossy → not auto-syncable
             if not args.dry_run:
                 slide["data"] = new_data
             old_n = len(cur_data.get("elements") or [])
@@ -1153,6 +1178,16 @@ def main() -> int:
         print(f"  SKIPPED (slide-key not in index.html): {len(skipped_missing)}")
         for key in skipped_missing:
             print(f"    {key}")
+    if args.check_drift:
+        # F-315 guard verdict for the caller (deck-cli / render auto-sync):
+        #   0  = in sync (no slide-level drift)
+        #   10 = drift present, ALL lossless (raw / custom_css / order / hidden /
+        #        notes) → safe to auto reverse-sync
+        #   11 = drift present, some LOSSY (a canvas slide) → needs human / --force
+        if not drift_count:
+            return 0
+        return 11 if lossy_drift else 10
+
     if drift_count == 0:
         print("  ✓ deck.json is in sync with index.html — no drift detected.")
         return 0

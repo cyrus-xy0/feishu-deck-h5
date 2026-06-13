@@ -343,6 +343,12 @@ body {
 .deck[data-mode="scroll"] ~ .deck-ui .deck-controls,
 .deck[data-mode="scroll"] ~ .deck-ui .nav-hint { display: none !important; }
 
+/* F-316 · deck-wide opt-in (deck.json `deck.hide_progress: true` → data-hide-progress
+   on .deck): hide ONLY the top reading-progress keyline, persistently, without the
+   per-URL #clean/kiosk hash (those also hide controls + hints). !important beats
+   feishu-deck.js's inline `.deck-progress` display set per present-mode. */
+.deck[data-hide-progress] ~ .deck-ui .deck-progress { display: none !important; }
+
 /* 规范: in 16:9 fullscreen there's no letterbox to hide chrome in — chrome
    would permanently overlay slide content (e.g., the slide's own footer at
    slide y=1032 is at viewport y=1032 when scale=1, right where the bottom
@@ -1513,7 +1519,18 @@ body {
 .slide[data-layout="process"],
 .slide[data-layout="big-stat"],
 .slide[data-layout="quote"],
-.slide[data-layout="canvas"] {
+.slide[data-layout="canvas"],
+/* F-307 (2026-06-13) · raw + iframe-embed must paint content-bg on the SLIDE too, not
+   just the frame (line ~222 whitelist). The frame-only fix left a transparent
+   .slide showing the frame's non-16:9 `cover` crop — the image's dark top edge
+   bleeds above the design's content-bg framing → "标题上方的黑条" on 16:10 /
+   16:9-letterboxed viewports. canvas was already here; raw/iframe-embed were
+   not, so lifted raw pages whose recovered CSS lacked a slide bg rendered the
+   bar. This is a DEFAULT — a raw slide emulating cover/end/hero still overrides
+   it via its own per-slide background in custom_css (equal specificity, later
+   in source order = wins). Keeps slide ↔ frame backgrounds consistent. */
+.slide[data-layout="raw"],
+.slide[data-layout="iframe-embed"] {
   background: #000 var(--fs-asset-content-bg) center/cover no-repeat;
 }
 

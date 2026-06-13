@@ -60,6 +60,12 @@ from _story_case_fit import (  # noqa: E402
 # scope_selectors co-locates per-slide custom_css scoped to its slide-key
 # (LIFT-ARCHITECTURE step 2) so the CSS travels with the slide on lift/clone.
 from _css_utils import scope_selectors  # noqa: E402
+from _index_sig import (  # noqa: E402  F-315 · un-synced-edit clobber guard
+    resolve_clobber as _index_resolve_clobber,
+    auto_sync as _index_auto_sync,
+    stamp_sig as _index_stamp_sig,
+    align_mtime as _index_align_mtime,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -1686,7 +1692,27 @@ def _enrich_iframe_embed(ctx, slide):
     # `+ 2px` overcompensation hides sub-pixel rounding seams on right/bottom
     # edges (otherwise the wrap's bg shows through a thin gap); the wrap's
     # overflow: hidden clips the overshoot.
+    # F-314 · `fit_width` convenience: a foreign prototype/H5 usually has a fixed
+    # DESIGN width (its `max-width` / container width, e.g. 1320px). The iframe
+    # otherwise stretches that content across the full ~1800px embed body → the
+    # design renders centered with empty side gaps AND its text shrinks. Set
+    # `data.fit_width` to that design width and the renderer derives the right
+    # `zoom` (= body/fit_width) so the prototype renders AT its design width then
+    # scales up to fill the frame — bigger text, no side gaps. Fills by WIDTH;
+    # a taller-than-frame app stays scrollable (live demo). This is the SANCTIONED
+    # path — do NOT hand-roll `custom_css` with `!important` to resize the iframe
+    # (the framework iframe rule out-specifies it; you scale the wrong base size →
+    # content clips off-frame / de-centers). See references/prototype-embed.md.
+    IFRAME_BODY_W = 1800.0   # iframe-embed .stage/.iframe-wrap design width (1920 − 2×60 inset)
     zoom = ctx.get("zoom")
+    fit_w = ctx.get("fit_width")
+    if not zoom and fit_w:
+        try:
+            fw = float(fit_w)
+            if fw > 0:
+                zoom = round(IFRAME_BODY_W / fw, 4)
+        except (TypeError, ValueError):
+            zoom = None
     if zoom and zoom != 1.0:
         inv = 100.0 / float(zoom)
         ctx["iframe_inline_style"] = (
@@ -2502,6 +2528,12 @@ def main(argv=None) -> int:
                     help="DELIVERY PROFILE (W6): force a FULL render — ignore "
                          "--iter/--scope, all audits on every page, "
                          "autosnapshot on. Use before any handoff/publish.")
+    ap.add_argument("--force", action="store_true",
+                    help="F-315: overwrite index.html even if it carries un-synced "
+                         "browser edit-mode / hand edits (the clobber guard would "
+                         "otherwise refuse). Use only after you have ported those "
+                         "edits into deck.json (sync-index-to-deck.py) or you "
+                         "deliberately want to DISCARD them.")
     args = ap.parse_args(argv)
 
     if args.final:                       # delivery profile beats iteration profile
@@ -2556,6 +2588,34 @@ def main(argv=None) -> int:
             if rc.stderr.strip():
                 print(rc.stderr, file=sys.stderr)
             return 2
+
+    # F-315 (Option A): handle a sibling index.html carrying un-synced browser/hand
+    # edits BEFORE loading deck.json, so an auto-sync's folded edits are picked up by
+    # THIS render. ok → proceed · autosync (all-lossless) → fold into deck.json then
+    # render the updated source · refuse (canvas/baked/chrome-only/error) → stop.
+    # --force skips and DISCARDS. Fresh render (no existing index.html) → ok.
+    if not getattr(args, "force", False):
+        _out_idx = args.output_dir / "index.html"
+        _clob_action, _clob_reason = _index_resolve_clobber(args.deck, _out_idx)
+        if _clob_action == "refuse":
+            print(f"\n⚠ render-deck: REFUSING to overwrite index.html — {_clob_reason}",
+                  file=sys.stderr)
+            print(f"  → Inspect: python3 {Path(__file__).parent.name}/"
+                  f"sync-index-to-deck.py --dry-run {_out_idx} {args.deck}",
+                  file=sys.stderr)
+            print("  → Or re-run render with --force to DISCARD the un-synced edits.",
+                  file=sys.stderr)
+            return 8
+        if _clob_action == "autosync":
+            print("render-deck: index.html has un-synced (lossless) browser edits — "
+                  "folding them into deck.json before re-render…", file=sys.stderr)
+            _as_ok, _as_out = _index_auto_sync(args.deck, _out_idx)
+            if not _as_ok:
+                print(f"render-deck: auto-sync FAILED — refusing:\n{_as_out}",
+                      file=sys.stderr)
+                return 8
+            print("render-deck: ✓ folded browser edits into deck.json; rendering.",
+                  file=sys.stderr)
 
     # 2. Load deck
     try:
@@ -2825,6 +2885,15 @@ def main(argv=None) -> int:
         # OPT-IN Keynote-style Magic Move: feishu-deck.js wraps present-mode slide
         # changes in document.startViewTransition() when this attr is present.
         deck_data_attrs_parts.append(' data-magic-move=""')
+    if deck["deck"].get("hide_progress"):
+        # F-316 · OPT-IN: hide the top present-mode reading-progress bar
+        # (.deck-progress) deck-wide WITHOUT the per-URL `#clean`/kiosk hash. The
+        # bottom controls + nav hints stay (kiosk hides all three). CSS rule
+        # `.deck[data-hide-progress] ~ .deck-ui .deck-progress { display:none !important }`
+        # beats feishu-deck.js's inline `display:block` (set per present-mode).
+        # For formal client decks where the thin brand-gradient keyline reads as an
+        # unwanted top border.
+        deck_data_attrs_parts.append(' data-hide-progress=""')
     deck_data_attrs = "".join(deck_data_attrs_parts)
 
     # Speaker notes island: a hidden JSON map {slide-key → notes} the presenter
@@ -2865,6 +2934,10 @@ def main(argv=None) -> int:
     final = _stamp_provenance(final, _deck_hash)
 
     out_html = args.output_dir / "index.html"
+    # (F-315 clobber guard ran early — before deck load — so by here either the
+    # un-synced edits were folded into deck.json via auto-sync, or we already
+    # returned 8. Nothing more to check at the overwrite point.)
+
     # F-269: the delivery gate (section 6 below) runs AFTER this write. If the
     # gate then fails (return 4), a naive overwrite would have already replaced
     # the last "passed-the-gate" index.html with the new BAD one — a failed
@@ -3595,6 +3668,20 @@ def main(argv=None) -> int:
               "要把改动页截进 making-of 请改用 --scope N。")
     else:
         _maybe_auto_snapshot(out_html)
+
+    # F-315: stamp the self-integrity signature LAST — after every step that may
+    # have rewritten index.html (delivery gate, copy-assets / --inline). The sig is
+    # a hash of the canonical form of the bytes actually on disk, so a later
+    # external edit (edit-mode ⌘S / hand-patch) will fail verify() and the clobber
+    # guard above (and deck-cli's) will catch it. Then align index.html's mtime to
+    # deck.json so a freshly-rendered, unedited file is never mistaken for "newer
+    # than its source" — keeps the guard quiet on the normal set-page→render loop.
+    try:
+        _final_on_disk = out_html.read_text(encoding="utf-8")
+        atomic_write_text(out_html, _index_stamp_sig(_final_on_disk), encoding="utf-8")
+    except Exception:
+        pass  # never let the stamp fail a successful render
+    _index_align_mtime(out_html, args.deck)
     return 0
 
 

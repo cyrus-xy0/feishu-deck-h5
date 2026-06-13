@@ -171,10 +171,23 @@ title + 飞书 logo, prototype lives in the body area:
     "title": "<deck-level chapter title>",
     "src": "prototypes/<demo-slug>/index.html",
     "iframe_title": "<a11y label>",
+    "fit_width": 1320,
     "hint": "<optional bottom-right caption>"
   }
 }
 ```
+
+> ⚠️ **「字太小 / 两侧留白」必看 — 用 `fit_width`,别手搓 `custom_css`**(F-314)。
+> 外来原型/H5 几乎都有**固定设计宽**(它的 `max-width` / 容器宽,grep 一下就知道,
+> 如 `max-width: 1320px`)。iframe 默认把这宽度**硬拉**到 ~1800px 的嵌入体里 →
+> 内容在中间、两侧空、且字被缩小。**解法**:把 `data.fit_width` 设成原型的设计宽,
+> 渲染器自动算 `zoom = 1800 / fit_width`,让原型**按设计宽渲染再放大铺满** —— 字变大、
+> 白边消失、按宽铺满(更高的页面照常滚动,放映时交互)。
+> - 需要直接给比例 → 用 `data.zoom`(数字,`>1` 放大),`fit_width` 是它的便捷换算。
+> - **绝不要**用 `custom_css` + `!important` 去改 iframe 的 `width/height/transform`:
+>   框架那条 iframe 规则比你的 `.slide[...] iframe` 更高优先级,你会缩放到**错的基准尺寸**
+>   → 内容溢出被裁、左上角偏移(本 session 真实踩坑:hand-roll 出 2452px 被裁)。
+>   `fit_width`/`zoom` 走 iframe **内联 style**,天然盖过框架规则,这才是 sanctioned 通道。
 
 ### Mode C · Native HTML re-author
 

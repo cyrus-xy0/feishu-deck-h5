@@ -1047,6 +1047,7 @@
     'R-VIS-BALANCE': { coverage: 'universal', signal: 'dom' },
     'R-VIS-GUTTER': { coverage: 'universal', signal: 'dom' },
     'R-OVERLAP': { coverage: 'universal', signal: 'dom' },
+    'R-VIS-ABS-OVERLAP': { coverage: 'universal', signal: 'dom', optout: 'F-313 — two independently position:absolute text-blocks whose boxes overlap (R-OVERLAP skips absolute; R-VIS-BAND-COLLIDE needs a framework host). data-allow-overlap opts out.' },
     'R-VIS-BAND-COLLIDE': { coverage: 'schema-only', signal: 'dom', optout: 'host set = framework .stage/.grid/.flow...; raw via [data-role=flow|content-band] TODO (PR2)' },
     'R-VIS-ABSPOS-DUAL-ANCHOR': { coverage: 'universal', signal: 'dom' },
     'R-VIS-SLACK-FLEX': { coverage: 'universal', signal: 'dom' },
@@ -3364,8 +3365,8 @@
                 `slide ${slide_idx} · \`${entry.selector}\` content `
                 + `(${entry.content_h} px) is ${entry.overflow_px} px taller `
                 + `than its box (${entry.card_h} px) and overflow is NOT hidden `
-                + '— text is spilling visibly out the bottom past the border / '
-                + 'background. The slide still fits the 1920×1080 canvas, so '
+                + `— content is spilling visibly out the box ${entry.edge || '下沿'} past `
+                + 'the border / background. The slide still fits the 1920×1080 canvas, so '
                 + 'R-OVERFLOW misses it; the clip-only check missed it too because '
                 + 'overflow is visible. Fix: shorten body copy, drop a row / item, '
                 + 'tighten padding / gap, or give the box more height. (Geometry — '
@@ -3481,26 +3482,40 @@
               });
             }
           } else {
-            // (a') visible vertical spill — child bottom past parent border-box.
-            const dh = el.scrollHeight - el.clientHeight;
-            if (dh > 8 && el.clientHeight > 0 && el.children.length > 0) {
-              const elBottom = el.getBoundingClientRect().bottom;
-              let spill = 0;
+            // (a') visible vertical spill — IN-FLOW children cross the parent
+            // border-box. ⚠️ F-317: measure BOTH edges in design px (/_scale),
+            // NOT scrollHeight. `scrollHeight` ignores content pushed out the TOP
+            // of a flex box (justify-content:center|flex-end → dh≈0 even while rows
+            // visibly poke above *and* below the border); the old check both gated
+            // on `dh = scrollHeight-clientHeight > 8` and measured only the bottom
+            // edge in raw screen px, so it (1) missed centered-card overflow
+            // (#meeting-qc 标题行顶出面板上沿) and (2) at present-mode scale<1
+            // under-reported the bottom spill by never dividing by _scale like the
+            // rest of the engine (line 56 等). Now: both edges, design px, summed.
+            if (el.clientHeight > 0 && el.children.length > 0) {
+              const er = el.getBoundingClientRect();
+              let topSpill = 0, botSpill = 0;
               for (const ch of el.children) {
                 if (ch.tagName === 'SCRIPT' || ch.tagName === 'STYLE') continue;
                 const ccs = getComputedStyle(ch);
                 // 装饰/隐藏子元素不算「自身内容」溢出(spec §2A)。
                 if (ccs.position === 'absolute' || ccs.position === 'fixed'
                     || ccs.display === 'none' || ccs.visibility === 'hidden' || +ccs.opacity === 0) continue;
-                spill = Math.max(spill, ch.getBoundingClientRect().bottom - elBottom);
+                const cr = ch.getBoundingClientRect();
+                botSpill = Math.max(botSpill, (cr.bottom - er.bottom) / _scale);
+                topSpill = Math.max(topSpill, (er.top - cr.top) / _scale);
               }
-              if (spill > 8) {
+              const overshoot = Math.max(0, topSpill) + Math.max(0, botSpill);
+              if (overshoot > 8) {
+                const edge = (topSpill > 4 && botSpill > 4) ? '上下两沿'
+                  : (topSpill > 4) ? '上沿' : '下沿';
                 pushEntry({
                   selector: shortSel(el),
-                  content_h: el.scrollHeight,
-                  card_h: el.clientHeight,
-                  overflow_px: Math.round(spill),
+                  content_h: Math.round(el.clientHeight / _scale + overshoot),
+                  card_h: Math.round(el.clientHeight / _scale),
+                  overflow_px: Math.round(overshoot),
                   direction: 'vertical-visible',
+                  edge,
                 });
               }
             } else if (el.clientHeight > 0 && el.children.length === 0
@@ -4014,7 +4029,34 @@
         const fwTitle = hdr && hdr.getClientRects().length > 0 && hdr.querySelector(
           ':scope > .title-zh, :scope > h1.title-zh, :scope > h2.title-zh, '
           + ':scope h2.title-zh, :scope h1.title-zh');
-        if (fwTitle) return [];   // 有框架标题 → 归 R-VIS-TITLE-POSITION
+        if (fwTitle) {
+          // F-307 (2026-06-13) · 关闭 raw×框架标题的标题位盲区。
+          // 旧逻辑在此 `return []` 让位给 R-VIS-TITLE-POSITION,但那条是 schema-only、
+          // raw 页根本不跑 → 二者夹缝里"谁都没量"。lift 外来 raw 页会把源 deck 的自定义
+          // header 定位(top≠61)一起 recover 进来,标题与右上 logo 错位(实证:tongdianjuli
+          // lift 进来 top:48,比基线高 13px,顶部参差 + 与 logo 不齐),全程零告警。
+          // 这里自量框架 .header 的 top,双向都查(偏高=与 logo 错位 / 偏低=上方空带),
+          // tol=8 与 TITLE-POSITION 对齐。severity 仍 warn(F-256:error 级 R-VIS 阻断,
+          // raw 标题位做 error 会 block 大量现存漂移 raw deck);warn 进 advisory,作者可见即修。
+          const sr0 = slide.getBoundingClientRect();
+          const scale0 = (sr0.height / 1080) || 1;
+          const fwHeaderTop = Math.round((hdr.getBoundingClientRect().top - sr0.top) / scale0);
+          const expFw = 61, tolFw = 8;
+          if (Math.abs(fwHeaderTop - expFw) <= tolFw) return [];
+          const dir = fwHeaderTop < expFw
+            ? '偏高,与右上 logo 不在同一基线(顶部参差)'
+            : '偏低,标题上方留了一条空带';
+          return [{
+            rule: 'R-VIS-RAW-TITLE-POS', severity: 'warn', slide_idx, layout,
+            actual_top: fwHeaderTop, expected_top: expFw, title_sel: shortSel(fwTitle),
+            message:
+              `slide ${slide_idx} (layout \`raw\`) · 框架 \`.header\` 渲染在 top:${fwHeaderTop}px,`
+              + `标准基线 ~${expFw}px,${dir} —— 标题与右上角 logo 未对齐。`
+              + '常见于 lift 外来页时把源 deck 的自定义 header 定位(top≠61)一起带了进来。'
+              + 'Fix: 把该页 `.header` 的 top 改回 61px(写在 custom_css / 该页 <style>),'
+              + '与 master 基线和 logo 对齐;确属居中大字 / 无标题设计,用 `data-allow-imbalance` opt-out。',
+          }];
+        }
         const sr = slide.getBoundingClientRect();
         const scale = (sr.height / 1080) || 1;
         let tEl = null, tTop = Infinity;
@@ -4797,6 +4839,112 @@
             }
           }
         });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-ABS-OVERLAP · F-313 (2026-06-13) · 两个各自 position:absolute 的内容块
+      // 在画面上相互重叠(包围盒相交)。补 R-OVERLAP / R-VIS-BAND-COLLIDE 的盲区:
+      //   · R-OVERLAP 只查 framework 容器(.stage/.grid/.flow/...)内的「流式同级块」,
+      //     且 4788 行显式 `position:absolute|fixed → return false` 把绝对定位全跳过;
+      //   · R-VIS-BAND-COLLIDE 只查 absolute「带」压到 .stage/.grid 等 host 内的流式正文;
+      //   两者都漏「raw/自定义页里两个各自 absolute 的块直接叠在一起」(本 session 实证:
+      //   voice-hub 中枢卡片被内容撑高、压进底部 SEEN/ROUTED 支柱区,8 处文字叠文字,
+      //   render 全绿、capture-frames 也过——因为没有任何规则比对独立绝对块之间的几何)。
+      // 方法(name-free,纯几何):收最外层 absolute/fixed、可见、自带文字(textContent≥4)、
+      //   非全屏脚手架(面积<画布62%)、非 SVG/装饰(pointer-events≠none)的内容块;两两求交,
+      //   ix>8 && iy>8 视为真二维交叠;再确认「一方的文字叶子压进另一方的盒子」(text-in-box)
+      //   才报——纯 padding/margin 交叠不算,降误报。warn(启发式,不阻断;`data-allow-overlap`
+      //   显式豁免有意叠放的浮层)。截断 6 条/页。
+      id: 'R-VIS-ABS-OVERLAP',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const sr = slide.getBoundingClientRect();
+        const slideArea = (sr.width * sr.height) || 1;
+        const scale = (sr.height / 1080) || 1;
+        const interOf = (a, b) => ({
+          ix: Math.min(a.right, b.right) - Math.max(a.left, b.left),
+          iy: Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top),
+        });
+        // 1) 收候选:最外层 absolute/fixed 文本内容块
+        const raw = [];
+        for (const el of slide.querySelectorAll('*')) {
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+          if (el.tagName === 'svg' || el.tagName === 'SVG' || el.closest('svg')) continue;
+          const cs = getComputedStyle(el);
+          if (cs.position !== 'absolute' && cs.position !== 'fixed') continue;
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.1) continue;
+          // ⚠ 不按 pointer-events 过滤:present 模式下非当前帧整体 `pointer-events:none`,
+          //   会被所有后代继承 —— 审计逐页量时当前帧只有 1 个,其余帧的候选会被全部误杀
+          //   (F-313 调试实证:整页 blocks=[])。装饰层(svg 流线/光晕/动效点)已由上面的
+          //   svg 排除 + 下面的「无真实文字」排除覆盖,无需 pointer-events 这条。
+          if ((el.textContent || '').trim().length < 4) continue;     // 必须自带真实文字
+          const r = el.getBoundingClientRect();
+          if (r.width < 24 || r.height < 16) continue;
+          if (r.width * r.height > slideArea * 0.62) continue;        // 跳过全屏脚手架容器
+          raw.push({ el, r });
+        }
+        // 只留最外层(若某候选的祖先也是候选 → 丢弃,比对顶层块而非其嵌套文字)
+        const blocks = raw.filter((c) =>
+          !raw.some((o) => o.el !== c.el && o.el.contains(c.el)));
+        // own-text 叶子 rect(含自身,若自带文字)
+        const leafRects = (el) => {
+          const out = [];
+          if (hasOwnText(el)) out.push(el.getBoundingClientRect());
+          for (const n of el.querySelectorAll('*')) {
+            if (!hasOwnText(n)) continue;
+            const cs = getComputedStyle(n);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.1) continue;
+            const r = n.getBoundingClientRect();
+            if (r.width > 2 && r.height > 2) out.push(r);
+          }
+          return out;
+        };
+        // 该块是否「画了东西」(有不透明底色 / 背景图 / 边框)——只有会 paint 的块压住
+        // 另一方文字才算真遮挡。透明大容器(.lcol/.rcol 跨全高但内容只占一段)套住别人
+        // 文字不算缺陷,靠这条排除(否则 header 落在透明 .lcol 空白区会误报)。
+        const paints = (el) => {
+          const cs = getComputedStyle(el);
+          const bg = (cs.backgroundColor || '').replace(/\s/g, '');
+          const bgVisible = bg && bg !== 'transparent' && !/,0\)$/.test(bg);   // rgba(...,0) = 透明
+          const bgImg = cs.backgroundImage && cs.backgroundImage !== 'none';
+          const bd = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0)
+            + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+          return !!(bgVisible || bgImg || bd > 0);
+        };
+        const findings = [];
+        const seen = new Set();
+        for (let i = 0; i < blocks.length; i++) {
+          for (let j = i + 1; j < blocks.length; j++) {
+            const A = blocks[i], B = blocks[j];
+            if (A.el.closest('[data-allow-overlap]') || B.el.closest('[data-allow-overlap]')) continue;
+            const o = interOf(A.r, B.r);
+            if (o.ix <= 8 || o.iy <= 8) continue;                    // 需真二维交叠
+            // 确认真遮挡:一方「会 paint」的盒子压住了另一方的文字叶子
+            const aCoversB = paints(A.el) && leafRects(B.el).some((l) => { const t = interOf(l, A.r); return t.ix > 4 && t.iy > 4; });
+            const bCoversA = paints(B.el) && leafRects(A.el).some((l) => { const t = interOf(l, B.r); return t.ix > 4 && t.iy > 4; });
+            if (!aCoversB && !bCoversA) continue;                    // 没有「不透明盒压文字」→ 跳过
+            const aSel = shortSel(A.el), bSel = shortSel(B.el);
+            const key = `${slide_idx}::${aSel}::${bSel}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            findings.push({
+              rule: 'R-VIS-ABS-OVERLAP', severity: 'warn', slide_idx,
+              a_sel: aSel, b_sel: bSel,
+              overlap_x: Math.round(o.ix / scale), overlap_y: Math.round(o.iy / scale),
+              message:
+                `slide ${slide_idx} · 两个独立绝对定位内容块在画面上相互重叠:\`${aSel}\` 与 \`${bSel}\` `
+                + `交叠 ${Math.round(o.ix / scale)}×${Math.round(o.iy / scale)}px,且一方文字压进了另一方的盒子(文字叠文字 / 文字压框)。`
+                + 'R-OVERLAP 只查 framework 容器内的流式同级块(跳过 absolute)、R-VIS-BAND-COLLIDE 只查 .stage/.grid 等 host 内带压正文 —— '
+                + '都漏了 raw/自定义页里两个各自 `position:absolute` 的块直接叠这一类(本规则补盲)。'
+                + 'Fix: 改其一的 top / 缩高 / 换位,或收紧内容别撑高越界,让两块包围盒不再相交;'
+                + '确属有意叠放(浮层)→ 给其一加 `data-allow-overlap`。',
+            });
+            if (findings.length >= 6) return findings;
+          }
+        }
         return findings;
       },
     },

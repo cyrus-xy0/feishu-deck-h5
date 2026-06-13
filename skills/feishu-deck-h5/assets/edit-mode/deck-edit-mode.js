@@ -787,7 +787,14 @@
         const writable = await fileHandle.createWritable();
         await writable.write(html);
         await writable.close();
-        showToast('✓ Saved to ' + fileHandle.name, 1200);
+        // F-315: these edits live ONLY in index.html. deck.json (the source of
+        // truth) is unchanged, so an AI edit / re-render would regenerate
+        // index.html and wipe them. render-deck.py & deck-cli now REFUSE to do
+        // that (they detect the un-synced edit via the fs-render-sig stamp this
+        // save deliberately leaves stale), but the clean path is to fold the
+        // edits back: `sync-index-to-deck.py index.html deck.json`. Remind the user.
+        showToast('✓ 已保存到 ' + fileHandle.name +
+                  ' — 改动只在 index.html;AI 改其他页 / 重渲染前请先 sync 回 deck.json', 4200);
         updateSaveButton();
         return;
       } catch (err) {

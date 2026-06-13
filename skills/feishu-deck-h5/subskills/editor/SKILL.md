@@ -71,6 +71,19 @@ Designer + Renderer instead).
   exists because a real session paid for its absence. `set-page` /
   `set --from-file` is the sanctioned write path for fragment payloads.
 
+  **Un-synced browser edits — the clobber guard (F-315, Option A)**: if someone
+  edited this deck in the browser edit-mode (`e` + ⌘S — writes `index.html` only,
+  never `deck.json`), `deck-cli` / `render` / `import-html-slide` detect it (via the
+  `fs-render-sig` stamp) before they touch `deck.json`/`index.html`, and act
+  **auto-sync-if-lossless, else refuse**:
+  - **raw-slide edits** (lossless) → silently **auto-synced** into `deck.json`
+    first, then your command/render proceeds — no action needed, both edits survive.
+  - **canvas / schema / baked / chrome edits** (lossy or unfoldable) → **refuse**
+    (deck-cli exit 6, render exit 8): handle manually (`sync-index-to-deck.py`,
+    re-apply in `deck.json`) or `--force` to DISCARD. Canvas (PPTX-import) decks
+    hit this — prefer editing canvas content in `deck.json`, not the browser.
+  See `references/round-trip-integrity.md` § "Automatic clobber guard".
+
 - **`EDIT` (manual scope)**: when you DO know the page numbers, `--scope N`
   (1-based, e.g. `--scope 3,5`) gives the same scoped render without the
   sidecar diff — it refreshes only those pages in the making-of and skips the

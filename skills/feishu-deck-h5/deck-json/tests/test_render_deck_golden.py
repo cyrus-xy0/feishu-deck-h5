@@ -34,6 +34,10 @@ def _normalize(html: str) -> str:
     # by the edit-mode cross-deck-overwrite guard — non-deterministic, so pin it
     # to a stable token, same as the path above.
     html = re.sub(r'data-deck-id="dk-[a-z0-9]+"', 'data-deck-id="DECKID"', html)
+    # F-315: fs-render-sig is a content hash stamped per render (deterministic, but
+    # non-authored metadata like deck_id) — strip it so the snapshot stays focused
+    # on generated markup and need not be regenerated for the sig.
+    html = re.sub(r'\s*<meta name="fs-render-sig" content="[^"]*">', '', html)
     return html
 
 

@@ -1142,7 +1142,12 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if info["accent"]:
             entry["accent"] = info["accent"]
         if info["decor"]:
-            entry["decor"] = [info["decor"]]
+            # F-308-fix (2026-06-13): data-decor is a space-separated token LIST
+            # (e.g. "mix-glow grain" = two decors). Wrapping the whole string in a
+            # 1-elem array → decor:["mix-glow grain"], an invalid single enum value
+            # that fails validate-deck.py --strict and rolls the whole lift back.
+            # Split on whitespace so each token is its own array element.
+            entry["decor"] = info["decor"].split()
         deck["slides"].append(entry)
         appended += 1
         cp = report.get("input_copied", [])

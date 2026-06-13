@@ -41,6 +41,47 @@ the delivered HTML — it doesn't know about `deck.json`, so it can't
 catch this drift on its own. **The deck author owns this check, before
 delivery.**
 
+### Automatic clobber guard (F-315) — enforced, not just advisory
+
+The "author owns this check" rule above used to be honor-system: nothing
+stopped an AI from re-rendering over un-synced browser edits, so a colleague's
+edit-mode (`e` + ⌘S) changes — which land in `index.html` ONLY — were silently
+destroyed by the next render. That is now **enforced at the toolchain**:
+
+- `render-deck.py` stamps a self-integrity signature into every `index.html`
+  (`<meta name="fs-render-sig">` — a hash of the canonical content, layout-agnostic,
+  so it works for canvas / raw / schema alike). Any post-render external edit
+  (edit-mode ⌘S re-serialises the DOM; a hand-patch changes bytes) makes the file
+  no longer match its sig.
+- Before **render** overwrites `index.html`, before **`deck-cli`** mutates
+  `deck.json`, and before **`import-html-slide`** inserts a page, the shared
+  resolver (`_index_sig.resolve_clobber`) decides what to do when the sibling
+  `index.html` is "edited" (fails its sig) AND `deck.json` is not newer than it.
+  It classifies the drift via `sync --check-drift` and acts **auto-sync-if-lossless,
+  else refuse (Option A)**:
+  - **No un-synced edit** → proceed (fast path; no subprocess).
+  - **All-lossless edits** (raw `data.html` / `custom_css` / order / hidden / notes)
+    → **auto-sync**: fold them into `deck.json` FIRST, then carry on (the command's
+    edit / the render then layers on top — both survive). You don't lift a finger.
+  - **Lossy or unfoldable** (a **canvas** slide edited; a **baked** DOM; or an edit
+    in chrome/`<head>`/a **schema** slide that sync can't fold losslessly) → **refuse**
+    (render exits `8`, deck-cli exits `6`) and tell you to handle it manually.
+    `--force` overrides and DISCARDS the un-synced edits.
+- The guard also RELEASES once `deck.json` is genuinely newer (you synced/edited it).
+- A freshly rendered (unedited) `index.html` is mtime-aligned to `deck.json`, so
+  the normal `set-page → render` loop never trips the guard.
+
+So for the common case (raw slides) you no longer even have to sync — it happens
+automatically. Only canvas/schema/baked edits stop and ask. Read-only triage:
+`sync-index-to-deck.py --check-drift index.html deck.json`
+(exit 0 = clean · 10 = un-synced, all lossless · 11 = un-synced, some lossy).
+
+> Why canvas/schema refuse instead of auto-syncing: `sync` round-trips **raw**
+> slides losslessly, but **canvas** (PPTX-import) reverse-mapping is non-idempotent
+> (geometry / multi-run text) and **schema** slides only convert with `--force`
+> (lossy schema→raw). Auto-folding those would corrupt the source, so the guard
+> stops and lets you decide — prefer re-applying the edit in `deck.json` directly.
+
 ### Detection + recovery
 
 The skill ships `deck-json/sync-index-to-deck.py` for both detection
