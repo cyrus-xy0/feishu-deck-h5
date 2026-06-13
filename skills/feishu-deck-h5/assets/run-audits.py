@@ -1090,6 +1090,23 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
                 page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000)
             except Exception:
                 pass
+            # Await <img> decode (bounded). A still-loading <img> contributes its
+            # intrinsic (natural) height to layout, so a `height:100%` image inside
+            # an overflow:hidden media box can transiently measure FAR taller than
+            # its container → false R-VIS-CARD-OVERFLOW (content-clip). Decoding makes
+            # every image layout-definite before geometry is measured. `img.complete`
+            # short-circuits the already-loaded common case to a no-op (zero baseline
+            # drift); the 2s race caps a slow/broken asset so it can't hang the gate.
+            try:
+                page.evaluate(
+                    "() => Promise.race(["
+                    "Promise.all([...document.images].map(i => "
+                    "(i.complete && i.naturalWidth) ? Promise.resolve() "
+                    ": (i.decode ? i.decode().catch(() => {}) : Promise.resolve()))),"
+                    "new Promise(r => setTimeout(r, 2000))])"
+                )
+            except Exception:
+                pass
             page.wait_for_timeout(settle_ms)  # 让 scale-to-fit / 布局稳定
             # ── 把链接的【框架 CSS】源文本注入成 <style data-source="framework"> ──
             # R-CSSVAR 要读"所有 CSS 源文本"判定 var(--x) 定义/引用,而 file:// 下外链

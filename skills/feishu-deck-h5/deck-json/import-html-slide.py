@@ -20,9 +20,21 @@ Interactive flow:
   4. Pick position (numeric slide index, end, or after-key).
   5. Apply + (mode A) re-render.
 
+By default the importer also:
+  • copies every LOCAL asset a slide references (img / iframe / video / url(),
+    one level of iframe-body recursion) into `assets/imported/<src>/…` and
+    rewrites the refs, so a slide pulled out of another deck doesn't 404; and
+  • marks each imported slide `lifted:true` (it IS verbatim from another deck),
+    so the validator warns — not fails — on that deck's off-ladder font sizes.
+
 Flags:
-  --strict    Any compliance issue → abort, no prompt (default: prompt).
-  --yes       Skip prompts (insert anyway, append at end).
+  --strict           Any compliance issue → abort, no prompt (default: prompt).
+  --yes              Skip prompts (insert anyway, append at end).
+  --key KEY          Import only the slide-frame(s) with this data-slide-key —
+                     pull ONE page out of a multi-slide montage.
+  --index N          Import only the 1-based N-th slide-frame of each source.
+  --no-lifted        Don't mark imported slides lifted (face the full font gate).
+  --no-copy-assets   Don't copy/rewrite local assets (leave refs as-authored).
 
 stdlib only. Python 3.11+.
 """
@@ -254,6 +266,119 @@ def data_layout_in(frag: str) -> str | None:
     return m.group(1) if m else None
 
 
+# ──────────────────────────────────────────────────────── asset copy + rewrite
+# Mirror of lift-slides.py's _ASSET_REF_PATTERNS / _is_local_asset_ref (kept local
+# to avoid importing across a hyphenated filename). SAME scanner the F-76 lift
+# asset-copy fix standardized on, so url() / <img> / <iframe> / <video> / <source>
+# refs all get carried — not just url(). An imported slide otherwise lands with
+# refs relative to the SOURCE file (e.g. `tongdianjuli/input/x.jpeg`) that resolve
+# to nothing under the target deck → silent 404s. We copy them in + rewrite.
+_ASSET_REF_PATTERNS = (
+    re.compile(r'''<iframe\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''<img\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''<source\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''<video\b[^>]*?\b(?:src|poster)\s*=\s*['"]([^'"]+)['"]''', re.I),
+    re.compile(r'''url\(\s*['"]?([^'")]+?)['"]?\s*\)''', re.I),
+)
+
+
+def _is_local_asset_ref(url: str) -> bool:
+    """True for refs to resolve against the source dir; False for self-contained
+    (data:) / external (http) / in-page (#) refs."""
+    u = (url or "").strip()
+    if not u:
+        return False
+    low = u.lower()
+    return not low.startswith(("data:", "http://", "https://", "//", "mailto:",
+                               "tel:", "javascript:", "blob:", "#", "about:"))
+
+
+def _strip_dotslash(u: str) -> str:
+    while u.startswith("./"):
+        u = u[2:]
+    return u
+
+
+def _slug(s: str) -> str:
+    s = re.sub(r'\.[A-Za-z0-9]+$', '', s)                 # drop extension
+    s = re.sub(r'[^\w-]+', '-', s).strip('-').lower()     # \w keeps CJK; spaces/dots → -
+    return s or "src"
+
+
+def _scan_local_refs(text: str) -> list[str]:
+    """Distinct local asset refs in `text` (?query/#hash stripped), doc order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for pat in _ASSET_REF_PATTERNS:
+        for m in pat.finditer(text):
+            base = m.group(1).strip().split("?", 1)[0].split("#", 1)[0]
+            if _is_local_asset_ref(base) and base not in seen:
+                seen.add(base)
+                out.append(base)
+    return out
+
+
+def _rewrite_refs(text: str, mapping: dict[str, str]) -> str:
+    """Replace each mapped ref (the regex capture) with its new path, in place,
+    so ?query / #hash suffixes survive."""
+    def make_repl(_pat):
+        def repl(m):
+            whole = m.group(0)
+            u = m.group(1).strip()
+            base = u.split("?", 1)[0].split("#", 1)[0]
+            if base in mapping:
+                return whole.replace(u, mapping[base] + u[len(base):])
+            return whole
+        return repl
+    for pat in _ASSET_REF_PATTERNS:
+        text = pat.sub(make_repl(pat), text)
+    return text
+
+
+def copy_and_rewrite_assets(frag: str, src_dir: Path, deck_dir: Path,
+                            src_stem: str) -> tuple[str, list[str], list[str]]:
+    """Copy every LOCAL asset a slide references into the target deck under
+    `assets/imported/<src-slug>/…` (sub-paths preserved) and rewrite the refs to
+    match. One-level recursion: an iframe/.html body ALSO gets its own local refs
+    copied alongside it (the phone-mockup case), left relative so they still
+    resolve. Returns (new_frag, copied_rel_paths, missing_refs)."""
+    ns = f"assets/imported/{_slug(src_stem)}"
+    copied: list[str] = []
+    missing: list[str] = []
+    mapping: dict[str, str] = {}
+    deck_root = deck_dir.resolve()
+    for ref in _scan_local_refs(frag):
+        src_path = (src_dir / _strip_dotslash(ref)).resolve()
+        if not src_path.is_file():
+            missing.append(ref)
+            continue
+        dest_rel = f"{ns}/{_strip_dotslash(ref)}"
+        dest_path = deck_dir / dest_rel
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dest_path)
+        mapping[ref] = dest_rel
+        copied.append(dest_rel)
+        # one-level recursion for an iframe/.html body's own assets
+        if src_path.suffix.lower() in (".html", ".htm"):
+            try:
+                inner = src_path.read_text(encoding="utf-8")
+            except OSError:
+                inner = ""
+            for r2 in _scan_local_refs(inner):
+                s2 = (src_path.parent / _strip_dotslash(r2)).resolve()
+                if not s2.is_file():
+                    continue
+                d2 = dest_path.parent / _strip_dotslash(r2)
+                try:
+                    d2.resolve().relative_to(deck_root)        # never write outside deck
+                except ValueError:
+                    continue
+                d2.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(s2, d2)
+                copied.append(str(d2.relative_to(deck_dir)))
+    return _rewrite_refs(frag, mapping), copied, missing
+
+
 # ──────────────────────────────────────────────────────── validate via validate.py
 
 SHELL_TEMPLATE = """<!doctype html>
@@ -456,7 +581,8 @@ def _renumber_text_ids(html: str, new_slide_no: int) -> str:
     return out
 
 
-def insert_into_json(deck_path: Path, fragments: list[str], position: int) -> None:
+def insert_into_json(deck_path: Path, fragments: list[str], position: int,
+                     lifted: bool = True) -> None:
     deck = json.loads(deck_path.read_text(encoding="utf-8"))
     if not isinstance(deck.get("slides"), list):
         raise SystemExit(f"{deck_path.name}: malformed deck.json — missing/invalid "
@@ -493,6 +619,13 @@ def insert_into_json(deck_path: Path, fragments: list[str], position: int) -> No
             new_slide["decor"] = attrs["decor"].split()
         if attrs.get("screen-label"):
             new_slide["screen_label"] = attrs["screen-label"]
+        # An imported HTML slide is verbatim from ANOTHER deck → mark lifted so the
+        # validator downgrades that deck's font-tier choices (off-ladder sizes,
+        # custom header position …) to warnings instead of failing the gate on
+        # content the user explicitly chose to bring in as-is. `--no-lifted` opts
+        # out when the user wants the slide treated as native + fully re-gated.
+        if lifted:
+            new_slide["lifted"] = True
         new_slides.append(new_slide)
 
     # Backup before write
@@ -585,6 +718,18 @@ def main(argv=None) -> int:
                     help="Any compliance issue → abort (default: prompt per slide).")
     ap.add_argument("--yes", action="store_true",
                     help="Skip prompts. Insert violations as-is. Append at end.")
+    ap.add_argument("--key", default=None,
+                    help="Only import the slide-frame(s) with this data-slide-key "
+                         "(use to pull ONE page out of a multi-slide montage).")
+    ap.add_argument("--index", type=int, default=None,
+                    help="Only import the slide-frame at this 1-based position "
+                         "within each source file.")
+    ap.add_argument("--no-lifted", action="store_true",
+                    help="Do NOT mark imported slides lifted (treat as native — "
+                         "they then face the full font-tier gate, not warnings).")
+    ap.add_argument("--no-copy-assets", action="store_true",
+                    help="Do NOT copy + rewrite the slide's local assets into the "
+                         "target deck (leave refs as-authored).")
     args = ap.parse_args(argv)
 
     # Resolve target
@@ -604,33 +749,65 @@ def main(argv=None) -> int:
                 raise SystemExit(f"source not found: {s}")
     _info(f"sources: {len(sources)} file(s)")
 
-    # Extract + validate each slide-frame from each source
-    accepted: list[str] = []
+    # Extract + validate each slide-frame from each source. Track the source dir
+    # per accepted frag so assets resolve against the right directory.
+    accepted: list[tuple[str, Path]] = []          # (frag, source_path)
     for src in sources:
         text = src.read_text(encoding="utf-8")
         frags = extract_slide_frames(text)
         if not frags:
             _warn(f"{src.name}: no <div class='slide-frame'> found, skipping")
             continue
-        _info(f"{src.name}: {len(frags)} slide-frame(s) found")
-        for i, frag in enumerate(frags):
+        # --index / --key narrow a montage down to the one page wanted. Indices are
+        # paired so the per-frame log still reflects the original 1-based position.
+        indexed = list(enumerate(frags))
+        if args.index is not None:
+            indexed = [t for t in indexed if t[0] == args.index - 1]
+        if args.key is not None:
+            indexed = [t for t in indexed if slide_key_in(t[1]) == args.key]
+        if not indexed:
+            _warn(f"{src.name}: no slide-frame matched "
+                  f"{'--index ' + str(args.index) if args.index else ''}"
+                  f"{' --key ' + args.key if args.key else ''}; skipping")
+            continue
+        _info(f"{src.name}: {len(frags)} slide-frame(s) found, "
+              f"{len(indexed)} selected")
+        for i, frag in indexed:
             ok, issues = validate_slide_fragment(frag, strict=args.strict)
             verdict = resolve_compliance(src.name, i, frag, issues,
                                           strict=args.strict, auto_yes=args.yes)
             if verdict == "insert":
                 if ok:
-                    _ok(f"{src.name}[{i}] '{slide_key_in(frag) or '?'}' clean, queued")
+                    _ok(f"{src.name}[{i+1}] '{slide_key_in(frag) or '?'}' clean, queued")
                 else:
-                    _info(f"{src.name}[{i}] inserted with {len(issues)} known issues")
-                accepted.append(frag)
+                    _info(f"{src.name}[{i+1}] inserted with {len(issues)} known issues")
+                accepted.append((frag, src))
             elif verdict == "skip":
-                _info(f"{src.name}[{i}] skipped")
+                _info(f"{src.name}[{i+1}] skipped")
             else:                                  # abort
                 raise SystemExit("aborted on compliance issue (--strict)")
 
     if not accepted:
         _warn("no slides queued for import. nothing to do.")
         return 0
+
+    # Copy + rewrite each accepted slide's local assets into the target deck so
+    # img/iframe/url() refs (authored relative to the SOURCE file) keep resolving.
+    deck_dir = target.parent
+    if not args.no_copy_assets:
+        rewritten: list[tuple[str, Path]] = []
+        for frag, src in accepted:
+            new_frag, copied, missing = copy_and_rewrite_assets(
+                frag, src.parent, deck_dir, src.stem)
+            if copied:
+                _ok(f"{src.name}: copied {len(copied)} asset(s) → "
+                    f"assets/imported/{_slug(src.stem)}/")
+            for mref in missing:
+                _warn(f"{src.name}: asset ref not found on disk, left as-is: {mref}")
+            rewritten.append((new_frag, src))
+        accepted = rewritten
+
+    accepted_frags = [f for f, _ in accepted]
 
     # Pick position
     if mode == "A":
@@ -650,7 +827,8 @@ def main(argv=None) -> int:
 
     # Apply
     if mode == "A":
-        insert_into_json(target, accepted, position)
+        insert_into_json(target, accepted_frags, position,
+                         lifted=not args.no_lifted)
         rc = re_render(target)
         if rc != 0:
             _err("import mutated deck.json but the re-render FAILED — the deck "
@@ -658,7 +836,7 @@ def main(argv=None) -> int:
                  "NOT reporting success.")
             return rc
     else:
-        insert_into_html(target, accepted, position)
+        insert_into_html(target, accepted_frags, position)
 
     _ok("done")
     return 0

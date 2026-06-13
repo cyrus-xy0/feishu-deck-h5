@@ -328,6 +328,13 @@ For an existing deck:
   `deck-json/locate-slide.py` for source/target lookup and
   `render-deck.py --renumber` on target DeckJSON when labels need to match true
   frame order.
+- To see a deck's REAL page map (never `grep` a rendered HTML for `data-slide-key`
+  — it counts CSS-rule + JS-template hits, not slides), run
+  `deck-json/deck-map.py <index.html | deck.json>`: it reads only the
+  `<div class="slide-frame">` blocks (or `slides[]`) and prints
+  `idx · key · layout · screen-label · title` (`--json`, `--key`, `--index`
+  filters). Use it to identify which page a `#N` / "last page" request means
+  before editing a multi-slide montage.
 
 ## Cloud Knowledge / Asset Base
 
