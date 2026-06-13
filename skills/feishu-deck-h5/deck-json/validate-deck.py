@@ -490,6 +490,11 @@ def main(argv=None) -> int:
     ap.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA, help="schema file (default: deck-schema.json beside this script)")
     ap.add_argument("--strict", action="store_true", help="promote warnings to errors")
     ap.add_argument("--no-business-rules", action="store_true", help="skip cross-field business rules")
+    ap.add_argument("--json", action="store_true",
+                    help="emit findings as JSON {ok, errors, warnings, soft_warnings}, "
+                         "each item {path, msg, slide, key} (slide = 0-based index parsed "
+                         "from the instance path, key = that slide's key). For scoped / "
+                         "programmatic gating (F-320: deck-cli's scope-aware pre-write lint).")
     args = ap.parse_args(argv)
 
     try:
@@ -528,6 +533,33 @@ def main(argv=None) -> int:
         i: (s.get("key") if isinstance(s, dict) else None)
         for i, s in enumerate(slides)
     } if isinstance(slides, list) else {}
+
+    if args.json:
+        # F-320 · machine-readable findings for deck-cli's scope-aware pre-write
+        # lint. `errors` is the EFFECTIVE blocking set (under --strict the warning
+        # promotion at the end of check_business_rules has already extended it);
+        # `soft_warnings` are advisory and never block. Each item carries the
+        # 0-based slide index parsed from its instance path + that slide's key, so
+        # a caller can demote findings on pages its edit did not touch.
+        import re as _re
+
+        def _pack(items):
+            out = []
+            for p, m in items:
+                _mi = _re.search(r"slides\[(\d+)\]", str(p))
+                si = int(_mi.group(1)) if _mi else None
+                out.append({"path": str(p), "msg": m, "slide": si,
+                            "key": slide_keys.get(si) if si is not None else None})
+            return out
+
+        print(json.dumps({
+            "ok": result.ok,
+            "errors": _pack(result.errors),
+            "warnings": _pack(result.warnings),
+            "soft_warnings": _pack(result.soft_warnings),
+        }, ensure_ascii=False))
+        return 0 if result.ok else 1
+
     print(f"DeckJSON validation · {args.deck.name}")
     print(f"  deck: {title}")
     print(f"  slides: {n_slides}")

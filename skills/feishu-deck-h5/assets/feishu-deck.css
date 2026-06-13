@@ -224,6 +224,24 @@ body {
 .deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="canvas"]) {
   background: #000 var(--fs-asset-content-bg) center/cover no-repeat;
 }
+/* F-318 · present mode = SINGLE ambient-bg layer (the slide-frame, painted cover
+   above so it fills the letterbox). The slide itself goes transparent so the
+   frame's bg shows through SEAMLESSLY. ROOT CAUSE of the recurring「顶部有条边 /
+   颜色和背景不一样」report: F-307 made BOTH the frame AND the slide paint
+   content-bg, but at DIFFERENT cover crops — the frame crops to the VIEWPORT
+   aspect (e.g. 16:10), the slide to its fixed 16:9 canvas. On any non-16:9
+   fullscreen the letterbox appears and the two crops disagree at the boundary →
+   a visible horizontal colour seam (worse the bigger the screen). Collapsing to
+   one layer (frame paints, slide transparent) removes the seam for EVERY layout,
+   every viewport — no per-deck patch. Scroll/browse mode is unaffected (the
+   slide keeps its own card bg there — this rule is data-mode="present" only).
+   A slide that genuinely needs a bespoke present-mode full-bleed background sets
+   it on `.slide-frame` via custom_css (rare); setting it on `.slide` no longer
+   shows in present mode by design. */
+.deck[data-mode="present"] .slide-frame > .slide {
+  background-image: none !important;
+  background-color: transparent !important;
+}
 .deck[data-mode="present"] .slide-frame.is-current {
   opacity: 1; pointer-events: auto;
   content-visibility: visible;

@@ -172,10 +172,79 @@ def backup_path(deck_path: Path, command: str) -> Path:
     return cand
 
 
+def _edit_scope_keys(args, updated: dict):
+    """F-320 · the set of slide KEYS this edit could legitimately affect, for the
+    scope-aware pre-write lint. Return:
+      · None      → opt OUT: whole-deck gate (unchanged default for commands that
+                    haven't been scoped — every other command).
+      · set()     → a DECK-LEVEL edit (deck meta / a top-level scalar): no per-slide
+                    finding is this edit's fault, so only deck-level / schema errors
+                    block; every pre-existing per-page error is demoted.
+      · {keys…}   → scope the gate to those page(s).
+    Conservative: only the single-slide-target / deck-scalar commands opt in; the
+    rest (reorder / delete / move-key / clone / paste / hide …) keep the whole-deck
+    gate, so this change can never WEAKEN a gate it doesn't understand."""
+    cmd = getattr(args, "cmd", None)
+    if cmd in ("set-page", "set-accent", "set-decor", "set-notes",
+               "set-variant", "insert") and getattr(args, "key", None):
+        return {args.key}
+    if cmd == "set":
+        path = getattr(args, "path", "") or ""
+        if not path.startswith("slides"):
+            return set()                        # deck-level scalar (deck.title, magic_move …)
+        # `set` indexes arrays with DOTS (slides.5.accent); also tolerate brackets.
+        m = re.match(r"slides[.\[](\d+)", path)
+        if m:
+            i = int(m.group(1))
+            slides = updated.get("slides") or []
+            if 0 <= i < len(slides) and slides[i].get("key"):
+                return {slides[i]["key"]}
+        return None                             # touches slides, unattributable → whole-deck gate
+    return None
+
+
+def _scope_demote(deck_path: Path, scope_keys, command: str) -> bool:
+    """F-320 · the post-write whole-deck validation FAILED. Decide whether the
+    failure is confined to PAGES THIS EDIT DID NOT TOUCH (→ True: KEEP the write,
+    print an advisory) or hits an in-scope page / a deck-level / schema rule (→
+    False: print the blocking error(s); the caller rolls back). Re-validates with
+    `--json` for per-page attribution; on ANY parse failure returns False — the
+    safe fallback is the original whole-deck rollback. `scope_keys` empty = a
+    deck-level edit (only deck-level / schema errors block)."""
+    try:
+        jr = subprocess.run(
+            [sys.executable, str(VALIDATE_DECK), str(deck_path), "--strict", "--json"],
+            capture_output=True, text=True)
+        errs = json.loads(jr.stdout).get("errors", [])
+    except Exception:
+        return False
+    def _off(e):   # a per-page error on a page OUTSIDE this edit's scope
+        return (e.get("slide") is not None and e.get("key") is not None
+                and e.get("key") not in scope_keys)
+    off_scope = [e for e in errs if _off(e)]
+    in_scope = [e for e in errs if not _off(e)]
+    if in_scope:
+        print(f"deck-cli: ✗ post-{command} validation — {len(in_scope)} error(s) on "
+              f"this edit's page(s) / deck-level:", file=sys.stderr)
+        for e in in_scope[:8]:
+            loc = f"slide '{e['key']}'" if e.get("key") else "deck-level"
+            print(f"    ✗ {loc}: {(e.get('msg') or '')[:100]}", file=sys.stderr)
+        return False
+    print(f"deck-cli: ⓘ {len(off_scope)} PRE-EXISTING error(s) on page(s) this "
+          f"'{command}' did NOT touch — demoted, write KEPT (scope: "
+          f"{', '.join(sorted(scope_keys)) if scope_keys else 'deck-level only'}). "
+          f"They predate this edit; run `lint` or render --final for the whole-deck "
+          f"gate.", file=sys.stderr)
+    for e in off_scope[:6]:
+        print(f"    · slide '{e.get('key')}': {(e.get('msg') or '')[:90]}", file=sys.stderr)
+    return True
+
+
 def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
                                 no_backup: bool = False,
                                 expected_mtime: float | None = None,
-                                force: bool = False) -> bool:
+                                force: bool = False,
+                                scope_keys=None) -> bool:
     """Write deck back to disk, re-validate. On schema fail: rollback, return False.
 
     Optimistic lock (F-48): if `expected_mtime` is given and the file's current
@@ -224,10 +293,20 @@ def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
         capture_output=True, text=True,
     )
     if rc.returncode != 0:
-        # Schema fail — roll back
-        print(f"deck-cli: post-{command} schema validation FAILED. Rolling back.",
+        # F-320 · scope-aware pre-write lint. A SCOPED edit (scope_keys is not None)
+        # must not roll back because of a PRE-EXISTING error on a page it did not
+        # touch (another session's WIP, a validator-rule drift) — only an error on
+        # an in-scope page OR a deck-level / schema rule should. `scope_keys is None`
+        # → the unchanged whole-deck rollback (commands that didn't opt in).
+        if scope_keys is not None and _scope_demote(deck_path, scope_keys, command):
+            if bak:
+                print(f"deck-cli: backup at {bak.name}")
+            return True
+        # Schema / in-scope fail — roll back.
+        print(f"deck-cli: post-{command} validation FAILED. Rolling back.",
               file=sys.stderr)
-        print(rc.stdout, file=sys.stderr)
+        if scope_keys is None:
+            print(rc.stdout, file=sys.stderr)   # scoped path already printed the focused errors
         if bak and bak.exists():
             shutil.copy2(bak, deck_path)
             print(f"deck-cli: restored from {bak.name}", file=sys.stderr)
@@ -1325,7 +1404,8 @@ def main(argv=None) -> int:
 
     ok = write_deck_with_validation(args.deck, updated, args.cmd, args.no_backup,
                                     expected_mtime=deck_mtime,
-                                    force=getattr(args, "force", False))
+                                    force=getattr(args, "force", False),
+                                    scope_keys=_edit_scope_keys(args, updated))
     return 0 if ok else 3
 
 
