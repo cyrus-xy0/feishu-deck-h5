@@ -295,6 +295,14 @@ R-VIS-SHORT-LABEL-FLOOR:
   fix:
     - "把短标签提到至少 18px"
 
+R-VIS-SVG-TEXT-FLOOR:
+  concern:     "A · 客户看不见"
+  symptom:     "SVG 图(架构图/流程图)里 8+ 字的文字, 实效渲染后小于 18px"
+  consequence: "以 SVG 为主内容的页, 字号闸门全绿但投影上只有 13-15px, 观众读不清 (实效像素 = font-size × 缩放)"
+  fix:
+    - "放大 SVG 内文字 / 缩小 viewBox, 让实效渲染 ≥18px"
+    - "≤7 字短轴标归 R-VIS-SHORT-LABEL-FLOOR"
+
 R-VIS-HERO-FLOOR:
   concern:     "A · 客户看不见"
   symptom:     "这一页主角元素 (大数字 / 封面大标题) 不够大"
@@ -528,13 +536,14 @@ R-SELF-CONTAINED:
   fix:
     - "把每页定制样式放进该页的 custom_css"
 
-R-RAW-LOOKS-SCHEMA:
-  concern:     "C · 复用时会打架"
-  symptom:     "这页是手搓的 (raw), 但内容其实就是一排标准卡片 (图标+标题+正文)"
-  consequence: "手搓标准形状 = 多花功夫 / 更容易出格 / 更难改, 没有设计增益 (建议性)"
+R-LAYOUT-DEPRECATED:
+  concern:     "G · 版式已冻结 (raw-first)"
+  symptom:     "这页用了已冻结的正文 schema 版式 (content / stats / flow / chart / table / arch-stack / image-text / logo-wall, 含全部 variant)"
+  consequence: "正文 schema 版式已冻结 (F-305 «raw unless ceremonial»): 仍为存量 deck 渲染, 但新页应走 layout:\"raw\" —— 模型自由排版更丰富、各页更不同 (建议性, 永不阻塞)"
   fix:
-    - "改用标准卡片版式 (content/3up 或 content/blocks), 更省更稳更一致"
-    - "若这页确有定制 / 关系 / 叙事的设计实质, 保持 raw 忽略本条即可"
+    - "新页改用 layout:\"raw\" (用框架 token / 组件 / pattern 自由排版)"
+    - "schema 只为【仪式页】(cover/section/agenda/quote/end) 与【机制页】(raw/canvas/iframe-embed/replica) 保留"
+    - "存量页保持现状即可 —— 照常渲染, 不必改 (本条永不阻塞编辑/重渲)"
 
 # ---- D · 放映功能不全 (不影响内容, 影响演示体验) ----
 

@@ -117,14 +117,14 @@ def _inline_framework_js(page, base_dir):
 
 
 def _load_deck_json(base_dir):
-    """Read the sibling deck.json next to index.html (SOURCE-OF-TRUTH for
-    R-RAW-LOOKS-SCHEMA's raw-layout keys). Mirrors validate.py's
-    audit_raw_looks_schema, which reads `Path(path).parent / 'deck.json'`:
-    a raw slide commonly masks itself with a schema-ish data-layout in its
+    """Read the sibling deck.json next to index.html (SOURCE-OF-TRUTH for the
+    true authored `layout` of each slide — R-LAYOUT-DEPRECATED's key→layout map).
+    A raw slide commonly masks itself with a schema-ish data-layout in its
     rendered DOM, so the rendered data-layout can't distinguish raw from real
     schema — the deck.json is authoritative. Returns the parsed dict (injected
-    to window.__DECK_JSON__) or None (no sidecar → rule falls back / skips,
-    advisory never false-positives). Pure file read, no rule logic."""
+    to window.__DECK_JSON__) or None (no sidecar → rule skips, advisory never
+    false-positives). Pure file read, no rule logic.
+    (Until 2026-06-12 this also fed the retired R-RAW-LOOKS-SCHEMA.)"""
     dj = (base_dir / "deck.json").resolve()
     if not dj.is_file():
         return None
@@ -1111,7 +1111,7 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             """)
             page.wait_for_timeout(200)  # 让 present 布局再稳定一次
             # ── 把旁边的 deck.json(若存在)注入 window.__DECK_JSON__ ──
-            # R-RAW-LOOKS-SCHEMA 的 SOURCE-OF-TRUTH 是 deck.json 的 layout:"raw" key
+            # R-LAYOUT-DEPRECATED 的 SOURCE-OF-TRUTH 是 deck.json 的真 authored layout
             # (渲染后 data-layout 会伪装借框架 CSS,不可信)。纯文件读,不含规则逻辑。
             deck_json = _load_deck_json(html_path.parent)
             page.evaluate("(dj) => { window.__DECK_JSON__ = dj; }", deck_json)

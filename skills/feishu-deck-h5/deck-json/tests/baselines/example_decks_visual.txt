@@ -5,3 +5,4 @@ phase-1c	8	R-FOCAL-CHECK
 phase-1c	8	R-VIS-CANVAS-CENTER
 phase-1c	8	R-VIS-DIM-TEXT
 phase-1c	9	R-VIS-BALANCE
+sample-deck	5	R-VIS-SVG-TEXT-FLOOR

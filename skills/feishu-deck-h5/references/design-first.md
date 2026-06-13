@@ -393,35 +393,27 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
 
 ### Decision rule — 白名单回退判定(raw-first)
 
-**默认 = `layout: "raw"`。** 下表是「能回退 schema 的标准形状」清单 —— 逐页判:这页内容
-**是不是一个纯标准形状**(命中下表某行 **且** 无对位 / 关系 / 叙事 / 隐喻 / 空间 / 动画实质)?
-- **是 → 回退该 schema**(raw 装它纯属过度处理,会被 `R-RAW-LOOKS-SCHEMA` 标);
-- **否 → `layout: "raw"`**(主场)。
+**默认 = `layout: "raw"`。** F-305 «raw unless ceremonial» 之后,schema 回退**只剩仪式页**
+(封面 / 分章 / 目录 / 金句 / 封底)与机制页(`replica` / `canvas` / `iframe-embed`)——
+**正文内容一律 raw**(由模型自由排版,更丰富、各页更不同)。逐页判:这页是不是**仪式页**?
+- **是 → 回退对应仪式 schema**(下表);
+- **否(任何正文页)→ `layout: "raw"`**(主场)。
 
-例外:`chart` / `table` / `logo-wall` / `flow` / `arch-stack` 这类**确定性几何 schema**,
-当页"只是结构 / 数据、无 bespoke 故事"时可主动选 schema(renderer 出确定性图更省更稳)——
-这是你的判断,两边都不算错、不被标。
+> ⚠️ **正文 schema 版式已冻结(F-305)**:`content` / `stats` / `flow` / `chart` / `table` /
+> `arch-stack` / `image-text` / `logo-wall`(含全部 variant)**仍为存量 deck 渲染,但新页别再用**
+> —— 用了会被 `R-LAYOUT-DEPRECATED`(warn_soft,advisory)提醒。从前"确定性几何 schema 更省
+> 更稳"的理由,已让位给"模型自排更丰富、各页更不同":彻底 raw-first。一张纯标准卡片页,
+> 现在也由模型 raw 自排(不再回退 content)。
 
-| 内容形态 | 命中则回退 | 它为何是"纯标准形状" |
+| 内容形态 | 命中则回退 | 它为何是"仪式页" |
 |---|---|---|
 | 单标题 + 发起人 + 日期 | `cover` | Master 封面 |
 | 3-8 章节项的目录 | `agenda` | Pill stack |
 | 大章节号 + 章节标题 | `section` | Chapter divider |
-| **3 个并列要点**(title + 2-3 行 body) | `content/3up` | 最常见 content shape |
-| 1 个 narrative + 1 个 visual | `content/2col` | 文 + 图 |
-| 4 拍叙事(痛/冲突/解/价值)单客户 | `content/story-case` | One-pager 标准 |
-| 4 个 KPI 数字横排 | `stats/row` | KPI dashboard |
-| 1 个 hero 数字 + 解释 | `stats/hero` 或 `big-stat` | 大数字 |
 | 1 句客户原话 + attribution | `quote` | 单句证言 |
-| 全幅照片 + 角落文字 | `image-text` | Cinematic |
-| 2-6 行 × 2-5 列对比矩阵 | `table` | Comparison |
-| 时间轴 4-6 节点 | `flow/timeline` | Chronological |
-| 3-6 顺序流程步骤 | `flow/process` | Sequential |
-| 客户 logo 矩阵 | `logo-wall` | N × M 网格 |
-| 2-5 层架构(应用 / 平台 / AI / 数据) | `arch-stack` | Tech stack |
 | 结尾 slogan / 联系方式 | `end` | Master 封底 |
-| Designer-polished PDF 页保真 | `replica` | 整页贴图 |
-| **以上都不匹配,或有 bespoke 实质** | → `layout: "raw"`(默认主场) | 见下 |
+| Designer-polished PDF 页保真 | `replica` | 整页贴图(机制页,非设计版式) |
+| **以上都不匹配 = 任何正文内容** | → `layout: "raw"`(默认主场) | 见下 |
 
 ### raw 的典型实质(它是默认,不再"仅限")
 
@@ -439,7 +431,7 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
 ### Anti-patterns — 这些该回退 schema / 不是 layout 问题,别拿 raw 硬扛
 
 - ❌ "想标题 18 px 不要 24" — R20 drift,不是设计实质;raw 页也得用 `var(--fs-*)` 四档
-- ❌ "纯并列 4 卡(图标+标题+正文),想用 raw" — 这是纯标准形状,**回退 `content/blocks`**;raw 它 = 过度处理,`R-RAW-LOOKS-SCHEMA` 会标
+- ✅ "纯并列 4 卡(图标+标题+正文)" — **F-305 后:用 `layout:"raw"` 自排**(正文 schema 已冻结,旧的「回退 content/blocks」口径作废);用框架卡片 token / pattern 写,别再选 content schema
 - ❌ "拿不准这页算不算纯标准形状" — raw-first 下**默认 raw 就对**(回退 schema 才要确证);别为了"省"硬塞进不贴合的 schema
 - ❌ "想给每页换不同 accent 颜色" — `data-accent` 属性,不是 layout 改
 

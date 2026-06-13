@@ -375,7 +375,7 @@
         "end",
         "replica", "raw", "canvas"
       ],
-      "description": "14 base layouts (content/stats/flow are multi-variant) + 3 specials (replica/raw/canvas). iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide. canvas = absolutely-positioned structured elements (the PPTX → structured-JSON intermediate; see DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3)."
+      "description": "14 base layouts (content/stats/flow are multi-variant) + 3 specials (replica/raw/canvas). iframe-embed wraps an external HTML page (prototype / live demo / report) as a slide. canvas = absolutely-positioned structured elements (the PPTX → structured-JSON intermediate; see DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3). F-305 «raw unless ceremonial»: every value still RENDERS (legacy decks unaffected), but for NEW pages only the CEREMONIAL set (cover/section/agenda/quote/end) + MECHANISM layouts (raw/canvas/iframe-embed/replica) are recommended; the body-content schemas (content/stats/flow/chart/table/arch-stack/image-text/logo-wall, all variants) are FROZEN — author new body pages as layout:\"raw\" (advisory R-LAYOUT-DEPRECATED nudges any that aren't; never blocks)."
     },
 
     "accent_enum": {

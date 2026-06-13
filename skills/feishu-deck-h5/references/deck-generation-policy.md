@@ -73,24 +73,25 @@ the slide may become `layout: raw`.
 
 ## Layout Choice
 
-Default each page to `layout: "raw"` unless it hits the pure standard-shape
-allowlist below. The common schema set includes cover, agenda, section, content
-variants, quote, stats, big-stat, image-text, table, timeline, process, end, plus
-extra DeckJSON layouts such as `raw`, `replica`, and `iframe-embed`.
+Default each page to `layout: "raw"` unless it is a CEREMONIAL page. Per F-305
+«raw unless ceremonial», schema is kept ONLY for the ceremonial set — cover,
+agenda, section, quote, end — plus the mechanism layouts `raw`, `replica`,
+`canvas`, `iframe-embed`. The body-content schema layouts (content / stats / flow
+/ chart / table / arch-stack / image-text / logo-wall, all variants) are **FROZEN**:
+they still render for legacy decks, but NEW pages must be `layout: "raw"` (the
+model lays them out freely — richer & more distinct). `R-LAYOUT-DEPRECATED`
+(warn_soft · advisory, never blocks) flags a new page that uses a frozen layout.
 
 Pick by content substance, not aesthetics. A page stays **`raw` (the default)**
-unless it is a *pure standard shape* — a page with no bespoke pairing,
-relationship, narrative, metaphor, spatial composition, or motion substance. Only
-then is a schema layout faster, safer, and more editable. (Do not use vague tests
-like "has alignment / hierarchy" to decide — every page has those.)
+unless it is a ceremonial page (above). (Do not use vague tests like "has
+alignment / hierarchy" to decide — every page has those.)
 
 **Single source for the fall-back allowlist.** The canonical "when may a page fall
 back to a schema layout" table lives in `references/design-first.md` →
 *Decision rule — 白名单回退判定*. Use that one table; do not keep a second copy
 here (the two drifting apart is what made the same page type land on raw in one
-run and schema in the next). That table already includes the deterministic-geometry
-schemas (`chart` / `table` / `logo-wall` / `flow` / `arch-stack`), which may be
-chosen when the page is mainly data/structure with no bespoke story. **Anything not
+run and schema in the next). Post-F-305 that table lists ONLY the ceremonial five
+(cover / agenda / section / quote / end) + `replica` (mechanism). **Anything not
 matching a row in that table → `layout: "raw"`.**
 
 Use schema-first only when the user explicitly asks for "schema-first", "安全模式",
@@ -320,9 +321,11 @@ Rules:
   fit, cut/split content or redesign the page instead of shrinking below the
   ladder.
 - Raw work requires the design gate: Q0-Q4 + six-dimensional spec.
-- If a raw page is just a plain N-card parallel list with no bespoke substance,
-  fall back to `content/3up` / `content/blocks`; validator
-  `R-RAW-LOOKS-SCHEMA` warns on this over-processing case.
+- A plain N-card parallel list is ALSO raw now (F-305): author it with framework
+  card tokens / patterns — do NOT fall back to a content schema. The old reverse
+  nudge (`R-RAW-LOOKS-SCHEMA`, "raw card-list → content/blocks") was RETIRED on
+  2026-06-12; its successor `R-LAYOUT-DEPRECATED` nudges the OPPOSITE way (frozen
+  body schema → raw).
 
 ## Path B · Whole-Page Handwritten HTML
 

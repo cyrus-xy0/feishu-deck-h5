@@ -701,8 +701,11 @@
 
   // --------------------------------------------------------------------------
   //  步骤 3 第五批共享常量/工具
-  //  (UI1 / R-VIS-LIFT-STYLE-LOST / R-AUTOBALANCE-PRESENT / R-RAW-LOOKS-SCHEMA /
-  //   audit_structure: R02/R07)
+  //  (UI1 / R-VIS-LIFT-STYLE-LOST / R-AUTOBALANCE-PRESENT / audit_structure: R02/R07)
+  //  注:R-RAW-LOOKS-SCHEMA 已于 2026-06-12 退役(F-305 «raw unless ceremonial»,
+  //  与新增的反向规则 R-LAYOUT-DEPRECATED 立场冲突),其 helper(isIconViewBox /
+  //  RLS_FLOW_SIGNALS / rawKeysFromDeckJson)随之删除;deck.json 真源查询改用
+  //  下方通用的 layoutByKeyFromDeckJson。
   // --------------------------------------------------------------------------
 
   // ── UI1(audit_ui_mocks_are_html)brand / raster / ui-hint 判定(逐字对应
@@ -737,38 +740,35 @@
   // ── R-AUTOBALANCE-PRESENT 指纹(逐字对应 _AUTOBALANCE_SIG)。
   const AUTOBALANCE_SIG = 'function balanceSlide(slide)';
 
-  // ── R-RAW-LOOKS-SCHEMA:icon 方形 viewBox 判定(逐字对应 _is_icon_vb)。
-  const isIconViewBox = (vb) => {
-    const p = (vb || '').trim().split(/\s+/);
-    if (p.length !== 4) return false;
-    const w = parseFloat(p[2]);
-    const h = parseFloat(p[3]);
-    if (!isFinite(w) || !isFinite(h)) return false;
-    return w === h && w > 0 && w <= 64;
-  };
-  // 结构级 flow/relationship 信号(逐字对应 _FLOW_SIGNALS)—— markup 级连接器,
-  // 不含正文里的箭头字形(那种"投入 → 产出"的扁平卡片仍算扁平)。在 slide 源 HTML 上判。
-  const RLS_FLOW_SIGNALS = ['connector', 'data-arrow', 'class="arrow'];
+  // ── F-305 «raw unless ceremonial» — 正文 schema 版式【冻结清单】。schema 只保留
+  //    【仪式页】(cover/section/agenda/quote/end)+【机制页】(raw/canvas/iframe-embed/
+  //    replica);下面这 8 个【正文 schema 版式】(含其全部 variant:content-3up/2col/...
+  //    stats-row/hero/... flow-process/timeline/... 等)已冻结 —— 仍为存量 deck 渲染,但
+  //    新页应走 layout:"raw"(模型自由排版,更丰富、各页更不同)。判据用 deck.json 的
+  //    【真 authored layout】(下方 layoutByKeyFromDeckJson),不用渲染后 data-layout ——
+  //    raw 页常借 data-layout="content-3up" 蹭框架 CSS,那是 raw 主场、绝不算 deprecated。
+  const DEPRECATED_BODY_LAYOUTS = new Set([
+    'content', 'stats', 'flow', 'chart', 'table',
+    'arch-stack', 'image-text', 'logo-wall',
+  ]);
 
-  // ── R-RAW-LOOKS-SCHEMA 的 raw_keys 来源:Python 读 index.html 旁的 deck.json。
-  //    渲染后没有磁盘 deck.json,改从【渲染后 DOM 的真 data-layout】判 raw —— 但原版
-  //    特意说明 raw 页常伪装成 schema-ish data-layout 借框架 CSS,所以 data-layout 不可靠,
-  //    SOURCE-OF-TRUTH = deck.json。运行期 deck.json 由 runner 通过 window.__DECK_JSON__
-  //    注入(若存在);缺则 fall back 到 data-layout="raw"。两者皆缺 → 该帧不参与(安静跳过,
-  //    与原版"无 deck.json 则 skip"同向:advisory 永不误报)。返回 raw slide-key 集合 or null。
-  const rawKeysFromDeckJson = () => {
-    if (typeof window !== 'undefined' && window.__RLS_RAW_KEYS__ !== undefined) {
-      return window.__RLS_RAW_KEYS__;
+  // ── deck.json 的 key → 真 authored layout 映射(R-LAYOUT-DEPRECATED 的 SOURCE-OF-TRUTH)。
+  //    deck.json 里 layout 与 variant 是分开字段,这里只取 base layout 即可判冻结。runner 经
+  //    window.__DECK_JSON__ 注入(若存在);缺(foreign / Path B / lifted standalone)→ null,
+  //    该规则安静跳过(advisory 永不误报)。memoize 到 window.__DECK_LAYOUT_BY_KEY__。
+  const layoutByKeyFromDeckJson = () => {
+    if (typeof window !== 'undefined' && window.__DECK_LAYOUT_BY_KEY__ !== undefined) {
+      return window.__DECK_LAYOUT_BY_KEY__;
     }
     let out = null;
     const dj = (typeof window !== 'undefined' && window.__DECK_JSON__) || null;
     if (dj && Array.isArray(dj.slides)) {
-      out = new Set();
+      out = new Map();
       for (const s of dj.slides) {
-        if (((s.layout || '').trim() === 'raw') && s.key) out.add(s.key);
+        if (s && s.key) out.set(s.key, (s.layout || '').trim());
       }
     }
-    if (typeof window !== 'undefined') window.__RLS_RAW_KEYS__ = out;
+    if (typeof window !== 'undefined') window.__DECK_LAYOUT_BY_KEY__ = out;
     return out;
   };
 
@@ -1030,7 +1030,7 @@
     'R02-R07-STRUCTURE': { coverage: 'universal', signal: 'dom' },
     'R-VIS-LIFT-STYLE-LOST': { coverage: 'raw-only', signal: 'dom', optout: 'lifted raw slide style-preservation, raw by design' },
     'R-AUTOBALANCE-PRESENT': { coverage: 'universal', signal: 'dom' },
-    'R-RAW-LOOKS-SCHEMA': { coverage: 'raw-only', signal: 'dom', optout: 'warns when a raw page should be schema — raw by design' },
+    'R-LAYOUT-DEPRECATED': { coverage: 'schema-only', signal: 'dom', optout: 'fires only on the FROZEN schema body layouts (F-305 «raw unless ceremonial»); raw is the preferred path and is never flagged — the narrowing IS the rule intent, not a coverage gap. Reads true authored layout from window.__DECK_JSON__ (not data-layout, which a raw page may borrow)' },
     'R-OVERFLOW': { coverage: 'universal', signal: 'dom' },
     'R-VIS-CARD-OVERFLOW': { coverage: 'universal', signal: 'dom' },
     'R-VIS-TIER': { coverage: 'partial', signal: 'dom', optout: 'card path keyed on .col/.num then name-free fallback' },
@@ -3188,60 +3188,42 @@
     },
 
     {
-      // R-RAW-LOOKS-SCHEMA · raw-first 反向闸:过度处理的扁平 N 卡片并列。(步骤 3 第五批
-      // 迁自 _validate_audits.py audit_raw_looks_schema)。SOURCE-OF-TRUTH = deck.json 的
-      // layout:"raw" key(渲染后 data-layout 会伪装,不可信);无 deck.json → 安静跳过(advisory
-      // 永不误报)。命中条件:该 key 是 raw、无 @keyframes、无 非 icon diagram svg、无
-      // arrow/connector flow 信号、card token 数 ∈ [3,6] → warn_soft(ADVISORY,--strict 也不升级)。
-      //
-      // 移植:raw_keys 由 runner 经 window.__DECK_JSON__ 注入(无则 fall back data-layout="raw");
-      //   @keyframes / svg viewBox / flow 信号 / card token 计数全在 slide 源 HTML 上判(与原版
-      //   逐字正则等价,保留高精度)。key 用 data-slide-key 属性。
-      id: 'R-RAW-LOOKS-SCHEMA',
+      // R-LAYOUT-DEPRECATED · F-305 «raw unless ceremonial» 版式收编。SOURCE-OF-TRUTH =
+      // deck.json 的【真 authored layout】(渲染后 data-layout 不可信:raw 页常借 schema
+      // CSS)。该页 authored layout ∈ DEPRECATED_BODY_LAYOUTS(content/stats/flow/chart/
+      // table/arch-stack/image-text/logo-wall,含全部 variant)→ warn_soft 提醒:正文 schema
+      // 版式已冻结,新页应走 layout:"raw"(模型自由排版,更丰富、各页更不同)。仪式页
+      // (cover/section/agenda/quote/end)与机制页(raw/canvas/iframe-embed/replica)不在
+      // 冻结清单,永不报。
+      //   · ADVISORY · warn_soft —— 绝不阻塞(连 --strict 也不升级):存量 deck 的编辑/重渲不被卡。
+      //   · 仅 scope 内的页报(driver 对 scope 外页跳 evaluate)—— --scope N 编辑/新增时只点正在动的页。
+      //   · IMPORTED deck(全 lifted / origin=imported)整体豁免:外来 deck 版式不该被本立场评判。
+      //   · 无 deck.json 真源注入(foreign / Path B)→ 安静跳过(layoutByKeyFromDeckJson 返回 null)。
+      //   退役了反向规则 R-RAW-LOOKS-SCHEMA(2026-06-12,F-305):它劝 raw 卡片页回退 content
+      //   schema,与本条 raw-first 立场直接冲突;彻底 raw-first 下,扁平卡片页也由模型 raw 自排。
+      id: 'R-LAYOUT-DEPRECATED',
       severity: 'warn_soft',
       evaluate(slide, ctx) {
-        const { slide_idx, layout } = ctx;
-        const rawKeys = rawKeysFromDeckJson();
+        const { slide_idx } = ctx;
+        if (deckAllImported()) return [];          // 外来 deck 整体豁免
+        const byKey = layoutByKeyFromDeckJson();
+        if (byKey === null) return [];             // 无 deck.json 真源 → 跳过(advisory 永不误报)
         const key = slide.getAttribute('data-slide-key') || '';
-        // SOURCE-OF-TRUTH: deck.json 注入了 → 严格按其 raw key 集判(缺 key 不算 raw)。
-        // 没注入 deck.json → fall back 渲染后 data-layout="raw"(尽力而为;原版无 deck.json
-        // 时直接 skip,这里 fall back 是更宽的"尽量也查",仍只对 raw 帧、advisory)。
-        let isRaw;
-        if (rawKeys === null) {
-          isRaw = (layout === 'raw');
-        } else {
-          isRaw = rawKeys.has(key);
-        }
-        if (!isRaw) return [];
-        const fr = slideOuterHTML(slide);
-        if (fr.indexOf('@keyframes') >= 0) return [];   // animated → 真 bespoke
-        // svg 计数:全部 svg vs icon svg(方形小 viewBox);有非 icon diagram svg → bespoke。
-        const allSvg = slide.querySelectorAll('svg').length;
-        let iconSvg = 0;
-        slide.querySelectorAll('svg').forEach((svg) => {
-          const vb = svg.getAttribute('viewBox');
-          if (vb && isIconViewBox(vb)) iconSvg += 1;
-        });
-        if (allSvg > iconSvg) return [];                // 非 icon diagram svg → bespoke
-        if (RLS_FLOW_SIGNALS.some((sig) => fr.indexOf(sig) >= 0)) return [];  // flow/relationship
-        // card 元素数:`card` 作为独立 class TOKEN(不是含 "card" 的每个 class)。
-        const cardRe = /class="(?:[^"]*\s)?card(?:\s[^"]*)?"/g;
-        const cards = (fr.match(cardRe) || []).length;
-        if (cards >= 3 && cards <= 6) {
-          return [{
-            rule: 'R-RAW-LOOKS-SCHEMA',
-            severity: 'warn_soft',
-            slide_idx,
-            message:
-              `raw slide "${key}" looks like a plain ${cards}-card parallel `
-              + `list (icon+title+body · no diagram-svg · no animation · no `
-              + `arrow/connector) — that is a standard shape. Consider falling `
-              + `back to content/3up or content/blocks (less bug surface, `
-              + `faster, consistent). [advisory · if the page has bespoke / `
-              + `relational / narrative substance, keep raw & ignore · never blocks]`,
-          }];
-        }
-        return [];
+        const authored = byKey.get(key);
+        if (!authored || !DEPRECATED_BODY_LAYOUTS.has(authored)) return [];
+        return [{
+          rule: 'R-LAYOUT-DEPRECATED',
+          severity: 'warn_soft',
+          slide_idx,
+          message:
+            `slide "${key}" uses the FROZEN body layout "${authored}" (F-305 «raw `
+            + `unless ceremonial»). Schema layouts are kept only for CEREMONIAL pages `
+            + `(cover/section/agenda/quote/end) + MECHANISM pages (raw/canvas/`
+            + `iframe-embed/replica); body content (content/stats/flow/chart/table/`
+            + `arch-stack/image-text/logo-wall) is frozen — author NEW pages as `
+            + `layout:"raw" (the model lays them out freely — richer & more distinct). `
+            + `[advisory · existing pages keep rendering · never blocks, even under --strict]`,
+        }];
       },
     },
 

@@ -27,9 +27,9 @@ Key rendering facts the wrapper handles
   no `.slide`, we inject a minimal carrier `.slide` (inside the required
   `.deck > .slide-frame > .slide` shell) so the deck-level rules (R06/R10/R20/
   R-CSSVAR/R12/R-WHITE-TEXT/L*/…) actually run against the author CSS.
-* The engine reads a sibling `deck.json` (R-RAW-LOOKS-SCHEMA source-of-truth)
-  and injects framework CSS/JS. We render against a temp dir; absent deck.json is
-  fine (rule falls back / skips).
+* The engine reads a sibling `deck.json` (R-LAYOUT-DEPRECATED source-of-truth for
+  each slide's true authored `layout`) and injects framework CSS/JS. We render
+  against a temp dir; absent deck.json is fine (rule skips).
 * Chromium is REQUIRED (the rules are DOM/geometry). If Playwright/Chromium is
   unavailable the helper raises `EngineUnavailable`; tests skip via `skip_if_no_engine`.
 
@@ -147,7 +147,7 @@ def run(html_or_slides, *, scope=None, deck_json=None, settle_ms=200, raw=False,
     list (each {rule, severity, slide_idx, message, …}).
 
     `deck_json` (a dict) is written next to index.html so deck.json-sourced rules
-    (R-RAW-LOOKS-SCHEMA) see it. `raw=True` uses the fragment verbatim inside an
+    (R-LAYOUT-DEPRECATED) see it. `raw=True` uses the fragment verbatim inside an
     <html><body> shell (see _wrap). `verbatim=True` writes the EXACT bytes to
     index.html with NO wrapping at all — required for the runner SOURCE-BYTE rule
     R-DOC-INTEGRITY, whose whole point is detecting truncated tags / a missing

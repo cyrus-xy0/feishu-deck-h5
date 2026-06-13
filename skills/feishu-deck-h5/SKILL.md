@@ -64,8 +64,11 @@ These gates apply before dispatching to any subskill:
    contract the renderer follows.
 3. **Default stance is raw-first inside Path A.** Renderer should make slides
    `layout: "raw"` by default, using framework tokens/components/patterns. Fall
-   back to schema layouts only for pure standard shapes covered by
-   `references/deck-generation-policy.md`.
+   back to schema layouts ONLY for ceremonial pages (cover / section / agenda /
+   quote / end) — per F-305 «raw unless ceremonial» the body-content schema
+   layouts (content / stats / flow / chart / table / arch-stack / image-text /
+   logo-wall) are frozen; new pages go raw and `R-LAYOUT-DEPRECATED` (advisory)
+   nudges any that don't. See `references/deck-generation-policy.md`.
 4. **Validate before delivery or publish.** Any rendered or edited HTML must pass
    the validator path appropriate to the locked scope before local handoff,
    simulator use, or publisher confirmation.

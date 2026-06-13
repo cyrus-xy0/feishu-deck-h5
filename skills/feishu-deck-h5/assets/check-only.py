@@ -85,7 +85,7 @@ FAMILIES = [
                               'R-LIFT-CSS-BUDGET',
                               'R-CSS-INLINE-BUDGET', 'R-CSS-CROSS-PAGE',
                               'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT',
-                              'R-RAW-LOOKS-SCHEMA', 'R-IFRAME-REMOTE']),
+                              'R-LAYOUT-DEPRECATED', 'R-IFRAME-REMOTE']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
@@ -98,7 +98,8 @@ FAMILIES = [
                               'R-VIS-CARD-MIN-HEIGHT-SPARSE', 'R-VIS-SLACK-FLEX',
                               'R-VIS-CROWD', 'R-VIS-PANEL-TOP', 'R-VIS-TITLE-GAP', 'R-VIS-PEER-SIZE',
                               'R-VIS-GUTTER', 'R-VIS-HERO-FLOOR',
-                              'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-CANVAS-CENTER',
+                              'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-SVG-TEXT-FLOOR',
+                              'R-VIS-CANVAS-CENTER',
                               'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE',
                               'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS', 'R-VIS-RAW-TITLE-STACK']),
     ('跨页一致性',           ['R-DECK-TITLE-DRIFT', 'R-DECK-PALETTE-DRIFT',
@@ -126,10 +127,14 @@ CONTEXT_NOTES = {
                     '重渲一次即盖章; --strict / 入库门会升 error). 有章但 fs-deck-hash 与 '
                     '当前 deck.json 哈希失配 = error (真漂移: 改了 deck.json 没重渲, 或手改了 '
                     'index.html). 修法: 从 deck.json 跑 render-deck.py 重渲.',
-    'R-RAW-LOOKS-SCHEMA': 'raw-first 立场下的过度处理兜底: 一张手搓 raw 页若其实只是 '
-                        '一排标准卡片 (图标+标题+正文, 无示意图/动画/箭头连接), 提醒 '
-                        '改用 content/3up·blocks 更省更稳. 非阻塞 (warn_soft); 这页若有 '
-                        '定制/关系/叙事实质, 保持 raw 忽略即可.',
+    'R-LAYOUT-DEPRECATED': 'F-305 «raw unless ceremonial»: 正文 schema 版式 (content / '
+                        'stats / flow / chart / table / arch-stack / image-text / '
+                        'logo-wall, 含全部 variant) 已冻结 —— 仍为存量 deck 渲染, 但新页应走 '
+                        'layout:"raw" (模型自由排版, 更丰富、各页更不同). 只有仪式页 '
+                        '(cover/section/agenda/quote/end) 与机制页 (raw/canvas/iframe-embed/'
+                        'replica) 留 schema. 非阻塞 (warn_soft, 连 --strict 也不升级); 真源 = '
+                        'deck.json 的 authored layout (非渲染后 data-layout); imported / '
+                        '无 deck.json 整体豁免. 2026-06-12 退役了反向的 R-RAW-LOOKS-SCHEMA.',
 }
 
 

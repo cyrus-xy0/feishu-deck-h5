@@ -1,8 +1,8 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-306**
+> **下一可用号 = F-307**
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-305 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-306 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -47,7 +47,8 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-302 | baseline-aware 视觉闸:new-vs-pre-existing findings diff(--scope 豁免存量红) | `deck-json/render-deck.py` / `tests/test_baseline_gate.py` |
 | F-303 | fast-text.py:亚秒级纯文案双写编辑(no render, no validation) | `deck-json/fast-text.py` |
 | F-304 | shoot-page.py:确定性单页截图(外链 iframe route-ABORT) | `assets/shoot-page.py` |
-| **F-305** | **「raw unless ceremonial」:冻结全部正文 schema 版式,只留仪式五件套+机制页;deck.json 保留裁决记录在案。REGISTERED 未动工** | **`docs/F-305-RAW-UNLESS-CEREMONIAL-2026-06-12.md`** |
+| **F-305** | **「raw unless ceremonial」:冻结全部正文 schema 版式只留仪式五件套+机制页;新增 validator `R-LAYOUT-DEPRECATED`(advisory)+ 退役反向规则 `R-RAW-LOOKS-SCHEMA`;文档/schema 口径收窄;deck.json 保留裁决在案。**DONE 2026-06-13**(零回归,新测 10/10)** | **`docs/F-305-RAW-UNLESS-CEREMONIAL-2026-06-12.md`** |
+| F-306 | 补全 `a06f171`(R-VIS-SVG-TEXT-FLOOR 规则)漏登记的 FAMILIES / business-rules.yaml / validator-rules.md / examples 视觉基线——本是 main 上既存红闸(覆盖闸 + F-03 + 视觉基线三处),随 F-305 验证一并发现并修。DONE 2026-06-13 | `assets/check-only.py` / `assets/business-rules.yaml` / `references/validator-rules.md` / `deck-json/tests/baselines/example_decks_visual.txt` |
 
 ## 已裁决(WONTFIX / DONE)
 
