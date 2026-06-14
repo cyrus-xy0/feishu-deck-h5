@@ -19,25 +19,25 @@ description: |
 
 Inline freshness rule: when this subskill is not running as a separate
 multi-agent worker, reread the current upstream files before simulating. Do not
-rely on cached chat summaries or earlier reads of `audit-report.json`,
+rely on cached chat summaries or earlier reads of the validator PASS verdict,
 `outline.json`, `deck.json`, `index.html`, or the user's latest meeting context.
 
 ## 触发时机
 
-feishu-deck-h5 标准链路里,`pitch-simulator` 放在 `deck-validator` 之后、`publisher`
+feishu-deck-h5 标准链路里,`simulator` 放在 `validator` 之后、`publisher`
 之前,但它是 **validator 后本地 HTML 交付完成之后的异步环节**。不要在
-`deck-designer` 刚产出 outline 后先跑 simulator;designer 应该先基于知识库和用户 brief 生成 outline,再由 renderer / validator 形成可看的 deck。
+`designer` 刚产出 outline 后先跑 simulator;designer 应该先基于知识库和用户 brief 生成 outline,再由 renderer / validator 形成可看的 deck。
 
-在以下链路后使用:
+在以下链路后使用(角色名 = `subskills/<role>/`):
 
 ```text
 brief
-  -> deck-designer
+  -> designer
   -> user confirms outline
-  -> deck-renderer
-  -> deck-validator
+  -> renderer
+  -> validator
   -> local HTML delivery
-  -> async pitch-simulator
+  -> async simulator
   -> user decides revise vs confirm publishable
   -> publish-magic-page if needed
   -> user confirms ingestion
@@ -67,12 +67,16 @@ brief
 `source.assumptions` 里说明限制。
 
 在 feishu-deck-h5 标准链路中,不要新增 `rehearsal-request.json`。预演直接消费
-designer 已落盘的 Scenario、`outline.json`、`deck.json`、可选 `index.html`,并以 `audit-report.json`
-的 `verdict` 作为进入门禁。不要直接消费 validator 的 markdown 摘要。
+designer 已落盘的 Scenario、`outline.json`、`deck.json`、可选 `index.html`,并以
+**validator 的 PASS 结论**作为进入门禁(若 validator 把结论落盘成
+`audit-report.json` / `AUDIT_REPORT.md` 则复用其 `verdict`,否则以 validator
+本次运行的 PASS 返回结果为准)。门禁只看 PASS 与否,不要把 validator 的
+markdown 摘要正文当作结构化输入解析。
 
 ## Subagent I/O Contract
 
-作为独立异步 subagent 执行时,输入只包含 `context_packet`、`audit-report.json`、
+作为独立异步 subagent 执行时,输入只包含 `context_packet`、validator 的 PASS
+门禁结论(如有落盘的 `audit-report.json` / `AUDIT_REPORT.md` 则一并传入)、
 `scenario.json` 或带 `scenario` 字段的 `outline.json`、`deck.json` 和可选 `index.html`。输出必须是
 `pitch-rehearsal.json` 和 `PITCH_REHEARSAL.md`;它们补交给用户和总控,不阻塞 validator
 后的本地 HTML 交付。simulator 不能直接发布、改稿或入库。
@@ -86,7 +90,7 @@ pitch-rehearsal.json   # 结构化结果,符合 schema/pitch-rehearsal.schema.js
 PITCH_REHEARSAL.md     # 给 GTM / 讲述者看的可读报告
 ```
 
-这两份文件必须返回给用户或在状态页可见;不能只作为内部日志。预演完成后不自动发布、不自动入库;必须让用户选择是否按反馈修改:选择修改则回到 `deck-designer` 生成新 outline 并重新生成本地 HTML;选择不用修改后,再进入最终发布物确认。
+这两份文件必须返回给用户或在状态页可见;不能只作为内部日志。预演完成后不自动发布、不自动入库;必须让用户选择是否按反馈修改:选择修改则回到 `designer` 生成新 outline 并重新生成本地 HTML;选择不用修改后,再进入最终发布物确认。
 
 落文件后用 stdlib 校验器检查:
 
@@ -143,7 +147,7 @@ python3 skills/feishu-deck-h5/subskills/simulator/simulate-pitch.py \
    - 按优先级列出要改的 slide、要补的证据、要删的废话、要调整的讲法。
    - 修改建议必须能回写到 `deck.json` 或 `outline.json`。
    - 对无法 defend 的主张,只允许改成 open question 或证据缺口,不要补编数字。
-   - 修改队列必须等待用户确认;确认后才交回 `deck-designer` / `deck-renderer` 迭代。
+   - 修改队列必须等待用户确认;确认后才交回 `designer` / `renderer` 迭代。
 
 ## JSON 核心字段
 
@@ -171,9 +175,9 @@ python3 skills/feishu-deck-h5/subskills/simulator/simulate-pitch.py \
 
 预演完成后,把 `revision_queue` 交回:
 
-- `deck-designer`: 当问题是叙事结构、受众选择、页序、每页重点、关键 idea 或主张。
-- `deck-renderer`: 当问题是具体页面、文案、layout、可读性、素材落地或证据页。
-- `deck-validator`: 当下一版生成后需要再次验收。
+- `designer`: 当问题是叙事结构、受众选择、页序、每页重点、关键 idea 或主张。
+- `renderer`: 当问题是具体页面、文案、layout、可读性、素材落地或证据页。
+- `validator`: 当下一版生成后需要再次验收。
 - `publisher`: 当 deck 通过验收且预演没有阻断性修改建议时,只在用户确认后发布 Magic Page 链接。
 - `importer`: 当 deck 通过验收且用户确认成品 HTML 应入库时,把可复用的 slide、素材和知识交给 slide-library 入库流程。
 - 飞书 Base 素材库/知识库: 当问题是缺客户案例、行业数据、demo、logo 或产品截图。

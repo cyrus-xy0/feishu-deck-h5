@@ -54,8 +54,8 @@ bash skills/feishu-deck-h5/assets/reskin.sh <input.html> \
   output often hits R-OVERFLOW / R-VIS-LABEL-FLOOR on dense foreign
   content, needs human iteration)
 
-Output: `runs/<ts>-reskin-<slug>/output/index.html` + `deck.json`. Single-file inline delivery: `--inline` on render-deck.py,
-or `build.sh --inline` after.
+Output: `runs/<ts>-reskin-<slug>/output/index.html` + `deck.json`. Single-file inline delivery: `--inline` on render-deck.py
+against THIS run dir (`python3 deck-json/render-deck.py runs/<ts>-reskin-<slug>/output --inline`). Do NOT use `build.sh --inline` — it rebuilds the bundled sample deck, not your reskin output.
 
 ### PRECONDITION — source canvas MUST be 1920×1080 (CHECK BEFORE INVOKING)
 

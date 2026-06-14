@@ -250,7 +250,10 @@ silently points at the wrong slide.
 > ```bash
 > # delete / insert / reorder a slide (auto-backup + schema revalidate)
 > python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json delete <key> --yes
-> python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json insert 7 raw '{}' <new-key>
+> #   insert POSITION LAYOUT [VARIANT] KEY  — VARIANT is a layout variant
+> #   name (e.g. content 3up); omit it for layouts that have none (e.g. raw):
+> python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json insert 7 raw <new-key>
+> python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json insert 7 content 3up <new-key>
 > python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json move-key <key> 2
 > # then re-render; --renumber canonicalizes every slide's screen-label ordinal
 > python3 skills/feishu-deck-h5/deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/ --renumber

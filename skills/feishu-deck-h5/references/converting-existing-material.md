@@ -971,9 +971,11 @@ opening comment. Default = stay with the master.
 ### Step 5 · Run the validator BEFORE responding
 
 ```bash
-bash build.sh --inline
-python3 assets/validate.py examples/sample-deck.html --strict
-python3 assets/validate.py examples/sample-deck-inline.html --strict
+# Validate THE USER'S converted run (not the bundled sample). build.sh --inline
+# rebuilds examples/sample-deck*, so never use it to inline/validate a real deck.
+python3 assets/validate.py runs/<ts>/output/index.html --strict
+python3 deck-json/render-deck.py runs/<ts>/output --inline   # inlines index.html of THIS run in place
+python3 assets/validate.py runs/<ts>/output/index.html --strict
 ```
 
 All four must exit 0. If any check fails (R49 cyan-as-accent, L1 mono

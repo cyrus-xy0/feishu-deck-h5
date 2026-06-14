@@ -73,7 +73,7 @@ verify the artifact form. Pick exactly **one** valid shape for the destination:
 
 | Shape | When | What goes back |
 |---|---|---|
-| **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. Use for customer preview, IM forwarding, and single-file viewing. | `bash build.sh --inline` → ship `examples/sample-deck-inline.html` (or its renamed copy under `runs/<ts>/output/`). Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. Not a slide-library ingest format. |
+| **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. Use for customer preview, IM forwarding, and single-file viewing. | `python3 assets/inline-assets.py runs/<ts>/output/index.html --out runs/<ts>/output/lark-<customer>-<date>.html` (or `python3 deck-json/render-deck.py runs/<ts>/output --inline`) → ship that per-run inline file. Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. **Do NOT use `build.sh --inline` here — that rebuilds the skill's bundled SAMPLE deck, not the user's run.** Not a slide-library ingest format. |
 | **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + assets + optional `deck.json` + `assets-manifest.yaml` + `README.txt`. Recipient unzips, opens `index.html`, presses **E** for the built-in visual editor, edits text in-browser, saves with ⌘/Ctrl+S. |
 | **C · hosted URL** *(when the user already deploys to Pages / a CDN)* | Deck lives at a stable web URL. | Ship the URL string. No file attachment. |
 | **D · `deck.zip` for slide-library ingest** *(required for "入库素材库 / 上传素材网站 / 网页入库 / slide library ingest")* | The destination is the material library web ingest pipeline. | `bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>` → upload `runs/<ts>/output/deck.zip`. This is the only standard upload format for the material library. |
@@ -325,8 +325,11 @@ browser (in-browser editor is zero-dep client-side JS).
 ### Mode 3 · View-only delivery (when editability isn't needed)
 
 If the recipient is "客户/老板看一眼就行" and editing is not in scope,
-ship just the inlined `index.html` (no zip). Use `build.sh --inline` to
-produce a fully self-contained single file.
+ship just the inlined `index.html` (no zip). Run
+`python3 assets/inline-assets.py runs/<ts>/output/index.html --out runs/<ts>/output/lark-<customer>-<date>.html`
+(or `python3 deck-json/render-deck.py runs/<ts>/output --inline`) to produce a
+fully self-contained single file from **the user's run**. Do NOT use
+`build.sh --inline` — that rebuilds the skill's bundled SAMPLE deck.
 
 (The inline single file still carries the in-browser editor unless you
 strip the edit-mode lines; for a strictly read-only handout, remove them.)
