@@ -2396,7 +2396,8 @@ def _framework_hash() -> str:
     h.update(f"sidecar-schema-{_SIDECAR_SCHEMA}".encode("utf-8"))
     files = [ASSETS_DIR / "feishu-deck.css",
              ASSETS_DIR / "feishu-deck-patterns.css",
-             ASSETS_DIR / "feishu-deck.js"]
+             ASSETS_DIR / "feishu-deck.js",
+             ASSETS_DIR / "feishu-deck-motion.js"]
     files += sorted(TEMPLATES_DIR.rglob("*.html")) + \
              sorted(TEMPLATES_DIR.rglob("*.css"))
     for p in files:
@@ -2946,6 +2947,15 @@ def main(argv=None) -> int:
         # OPT-IN Keynote-style Magic Move: feishu-deck.js wraps present-mode slide
         # changes in document.startViewTransition() when this attr is present.
         deck_data_attrs_parts.append(' data-magic-move=""')
+    if deck["deck"].get("motion_engine") == "gsap":
+        # OPT-IN GSAP motion engine (§8 motion-system.md). feishu-deck-motion.js
+        # reads this attr and replaces the flat fs-reveal entrance with a
+        # choreographed per-slide GSAP timeline (title word-rise + depth stagger
+        # + SVG draw-on + count-up). The engine NEVER pre-hides content (resting
+        # state stays visible), so a missing/late GSAP load degrades to "no
+        # animation", never to lost content. Absent this flag the page is
+        # byte-for-byte the CSS-only baseline — fully non-breaking.
+        deck_data_attrs_parts.append(' data-motion="gsap"')
     if deck["deck"].get("hide_progress"):
         # F-316 · OPT-IN: hide the top present-mode reading-progress bar
         # (.deck-progress) deck-wide WITHOUT the per-URL `#clean`/kiosk hash. The
@@ -2968,6 +2978,20 @@ def main(argv=None) -> int:
         + "</script>"
     ) if notes_map else ""   # empty → zero extra bytes for note-less decks
 
+    # OPT-IN GSAP engine scripts — emitted ONLY when deck.motion_engine == "gsap".
+    # Vendored locally (assets/gsap/*) so the deck stays offline / self-contained;
+    # copy-assets resolves these refs the same way it does feishu-deck.js. Loaded
+    # AFTER the runtime so feishu-deck-motion.js can subscribe to fs-slide-enter.
+    # Empty string for every other deck → zero extra bytes, zero behaviour change.
+    motion_scripts = ""
+    if deck["deck"].get("motion_engine") == "gsap":
+        motion_scripts = (
+            f'\n  <script src="{asset_path}/gsap/gsap.min.js"></script>'
+            f'\n  <script src="{asset_path}/gsap/CustomEase.min.js"></script>'
+            f'\n  <script src="{asset_path}/gsap/SplitText.min.js"></script>'
+            f'\n  <script src="{asset_path}/feishu-deck-motion.js"></script>'
+        )
+
     final = render_template(shell_tpl.read_text(encoding="utf-8"), {
         "title":                      deck["deck"]["title"],
         "asset_path":                 asset_path,
@@ -2977,6 +3001,7 @@ def main(argv=None) -> int:
         "slides_html":                "\n".join(slides_html),
         "deck_data_attrs":            deck_data_attrs,
         "notes_json":                 notes_json,
+        "motion_scripts":             motion_scripts,
     })
 
     # F-266: stamp provenance into the assembled HTML — BEFORE the delivery gate

@@ -246,6 +246,25 @@ body {
   opacity: 1; pointer-events: auto;
   content-visibility: visible;
 }
+/* 2026-06-14 · present-mode compositor-layer relief (page-turn flicker / black
+   flash on animation-heavy multi-page decks). All N frames sit stacked at
+   inset:0 INSIDE the viewport, so content-visibility:auto (L181) never skips
+   them — the browser treats every hidden frame as "on-screen", keeps each
+   .slide's `will-change:transform` 1920×1080 layer alive (≈1.7GB VRAM @2x on a
+   56-page deck) AND keeps compositing the hidden pages' (often infinite)
+   animations. The GPU thrashes layers → constant flicker, worst mid page-turn.
+   Fix: once JS has set .is-current, make non-current frames TRULY skip rendering
+   (content-visibility:hidden — this also halts their CSS + SMIL animations, so
+   it supersedes the earlier universal animation-pause rule AND the per-frame
+   svg.pauseAnimations hack) and release their compositor layer
+   (will-change:auto). Gated on [data-js-ready] so the pre-JS :first-child cover
+   (below) still paints; current frame + scroll mode are untouched. */
+.deck[data-mode="present"][data-js-ready] .slide-frame:not(.is-current) {
+  content-visibility: hidden;
+}
+.deck[data-mode="present"][data-js-ready] .slide-frame:not(.is-current) .slide {
+  will-change: auto;
+}
 /* Pre-JS state: first frame visible immediately so users don't see a
    black screen during the gap between CSS-applied (frame opacity:0) and
    JS-loaded (frame .is-current). IMPORTANT: gate this fallback behind

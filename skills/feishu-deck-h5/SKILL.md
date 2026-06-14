@@ -285,12 +285,25 @@ For an existing deck:
   motion is layout-last, per-page, scoped to `.slide-frame.is-current
   .slide[data-slide-key=K]`, and designed fresh per page (not stamped from a frozen
   template). See `references/motion-system.md` for the constraints, method, and the
-  extensible effect catalog. The ONE sanctioned framework-level JS exception is
-  Keynote-style **Magic Move** (page-turn morph): opt in via deck.json
-  `deck.magic_move: true` (renderer emits `data-magic-move`; `feishu-deck.js`
-  wraps the present-mode swap in `document.startViewTransition` — feature-detected,
-  reduced-motion-gated, off by default). Authors still write only CSS — matched
-  `view-transition-name` pairs in `custom_css`. See `references/motion-system.md` §7.
+  extensible effect catalog. There are TWO sanctioned framework-level JS
+  exceptions, both deck-level opt-in and OFF by default (a deck without the flag
+  is byte-for-byte the CSS-only baseline):
+  (1) Keynote-style **Magic Move** (page-turn morph): `deck.magic_move: true`
+  (renderer emits `data-magic-move`; `feishu-deck.js` wraps the present-mode swap
+  in `document.startViewTransition` — feature-detected, reduced-motion-gated).
+  Authors still write only CSS — matched `view-transition-name` pairs in
+  `custom_css`. See `references/motion-system.md` §7.
+  (2) **GSAP entrance engine**: `deck.motion_engine: "gsap"` (renderer emits
+  `data-motion="gsap"` + vendors GSAP `assets/gsap/*` + loads
+  `assets/feishu-deck-motion.js`, which replaces the flat fs-reveal with a
+  choreographed per-slide timeline — title word/char rise, depth stagger, SVG
+  draw-on, number count-up). The engine NEVER pre-hides content (resting state
+  stays visible) so a failed/late GSAP load degrades to "no animation", never to
+  lost content. Caveat: the CSSOM-based validator audits cannot introspect
+  JS-driven motion — the visible-resting guarantee is the safety net. Bespoke
+  per-page GSAP (Flip/MorphSVG/Draggable) is NOT covered — use the iframe escape
+  hatch. See `references/motion-system.md` §8. This is the only place a JS
+  animation lib is allowed; per-slide `<script>` is still forbidden (no JS slot).
 - Work happens inside `runs/<timestamp>-<slug>/`. After preflight and before any
   new generation, create a run with `assets/new-run.sh <slug>` and announce the
   absolute run path. Use a short ASCII slug derived from the topic/customer; do

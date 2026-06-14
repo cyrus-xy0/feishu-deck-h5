@@ -894,6 +894,10 @@
     if (!frame) return;
     const slide = frame.querySelector('.slide');
     const vids = frame.querySelectorAll('video');
+    // NOTE: non-current present frames are made content-visibility:hidden by the
+    // stylesheet, which already halts their SMIL (<animate>) + CSS animations
+    // and releases their compositor layer — so no JS-side svg.pauseAnimations is
+    // needed (an earlier version did this; content-visibility:hidden supersedes it).
     if (isCurrent) {
       vids.forEach((v) => {
         if (v.hasAttribute('data-no-restart')) return;
