@@ -211,6 +211,26 @@ _FONT_SIZE_RE = re.compile(r'(font-size:\s*)(\d+)(px)')
 # isn't mistaken for the `font:` shorthand (`\bfont:` matched the `-font:` tail).
 _FONT_SHORTHAND_RE = re.compile(r'((?<![\w-])font:\s*[^;{}]*?)(\d+)(px)')
 
+# `/* … */` comment span — used to mask comments out of a rule body before the
+# font-px rewriters run, so author annotations (e.g. `/* was 13px legend */`)
+# are never mutated and never inflate the change count (lift-1).
+_BODY_COMMENT_RE = re.compile(r'/\*.*?\*/', re.S)
+
+
+def _sub_outside_comments(rx: re.Pattern, repl, body: str) -> str:
+    """Apply `rx.sub(repl, …)` to the parts of `body` OUTSIDE any `/* … */`
+    comment, leaving comment spans verbatim. Splitting on the comment regex
+    keeps comments (capturing group) and code segments interleaved, so we only
+    rewrite the code segments."""
+    parts = _BODY_COMMENT_RE.split(body)          # code segments (comments removed)
+    comments = _BODY_COMMENT_RE.findall(body)     # the comment spans, in order
+    out = []
+    for idx, seg in enumerate(parts):
+        out.append(rx.sub(repl, seg))
+        if idx < len(comments):
+            out.append(comments[idx])
+    return ''.join(out)
+
 
 def _snap_declarations(body: str, selector: str, allow_typescale: bool,
                        changes: list[tuple[int, int, str]]):
@@ -256,8 +276,8 @@ def _snap_declarations(body: str, selector: str, allow_typescale: bool,
         changes.append((orig, t, 'font'))
         return f'{m.group(1)}{t}{m.group(3)}'
 
-    body = _FONT_SIZE_RE.sub(_repl_size, body)
-    body = _FONT_SHORTHAND_RE.sub(_repl_shorthand, body)
+    body = _sub_outside_comments(_FONT_SIZE_RE, _repl_size, body)
+    body = _sub_outside_comments(_FONT_SHORTHAND_RE, _repl_shorthand, body)
     return body, n
 
 

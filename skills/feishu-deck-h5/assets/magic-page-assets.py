@@ -29,6 +29,8 @@ from urllib.request import Request, urlopen
 RESOURCE_ATTRS = {"src", "href", "poster"}
 NON_DEPENDENCY_SCHEMES = {"", "about", "blob", "javascript", "mailto", "tel"}
 NETWORK_TIMEOUT_SECONDS = 20
+# delivery-7: cap remote bodies so a hostile/huge URL can't exhaust memory.
+MAX_EXTERNAL_BYTES = 64 * 1024 * 1024  # 64 MB
 MIME_SUFFIXES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -243,8 +245,19 @@ def download_external_ref(
         return cache[url]
     request = Request(url, headers={"User-Agent": "feishu-deck-h5-publisher/1.0"})
     with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
-        payload = response.read()
+        # delivery-7: refuse oversized bodies early (Content-Length when present),
+        # and read at most MAX_EXTERNAL_BYTES + 1 so an unsized/streaming response
+        # can't read the whole thing into memory.
+        declared = response.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > MAX_EXTERNAL_BYTES:
+            raise RuntimeError(
+                f"external resource too large ({int(declared)} bytes > "
+                f"{MAX_EXTERNAL_BYTES} cap): {url}")
+        payload = response.read(MAX_EXTERNAL_BYTES + 1)
         content_type = response.headers.get("content-type", "application/octet-stream")
+    if len(payload) > MAX_EXTERNAL_BYTES:
+        raise RuntimeError(
+            f"external resource exceeds {MAX_EXTERNAL_BYTES}-byte cap: {url}")
     if not payload:
         raise RuntimeError(f"external resource is empty: {url}")
     digest = hashlib.sha256(payload).hexdigest()[:16]
@@ -324,8 +337,16 @@ def rewrite_refs(html: str, html_path: Path, *, uploader: Path, base_url: str, k
 
         def replace_resource_attr(match: re.Match[str]) -> str:
             prefix = match.group(1)
+            tag = match.group("tag")
+            attr = match.group("attr")
             quote = match.group(4)
             src = match.group(5)
+            # delivery-6: only rewrite attrs that are actually delivery resources.
+            # Without this, an <a href="page2.html"> navigation link gets treated
+            # as an upload target. is_probable_resource_attr keeps src/poster on
+            # any tag, but limits href to <link>.
+            if not is_probable_resource_attr(tag, attr, src):
+                return match.group(0)
             url = public_url(src)
             if url is None:
                 return match.group(0)

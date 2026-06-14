@@ -708,3 +708,34 @@ R-IFRAME-REMOTE:
   fix:
     - "把远程内容本地化: 截图静态化, 或抓取后用本地 HTML 重建"
     - "确认现场必有网络且已登录, 在 iframe 上加 data-allow-remote-iframe 显式接受"
+
+# ---- deck.json-side schema validator (validate-deck.py) · contract-1 补齐 ----
+#  这三条由 deck-json/validate-deck.py (schema + 业务校验) 发出, 之前不在 coverage
+#  闸门可见范围, 现已纳入 enumerate_validate_rules 的第 4 个扫描面.
+
+R-CANVAS:
+  concern:     "B · 库找不回这张 slide"
+  symptom:     "canvas 版式这一页结构有问题 (没有元素 / 元素 id 重复 / 坐标尺寸不是数字 / 图片元素缺 src)"
+  consequence: "这页渲染不出来或元素错位, 入库后这张片复用 / 重渲都会出错"
+  fix:
+    - "给 canvas 页补上 elements (空白占位页要显式标 placeholder)"
+    - "每个元素的 id 在本页内唯一, 别重复"
+    - "x / y / w / h 必须是数字"
+    - "image 类型的元素必须带 src"
+
+R-DEMO-IFRAME:
+  concern:     "D · 放映功能不全"
+  symptom:     "这一页原本是内嵌的可交互 demo (iframe-embed), 现在 html 里已经没有 <iframe> 了"
+  consequence: "现场的 live demo 被悄悄换成了静态截图 / mock, 演示时点不动 —— 本该交互的环节失效"
+  fix:
+    - "恢复这页的 <iframe> 内嵌 (重新拎一次原 iframe-embed 页)"
+    - "确属有意改成静态版: 在这张 slide 上加 \"allow\": [\"no-iframe\"] 显式接受"
+
+R-FAMILY-DRIFT:
+  concern:     "C · 复用时会打架"
+  symptom:     "这一页 (raw 正文页) 跟同 deck 其它内容页的房子约定不一致 (自绘背景 / 标题位置 / 标题前装饰条三选一漂了)"
+  consequence: "同一份 deck 里这页排得跟兄弟页不一样, 翻页 / 复用时风格接不上, 像从别处拷来的"
+  fix:
+    - "跑 conform-to-deck.py --apply 让这页自动对齐兄弟页的约定"
+    - "或手动改: 背景 / 标题位置 / 标题前装饰跟其余内容页保持一致 (兄弟页就是规范)"
+    - "本条为建议性 (warn_soft), 永不阻塞渲染"

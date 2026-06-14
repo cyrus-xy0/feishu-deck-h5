@@ -70,6 +70,15 @@ def cmd_residual(args):
         text = open(path, encoding="utf-8").read()
         text = re.sub(r'<!--.*?-->', blank, text, flags=re.S)
         text = re.sub(r'/\*.*?\*/', blank, text, flags=re.S)
+        # Blank <script>...</script> BODIES (keep newlines for line numbers): CJK
+        # inside a <script> is non-translatable by design — extract-text-pairs'
+        # RunExtractor skips script content, and the renderer embeds Chinese speaker
+        # notes verbatim in <script type="application/json" id="fs-deck-notes">. Those
+        # are never swapped by the text-pairs pipeline, so flagging them as HARD
+        # untranslated Chinese here is an unactionable false positive (misc-3).
+        text = re.sub(r'(<script\b[^>]*>)(.*?)(</script>)',
+                      lambda m: m.group(1) + re.sub(r'[^\n]', ' ', m.group(2)) + m.group(3),
+                      text, flags=re.S | re.I)
         suspects, fw = [], []
         for i, l in enumerate(text.split("\n"), 1):
             has_ideo, has_fw = IDEO.search(l), FW.search(l)
@@ -138,9 +147,17 @@ def cmd_parity(args):
         sel_ratio = None
         sel_ok = True            # cannot evaluate → don't block, but be loud
         sel_disabled = True
-    ok = css_ratio >= thr and sel_ok and f0 == f1
+    # A frameless render proves NOTHING — an empty/failed roundtrip (f1==0) or a
+    # frameless source (f0==0) would otherwise sail through (f0==f1, and css_ratio
+    # defaults to 1.0 when c0==0), falsely reporting BRANCH A "round-trips cleanly".
+    # Require at least one frame on BOTH sides before a PASS can be granted.
+    frames_real = f0 > 0 and f1 > 0
+    ok = css_ratio >= thr and sel_ok and f0 == f1 and frames_real
     print(f"source   : css={c0} chars | slide-key selectors={s0} | frames={f0}")
     print(f"roundtrip: css={c1} chars | slide-key selectors={s1} | frames={f1}")
+    if not frames_real:
+        print("⚠️  empty/frameless render (source frames={} roundtrip frames={}) — "
+              "cannot certify a clean round-trip; forcing BRANCH B.".format(f0, f1))
     if sel_disabled:
         print("⚠️  per-slide selectors NOT found in source (s0=0) — selector criterion "
               "DISABLED; deciding on css_ratio + frames only (broaden the selector "

@@ -209,6 +209,41 @@ def _esc_br(s):
     return html.escape(str(s), quote=True).replace("\n", "<br>")
 
 
+def _esc_attr(s):
+    """HTML-escape user text for an ATTRIBUTE VALUE — like _esc_br but WITHOUT the
+    \\n→<br> conversion. _esc_br emits a literal "<br>" which is correct inside
+    element CONTENT but corrupts an attribute value (e.g. data-* / aria-label /
+    inline style="…url('…')…") when the source text contains a newline. Use this
+    for any value that lands between the quotes of an HTML attribute."""
+    if s is None:
+        return ""
+    return html.escape(str(s), quote=True)
+
+
+# Schemes allowed in an iframe `src`. http(s) for live/remote prototypes, plus
+# scheme-relative ("//host/…") and bare relative/absolute PATH refs (local bundled
+# prototypes). Everything else — notably javascript: / data: / vbscript: / file: —
+# is rejected so a deck.json src can't smuggle script execution into the embed.
+_IFRAME_SCHEME_RE = re.compile(r"^\s*([a-zA-Z][a-zA-Z0-9+.\-]*):")
+_IFRAME_ALLOWED_SCHEMES = {"http", "https"}
+
+
+def _safe_iframe_src(src):
+    """Return src unchanged if it carries no scheme (relative/absolute path or
+    scheme-relative //host) or an http/https scheme; otherwise return "" and warn.
+    Blocks javascript:/data:/vbscript:/file: injection through an iframe src."""
+    if not src:
+        return src
+    m = _IFRAME_SCHEME_RE.match(str(src))
+    if m and m.group(1).lower() not in _IFRAME_ALLOWED_SCHEMES:
+        print(
+            f"render-deck: WARN iframe src scheme '{m.group(1)}:' is not allowed "
+            f"(only http/https or a relative path); blanking src {src!r}.",
+            file=sys.stderr)
+        return ""
+    return src
+
+
 # ---------------------------------------------------------------------------
 # Provenance stamp (F-266 — Gate 1 model-agnostic enforcement)
 # ---------------------------------------------------------------------------
@@ -412,7 +447,12 @@ def _renumber_label(slide: dict, frame_index: int) -> str:
     from the on-screen page number / URL hash after lift / insert / reorder.
     Used by render --renumber."""
     base = slide.get("screen_label") or _derive_screen_label(slide)
-    name = re.sub(r"^\s*\d[\w\-]*\s+", "", base).strip() or _derive_screen_label(slide)
+    # Strip ONLY a pure page-number ordinal (digits + optional '-A' page-variant
+    # suffix) followed by whitespace — e.g. '01 ', '50 ', '04-A '. Must NOT match
+    # alphanumeric leading title tokens like '5G ', '3D ', '24小时 ', '2024 ' (which
+    # merely START with a digit) — those are real title words, not page numbers.
+    name = re.sub(r"^\s*\d{1,3}(?:-[A-Za-z0-9]+)?(?=\s)", "", base).strip() \
+        or _derive_screen_label(slide)
     return f"{frame_index:02d} {name}"
 
 
@@ -425,14 +465,14 @@ def _build_data_attrs(slide: dict) -> str:
     emitted on .slide when overridden per-slide."""
     parts = []
     if slide.get("accent"):
-        parts.append(f'data-accent="{_esc_br(slide["accent"])}"')
+        parts.append(f'data-accent="{_esc_attr(slide["accent"])}"')
     decor = slide.get("decor", [])
     if decor:
-        parts.append(f'data-decor="{_esc_br(" ".join(decor))}"')
+        parts.append(f'data-decor="{_esc_attr(" ".join(decor))}"')
     if slide.get("title_style"):
-        parts.append(f'data-title-style="{_esc_br(slide["title_style"])}"')
+        parts.append(f'data-title-style="{_esc_attr(slide["title_style"])}"')
     if slide.get("logo_position"):
-        parts.append(f'data-logo-position="{_esc_br(slide["logo_position"])}"')
+        parts.append(f'data-logo-position="{_esc_attr(slide["logo_position"])}"')
     # Slide-level visual-audit opt-outs → data-allow-<token> on .slide. This is the
     # ONLY authoring channel for the slide-scoped opt-outs the visual engine
     # checks via slide.hasAttribute (imbalance / no-focal / title-gap); without it a
@@ -457,7 +497,7 @@ def _build_data_attrs(slide: dict) -> str:
         # R-VIS-BODY-FLOOR / R-VIS-TIER) from error → warning. Geometry /
         # overflow rules stay full severity. Value = source ref string.
         val = slide["lifted"] if isinstance(slide["lifted"], str) else "1"
-        parts.append(f'data-lifted="{_esc_br(val)}"')
+        parts.append(f'data-lifted="{_esc_attr(val)}"')
     if slide.get("hidden"):
         # 隐藏页 (PPT-style hide): the slide is still rendered + reachable by a
         # direct #N/#key hash and in scroll mode, but feishu-deck.js skips it in
@@ -561,6 +601,10 @@ def _enrich_verdict_grid(block):
 
 
 def _enrich_phone_iframe(block):
+    # Scheme allow-list (see _safe_iframe_src) — phone-iframe also drops its
+    # iframe_src straight into <iframe src="...">.
+    if "iframe_src" in block:
+        block["iframe_src"] = _safe_iframe_src(block.get("iframe_src"))
     hint = block.get("hint")
     block["hint_html"] = (
         f'            <div class="iframe-hint">{_esc_br(hint)}</div>'
@@ -600,7 +644,7 @@ def _enrich_mockup_card(block):
     img = block.get("image")
     block["image_html"] = (
         f'              <div class="ui-shot" '
-        f'style="background-image:url(\'{_esc_br(img)}\')"></div>'
+        f'style="background-image:url(\'{_esc_attr(img)}\')"></div>'
         if img else ""
     )
     cp = block.get("compare_pair") or {}
@@ -631,7 +675,7 @@ def _enrich_persona_card(block):
     portrait = block.get("portrait")
     block["portrait_html"] = (
         f'              <div class="portrait" '
-        f'style="background-image:url(\'{_esc_br(portrait)}\')"></div>'
+        f'style="background-image:url(\'{_esc_attr(portrait)}\')"></div>'
         if portrait else ""
     )
 
@@ -648,7 +692,7 @@ def _enrich_testimonial_card(block):
     """
     portrait = block.get("portrait")
     block["portrait_html"] = (
-        f'              <div class="portrait" style="background-image:url(\'{_esc_br(portrait)}\')"></div>'
+        f'              <div class="portrait" style="background-image:url(\'{_esc_attr(portrait)}\')"></div>'
         if portrait else ""
     )
     logo = block.get("company_logo")
@@ -662,7 +706,7 @@ def _enrich_testimonial_card(block):
             # use a sentinel that gets substituted at slide render time via {{ asset_path }}.
             src = f"{{ASSET_PATH}}/shared/clientlogo/{safe}.png"
         block["company_logo_html"] = (
-            f'              <div class="company-logo" style="background-image:url(\'{_esc_br(src)}\')"></div>'
+            f'              <div class="company-logo" style="background-image:url(\'{_esc_attr(src)}\')"></div>'
         )
     else:
         block["company_logo_html"] = ""
@@ -955,10 +999,10 @@ def _render_visual(visual, slide_no_padded):
     v_type = visual.get("type")
     if v_type == "image":
         img = visual.get("image", {})
-        src = _esc_br(img.get("src", ""))
-        alt = _esc_br(img.get("alt", ""))
+        src = _esc_attr(img.get("src", ""))
+        alt = _esc_attr(img.get("alt", ""))
         fit = visual.get("min_height")
-        style = f'min-height:{_esc_br(fit)}px;' if fit else ""
+        style = f'min-height:{_esc_attr(fit)}px;' if fit else ""
         return (
             f'              <div role="img" aria-label="{alt}" '
             f'style="background-image:url(\'{src}\');background-size:cover;'
@@ -1097,9 +1141,9 @@ def _enrich_image_text(ctx, slide):
 
     if file_exists and src:
         ctx["bg_style"] = (
-            f"background-image:url('{_esc_br(src)}');"
-            f"background-size:{_esc_br(fit)};"
-            f"background-position:{_esc_br(position)};"
+            f"background-image:url('{_esc_attr(src)}');"
+            f"background-size:{_esc_attr(fit)};"
+            f"background-position:{_esc_attr(position)};"
         )
     else:
         # Fallback: dark radial gradient — placeholder that won't look broken on a projector.
@@ -1171,7 +1215,7 @@ def _enrich_logo_wall(ctx, slide):
             logo_divs.append(
                 f'              <div class="logo" '
                 f'data-text-id="slide-{snp}.industry-{i_padded}.logo-{li:02d}" '
-                f'style="background-image:url(\'{_esc_br(src)}\')"></div>'
+                f'style="background-image:url(\'{_esc_attr(src)}\')"></div>'
             )
         logos_html = "\n".join(logo_divs)
         industry_blocks.append(
@@ -1368,9 +1412,9 @@ def _enrich_content_story_case(ctx, slide):
 
     if file_exists and src:
         bg_style = (
-            f"background-image:url('{_esc_br(src)}');"
-            f"background-size:{_esc_br(fit)};"
-            f"background-position:{_esc_br(position)};"
+            f"background-image:url('{_esc_attr(src)}');"
+            f"background-size:{_esc_attr(fit)};"
+            f"background-position:{_esc_attr(position)};"
         )
     else:
         if src:
@@ -1384,7 +1428,7 @@ def _enrich_content_story_case(ctx, slide):
 
     ctx["scene_html"] = (
         f'              <div class="scene-frame" role="img" '
-        f'aria-label="{_esc_br(alt)}" style="{bg_style}">\n'
+        f'aria-label="{_esc_attr(alt)}" style="{bg_style}">\n'
         f'                <span class="scene-cap" data-text-id="slide-{snp}.scene.caption">'
         f'{_esc_br(caption)}</span>\n'
         f'              </div>'
@@ -1641,11 +1685,24 @@ def _enrich_flow_swim(ctx, slide):
             f'{_esc_br(lane.get("name", ""))}{sub_html}'
             f'</div>'
         )
-        # Build column cells, placing milestones by quarter index
+        # Build column cells, placing milestones by quarter index. The grid has
+        # exactly one cell per (lane, quarter), so two milestones in the same lane
+        # sharing a quarter would collide last-write-wins and silently drop the
+        # earlier one — warn (matching the peer-enricher convention) so the loss is
+        # never silent.
         milestones_by_q = {}
         for mi, ms in enumerate(lane.get("milestones") or [], start=1):
             q = ms.get("quarter")
             if isinstance(q, int) and 1 <= q <= len(time_axis):
+                if q in milestones_by_q:
+                    prev_mi, prev_ms = milestones_by_q[q]
+                    print(
+                        f"render-deck: WARN slide[{ctx['slide_no'] - 1}] flow/swim "
+                        f"lane '{lane.get('name', '?')}' has two milestones in "
+                        f"quarter {q} ('{prev_ms.get('title', '')}' and "
+                        f"'{ms.get('title', '')}'); only the last is rendered — give "
+                        f"them distinct quarters.",
+                        file=sys.stderr)
                 milestones_by_q[q] = (mi, ms)
         for qi in range(1, len(time_axis) + 1):
             entry = milestones_by_q.get(qi)
@@ -1672,6 +1729,10 @@ def _enrich_replica(ctx, slide):
 
 
 def _enrich_iframe_embed(ctx, slide):
+    # Scheme allow-list: an iframe src goes straight into <iframe src="...">; only
+    # http/https or a relative path is allowed, so javascript:/data: can't execute.
+    if "src" in ctx:
+        ctx["src"] = _safe_iframe_src(ctx.get("src"))
     # iframe_title defaults to data.title for a11y
     if not ctx.get("iframe_title"):
         ctx["iframe_title"] = ctx.get("title", "")
@@ -2015,7 +2076,7 @@ def _scan_slide_assets(slide_html: str) -> list:
     return sorted(set(_ASSET_REF_RE.findall(slide_html)))
 
 
-def render_slide(slide: dict, slide_index: int, total: int, asset_path: str, deck_dir: Path | None = None) -> str:
+def render_slide(slide: dict, slide_index: int, asset_path: str, deck_dir: Path | None = None) -> str:
     layout  = slide["layout"]
     variant = slide.get("variant")
     tpl_path = _resolve_template_path(layout, variant)
@@ -2812,7 +2873,7 @@ def main(argv=None) -> int:
         try:
             # Pass NEW index (post-skip) for page-number continuity, but include
             # original index in error context for debugging.
-            slide_html = render_slide(slide, new_idx, total, asset_path, deck_dir=deck_dir)
+            slide_html = render_slide(slide, new_idx, asset_path, deck_dir=deck_dir)
         except SystemExit as e:
             # F-280b · 1-based page index + variant in the locator (matches
             # validate-deck / deck-cli list / URL #N). orig_idx is 0-based.
@@ -3798,11 +3859,17 @@ def inline_html(out_html: Path, deck: dict) -> list[str]:
             return m.group(0)
         return f"{pre}{quote}{_file_to_data_uri(p)}{quote}{post}"
 
+    # The attribute name is anchored with `(?<![\w-])` (not a bare `\b`) so a
+    # preceding word-char OR hyphen blocks the match — otherwise the non-greedy
+    # `[^>]*?` would stop at the `src` inside a `data-src=` / `data-poster=` that
+    # appears BEFORE the real src, inlining the lazy ref and leaving the real
+    # (displayed) image external (a "portable" deck that 404s once moved, and it
+    # slips past --inline-strict because the real ref is never visited).
     _ATTR_PATTERNS = (
-        r'(?P<pre><img\b[^>]*?\bsrc\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
-        r'(?P<pre><source\b[^>]*?\bsrc\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
-        r'(?P<pre><video\b[^>]*?\bsrc\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
-        r'(?P<pre><video\b[^>]*?\bposter\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+        r'(?P<pre><img\b[^>]*?(?<![\w-])src\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+        r'(?P<pre><source\b[^>]*?(?<![\w-])src\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+        r'(?P<pre><video\b[^>]*?(?<![\w-])src\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
+        r'(?P<pre><video\b[^>]*?(?<![\w-])poster\s*=\s*)(?P<q>["\'])(?P<url>[^"\']+)(?P=q)(?P<post>)',
     )
     for _pat in _ATTR_PATTERNS:
         html_text = re.sub(_pat, _inline_attr, html_text, flags=re.I)

@@ -1,6 +1,11 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-322**
+> **下一可用号 = F-332**
+>
+> ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其 WIP 未提交;
+> 本分支 off HEAD 看不到)。本分支(`fix/code-review-0614`)从 **F-323** 起,跳过 F-322
+> 不复用,合并时与对方的 F-322 行各占一行即可。F-323..F-331 = 2026-06-14 全量 code review
+> 修复批次,明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
 
 这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-307 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
@@ -64,6 +69,25 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-319 | **(A·迭代环加速)** `render-deck.py --scope N,M --visual` 此前只 scope **渲染**,**视觉审计 findings 与 PASS/FAIL 闸仍全 deck** → 别页(他 session 的 WIP / validator 漂移)一个视觉错就 FAIL 并**回滚 in-scope 编辑的 index.html**(本次给 deck 加 19/20 两页,被 p3/4/7/8/13/16 反复挡,只能 grep 捞自己页 + 补渲复原,占了收尾来回 ~80% 时间)。正解=scoped runs/ 的 `--visual` 主闸改走 `--no-visual`(静态)+ 把 `--scope-frames`+in-scope 过滤+F-302 baseline 的视觉块对 `--visual+scope` 也生效(`_vis_block`/`_geom_block` 只判 in-scope NEW 视觉/几何错);deck 级/域外错降级 advisory。DONE 2026-06-13(并发 session 落地:`render-deck.py:3061` `if not args.visual or (scope_pages and _is_runs)` + `:3177` 视觉块 guard 扩成 `not args.visual or scope_pages`;实测 `--scope 19,20 --visual`→PASS rc=0 / `GATE-COVERAGE visual=ran(scope=19,20) geometry=ran(scope=19,20)` / 不回滚;早先两页带 `var(--h)`/`gs-dist` 溢出时正确 BLOCK→修净后 PASS,双向都对)。**⚠ 号冲突待清理**:此 scope-gate 在 `render-deck.py` 注释里长期挂 `F-307`,但本登记处 F-307 是「raw/iframe content-bg 黑条修复」(另一特性)——同号双用,建议把代码注释正名为 F-319。 | `deck-json/render-deck.py` |
 | F-320 | **(B·并发编辑解锁)** `deck-cli set/insert/set-page` 的预写 lint 是**全 deck**:别的 session 一个坏页(本次 p16 `R-FAMILY-DRIFT`)就**回滚我对别页的编辑**——`set hide_progress` 被打回(`restored from backup`),被迫 `--skip-lint` + 手写原子追加(丢了乐观锁/校验安全网)。修法=预写 lint 只判被改 slide(+deck 级不变量),域外页既存错降级 advisory、不挡本次写;镜像 F-319/F-307 的 scope-降级口径。DONE 2026-06-13:① `validate-deck.py` 加 `--json`(发 `{ok,errors,warnings,soft_warnings}`,每项带 `{path,msg,slide,key}` —— slide 从实例路径 `slides[N]` 解析、key 为该页 key,给 scope 归属用;`--strict` 下 warnings 已 promote 进 errors 即 blocking 集);② `deck-cli.py` 加 `_edit_scope_keys(args,updated)`(单页/deck 级命令 opt-in 返回 scope:set-page/accent/decor/notes/variant/insert→`{key}`、`set` 路径 `slides.N.x`→`{该页 key}`/非 slides 顶层→`set()` deck 级/不可归属→`None` 全 deck;其余命令一律 `None` 不弱化)+ `_scope_demote()`(校验失败时按 `--json` 归属:in-scope 页/deck 级/schema 错→回滚、纯域外既存错→**降级保留写入**;解析失败 fallback 回滚)+ `write_deck_with_validation(...,scope_keys=)` 接线。**坑**:`set` 用**点**语法 `slides.N`(非方括号)索引数组,helper regex 一度只认方括号会误降级真 slide 错——已修两者都认。实测 4 场景全对(正常成功/deck级 demote/dot-path in-scope 回滚/unscoped reorder 仍全 deck 回滚)+ **112 回归测试全过、零回归**(deck-cli smoke + validate examples/static/gate/slide-filter + edit-roundtrip + atomic-render) | `deck-json/validate-deck.py` / `deck-json/deck-cli.py` |
 | F-321 | **(C·截图工具)** 截指定页的 present 模式图**没有一等 CLI**:每轮手搓 Playwright(踩 `networkidle` 超时——iframe 页永不 idle、`ArrowRight`×N 翻页、letterbox 视口),本次重复 ~5 次。`deck-log` 有 snapshot 但绑 making-of。修法=`shoot --pages 19,20 --present [--aspect 16:10] [--out DIR]` 一行出 PNG:复用 `?mode=present` 入口、按 frame-index 翻页、`domcontentloaded`(非 networkidle)、可选 letterbox 视口验接缝。复用 log-tool present helpers。DONE 2026-06-13(`deck-json/shoot.py`:`?mode=present` 入口 + **框架自身键盘导航**(ArrowRight 走到目标帧——最初想用 is-current toggle 跳帧,实测和框架内部 currentIdx 抢控制、非确定性,改回 proven 键盘导航 + 650ms settle 等 fs-reveal)+ `domcontentloaded` + 4s `load` 上限 + 字体 ready;`--pages` 收 idx 或 slide-key、`--aspect` 16:9 design-clip / 其它比例全视口验 letterbox 接缝、缺页 rc=3。实测:design 19/20 + letterbox 13 内容/pager 全对、F-318 无缝可见) | `deck-json/shoot.py` |
+
+## 2026-06-14 全量 code review 修复批次(F-323..F-331)
+
+> 多 agent 全仓 code review(68 agents/13 子系统,每条 HIGH 经对抗式复核)产出 86 条
+> 已验证 finding(0 critical / 6 high / 31 medium / 49 low)。按主题收成 9 个批次工单,
+> 明细(file:line + evidence + fix + 复核结论)见 `docs/CODE-REVIEW-2026-06-14.md`。
+> 分支 `fix/code-review-0614`(独立 worktree,off `6244ed7`)。
+
+| 号 | 一句话 | 归属 / 覆盖 finding |
+| --- | --- | --- |
+| F-323 | **安全写收口**:4 个非 deck-cli 的 deck.json 写者统一走新 `deck-json/_safe_write.py`(原子写 + `validate-deck.py` 校验 + .bak 回滚),补齐它们各自缺的原子性/校验/回滚/锁——治「import 失败留下半截无效 deck.json」一类数据完整性洞 | `deck-json/_safe_write.py`(新)/ `import-html-slide.py` / `apply-text-pairs.py` / `reconcile-reflow.py` / `merge-canvas-lines.py` · mutation-1/5/6, misc-4, sync-5, reskin-11, lift-5 |
+| F-324 | **资产拷贝路径穿越收口**:所有 copy 循环(paste/import/parser/package)用 `_safe_write.contained_dest()` 守住目标目录,`../`/绝对路径/symlink 逃逸一律跳过——治「crafted 源 deck 把文件写到 deck 目录外」 | `deck-json/deck-cli.py` / `import-html-slide.py` / `subskills/parser/parse.py` / `assets/package-deliverable.sh` / `assets/lift-slides.py` · subskill-3, mutation-2/3, delivery-4, lift-3 |
+| F-325 | **validator 规则漂移闸补强**:把 `validate-deck.py` 纳入 rule-id 扫描面(R-CANVAS/R-FAMILY-DRIFT/R-DEMO-IFRAME 此前完全绕过漂移闸)、修契约测试正则(吃不下 `L1/L2/L4` 含 `/` 的 id)、补 validator-rules.md 反向闸、修指错文件的消息 | `assets/check-only.py` / `assets/audits.js` / `deck-json/validate-deck.py` / `assets/check-rule-coverage.py` / `references/validator-rules.md` / 契约测试 · contract-1/2/3, audits-js-1/3/5 |
+| F-326 | **反向 sync / renumber / canvas 静默丢数据**:canvas 反映射保 size/font/grad/src/svg、整数几何不转 float;`--renumber` 不删 5G/3D 类前导 token;flow/swim 同季里程碑碰撞不丢;reskin 容器/run 不漏;edit-mode 存档剥 runtime !important;译文对不齐/重复替换防护 | `deck-json/sync-index-to-deck.py` / `render-deck.py` / `assets/reskin.py` / `merge-canvas-lines.py` / `edit-mode/deck-edit-mode.js` / `apply-text-pairs.py` / `extract-text-pairs.py` · sync-1/2/3/4, renderer-2/3, reskin-1/2, frontend-2, misc-2/6 |
+| F-327 | **publisher/importer 闸门加固(外发面)**:无 deck.json 也必须过 validator、校验实际发布字节(非复用旧 audit)、self-check 不空过、网络子进程加超时、importer 不串 audit、报告模板键修 | `subskills/publisher/publish.py` / `self_check.py` / `subskills/importer/ingest.py` · subskill-1/2/4/5/6/8/9 |
+| F-328 | **交付可移植性**:远程交付 zip 不再打包整个共享池(漏其他客户 logo)、`--inline` 认真 src 不认 data-src、inline-assets 不串属性、manifest 与实物一致、magic-page href 不当资源、下载限大小、shoot 浏览器不泄漏 | `assets/package-deliverable.sh` / `finalize.sh` / `inline-assets.py` / `copy-assets.py` / `magic-page-assets.py` / `shoot.py` / `shoot-page.py` / `render-deck.py` / `references/delivery.md` · delivery-1/2/3/5/6/7/8, renderer-1, prose-1 |
+| F-329 | **HTML/CSS 正则脆弱解析**:scope @supports 等花括号 at-rule、scale_canvas 不跳含 font-size 整行、drop-shadow 偏移解析、div 深度计数避开注释/script、标题文本转义、band 行均值、迁移幂等 | `assets/reskin.py` / `deck-json/merge-canvas-lines.py` / `migrate-head-css-to-custom-css.py` / `reconcile-lifted.py` / `lift-slides.py` / `render-deck.py` / `deck-map.py` · reskin-3/4/5/6/7/8/9/10, lift-1/4, renderer-4, misc-7 |
+| F-330 | **F-319 scope 闸加固 + 回归测试**:消息无「slide N」锚点的 in-scope 错(R05 emoji/!/…)不再被静默降级、no-browser 路径 scope 一致、parse_scope 拒非法区间、补 F-319 回归测试 | `deck-json/render-deck.py` / `assets/run-audits.py` / `audits.js` / 新回归测试 · diff-1/2/3/4, audits-js-2/4, renderer-6 |
+| F-331 | **杂项健壮性 + 死代码 + 文档**:iframe scheme 白名单、_lint custom-property 误报、parse_value 类型强转脚枪、dead code 清理、frontend nav/overlay/reveal、PDF 八进制转义、deck-map disabled、translation-qa script 内 CJK、deck-log 版本号、文档契约修正 | 多文件(见 CODE-REVIEW 文档)· renderer-5/7, mutation-4/7/8, sync-6, lift-2/6, frontend-1/3/4/5, subskill-7, misc-1/3/5/8/9, prose-2/3/5/6 |
 
 ## 已裁决(WONTFIX / DONE)
 

@@ -134,8 +134,13 @@ def runs_from_html(html: str) -> list[str]:
             s = m.group(1).strip()
             if s and CJK.search(s) and s not in p.runs:
                 p.runs.append(s)
-    # longest-first so apply-text-pairs swaps containing runs before contained ones
-    return sorted(set(p.runs), key=len, reverse=True)
+    # longest-first so apply-text-pairs swaps containing runs before contained ones.
+    # p.runs is ALREADY deduped (in insertion order) by _add(); do NOT wrap it in a
+    # set() — set iteration order is nondeterministic across processes (PYTHONHASHSEED),
+    # so equal-length runs would tie-break differently each run, making the emitted
+    # pairs (and thus apply order) non-reproducible. sorted() is stable, so keeping
+    # the deduped list preserves insertion order for ties.
+    return sorted(p.runs, key=len, reverse=True)
 
 
 def runs_from_canvas(data: dict) -> list[str]:

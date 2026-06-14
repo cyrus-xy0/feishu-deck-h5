@@ -50,8 +50,17 @@ DIRECTION_TOLERANCE_S = 2.0
 _RE_DECK_ID = re.compile(r'(data-deck-id=")dk-[0-9a-z]+(")')
 _RE_OUR_META = re.compile(
     r'\s*<meta name="fs-(?:deck-generator|deck-hash|render-sig)" content="[^"]*">')
-_RE_ASSET_SRC = re.compile(r'((?:src|href)=")[^"]*?/?(assets/)')
-_RE_ASSET_URL = re.compile(r'(url\(\s*[\'"]?)[^)\'"]*?/?(assets/)')
+# Collapse ONLY the volatile prefix that copy-assets.py actually rewrites — a run
+# of `../` optionally preceded/followed by the `skills/feishu-deck-h5/` skill
+# segment — immediately before `assets/`. Anchoring to this exact shape (instead of
+# the old `[^"]*?/?` "anything up to assets/") means an AUTHORED path that merely
+# CONTAINS an `assets/` segment (e.g. src="some/other/path/assets/x.png") is NOT
+# collapsed, so a real edit to that prefix still changes the sig.
+_VOLATILE_ASSET_PREFIX = r'(?:(?:\.\./)*(?:skills/feishu-deck-h5/)?)?'
+_RE_ASSET_SRC = re.compile(
+    r'((?:src|href)=")' + _VOLATILE_ASSET_PREFIX + r'(assets/)')
+_RE_ASSET_URL = re.compile(
+    r'(url\(\s*[\'"]?)' + _VOLATILE_ASSET_PREFIX + r'(assets/)')
 _RE_SIG_VALUE = re.compile(r'<meta name="fs-render-sig" content="([0-9a-f]+)">')
 
 
@@ -61,11 +70,14 @@ def _canonicalize(html: str) -> str:
     Removed (legitimately volatile / non-authored):
       • the per-render minted deck_id (data-deck-id="dk-…")
       • our own provenance + sig <meta> tags
-      • asset path PREFIXES — copy-assets.py rewrites skill-relative refs to
-        ./assets/…; collapse any …/assets/ → assets/ so the path rewrite is not
-        seen as an edit. (--inline produces data: URIs with no "assets/" segment;
-        the sig is stamped AFTER post-processing, so the inlined bytes are simply
-        part of the canonical form and round-trip exactly.)
+      • asset path PREFIXES — copy-assets.py rewrites skill-relative refs
+        ((../)*[skills/feishu-deck-h5/]assets/…) to ./assets/…; collapse ONLY that
+        exact volatile prefix → assets/ so the path rewrite is not seen as an edit.
+        An authored path that merely CONTAINS an assets/ segment (e.g.
+        some/dir/assets/x.png) is left intact, so a real edit to it changes the sig.
+        (--inline produces data: URIs with no "assets/" segment; the sig is stamped
+        AFTER post-processing, so the inlined bytes are simply part of the canonical
+        form and round-trip exactly.)
     Everything else — every byte of authored slide content — is preserved."""
     html = _RE_DECK_ID.sub(r'\1\2', html)
     html = _RE_OUR_META.sub("", html)

@@ -89,6 +89,7 @@ EXIT CODES
        anti-oscillation revert). Report lists exactly what needs a human.
     2  usage / IO error.
     3  optimistic-lock refusal (deck.json changed on disk; re-run or --force).
+    4  post-reflow validate-deck --strict FAILED — rolled back, no change landed.
 
 DEPENDS ON (all in this skill, single source of truth — F-02)
     deck-json/reconcile-lifted.py   (channel 1; imported, not re-implemented)
@@ -110,7 +111,6 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent          # …/deck-json
@@ -125,6 +125,11 @@ if str(_ASSETS) not in sys.path:
 # Import channel 1 (font snap) so we don't re-implement it.
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
+
+# Shared safe deck.json writer (F-323): atomic write + post-write validate-deck
+# --strict + rollback-on-fail, so this ad-hoc writer gets the same data-integrity
+# guarantee deck-cli's single-writer has (sync-5).
+from _safe_write import validate_and_write_deck  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # The three HARD geometry rules F-54 gates on. NEW appearance of any of these
@@ -640,13 +645,17 @@ def main(argv=None) -> int:
             _cleanup(work, args.keep_renders)
             return 3
 
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    bak = args.deck_json.with_suffix(f".json.bak-pre-reflow-{ts}")
-    shutil.copy2(args.deck_json, bak)
-    args.deck_json.write_text(
-        json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    say(f"\n  ✓ backup: {bak.name}")
-    say(f"  ✓ wrote {args.deck_json}")
+    # Atomic write + post-write validate-deck --strict + rollback-on-fail via the
+    # shared safe writer (sync-5): a reflow that produced a schema-invalid
+    # deck.json (e.g. a malformed custom_css / font-snapped data.html) must never
+    # land on disk. validate_and_write_deck makes its own timestamped .bak,
+    # restores it on validation failure, and returns False then.
+    if not validate_and_write_deck(args.deck_json, deck, "reflow"):
+        say("\n  ✗ post-reflow validate-deck --strict FAILED — rolled back; "
+            "no change landed.")
+        _cleanup(work, args.keep_renders)
+        return 4
+    say(f"\n  ✓ wrote {args.deck_json}")
     say(f"  rounds run: {rounds_run}")
 
     _cleanup(work, args.keep_renders)

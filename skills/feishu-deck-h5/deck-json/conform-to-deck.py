@@ -479,24 +479,94 @@ _PRETITLE_TOKEN_RE = re.compile(
     r'^(topbar|eyebrow|kicker|overline|page-?label|slug|page-?meta)$', re.I)
 
 
+def _abs_offset(html: str, sourceline: int, sourcepos: int) -> int:
+    """Map a bs4 (sourceline 1-based, sourcepos 0-based within line) coordinate to
+    an absolute char offset in `html`."""
+    if sourceline is None or sourcepos is None:
+        return -1
+    lines = html.splitlines(keepends=True)
+    if not (1 <= sourceline <= len(lines)):
+        return -1
+    return sum(len(ln) for ln in lines[: sourceline - 1]) + sourcepos
+
+
+def _tag_span_end(html: str, start: int) -> int:
+    """Given the offset of an element's `<` opening tag, return the offset just
+    AFTER its matching close tag, by depth-counting that tag name. -1 if the open
+    tag can't be parsed."""
+    om = re.match(r"<([a-zA-Z][\w-]*)\b[^>]*?(/?)>", html[start:])
+    if not om:
+        return -1
+    tag = om.group(1)
+    if om.group(2) == "/":            # self-closed open tag
+        return start + om.end()
+    i = start + om.end()
+    depth = 1
+    open_close = re.compile(rf"<{re.escape(tag)}\b[^>]*?(/?)>|</{re.escape(tag)}\s*>",
+                            re.I)
+    j = i
+    while depth > 0:
+        nm = open_close.search(html, j)
+        if not nm:
+            return -1
+        if nm.group(0).startswith("</"):
+            depth -= 1
+        elif nm.group(1) != "/":      # an open tag of the same name (nesting)
+            depth += 1
+        j = nm.end()
+    return j
+
+
 def fix_pretitle_chrome(slide: dict) -> list[str]:
     """D3 — remove the eyebrow / topbar / page-label that sits above the title.
-    Uses a real HTML parser (never regex DOM surgery — editor hard rule). The
-    title element itself is never removed."""
+    Uses a real HTML parser to DECIDE what to remove (never regex DOM surgery —
+    editor hard rule). The title element itself is never removed.
+
+    sync-6: excise each target by its EXACT source span instead of re-serializing
+    the whole slide via str(soup) — bs4's serializer rewrites unrelated formatting
+    (void tags `<br>`→`<br/>`, attribute quoting, entity escaping), so a D3 fix on
+    one element would silently churn the rest of the slide's data.html. We locate
+    each target via bs4 (sourceline/sourcepos), then splice its span out of the
+    ORIGINAL string back-to-front, leaving every other byte untouched."""
     from bs4 import BeautifulSoup
     html = slide_html(slide)
     soup = BeautifulSoup(html, "html.parser")
     removed = []
+    spans = []
     for el in list(soup.find_all(True)):
         classes = (getattr(el, "attrs", None) or {}).get("class") or []
         if not any(_PRETITLE_TOKEN_RE.match(c) for c in classes):
             continue
         if "title-zh" in classes or el.find(class_="title-zh"):
             continue  # never remove (or gut) the title block itself
-        removed.append("." + ".".join(classes))
-        el.decompose()
+        start = _abs_offset(html, getattr(el, "sourceline", None),
+                            getattr(el, "sourcepos", None))
+        if start < 0:
+            continue
+        end = _tag_span_end(html, start)
+        if end < 0:
+            continue
+        spans.append((start, end, "." + ".".join(classes)))
+
+    if not spans:
+        return removed
+    # splice back-to-front so earlier offsets stay valid; drop nested/overlapping
+    # spans (a parent already removes its children).
+    spans.sort(key=lambda s: s[0])
+    kept = []
+    last_end = -1
+    for s, e, sel in spans:
+        if s < last_end:
+            continue                  # contained in an already-removed ancestor
+        kept.append((s, e, sel))
+        last_end = e
+    new_html = html
+    for s, e, sel in sorted(kept, key=lambda x: x[0], reverse=True):
+        new_html = new_html[:s] + new_html[e:]
+        removed.append(sel)
     if removed:
-        slide["data"]["html"] = str(soup)
+        slide["data"]["html"] = new_html
+        removed.reverse()             # report in document order
     return removed
 
 

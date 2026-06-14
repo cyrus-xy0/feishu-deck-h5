@@ -73,7 +73,7 @@ LINK_TAG_RE = re.compile(r'<link\b[^>]*>', re.I | re.S)
 
 FAMILIES = [
     ('结构 / DOM',           ['R02', 'R07', 'R-DOM', 'R-DOC-INTEGRITY', 'R-BAKED-DOM',
-                              'R-PROVENANCE']),
+                              'R-PROVENANCE', 'R-CANVAS']),
     ('安全 / 注入面',        ['R-FOREIGN-SCRIPT']),
     ('排版 / 文案',          ['R05', 'R06', 'R13', 'R20', 'R56',
                               'R-VIS-SUBTITLE-CANON',
@@ -85,7 +85,8 @@ FAMILIES = [
                               'R-LIFT-CSS-BUDGET',
                               'R-CSS-INLINE-BUDGET', 'R-CSS-CROSS-PAGE',
                               'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT',
-                              'R-LAYOUT-DEPRECATED', 'R-IFRAME-REMOTE']),
+                              'R-LAYOUT-DEPRECATED', 'R-IFRAME-REMOTE',
+                              'R-DEMO-IFRAME']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),
@@ -103,7 +104,7 @@ FAMILIES = [
                               'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE',
                               'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS', 'R-VIS-RAW-TITLE-STACK']),
     ('跨页一致性',           ['R-DECK-TITLE-DRIFT', 'R-DECK-PALETTE-DRIFT',
-                              'R-DECK-TYPESCALE-BUDGET']),
+                              'R-DECK-TYPESCALE-BUDGET', 'R-FAMILY-DRIFT']),
 ]
 
 CONTEXT_NOTES = {
@@ -170,8 +171,8 @@ def enumerate_validate_rules() -> set:
     """Best-effort set of rule codes the validator can emit. Used to detect gate
     drift (F-18) and to drive the FAMILIES / business-rules coverage guards.
 
-    UNIFY-VALIDATE-ARCH (step 4): there is now a SINGLE rule source — the unified
-    engine. Codes come from exactly three places, scanned here:
+    UNIFY-VALIDATE-ARCH (step 4): the rendered-deck rule source is the unified
+    engine. Codes come from FOUR places, scanned here:
       · assets/audits.js — the DOM/geometry/structure rules. Each finding carries
         a `rule: '<code>'` literal (NOTE the emitted code can differ from the
         rule's `id:` — e.g. the `R02-R07-STRUCTURE` rule emits `R02` and `R07`;
@@ -182,6 +183,13 @@ def enumerate_validate_rules() -> set:
         literal, perf P50–P55 via `warn("P5x", …)` / the PERF_* constants).
       · assets/validate.py — the CLI/adapter layer's own advisory `R-VISUAL`
         (engine-unavailable degrade), emitted via `iss.warn_soft('R-VISUAL', …)`.
+      · deck-json/validate-deck.py — the deck.json-side SCHEMA + business
+        validator (wired into deck-cli lint, render-deck, conform, repair). It
+        emits its codes as a free-text `(CODE)` parenthetical inside the message
+        (R-CANVAS / R-FAMILY-DRIFT / R-DEMO-IFRAME are UNIQUE to it; R-KEY /
+        R-LANG / R49 overlap the engine), so we scan that convention (contract-1).
+        Without this surface those three codes escaped the FAMILIES / yaml /
+        validator-rules.md coverage guards entirely.
     The OLD _validate_audits.py / visual-audit.js dual registries were retired;
     they are no longer scanned (and no longer exist).
     """
@@ -213,6 +221,18 @@ def enumerate_validate_rules() -> set:
         codes |= set(re.findall(
             r"(?:iss\.(?:err|warn|warn_soft)|_?lev)\(\s*['\"]([A-Za-z0-9][\w-]*)['\"]",
             vp))
+    except OSError:
+        pass
+
+    # 4) deck-json/validate-deck.py — the deck.json-side schema+business validator
+    #    (contract-1). It carries the rule code as a free-text `(CODE)` suffix
+    #    inside each Result.err/warn/warn_soft message rather than a structured
+    #    `rule=` field, so scan that parenthetical convention. Restrict to
+    #    R-prefixed codes (R-…, R<num>) so ticket refs like `(F-300)` and stray
+    #    `(HERE)` mentions are NOT mistaken for rule codes.
+    try:
+        vd = here.parent.joinpath('deck-json', 'validate-deck.py').read_text(encoding='utf-8')
+        codes |= set(re.findall(r'\((R-[A-Z][A-Z0-9-]*|R\d+)\)', vd))
     except OSError:
         pass
 

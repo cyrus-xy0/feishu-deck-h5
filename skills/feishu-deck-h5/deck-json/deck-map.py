@@ -27,9 +27,32 @@ import sys
 from pathlib import Path
 
 
+_COMMENT_OPEN = "<!--"
+_SKIP_BLOCKS = (("<!--", "-->"), ("<script", "</script>"), ("<style", "</style>"))
+
+
+def _skip_inert(html: str, j: int) -> int | None:
+    """If `html[j:]` begins an HTML comment, <script>, or <style> block, return the
+    index just past its end (so a stray </div> or <div inside a comment / JS string
+    / CSS body is NOT counted toward div depth). Otherwise return None.
+    Comments match anywhere; script/style only at a real tag boundary."""
+    if html.startswith(_COMMENT_OPEN, j):
+        end = html.find("-->", j + len(_COMMENT_OPEN))
+        return (end + 3) if end >= 0 else len(html)
+    lower = html[j:j + 7].lower()
+    for opener, closer in _SKIP_BLOCKS[1:]:
+        if lower.startswith(opener) and (len(html) <= j + len(opener)
+                                         or html[j + len(opener)] in " \t\n\r>/"):
+            close = html.lower().find(closer, j)
+            return (close + len(closer)) if close >= 0 else len(html)
+    return None
+
+
 def _depth_match_divs(html: str, open_re: re.Pattern) -> list[tuple[int, int]]:
     """Return (start, end) spans of every `<div …>` block matched by open_re,
-    depth-counted to the matching </div> (blocks may contain nested divs)."""
+    depth-counted to the matching </div> (blocks may contain nested divs).
+    Comment / <script> / <style> bodies are skipped wholesale so a stray
+    </div> or <div inside them does not corrupt the depth count."""
     spans: list[tuple[int, int]] = []
     i = 0
     while True:
@@ -40,6 +63,10 @@ def _depth_match_divs(html: str, open_re: re.Pattern) -> list[tuple[int, int]]:
         depth = 1
         j = m.end()
         while j < len(html) and depth > 0:
+            skip_to = _skip_inert(html, j)
+            if skip_to is not None:
+                j = skip_to
+                continue
             close = re.match(r'</div>', html[j:])
             tag = re.match(r'<div[\s>]', html[j:])
             if close:
@@ -106,14 +133,22 @@ def map_html(html: str) -> list[dict]:
 
 def map_deckjson(deck: dict) -> list[dict]:
     rows: list[dict] = []
-    for n, s in enumerate(deck.get("slides", []), 1):
+    # Page number = frame_index = position AFTER skipping _disabled slides — the
+    # canonical rule the renderer (active_slides) and locate-slide.py both enforce,
+    # and what URL #N / slide-index.json use. Enumerating the raw array would make
+    # every row after a _disabled slide off-by-one vs the real page number.
+    fi = 0
+    for s in deck.get("slides", []):
+        if s.get("_disabled"):     # omitted from the DOM and slide-index.json
+            continue
+        fi += 1
         data = s.get("data") or {}
         title = data.get("title")
         if not title and isinstance(data.get("html"), str):
             t = _text_of(data["html"], "title-zh", "title")
             title = t
         rows.append({
-            "index": n,
+            "index": fi,
             "key": s.get("key"),
             "layout": s.get("layout"),
             "label": s.get("screen_label"),

@@ -57,7 +57,12 @@ def main():
         notes.append("已是 imported,跳过 stamp")
 
     # 2. re-bundle the framework runtime (linked OR inlined)
-    link_m = re.search(r'<script\s+src="([^"]*feishu-deck\.js)"\s*>\s*</script>', html)
+    # Allow other attributes (defer / type=module / crossorigin) and an optional
+    # ?query / #fragment cache-buster on the src. Capture ONLY the path portion
+    # (no query/fragment) for the path-traversal containment guard below.
+    link_m = re.search(
+        r'<script\b[^>]*\bsrc="([^"?#]*feishu-deck\.js)(?:[?#][^"]*)?"[^>]*>\s*</script>',
+        html)
     if link_m:
         rel = link_m.group(1)
         target = (deck.parent / rel)

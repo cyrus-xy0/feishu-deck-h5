@@ -43,9 +43,12 @@ docs/archive record shows heal-lifted's "provably-safe" premise was once
 falsified and rolled back, so we never assume a blind direct run is safe — you
 preview, then apply.
 
-Steps 3–5 already write a `deck.json.bak-pre-<cmd>-<ts>` before mutating and
-re-validate with rollback, and steps 1–2 honor `--dry-run`; this orchestrator
-adds no writes of its own.
+Steps 3–5 each write a `deck.json.bak-pre-<cmd>-<ts>` before mutating (via
+shutil.copy2) and honor `--dry-run`, but they do NOT themselves re-validate or
+roll back — the timestamped .bak is the recovery point, and the final step 6
+(render + validate --strict) is what proves the cumulative result is
+schema-clean (and render-deck rolls back its own index.html on a gate fail).
+Steps 1–2 also honor `--dry-run`; this orchestrator adds no writes of its own.
 
 USAGE
 -----
@@ -164,9 +167,12 @@ def resolve_paths(deck_arg):
 
 
 def _run(cmd, dry):
-    """Run a sub-tool; on failure print its output and abort the pipeline (a
-    failed step has already rolled itself back). Returns nothing — raises
-    SystemExit on failure so a half-repaired deck is never silently accepted."""
+    """Run a sub-tool; on failure print its output and abort the pipeline.
+    Returns nothing — raises SystemExit on failure so a half-repaired deck is
+    never silently accepted. Recovery: each lifted-CSS step (heal/clean/
+    reconcile) leaves a timestamped `.bak-pre-<cmd>-<ts>` of the deck.json from
+    BEFORE its own edit; render-deck rolls back its own index.html on a gate
+    fail."""
     label = " ".join(Path(c).name if Path(c).name.endswith(".py") else str(c)
                      for c in cmd[1:])
     print(f"  $ {Path(sys.executable).name} {label}")
@@ -181,8 +187,9 @@ def _run(cmd, dry):
                   file=sys.stderr)
         verb = "preview" if dry else "step"
         print(f"\n✗ repair-lifted: {verb} failed "
-              f"({Path(cmd[1]).name}, exit {r.returncode}); pipeline aborted "
-              f"(the failing tool rolled itself back).", file=sys.stderr)
+              f"({Path(cmd[1]).name}, exit {r.returncode}); pipeline aborted. "
+              f"Recover the deck.json from the latest .bak-pre-*-<ts> beside it "
+              f"if a step had already written.", file=sys.stderr)
         sys.exit(r.returncode or 1)
     elif err:
         print("\n".join("      " + ln for ln in err.splitlines()))

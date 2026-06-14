@@ -29,6 +29,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# delivery-4: --name becomes a path component of ZIP_PATH ($OUT_DIR/$NAME.zip).
+# Reject any traversal/separator so the zip can never be written outside OUT_DIR.
+case "$NAME" in
+  *..* | */* | "")
+    echo "ERROR: --name must be a bare basename (no '/' or '..'): $NAME"
+    exit 1
+    ;;
+esac
+
 if [ -z "$OUT_DIR" ]; then
   echo "Usage: bash assets/package-deliverable.sh <output-dir> [--name <basename>]"
   exit 1
@@ -93,6 +102,18 @@ add_optional_dir() {
   fi
 }
 
+# delivery-1: a link-mode output keeps assets/shared as a symlink to the canonical
+# 30 MB skill pool. `cp -R` preserves it and `zip -r` later DEREFERENCES it, leaking
+# every other customer's logo into the deliverable. Refuse rather than ship the pool;
+# the caller must self-contain referenced files first (copy-assets.py --shared=copy,
+# which finalize.sh remote mode now does automatically).
+if [ -L "$OUT_DIR/assets/shared" ]; then
+  echo "ERROR: $OUT_DIR/assets/shared is a symlink to the shared pool."
+  echo "       Packaging would deref it and leak the WHOLE pool into the zip."
+  echo "       Self-contain first:  python3 $(dirname "$0")/copy-assets.py \"$OUT_DIR\" --shared=copy"
+  exit 2
+fi
+
 if [ -d "$OUT_DIR/assets" ]; then
   cp -R "$OUT_DIR/assets" "$STAGE/assets"
   ZIP_ITEMS+=(assets)
@@ -116,7 +137,10 @@ rm -f "$ZIP_PATH"
 
 # -X strips extra timestamps. Keep paths relative to STAGE so assets/ remains
 # next to index.html, matching the linked HTML references.
-( cd "$STAGE" && zip -q -X -r "$ZIP_PATH" "${ZIP_ITEMS[@]}" )
+# delivery-1: never ship system metadata (.DS_Store / __MACOSX / AppleDouble ._*)
+# into the customer-facing deliverable.
+( cd "$STAGE" && zip -q -X -r "$ZIP_PATH" "${ZIP_ITEMS[@]}" \
+    -x '*.DS_Store' -x '__MACOSX/*' -x '*/._*' -x '._*' )
 
 if [ ! -f "$ZIP_PATH" ]; then
   echo "ERROR: zip step failed"

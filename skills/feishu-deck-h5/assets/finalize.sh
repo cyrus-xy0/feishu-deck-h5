@@ -20,8 +20,10 @@
 #               + check-only gate + package-ingest.sh + deck.zip gate
 #
 # For single-file inline delivery (base64-inlined CSS/JS/images into one
-# .html file for email/IM attachment), run `bash build.sh --inline` from
-# the skill root — that's a separate pipeline, not orchestrated here.
+# .html file for email/IM attachment), inline THE USER'S RUN with
+# `python3 deck-json/render-deck.py runs/<ts>/output --inline` (or
+# `python3 assets/inline-assets.py runs/<ts>/output/index.html --out <file>`).
+# Do NOT use `build.sh --inline` — that rebuilds the skill's bundled SAMPLE deck.
 #
 # Exit codes:
 #     0  all green
@@ -45,8 +47,9 @@ while [ $# -gt 0 ]; do
         local|remote|library) MODE="$1"; shift ;;
         inline)
             echo "✗ 'inline' mode is no longer a finalize.sh subcommand." >&2
-            echo "  For single-file inline delivery, run from the skill root:" >&2
-            echo "    bash build.sh --inline" >&2
+            echo "  For single-file inline delivery of THIS run, run:" >&2
+            echo "    python3 deck-json/render-deck.py ${OUT_DIR:-runs/<ts>/output} --inline" >&2
+            echo "  (build.sh --inline rebuilds the bundled SAMPLE deck, not your run.)" >&2
             exit 1
             ;;
         --strict) STRICT="--strict"; shift ;;
@@ -114,11 +117,16 @@ run_step() {
 }
 
 # ---------- 1 · copy-assets (make output portable) ----------
+# delivery-1: remote (and library) must SELF-CONTAIN — real-copy only the shared
+# files this deck references. The default --shared=link makes output/assets/shared
+# a symlink to the whole 30 MB skill pool, which package-deliverable.sh's zip then
+# DEREFERENCES, leaking every other customer's logo into the deliverable. Only the
+# in-place `local` mode (kept next to the skill) may use the link.
 COPY_ARGS=("$OUT_DIR")
-if [ "$MODE" = "library" ]; then
+if [ "$MODE" = "library" ] || [ "$MODE" = "remote" ]; then
     COPY_ARGS+=("--shared=copy")
 fi
-if [ "$MODE" = "library" ]; then
+if [ "$MODE" = "library" ] || [ "$MODE" = "remote" ]; then
     echo "  · copy-assets --shared=copy …"
 else
     echo "  · copy-assets …"

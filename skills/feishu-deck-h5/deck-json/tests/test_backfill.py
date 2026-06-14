@@ -265,3 +265,31 @@ def test_e2e_explicit_backfill_flag_with_existing_deck(tmp_path):
                for p in src.iterdir())
     rebuilt = json.loads((src / "deck.json").read_text(encoding="utf-8"))
     assert all(s["lifted"].startswith("backfill:") for s in rebuilt["slides"])
+
+
+def test_backfill_duplicate_slide_key_keeps_distinct_bodies(tmp_path):
+    """sync-3: when index.html has duplicate data-slide-key values, each
+    duplicate-keyed slide must backfill its OWN body/label/custom_css — NOT a
+    copy of the first slide's content. (The old by-key re.search path returned
+    slide[0]'s content for every duplicate, silently losing the rest.)"""
+    html = (
+        "<html><head><title>Dup test</title></head><body><div class=\"deck\">\n"
+        '<div class="slide" data-slide-key="dup" data-screen-label="First">'
+        '<div class="wordmark">WM</div><p>FIRST BODY</p></div>\n'
+        '<div class="slide" data-slide-key="dup" data-screen-label="Second">'
+        '<div class="wordmark">WM</div><p>SECOND BODY DISTINCT</p></div>\n'
+        "</div></body></html>"
+    )
+    deck, warnings = _sync.backfill_deck(html, "duptest")
+    assert len(deck["slides"]) == 2
+    s0, s1 = deck["slides"]
+    # distinct bodies (the bug folded slide[1] into slide[0]'s body)
+    assert "FIRST BODY" in s0["data"]["html"]
+    assert "SECOND BODY DISTINCT" in s1["data"]["html"], \
+        "duplicate-keyed slide lost its own body (sync-3 regression)"
+    assert "FIRST BODY" not in s1["data"]["html"]
+    # distinct labels, and the collided key was renamed (not bodies)
+    assert s0.get("screen_label") == "First"
+    assert s1.get("screen_label") == "Second"
+    assert s0["key"] == "dup" and s1["key"] != "dup"
+    assert any("renamed" in w for w in warnings)

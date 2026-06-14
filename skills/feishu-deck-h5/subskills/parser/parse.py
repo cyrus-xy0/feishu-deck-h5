@@ -318,6 +318,61 @@ def pdf_page_count(path: Path) -> int:
     return max(1, count)
 
 
+_PDF_NAMED_ESCAPES = {
+    ord("n"): b"\n",
+    ord("r"): b"\n",
+    ord("t"): b"\t",
+    ord("b"): b"",
+    ord("f"): b"",
+    ord("("): b"(",
+    ord(")"): b")",
+    ord("\\"): b"\\",
+}
+
+
+def _pdf_unescape(value: bytes) -> bytes:
+    r"""Decode PDF literal-string escapes inside a parenthesized string body.
+
+    Handles BOTH the named escapes (\n \r \t \b \f \( \) \\) AND octal escapes
+    (\ddd, 1-3 digits) — the latter is how non-ASCII bytes are commonly written
+    and was previously left as literal "\050" garbage in the recovered text
+    (subskill-7). A backslash before a newline is a line continuation (dropped);
+    any other escaped char keeps the char (PDF spec: ignore the backslash).
+    """
+    out = bytearray()
+    i = 0
+    n = len(value)
+    while i < n:
+        c = value[i]
+        if c != 0x5C:  # not a backslash
+            out.append(c)
+            i += 1
+            continue
+        i += 1
+        if i >= n:
+            break
+        nxt = value[i]
+        if 0x30 <= nxt <= 0x37:  # octal escape: 1-3 octal digits
+            digits = bytearray()
+            while i < n and 0x30 <= value[i] <= 0x37 and len(digits) < 3:
+                digits.append(value[i])
+                i += 1
+            out.append(int(bytes(digits), 8) & 0xFF)
+            continue
+        if nxt in (0x0A, 0x0D):  # line continuation: backslash + EOL → drop both
+            i += 1
+            if nxt == 0x0D and i < n and value[i] == 0x0A:
+                i += 1
+            continue
+        repl = _PDF_NAMED_ESCAPES.get(nxt)
+        if repl is not None:
+            out.extend(repl)
+        else:
+            out.append(nxt)  # unknown escape: keep the char, drop the backslash
+        i += 1
+    return bytes(out)
+
+
 def pdf_text_light(path: Path, limit: int = 12000) -> str:
     """Best-effort PDF text extraction using only the standard library.
 
@@ -343,17 +398,7 @@ def pdf_text_light(path: Path, limit: int = 12000) -> str:
     string_re = re.compile(rb"\((?:\\.|[^\\()]){2,}\)")
     for chunk in expanded:
         for match in string_re.finditer(chunk):
-            value = match.group(0)[1:-1]
-            value = re.sub(rb"\\([nrtbf()\\])", lambda m: {
-                b"n": b"\n",
-                b"r": b"\n",
-                b"t": b"\t",
-                b"b": b"",
-                b"f": b"",
-                b"(": b"(",
-                b")": b")",
-                b"\\": b"\\",
-            }[m.group(1)], value)
+            value = _pdf_unescape(match.group(0)[1:-1])
             decoded = value.decode("utf-8", errors="ignore") or value.decode("latin1", errors="ignore")
             decoded = re.sub(r"\s+", " ", decoded).strip()
             if len(decoded) >= 2 and not re.fullmatch(r"[\W_]+", decoded):
@@ -604,14 +649,24 @@ def inspect_html(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 
 
 def local_html_asset_path(html_path: Path, ref: str) -> Path | None:
-    """Resolve a local HTML asset ref, ignoring remote/data/hash refs."""
+    """Resolve a local HTML asset ref, ignoring remote/data/hash refs.
+
+    Containment guard (F-287 untrusted source): a source HTML may carry a
+    crafted ref like ``../../../etc/passwd``. After resolving, reject anything
+    that escapes the source HTML's own directory so a malicious source cannot
+    drive an arbitrary-file read/copy into the deliverable. (parse.py lives
+    outside deck-json/ so the guard is inlined rather than importing _safe_write.)
+    """
     ref = str(ref).strip()
     if not ref or is_url(ref) or ref.startswith(("data:", "#", "mailto:", "tel:")):
         return None
     clean = ref.split("#", 1)[0].split("?", 1)[0]
     if not clean:
         return None
-    candidate = (html_path.parent / clean).resolve()
+    base = html_path.parent.resolve()
+    candidate = (base / clean).resolve()
+    if candidate != base and base not in candidate.parents:
+        return None
     return candidate if candidate.is_file() else None
 
 
@@ -717,7 +772,13 @@ def image_dimensions(path: Path) -> dict[str, int] | None:
 def resolve_markdown_media(path: Path, ref: str) -> Path | None:
     if is_url(ref) or ref.startswith(("data:", "#")):
         return None
-    candidate = (path.parent / ref.split("#", 1)[0].split("?", 1)[0]).resolve()
+    # Same containment guard as local_html_asset_path: a crafted markdown ref
+    # (e.g. ../../secret) must not escape the source markdown's directory
+    # (F-287 untrusted source; subskill-3).
+    base = path.parent.resolve()
+    candidate = (base / ref.split("#", 1)[0].split("?", 1)[0]).resolve()
+    if candidate != base and base not in candidate.parents:
+        return None
     return candidate if candidate.is_file() else None
 
 

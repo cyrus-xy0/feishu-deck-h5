@@ -62,6 +62,11 @@
   // ── enter / exit edit mode ────────────────────────────────────────────
   function enterEditMode() {
     if (editMode) return;
+    // No .deck root → edit mode has nothing to operate on, and several steps
+    // below dereference `deck` unconditionally (e.g. deck.dataset.editPasteGuard,
+    // deck.addEventListener). Bail out before flipping any state so we never throw
+    // on a null deck. (getTextLeaves already short-circuits on null deck.)
+    if (!deck) return;
     editMode = true;
     document.body.classList.add('deck-edit-mode');
 
@@ -345,20 +350,28 @@
   //     · top/bottom written with !important — the _ccApply canvas-center band
   //       translate (the R-11 landmine that compounds every round-trip). Plain
   //       author top/bottom on absolute boxes carry NO !important, so they survive.
+  //     · the balanceColumns() runtime geometry written with !important — flex /
+  //       min-height / height / width / background-size / max-height on the
+  //       letterboxed media box + justify-content on its parent cell (plus the
+  //       accompanying aspect-ratio). These are computed at runtime from the
+  //       loaded image's naturalWidth/naturalHeight + the scaled frame height —
+  //       an author never writes them, and they would otherwise bake into
+  //       index.html and fold back into deck.json on sync (越改越坏). !important
+  //       is the discriminator: author col-balance-shaped props carry no priority.
   //
   //   NOT stripped (DELIBERATELY): the balanceSlide geometry written WITHOUT
   //     !important — align-self / justify-content / min-height / padding-top /
-  //     padding-bottom (and the col-balance flex/height/aspect-ratio/max-height).
-  //     These are TEXT-IDENTICAL to ordinary author inline styles (an author may
-  //     well write `justify-content:center` in a raw slide), so stripping them
-  //     would DELETE authored layout — a worse corruption than the one we fix.
-  //     balanceSlide already reverts non-improvements (measure-or-revert), and a
-  //     kept improvement is a stable value (re-render → runtime re-measures →
-  //     already satisfied → no further injection), so it does NOT compound. The
-  //     ONLY compounding mutation is the canvas-center !important top/bottom,
-  //     which we DO strip. (Fully removing the ambiguous-prop residue would need
-  //     the runtime to write its mutations into a removable <style> — the
-  //     "change the runtime" approach this 稳妥版 deliberately does NOT take.)
+  //     padding-bottom. These are TEXT-IDENTICAL to ordinary author inline styles
+  //     (an author may well write `justify-content:center` in a raw slide), so
+  //     stripping them would DELETE authored layout — a worse corruption than the
+  //     one we fix. balanceSlide already reverts non-improvements (measure-or-
+  //     revert), and a kept improvement is a stable value (re-render → runtime
+  //     re-measures → already satisfied → no further injection), so it does NOT
+  //     compound. The compounding mutations are the !important ones above (canvas-
+  //     center top/bottom + balanceColumns geometry), which we DO strip. (Fully
+  //     removing the ambiguous no-priority residue would need the runtime to write
+  //     its mutations into a removable <style> — the "change the runtime" approach
+  //     this 稳妥版 deliberately does NOT take.)
   const RUNTIME_SLIDE_MARKER_ATTRS = [
     'data-fs-balanced', 'data-fs-colbalanced', 'data-fs-canvascentered',
     'data-fs-autobalanced',
@@ -366,18 +379,36 @@
   const RUNTIME_DECK_ATTRS = ['data-js-ready', 'data-nav-armed', 'data-edit-paste-guard'];
 
   // Strip the unambiguous runtime-injected props from one element's `style` attr,
-  // in place: --child-i + --fs-scale (always), and top/bottom ONLY when they carry
-  // !important (the _ccApply canvas-center signature). Leaves all author inline
-  // styles — including the balance props above — untouched. Drops an empty `style=""`.
+  // in place: --child-i + --fs-scale (always), and the !important-only runtime
+  // geometry written by the layout passes. !important is the clean discriminator:
+  //   · top/bottom  → _ccApply canvas-center band translate (the R-11 landmine);
+  //   · flex / min-height / height / width / background-size / max-height (on the
+  //     letterboxed media box) + justify-content (on its parent cell) →
+  //     balanceColumns() runtime-computed image-aspect geometry — derived from the
+  //     loaded image's naturalWidth/naturalHeight + scaled frame height, NEVER
+  //     authored, and (unlike the balanceSlide props) always written !important.
+  // Plain author inline styles carry NO priority, so they survive. balanceColumns
+  // ALSO writes aspect-ratio WITHOUT !important alongside those props; we strip it
+  // only when one of the !important balanceColumns fingerprints was present, so a
+  // standalone author `aspect-ratio` is never touched. Drops an empty `style=""`.
+  const BALANCE_COLS_IMPORTANT = ['flex', 'min-height', 'height', 'width',
+    'background-size', 'max-height', 'justify-content'];
   function stripRuntimeInlineStyle(el) {
     if (!el.hasAttribute || !el.hasAttribute('style')) return;
     const st = el.style;
     st.removeProperty('--child-i');
     st.removeProperty('--fs-scale');
-    // top/bottom: only the !important (canvas-center) variant is runtime.
-    for (const prop of ['top', 'bottom']) {
-      if (st.getPropertyPriority(prop) === 'important') st.removeProperty(prop);
+    // top/bottom + balanceColumns geometry: only the !important variants are runtime.
+    let hadColBalance = false;
+    for (const prop of ['top', 'bottom'].concat(BALANCE_COLS_IMPORTANT)) {
+      if (st.getPropertyPriority(prop) === 'important') {
+        if (BALANCE_COLS_IMPORTANT.indexOf(prop) !== -1) hadColBalance = true;
+        st.removeProperty(prop);
+      }
     }
+    // aspect-ratio is the one balanceColumns prop written WITHOUT !important; strip
+    // it only when an !important col-balance fingerprint accompanied it.
+    if (hadColBalance) st.removeProperty('aspect-ratio');
     if (!el.getAttribute('style')) el.removeAttribute('style');
   }
 

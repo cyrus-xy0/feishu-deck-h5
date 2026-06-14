@@ -377,6 +377,7 @@ Workers should load only the reference files they need:
 - `references/content-density.md`
 - `references/assets-and-files.md`
 - `references/layout-recipes.md`
+- `references/extra-layouts-and-raw.md`
 - `references/narrative-patterns.md`
 - `references/richness-primitives.md`
 - `references/motion-system.md`

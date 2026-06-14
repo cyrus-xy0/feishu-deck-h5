@@ -424,7 +424,15 @@ def compare_captures(
             diff_dir.mkdir(parents=True, exist_ok=True)
     changed.sort(key=lambda r: r["ratio"], reverse=True)
 
-    ok = not broken_unique and not font_fallbacks and not changed
+    # A real visual comparison happened only for paired slides that produced two
+    # screenshots (counted in `changed` + `unchanged`). If NOTHING compared (all
+    # slides went to `missing` — unpaired keys or capture failures) and there is
+    # no broken-link evidence either, the self-check verified nothing on the
+    # visual/font dimensions and must NOT report green. (subskill-4)
+    compared = len(changed) + unchanged
+    no_comparison = (compared == 0) and not broken_unique
+
+    ok = (not broken_unique and not font_fallbacks and not changed) and not no_comparison
     reasons: list[str] = []
     if broken_unique:
         reasons.append(f"{len(broken_unique)} 个资源在发布物上断链/404")
@@ -432,6 +440,8 @@ def compare_captures(
         reasons.append(f"{len(font_fallbacks)} 页字体在发布物上回落")
     if changed:
         reasons.append(f"{len(changed)} 页与本地渲染视觉差异超阈值({threshold*100:.0f}%)")
+    if no_comparison:
+        reasons.append("自检未产生任何可比对的页面(本地/远程页 key 不匹配或截图全部失败)")
 
     return {
         "ok": ok,

@@ -70,13 +70,15 @@ def _deck(frames, *, imported=False, extra_close=0):
     )
 
 
-def _no_visual(html):
+def _no_visual(html, scope=None):
     """Run the unified engine on the NO-BROWSER (dom_rules=False) path against the
-    raw bytes — the M9 contract: source-text rules execute without Chromium."""
+    raw bytes — the M9 contract: source-text rules execute without Chromium.
+    `scope` (1-based frame ordinals / None=whole deck) is fed through exactly as
+    validate.py --scope-frames / run-audits.py --slide do."""
     with tempfile.TemporaryDirectory() as td:
         idx = pathlib.Path(td) / "index.html"
         idx.write_text(html, encoding="utf-8")
-        result = RA.run_unified_engine(idx, None, dom_rules=False)
+        result = RA.run_unified_engine(idx, scope, dom_rules=False)
     return result
 
 
@@ -133,6 +135,49 @@ def test_esc_html_fires_no_browser():
 def test_esc_html_quiet_on_clean_text_no_browser():
     html = _deck([_frame(body="<p>正文里没有被转义的标签</p>")])
     assert "R-ESC-HTML" not in _codes(_no_visual(html), "R-ESC-HTML")
+
+
+# ==========================================================================
+# audits-js-2 — the no-browser path must HONOR scope for the per-slide rules
+# (R02 / R07 / R-ESC-HTML), mirroring the audits.js driver's
+# `scopeSet.has(slide_idx)` filter on the --visual path. Without this,
+# `--no-visual --scope-frames N` leaked a pre-existing off-scope finding and
+# diverged from `--visual --scope-frames N`, blocking a scoped edit.
+# ==========================================================================
+
+def test_scope_filters_off_scope_esc_html_no_browser():
+    # escaped tag ONLY on slide 2; scope=[1] must NOT report slide 2's R-ESC-HTML.
+    html = _deck([
+        _frame(body="<p>干净正文</p>", key="a"),
+        _frame(body="<p>裸 &lt;span class=x&gt;标签</p>", key="b"),
+    ])
+    in_scope = _by_rule(_no_visual(html, scope=[1]), "R-ESC-HTML")
+    assert in_scope == [], in_scope
+    # scope=[2] DOES report it (the finding is real, just off-scope above).
+    on_target = _by_rule(_no_visual(html, scope=[2]), "R-ESC-HTML")
+    assert any("slide 2" in f["message"] for f in on_target), on_target
+
+
+def test_scope_filters_off_scope_structure_no_browser():
+    # slide 2 missing data-layout (R02); scope=[1] must skip it.
+    html = _deck([
+        _frame("content", body="<div class='wordmark'></div>", key="a"),
+        _frame(layout=None, body="<div class='wordmark'></div>", key="b"),
+    ])
+    in_scope = [f for f in _by_rule(_no_visual(html, scope=[1]), "R02")
+                if "missing data-layout" in f["message"]]
+    assert in_scope == [], in_scope
+    on_target = [f for f in _by_rule(_no_visual(html, scope=[2]), "R02")
+                 if "missing data-layout" in f["message"]]
+    assert on_target, on_target
+
+
+def test_scope_keeps_deck_level_rules_unscoped_no_browser():
+    # R-KEY (deck-level) stays scope-independent: a duplicate key still fires
+    # under a scope that excludes one of the dup frames — matching its audits.js
+    # deck-level (isFirstInScope) twin.
+    html = _deck([_frame(key="dup"), _frame(key="dup")])
+    assert "R-KEY" in _codes(_no_visual(html, scope=[1]), "R-KEY")
 
 
 def test_r02_missing_layout_fires_no_browser():

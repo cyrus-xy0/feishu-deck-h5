@@ -26,6 +26,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parents[2]
 SELF_CHECK = Path(__file__).resolve().parent / "self_check.py"
 RUNS = REPO / "runs"
+CHECK_ONLY = REPO / "assets/check-only.py"
 MAGIC_PAGE_ASSETS = REPO / "assets/magic-page-assets.py"
 INLINE_ASSETS = REPO / "assets/inline-assets.py"
 DEFAULT_MAGIC_PAGE_PUBLISHER = REPO / "assets/magic-page-publish.js"
@@ -38,7 +39,10 @@ MAGIC_TOKEN_FILES = (
 )
 URL_RE = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)]*))\s*\)", re.I)
 IMPORT_RE = re.compile(r"@import\s+(?:url\(\s*)?(?:\"([^\"]*)\"|'([^']*)'|([^;'\")\s]+))(?:\s*\))?", re.I)
-RESOURCE_ATTR_RE = re.compile(r"<(?P<tag>[A-Za-z][\w:-]*)\b[^>]*?\b(?P<attr>src|href|poster)\s*=\s*([\"'])(.*?)\3", re.I | re.S)
+# NB: `(?<![\w-])` (not a bare `\b`) so a hyphenated attr name like data-src /
+# data-href / data-poster is NOT misdetected as the real src/href/poster — a
+# `\b` matches the boundary between '-' and 'src', falsely capturing data-* attrs.
+RESOURCE_ATTR_RE = re.compile(r"<(?P<tag>[A-Za-z][\w:-]*)\b[^>]*?(?<![\w-])(?P<attr>src|href|poster)\s*=\s*([\"'])(.*?)\3", re.I | re.S)
 SRCSET_ATTR_RE = re.compile(r"\bsrcset\s*=\s*([\"'])(.*?)\1", re.I | re.S)
 
 
@@ -121,6 +125,35 @@ def audit_passed(output_dir: Path) -> bool:
     return False
 
 
+def run_publish_gate(html_path: Path, output_dir: Path, *, label: str = "publish-gate") -> dict[str, Any]:
+    """Validate the EXACT HTML bytes about to be published.
+
+    Fail-closed: runs assets/check-only.py --gate ingest against html_path (auto
+    enables strict + visual + the byte-path rules, notably R-BAKED-DOM) rather
+    than reusing a stale render-time audit verdict. Used both as the pre-publish
+    gate (regardless of whether a deck.json sits in output_dir) and to re-check
+    the FINAL working_html after asset prep, since those bytes differ from the
+    bytes any prior render-time audit ran on.
+    """
+    report_path = output_dir / f"PUBLISH_QUALITY_REPORT-{label}.md"
+    cmd = [
+        sys.executable,
+        str(CHECK_ONLY),
+        str(html_path),
+        "--gate",
+        "ingest",
+        "--report",
+        str(report_path),
+    ]
+    step = subprocess_record(cmd, cwd=REPO, log_path=output_dir / f"publisher-{label}.log")
+    return {
+        "ok": step["ok"],
+        "report": repo_rel(report_path) if report_path.exists() else "",
+        "step": summarize_step(step),
+        "reason": "" if step["ok"] else (step["stderr"] or step["stdout"] or "publish quality gate failed"),
+    }
+
+
 def task_dirs(task_id: str) -> tuple[Path, Path]:
     task_dir = RUNS / task_id
     output_dir = task_dir / "output"
@@ -143,14 +176,46 @@ def resolve_html(args: argparse.Namespace, output_dir: Path | None) -> Path | No
     return html_path
 
 
+# Default wall-clock bound for child steps. The network-bound `node
+# magic-page-publish.js` upload gets a generous timeout so a stalled connection
+# cannot hang the whole publish with no bound (subskill-5).
+DEFAULT_SUBPROCESS_TIMEOUT = 300
+NETWORK_SUBPROCESS_TIMEOUT = 600
+
+
 def subprocess_record(
     cmd: list[str],
     *,
     cwd: Path,
     log_path: Path | None = None,
     env: dict[str, str] | None = None,
+    timeout: int | None = DEFAULT_SUBPROCESS_TIMEOUT,
 ) -> dict[str, Any]:
-    proc = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, env=env)
+    try:
+        proc = subprocess.run(
+            cmd, cwd=cwd, text=True, capture_output=True, env=env, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = (exc.stderr or "") + f"\nTIMEOUT after {timeout}s: {' '.join(cmd)}"
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="ignore")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="ignore")
+        if log_path:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text(
+                "$ " + " ".join(cmd) + "\n\nSTDOUT\n" + stdout + "\nSTDERR\n" + stderr,
+                encoding="utf-8",
+            )
+        return {
+            "cmd": cmd,
+            "ok": False,
+            "returncode": 124,
+            "stdout": stdout.strip(),
+            "stderr": stderr.strip(),
+            "json": None,
+        }
     if log_path:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
@@ -358,6 +423,23 @@ def publish_magic_page(
         write_publish_reports(output_dir, payload)
         return payload
 
+    # subskill-2: validate the EXACT bytes about to be published. asset prep
+    # (inline-assets + magic-page-assets URL rewriting) produced a NEW artifact
+    # that no prior render-time audit ran on; re-run the gate on working_html so
+    # R-BAKED-DOM and friends are caught on the publish-bound bytes. Fail-closed.
+    if not args.allow_unaudited:
+        final_gate = run_publish_gate(working_html, output_dir, label="finalbytes")
+        if not final_gate["ok"]:
+            payload = magic_failure(
+                "publish-bytes validator gate failed (re-check of the final published HTML)"
+                + (f": {final_gate['reason']}" if final_gate.get("reason") else ""),
+                working_html,
+                base_url,
+                None,
+            )
+            write_publish_reports(output_dir, payload)
+            return payload
+
     script = args.magic_page_script or optional_path(os.environ.get("FEISHU_DECK_H5_MAGIC_PAGE_PUBLISHER", "")) or DEFAULT_MAGIC_PAGE_PUBLISHER
     if not script.exists():
         payload = magic_failure(f"Magic Page publisher not found: {script}", working_html, base_url, None)
@@ -366,7 +448,7 @@ def publish_magic_page(
     cmd = ["node", str(script), "publish", str(working_html), "--title", title, "--base-url", base_url]
     if args.magic_page_open_source:
         cmd.append("--open-source")
-    proc = subprocess_record(cmd, cwd=REPO, log_path=output_dir / "publisher-magic-page.log")
+    proc = subprocess_record(cmd, cwd=REPO, log_path=output_dir / "publisher-magic-page.log", timeout=NETWORK_SUBPROCESS_TIMEOUT)
     parsed = parse_magic_stdout(proc["stdout"])
     ok = proc["ok"] and bool(parsed["app_url"])
     payload = {
@@ -415,8 +497,6 @@ def write_publish_reports(output_dir: Path, payload: dict[str, Any]) -> None:
         f"- dry_run: {payload.get('dry_run')}",
         f"- app_url: {payload.get('app_url') or ''}",
         f"- app_id: {payload.get('app_id') or ''}",
-        f"- mode: {payload.get('mode') or ''}",
-        f"- publish_dir: {payload.get('publish_dir') or ''}",
         f"- reason: {payload.get('reason') or ''}",
         "",
     ]
@@ -531,10 +611,25 @@ def main(argv: list[str] | None = None) -> int:
         output_dir = RUNS / task_id / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not args.allow_unaudited and output_dir.exists() and (output_dir / "deck.json").exists() and not audit_passed(output_dir):
-        raise SystemExit("publisher: deck-validator pass verdict is required before publishing")
-
     html_path = resolve_html(args, output_dir)
+
+    # Fail-closed validator gate: validate the EXACT artifact bytes about to be
+    # published, regardless of whether a deck.json happens to sit in output_dir.
+    # (subskill-1 / subskill-2: absence of deck.json must NOT silently disable
+    # the gate, and we never reuse a stale render-time audit verdict.)
+    if not args.allow_unaudited:
+        if not html_path:
+            raise SystemExit(
+                "publisher: deck-validator pass verdict is required before publishing "
+                "(no HTML artifact to validate; pass --allow-unaudited only for local/debug)"
+            )
+        gate = run_publish_gate(html_path, output_dir, label="prepublish")
+        if not gate["ok"]:
+            raise SystemExit(
+                "publisher: deck-validator gate failed on the artifact to be published"
+                + (f": {gate['reason']}" if gate.get("reason") else "")
+            )
+
     title = args.title or (read_json(output_dir / "deck.json").get("title") if (output_dir / "deck.json").exists() else "") or (html_path.stem if html_path else task_id)
 
     if not html_path:

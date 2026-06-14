@@ -121,7 +121,13 @@ def ensure_quality_gate(html_path: Path, output_dir: Path, args: argparse.Namesp
             "report": "",
             "reason": "--allow-unaudited set; quality gate bypassed for local/debug use",
         }
-    if audit_passed(output_dir):
+    # Only reuse output_dir's audit verdict when html_path IS the run's own
+    # index.html — that report pertains to that file. An external --html (even
+    # under --task-id) does NOT match output_dir's audit-report.json, so reusing
+    # it would stamp a stale/unrelated PASS onto a different artifact (subskill-6).
+    own_index = (output_dir / "index.html").resolve()
+    is_run_index = html_path.resolve() == own_index
+    if is_run_index and audit_passed(output_dir):
         return {
             "ok": True,
             "reused": True,
@@ -186,14 +192,46 @@ def selected_slide_keys(deck: dict[str, Any], requested: list[str]) -> list[str]
     return keys
 
 
+# Default wall-clock bound for child steps. Network-bound steps (bootstrap's git
+# clone, confirm-ingest's PR push) get a generous timeout so a stalled connection
+# cannot hang the whole run with no bound (subskill-5).
+DEFAULT_SUBPROCESS_TIMEOUT = 300
+NETWORK_SUBPROCESS_TIMEOUT = 600
+
+
 def subprocess_record(
     cmd: list[str],
     *,
     cwd: Path,
     log_path: Path | None = None,
     env: dict[str, str] | None = None,
+    timeout: int | None = DEFAULT_SUBPROCESS_TIMEOUT,
 ) -> dict[str, Any]:
-    proc = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, env=env)
+    try:
+        proc = subprocess.run(
+            cmd, cwd=cwd, text=True, capture_output=True, env=env, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = (exc.stderr or "") + f"\nTIMEOUT after {timeout}s: {' '.join(cmd)}"
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="ignore")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="ignore")
+        if log_path:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text(
+                "$ " + " ".join(cmd) + "\n\nSTDOUT\n" + stdout + "\nSTDERR\n" + stderr,
+                encoding="utf-8",
+            )
+        return {
+            "cmd": cmd,
+            "ok": False,
+            "returncode": 124,
+            "stdout": stdout.strip(),
+            "stderr": stderr.strip(),
+            "json": None,
+        }
     if log_path:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
@@ -386,7 +424,7 @@ def ingest_with_slide_library(
     if args.slide_library_offline:
         bootstrap_cmd.append("--offline")
     env = child_env(library_root)
-    bootstrap_step = subprocess_record(bootstrap_cmd, cwd=REPO, log_path=output_dir / "importer-slide-library-bootstrap.log", env=env)
+    bootstrap_step = subprocess_record(bootstrap_cmd, cwd=REPO, log_path=output_dir / "importer-slide-library-bootstrap.log", env=env, timeout=NETWORK_SUBPROCESS_TIMEOUT)
     result["steps"].append({"name": "bootstrap-library", **summarize_step(bootstrap_step)})
     if not bootstrap_step["ok"]:
         result["reason"] = bootstrap_step["stderr"] or bootstrap_step["stdout"] or "bootstrap-library failed"
@@ -457,7 +495,7 @@ def ingest_with_slide_library(
         confirm_cmd.append("--auto-merge")
     if args.wait_viewer:
         confirm_cmd.append("--wait-viewer")
-    confirm_step = subprocess_record(confirm_cmd, cwd=REPO, log_path=output_dir / "importer-slide-library-confirm.log", env=env)
+    confirm_step = subprocess_record(confirm_cmd, cwd=REPO, log_path=output_dir / "importer-slide-library-confirm.log", env=env, timeout=NETWORK_SUBPROCESS_TIMEOUT)
     result["steps"].append({"name": "confirm-ingest", **summarize_step(confirm_step)})
     result["confirmed"] = confirm_step["ok"]
     result["ok"] = confirm_step["ok"]

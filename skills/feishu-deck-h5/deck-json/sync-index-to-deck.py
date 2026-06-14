@@ -143,12 +143,27 @@ _RUNTIME_DECL_RE = re.compile(
     r"(^|;)\s*(?:--child-i|--fs-scale)\s*:\s*[^;\"]*",
     re.I,
 )
-# top/bottom are stripped ONLY when they carry !important — the _ccApply
-# canvas-center signature (the R-11 landmine that compounds). Plain author
-# top/bottom (common on absolute boxes, e.g. `position:absolute;top:0`) carry no
-# !important, so they survive. The boundary group(1) is preserved like above.
+# top/bottom + the balanceColumns() runtime geometry (flex / min-height / height /
+# width / background-size / max-height / justify-content) are stripped ONLY when
+# they carry !important — the runtime layout-pass signature that compounds across
+# round-trips (the R-11 _ccApply canvas-center top/bottom landmine + the
+# image-aspect column geometry). Plain author top/bottom/width… (no !important,
+# common on absolute boxes e.g. `position:absolute;top:0`) survive. This mirrors
+# deck-edit-mode.js stripRuntimeInlineStyle — the two sanitizers are PAIRED; keep
+# the declaration set in sync. The boundary group(1) is preserved like above.
 _RUNTIME_CC_DECL_RE = re.compile(
-    r"(^|;)\s*(?:top|bottom)\s*:\s*[^;\"]*!important\s*[^;\"]*",
+    r"(^|;)\s*(?:top|bottom|flex|min-height|height|width|background-size|max-height|justify-content)\s*:\s*[^;\"]*!important\s*[^;\"]*",
+    re.I,
+)
+# balanceColumns ALSO writes aspect-ratio WITHOUT !important alongside the props
+# above; strip it ONLY when an !important balanceColumns fingerprint accompanied it
+# in the same style body, so a standalone author `aspect-ratio` is never touched.
+_RUNTIME_COLBAL_IMPORTANT_RE = re.compile(
+    r"(?:flex|min-height|height|width|background-size|max-height|justify-content)\s*:\s*[^;\"]*!important",
+    re.I,
+)
+_ASPECT_RATIO_DECL_RE = re.compile(
+    r"(^|;)\s*aspect-ratio\s*:\s*[^;\"]*",
     re.I,
 )
 
@@ -186,8 +201,11 @@ def _sanitize_style_attr(style_body: str) -> str:
     collapsed. We restore the original trailing ';' (render-deck.py's emitted
     inline styles end with ';', so dropping it would falsely register as drift)."""
     had_trailing_semi = style_body.rstrip().endswith(";")
+    had_colbal = bool(_RUNTIME_COLBAL_IMPORTANT_RE.search(style_body))
     cleaned = _RUNTIME_DECL_RE.sub(r"\1", style_body)
     cleaned = _RUNTIME_CC_DECL_RE.sub(r"\1", cleaned)
+    if had_colbal:                                       # only then is aspect-ratio runtime
+        cleaned = _ASPECT_RATIO_DECL_RE.sub(r"\1", cleaned)
     cleaned = re.sub(r";\s*;+", ";", cleaned)            # collapse `;;` runs
     cleaned = cleaned.strip().strip(";").strip()
     if cleaned and had_trailing_semi:
@@ -282,16 +300,33 @@ def extract_slide_inner(html: str, slide_key: str) -> str | None:
 _STYLE_RE = re.compile(r'style="([^"]*)"')
 _SPAN_RE = re.compile(r'<span\b[^>]*style="([^"]*)"[^>]*>(.*?)</span>', re.S)
 _COLOR_RE = re.compile(r'color:\s*([^;]+)')
+# render-deck.py emits per-run font-size as `font-size:Ncqw` (N = px/W*100), so
+# reverse N→px via /100*W. font-family is the authored face plus an appended CJK
+# fallback chain (', "PingFang SC", "Microsoft YaHei", sans-serif') that we strip
+# back off. grad is carried as `background-image:<gradient>` (followed by the
+# clip/fill-color machinery, which we ignore). See render-deck.py:1819-1855.
+_FONTSIZE_RE = re.compile(r'font-size:\s*([\d.]+)cqw')
+_FONTFAMILY_RE = re.compile(r'font-family:\s*([^;]+)')
+_BGIMAGE_RE = re.compile(r'background-image:\s*([^;]+)')
+# the CJK fallback chain render-deck.py appends to every per-run font-family.
+_FONT_FALLBACK_SUFFIX = ', "PingFang SC", "Microsoft YaHei", sans-serif'
 
 
 def _canvas_geom_from_style(style: str, W: int, H: int) -> dict:
-    """cqw/cqh in an element's inline style → px geometry (1 decimal)."""
+    """cqw/cqh in an element's inline style → px geometry (1 decimal).
+
+    A whole-number result is emitted as an int (not 192.0): render-deck.py keeps
+    authored integer geometry integer, and the drift compare is a json.dumps
+    string compare, so floatifying a clean int (192 → 192.0) would register
+    PHANTOM drift on every canvas sync and trip the F-315 clobber guard (exit 11)
+    on a deck nobody edited. (sync-2)"""
     g = {}
     for css_key, base, json_key in (("left", W, "x"), ("top", H, "y"),
                                     ("width", W, "w"), ("height", H, "h")):
         m = re.search(rf'{css_key}:\s*([\d.]+)cq[wh]', style)
         if m:
-            g[json_key] = round(float(m.group(1)) / 100 * base, 1)
+            v = round(float(m.group(1)) / 100 * base, 1)
+            g[json_key] = int(v) if v == int(v) else v
     return g
 
 
@@ -303,20 +338,74 @@ def _text_from_html(html_text: str) -> str:
     return _html_unescape(re.sub(r"<[^>]+>", "", s))
 
 
-def _runs_from_inner(inner: str) -> list:
-    """span inner → runs (per-run bold/color). No spans but text present →
-    single flattened run (documented lossy boundary on multi-run edit)."""
-    runs = []
-    for style, text in _SPAN_RE.findall(inner):
-        cm = _COLOR_RE.search(style)
+def _font_from_family(decl: str) -> str | None:
+    """font-family declaration → the authored face, stripping the CJK fallback
+    chain render-deck.py appends. (The caller has already HTML-unescaped the style,
+    so `&quot;`→`"`; the stored deck.json `font` is a quoted CSS family list, e.g.
+    '"Arial"'.) Returns None if nothing usable remains."""
+    fam = decl.strip().rstrip(";").strip()
+    if fam.endswith(_FONT_FALLBACK_SUFFIX):
+        fam = fam[: -len(_FONT_FALLBACK_SUFFIX)].strip()
+    return fam or None
+
+
+def _runs_from_inner(inner: str, W: int = 1920, prev_runs: list | None = None) -> list:
+    """span inner → runs, recovering EVERY per-run field render-deck.py emits
+    (text, bold, color, size, font, grad) so a text-only browser edit never
+    strips typography on round-trip (sync-1).
+
+    To be robust against any future per-run field this reverse-parser does NOT
+    yet understand, recovered fields are MERGED positionally onto the matching
+    existing run dict (`prev_runs`) when the run count is unchanged — so unknown
+    fields survive even if they are never re-emitted to the DOM. When the run
+    count changes (add/flatten), fall back to a clean parse. No spans but text
+    present → single flattened run (documented lossy boundary on multi-run edit).
+    """
+    parsed = []
+    for style_raw, text in _SPAN_RE.findall(inner):
+        # render-deck.py HTML-escapes the style attr (quote=True), so a per-run
+        # font-family becomes `&quot;Arial&quot;, …`. Unescape the WHOLE style
+        # before parsing: `&quot;` ends in `;`, which would otherwise truncate a
+        # `[^;]+` font-family capture mid-entity. (Colors/grads have no entities,
+        # so this is a no-op for them.) The text is unescaped separately below.
+        style = _html_unescape(style_raw)
         run = {"text": _text_from_html(text)}
         if "700" in style:
             run["bold"] = True
+        cm = _COLOR_RE.search(style)
         if cm:
-            run["color"] = cm.group(1).strip()
-        runs.append(run)
-    if runs:
-        return runs
+            # render-deck.py supplies `color:currentColor` ONLY as a grad
+            # fallback for a colorless run — never round-trip it as an authored
+            # color (would phantom-drift a run that had no color).
+            col = cm.group(1).strip()
+            if col != "currentColor":
+                run["color"] = col
+        sm = _FONTSIZE_RE.search(style)
+        if sm:
+            sz = round(float(sm.group(1)) / 100 * W, 1)
+            run["size"] = int(sz) if sz == int(sz) else sz
+        fm = _FONTFAMILY_RE.search(style)
+        if fm:
+            fam = _font_from_family(fm.group(1))
+            if fam:
+                run["font"] = fam
+        gm = _BGIMAGE_RE.search(style)
+        if gm:
+            run["grad"] = gm.group(1).strip()
+        parsed.append(run)
+
+    if parsed:
+        # Positional merge: carry forward any field the existing run carried that
+        # the reverse-parser didn't recover, so unknown/未来 fields survive a
+        # text-only edit. Only when the run STRUCTURE is unchanged (same count) —
+        # an add/delete/flatten can't be aligned positionally, so trust the parse.
+        if prev_runs and len(prev_runs) == len(parsed):
+            for new_run, old_run in zip(parsed, prev_runs):
+                for k, v in old_run.items():
+                    if k not in new_run:
+                        new_run[k] = v
+        return parsed
+
     flat = _text_from_html(inner).strip()
     if flat:
         return [{"text": flat}]
@@ -325,8 +414,10 @@ def _runs_from_inner(inner: str) -> list:
 
 def _collect_canvas_els(inner: str) -> "list[tuple[str, dict]]":
     """Parse the slide's rendered .canvas inner for every [data-el-id] element.
-    Returns [(id, {tag, style, inner})] in DOM order. div / svg use depth-counted
-    inner; img is void. (svg = a FREEFORM/custGeom/LINE shape element.)"""
+    Returns [(id, {tag, style, inner, open_tag})] in DOM order. div / svg use
+    depth-counted inner; img is void. (svg = a FREEFORM/custGeom/LINE shape
+    element.) `open_tag` is kept so the reverse-map can recover non-style
+    attributes (e.g. an added image's src). (sync-4)"""
     out = []
     for tm in re.finditer(r'<(div|img|svg)\b[^>]*\bdata-el-id="([^"]+)"[^>]*>',
                           inner):
@@ -343,8 +434,24 @@ def _collect_canvas_els(inner: str) -> "list[tuple[str, dict]]":
                 if depth == 0:
                     el_inner = inner[i:i + mm.start()]
                     break
-        out.append((eid, {"tag": tag, "style": style, "inner": el_inner}))
+        out.append((eid, {"tag": tag, "style": style, "inner": el_inner,
+                          "open_tag": open_tag}))
     return out
+
+
+_SRC_RE = re.compile(r'\bsrc="([^"]*)"')
+
+
+def _img_src_from_html(open_tag: str, el_inner: str) -> str:
+    """Recover an image element's src on reverse-map. The common (uncropped) case
+    renders `<img class="el" data-el-id ... src=...>` so the src is on the open
+    tag; the cropped case wraps an inner `<img src=...>` inside the el div, so
+    fall back to scanning the captured inner. Empty if none found. (sync-4)"""
+    m = _SRC_RE.search(open_tag)
+    if m:
+        return _html_unescape(m.group(1))
+    m = _SRC_RE.search(el_inner or "")
+    return _html_unescape(m.group(1)) if m else ""
 
 
 def sync_canvas_data(inner: str, data: dict) -> dict:
@@ -377,7 +484,16 @@ def sync_canvas_data(inner: str, data: dict) -> dict:
             new_el = {"id": eid, "type": etype}
             new_el.update(_canvas_geom_from_style(h["style"], W, H))
             if etype == "text":
-                new_el["runs"] = _runs_from_inner(h["inner"])
+                new_el["runs"] = _runs_from_inner(h["inner"], W)
+            elif etype == "image":
+                # recover src so an added image isn't a broken empty box (sync-4)
+                src = _img_src_from_html(h["open_tag"], h["inner"])
+                if src:
+                    new_el["src"] = src
+            elif etype == "shape":
+                # capture the svg path/inner so an added shape isn't empty (sync-4)
+                if h["inner"].strip():
+                    new_el["svg"] = h["inner"].strip()
             jmap[eid] = new_el
             elements.append(new_el)
             continue
@@ -385,7 +501,9 @@ def sync_canvas_data(inner: str, data: dict) -> dict:
         # 2) geometry write-back
         el.update(_canvas_geom_from_style(h["style"], W, H))
         if el.get("type") == "text":
-            runs = _runs_from_inner(h["inner"])
+            # pass the existing runs so unchanged/unknown per-run fields (size /
+            # font / grad / future fields) survive a text-only edit (sync-1).
+            runs = _runs_from_inner(h["inner"], W, el.get("runs"))
             if runs:
                 el["runs"] = runs
 
@@ -430,6 +548,63 @@ _SLIDE_OPEN_RE = re.compile(
 def _slide_keys_in_dom_order(html: str) -> list:
     """Every `.slide` data-slide-key in DOM order (self-rendered feishu deck)."""
     return _SLIDE_OPEN_RE.findall(html)
+
+
+def _screen_label_in_tag(open_tag: str) -> str | None:
+    """data-screen-label off ONE slide open tag (positional, not by-key)."""
+    m = re.search(r'\bdata-screen-label="([^"]*)"', open_tag)
+    return m.group(1) if m else None
+
+
+def _depth_extract_div_inner(html: str, start: int) -> str | None:
+    """Inner HTML of the `.slide` div whose open tag ENDS at `start`, by
+    depth-counting `<div>`/`</div>`. Positional (anchored at `start`, not a
+    by-key re.search), so duplicate-keyed slides each get their OWN body. None if
+    the div never closes."""
+    i = start
+    depth = 1
+    j = i
+    while depth > 0 and j < len(html):
+        nm = re.search(r"<div\b[^>]*>|</div>", html[j:])
+        if not nm:
+            return None
+        depth += -1 if nm.group(0).startswith("</") else 1
+        j += nm.end()
+    return html[i: j - len("</div>")]
+
+
+def _slides_in_dom_order(html: str) -> "list[tuple[str, str, str | None, str]]":
+    """POSITIONAL backfill extractor (sync-3): walk every `.slide` open tag in DOM
+    order and depth-extract EACH one's own inner from its real position. Returns
+    [(key, inner, screen_label, custom_css)] — so two slides sharing a
+    data-slide-key carry distinct bodies (the by-key re.search path always grabbed
+    slide[0]'s content for every duplicate, silently losing the rest).
+
+    `inner` is post-processed identically to extract_slide_inner (leading
+    custom_css <style> + wordmark stripped, rstripped) so a subsequent sync on the
+    same index.html is a no-op; `custom_css` is that stripped block's body."""
+    out = []
+    for om in _SLIDE_OPEN_RE.finditer(html):
+        key = om.group(1)
+        inner_full = _depth_extract_div_inner(html, om.end())
+        if inner_full is None:
+            continue
+        # strip the leading per-slide custom_css block (render-deck injects it as
+        # the FIRST child of .slide); capture its body for the custom_css field.
+        custom_css = ""
+        cc = re.match(r'\s*<style[^>]*\bdata-fs-custom-css\b[^>]*>(.*?)</style>\s*',
+                      inner_full, re.S)
+        if cc:
+            custom_css = cc.group(1).strip()
+            inner_full = inner_full[cc.end():]
+        # strip the leading wordmark div
+        wm = re.match(r'\s*<div class="wordmark"[^>]*>.*?</div>\s*',
+                      inner_full, re.S)
+        if wm:
+            inner_full = inner_full[wm.end():]
+        out.append((key, inner_full.rstrip(),
+                    _screen_label_in_tag(om.group(0)), custom_css))
+    return out
 
 
 def _screen_label_for(html: str, slide_key: str) -> str | None:
@@ -572,22 +747,28 @@ def backfill_deck(index_html: str, html_stem: str) -> "tuple[dict, list]":
     native_keys = _slide_keys_in_dom_order(index_html)
 
     if native_keys:
-        # EXACT path — self-rendered feishu deck. Reuse extract_slide_inner so
-        # this is byte-identical to what a subsequent sync would compare against.
+        # EXACT path — self-rendered feishu deck. Extract each slide POSITIONALLY
+        # (by its real DOM occurrence) rather than by-key re.search, so duplicate
+        # data-slide-keys each carry their OWN body/label/css — the by-key path
+        # always returned slide[0]'s content for every duplicate, silently losing
+        # the rest (sync-3). The positional inner is post-processed identically to
+        # extract_slide_inner, so a subsequent sync on the same index.html is a no-op.
         used = set()
-        for n, key in enumerate(native_keys, 1):
-            inner = extract_slide_inner(index_html, key)
+        for n, (key, inner, label, cc) in enumerate(
+                _slides_in_dom_order(index_html), 1):
             if inner is None:
                 warnings.append(f"slide-key {key!r} matched in scan but inner "
                                 f"could not be extracted — skipped")
                 continue
             # de-dupe collided keys (a malformed deck could repeat one); the
-            # schema needs unique keys for a clean sync round-trip.
+            # schema needs unique keys for a clean sync round-trip. Bodies are now
+            # distinct (positional extraction above), so this is a pure key rename.
             ukey = key
             if ukey in used:
                 ukey = _make_key(key, used, n)
                 warnings.append(f"duplicate data-slide-key {key!r} → renamed "
-                                f"{ukey!r} for uniqueness")
+                                f"{ukey!r} for uniqueness (its own distinct body "
+                                f"is preserved)")
             else:
                 used.add(ukey)
             slide = {
@@ -596,10 +777,8 @@ def backfill_deck(index_html: str, html_stem: str) -> "tuple[dict, list]":
                 "lifted": f"backfill:{html_stem}#{n}",
                 "data": {"html": inner},
             }
-            label = _screen_label_for(index_html, key)
             if label:
                 slide["screen_label"] = label
-            cc = _extract_slide_custom_css(index_html, key)
             if cc:
                 slide["custom_css"] = cc
             slides.append(slide)
