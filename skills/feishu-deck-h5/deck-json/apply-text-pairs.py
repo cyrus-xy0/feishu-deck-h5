@@ -41,6 +41,10 @@ import json
 import sys
 from pathlib import Path
 
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from _safe_write import validate_and_write_deck, deck_is_valid
+
 
 def load_pairs(pairs_path: Path) -> dict:
     """Return {slide_key: [(find, replace), ...]} from the pairs JSON."""
@@ -140,11 +144,33 @@ def main(argv=None) -> int:
                 total += 1
                 miss += 1
             continue
-        for f, t in reps:
-            total += 1
-            n = h.count(f)
-            if n:
-                h = h.replace(f, t)
+        # SINGLE-PASS non-overlapping replacement: a chained `h.replace(f, t)`
+        # for each pair lets a string ALREADY substituted by an earlier replace
+        # be re-matched by a LATER find (double-translation, e.g. find "门店"→
+        # replace "store" then a later find "store"→… mangles the fresh output).
+        # We instead scan h left-to-right once: at each position try each find
+        # (longest-first, the order extract-text-pairs emits), and on a match emit
+        # its replacement and skip PAST it so replacement chars are never re-scanned.
+        finds = [f for f, _t in reps]
+        rep_of = dict(reps)
+        total += len(finds)
+        out: list[str] = []
+        matched: set[str] = set()
+        i = 0
+        n = len(h)
+        while i < n:
+            for f in finds:
+                if f and h.startswith(f, i):
+                    out.append(rep_of[f])
+                    i += len(f)
+                    matched.add(f)
+                    break
+            else:
+                out.append(h[i])
+                i += 1
+        h = "".join(out)
+        for f in finds:
+            if f in matched:
                 hit += 1
                 touched_keys.add(s["key"])
             else:
@@ -193,19 +219,24 @@ def main(argv=None) -> int:
               f"重读后重试, 或 --force 覆盖", file=sys.stderr)
         return 4
 
-    # Timestamped backup (collision-safe) — a FIXED name let a second text-swap
-    # run overwrite the only pre-first-swap backup, losing the original.
-    import datetime
-    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    bak = args.deck.parent / f"{args.deck.name}.bak-pre-textswap-{ts}"
-    n = 0
-    while bak.exists():
-        n += 1
-        bak = args.deck.parent / f"{args.deck.name}.bak-pre-textswap-{ts}.{n}"
-    bak.write_text(args.deck.read_text(encoding="utf-8"), encoding="utf-8")
-    args.deck.write_text(
-        json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"  ✓ 写回 {args.deck.name} (备份 {bak.name})")
+    # Write through the shared safe-writer: collision-safe timestamped backup →
+    # atomic write (no torn deck.json on a mid-write kill) → re-validate against
+    # the schema → auto-rollback from the backup if the result is invalid (e.g. a
+    # replacement broke the embedded data.html). Replaces the old plain
+    # non-atomic write_text that skipped schema re-validation + rollback.
+    #
+    # Gate the OUTPUT only when the INPUT was already valid: a verbatim text-swap
+    # on a deck that was ALREADY schema-invalid (e.g. a hand-edited canvas run with
+    # non-string text) must still go through — refusing it would block a legitimate
+    # edit because of a pre-existing flaw this tool neither caused nor can fix. When
+    # the input was valid, the gate guarantees the swap didn't break it.
+    gate = deck_is_valid(args.deck)   # args.deck still holds the pre-write input here
+    if not validate_and_write_deck(args.deck, deck, "textswap", validate=gate):
+        print(f"\n✗ {args.deck.name} 套用后未通过 deck-schema 校验,已回滚(未改盘)。"
+              f"检查替换串是否破坏了 data.html 结构。", file=sys.stderr)
+        return 2
+    suffix = "已校验, " if gate else "输入本已不合规→best-effort写入, "
+    print(f"  ✓ 写回 {args.deck.name} ({suffix}备份见上)")
     return 5 if miss else 0
 
 

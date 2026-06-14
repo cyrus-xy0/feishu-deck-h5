@@ -258,3 +258,89 @@ def test_roundtrip_stable_second_sync(tmp_path):
     data2 = _sync.sync_canvas_data(_inner(html2), data1)
     assert json.dumps(data1, sort_keys=True, ensure_ascii=False) == \
            json.dumps(data2, sort_keys=True, ensure_ascii=False)
+
+
+def _typo_slide():
+    """A canvas slide whose runs carry the FULL typography set render-deck emits:
+    size (font-size), font (font-family), grad (background-image), plus bold/color.
+    Used to lock sync-1 (reverse-map must not strip per-run typography) and sync-2
+    (integer geometry stays integer → no phantom drift)."""
+    return {
+        "key": "canvas-page", "layout": "canvas", "accent": "blue",
+        "data": {"canvas_w": 1920, "canvas_h": 1080, "elements": [
+            {"id": "t1", "type": "text", "x": 192, "y": 130, "w": 768, "h": 86,
+             "anchor": "top",
+             "runs": [{"text": "原始标题A", "bold": True, "color": "#1A1A1A",
+                       "size": 48, "font": '"Arial"',
+                       "grad": "linear-gradient(90deg, #3C7FFF 0%, #33D6C0 100%)"}]},
+            {"id": "img1", "type": "image", "x": 1152, "y": 130,
+             "w": 576, "h": 324, "src": "input/photo.jpg"},
+        ]},
+    }
+
+
+def test_roundtrip_text_edit_preserves_typography(tmp_path):
+    """sync-1: a text-only edit must NOT strip per-run size/font/grad (they are
+    emitted to the DOM and must be recovered, not silently dropped)."""
+    slide = _typo_slide()
+    html = _render(tmp_path, [slide])
+    edited = html.replace("原始标题A", "编辑后B")
+    new = _sync.sync_canvas_data(_inner(edited), slide["data"])
+    t1 = next(e for e in new["elements"] if e["id"] == "t1")
+    r = t1["runs"][0]
+    assert r["text"] == "编辑后B"
+    assert r.get("size") == 48, "per-run font-size stripped on text edit"
+    assert r.get("font") == '"Arial"', f"per-run font-family lost: {r.get('font')!r}"
+    assert "linear-gradient" in (r.get("grad") or ""), "per-run grad stripped"
+    assert r.get("bold") is True and r.get("color") == "#1A1A1A"
+
+
+def test_roundtrip_stable_second_sync_with_typography(tmp_path):
+    """sync-1 + sync-2: render(sync(render)) is a fixed point even when runs carry
+    size/font/grad AND geometry is integer (would phantom-drift if floatified)."""
+    slide = _typo_slide()
+    html1 = _render(tmp_path, [slide])
+    data1 = _sync.sync_canvas_data(_inner(html1), slide["data"])
+    # geometry must stay integer (sync-2: 192 not 192.0)
+    img = next(e for e in data1["elements"] if e["id"] == "img1")
+    assert all(isinstance(img[k], int) for k in ("x", "y", "w", "h")), \
+        f"geometry floatified: {[img[k] for k in ('x','y','w','h')]}"
+    slide2 = dict(slide, data=data1)
+    html2 = _render(tmp_path, [slide2])
+    data2 = _sync.sync_canvas_data(_inner(html2), data1)
+    assert json.dumps(data1, sort_keys=True, ensure_ascii=False) == \
+           json.dumps(data2, sort_keys=True, ensure_ascii=False)
+
+
+def test_roundtrip_add_image_keeps_src(tmp_path):
+    """sync-4: a newly-added canvas <img> must keep its src (else broken box)."""
+    slide = _canvas_slide()
+    html = _render(tmp_path, [slide])
+    inner = _inner(html)
+    new_img = ('<img class="el" data-el-id="addedimg" loading="lazy" '
+               'src="input/new.png" style="position:absolute;left:5.0cqw;'
+               'top:50.0cqh;width:10.0cqw;height:10.0cqh">')
+    m = re.search(r'<img class="el" data-el-id="img1"[^>]*>', inner)
+    edited = inner[:m.end()] + "\n" + new_img + inner[m.end():]
+    new = _sync.sync_canvas_data(edited, slide["data"])
+    added = next((e for e in new["elements"] if e["id"] == "addedimg"), None)
+    assert added is not None and added["type"] == "image"
+    assert added.get("src") == "input/new.png", "added image dropped its src"
+
+
+def test_roundtrip_add_shape_keeps_svg(tmp_path):
+    """sync-4: a newly-added canvas <svg> shape must keep its path/inner svg."""
+    slide = _canvas_slide()
+    html = _render(tmp_path, [slide])
+    inner = _inner(html)
+    new_svg = ('<svg class="el shape" data-el-id="addedsvg" '
+               'style="position:absolute;left:5.0cqw;top:50.0cqh;width:10.0cqw;'
+               'height:10.0cqh;overflow:visible" viewBox="0 0 100 100" '
+               'preserveAspectRatio="none">'
+               '<path d="M0,0 L100,100 Z" fill="#E91E63"/></svg>')
+    m = re.search(r'<img class="el" data-el-id="img1"[^>]*>', inner)
+    edited = inner[:m.end()] + "\n" + new_svg + inner[m.end():]
+    new = _sync.sync_canvas_data(edited, slide["data"])
+    added = next((e for e in new["elements"] if e["id"] == "addedsvg"), None)
+    assert added is not None and added["type"] == "shape"
+    assert "M0,0 L100,100 Z" in (added.get("svg") or ""), "added shape dropped svg"

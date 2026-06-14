@@ -63,6 +63,9 @@ SCHEMA_FILE   = HERE / "deck-schema.json"
 VALIDATE_DECK = HERE / "validate-deck.py"
 RENDER_DECK   = HERE / "render-deck.py"
 
+sys.path.insert(0, str(HERE))
+from _safe_write import contained_dest          # noqa: E402  (path-traversal guard)
+
 
 # ---------------------------------------------------------------------------
 # Atomic file write (F-269) — shared so every writer in the pipeline (deck-cli,
@@ -444,8 +447,27 @@ def cmd_set(deck: dict, args) -> tuple[int, dict | None]:
         except OSError as e:
             print(f"deck-cli: can't read --from-file: {e}", file=sys.stderr)
             return 1, None
+    elif getattr(args, "str", False):
+        # mutation-8: explicit raw-string channel — never JSON-coerce.
+        value = args.value
     else:
         value = parse_value(args.value)
+        # mutation-8: parse_value JSON-coerces a bare "42"/"true"/"null" to
+        # int/bool/None. That silently CORRUPTS a field that currently holds a
+        # string (e.g. `set …data.title 2024` would turn a string title into the
+        # int 2024). Be conservative: when the existing value is a string and the
+        # coercion would flip it to a non-string SCALAR, keep the raw string.
+        # (Arrays/objects are clearly intentional JSON, so they pass through; use
+        # --json to force a deliberate string→number/bool/null retype.)
+        if (not getattr(args, "json", False)
+                and isinstance(old, str)
+                and value is not args.value
+                and not isinstance(value, (str, list, dict))):
+            print(f"deck-cli: '{args.path}' currently holds a string — keeping "
+                  f"'{args.value}' as a string (use --json to set it to "
+                  f"{value!r} deliberately, or --str to silence this).",
+                  file=sys.stderr)
+            value = args.value
     try:
         set_path(deck, args.path, value)
     except (KeyError, IndexError, ValueError) as e:
@@ -867,8 +889,11 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     copied = {"input": [], "prototypes": [], "shared": [], "local": [], "missing": []}
     for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "input" / fname
-        d = dst_dir / "input" / fname
-        if s.is_file():
+        # mutation-2: a `../`-bearing fname from a crafted/foreign source deck must
+        # not let the copy escape the destination input/ dir. contained_dest()
+        # returns None for any ref that escapes — skip + flag it.
+        d = contained_dest(dst_dir / "input", fname)
+        if s.is_file() and d is not None:
             d.parent.mkdir(parents=True, exist_ok=True)
             if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
                 shutil.copy2(s, d)
@@ -883,8 +908,12 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     # it is. (cross-tenant-org-demo.html repro, 2026-06-02.)
     for seg in sorted(set(re.findall(r"prototypes/([^/\s\"'<>()\\?#]+)", text))):
         s = src_dir / "prototypes" / seg
-        d = dst_dir / "prototypes" / seg
-        if s.is_dir():
+        # mutation-2: containment guard — skip + flag any seg that escapes the
+        # destination prototypes/ dir via ../.
+        d = contained_dest(dst_dir / "prototypes", seg)
+        if d is None:
+            copied["missing"].append(f"prototypes/{seg}")
+        elif s.is_dir():
             if not d.exists():
                 shutil.copytree(s, d)
             copied["prototypes"].append(seg + "/")
@@ -897,8 +926,10 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
             copied["missing"].append(f"prototypes/{seg}")
     for ref in sorted(set(re.findall(r"assets/shared/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "assets" / "shared" / ref
-        d = dst_dir / "assets" / "shared" / ref
-        if s.is_file():
+        # mutation-2: containment guard — skip + flag any ref that escapes the
+        # destination assets/shared/ dir via ../.
+        d = contained_dest(dst_dir / "assets" / "shared", ref)
+        if s.is_file() and d is not None:
             d.parent.mkdir(parents=True, exist_ok=True)
             if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
                 shutil.copy2(s, d)
@@ -1223,6 +1254,13 @@ def main(argv=None) -> int:
                     help="read the value VERBATIM from this file (raw string, "
                          "no JSON coercion) — the channel for large payloads "
                          "like data.html / custom_css")
+    sp.add_argument("--str", dest="str", action="store_true",
+                    help="treat VALUE as a raw string — never JSON-coerce "
+                         "(e.g. keep '2024' a string, not the int 2024)")
+    sp.add_argument("--json", dest="json", action="store_true",
+                    help="force JSON coercion of VALUE even when the field "
+                         "currently holds a string (deliberate string→number/"
+                         "bool/null retype)")
 
     sp = sub.add_parser("set-page",
                         help="one-shot page payload: --html/--css from files "

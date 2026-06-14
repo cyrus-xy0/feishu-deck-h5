@@ -642,16 +642,23 @@ def cmd_snapshot(args) -> int:
 
     # 落 version + audit 事件(不存 deck html;只存截图路径 + 逐页内容指纹供下一版增量比对)。
     # 复用页的 png 指向它真正所在的旧版目录(reuse),磁盘上本版只多出真正改动的页。
-    append_event(log_dir, {
-        "t": "version", "v": v, "label": args.label or "",
-        "html": str(html_path),
-        "slides": [{"idx": s["idx"], "key": s.get("key"), "layout": s.get("layout"),
-                    "h": s.get("h"),
-                    "png": s.get("reuse") or f"screenshots/{v}/{s['png']}"} for s in (shots or [])],
-        "n_slides": len(shots or []),
-    })
-    if findings:
-        append_event(log_dir, {"t": "audit", "v": v, "findings": findings})
+    #
+    # _shoot 返回 None = 没装 playwright / 截图失败 → 根本没建 screenshots/vNNN 目录。
+    # 此时绝不能落 version 事件:_version_nums 只数截图目录,落了空 version 会让
+    # 日志里的版本号与磁盘脱钩(misc-9),且因为没有截图目录,下次 snapshot 又算出
+    # 同一个 v001,日志里堆出多个都叫 v001 的 version 事件(misc-5,版本号永远撞 v001)。
+    # 没有截图就跳过 version/audit 两个事件,版本号保持单调、日志与磁盘一致。
+    if shots is not None:
+        append_event(log_dir, {
+            "t": "version", "v": v, "label": args.label or "",
+            "html": str(html_path),
+            "slides": [{"idx": s["idx"], "key": s.get("key"), "layout": s.get("layout"),
+                        "h": s.get("h"),
+                        "png": s.get("reuse") or f"screenshots/{v}/{s['png']}"} for s in shots],
+            "n_slides": len(shots),
+        })
+        if findings:
+            append_event(log_dir, {"t": "audit", "v": v, "findings": findings})
 
     n = len(shots) if shots else 0
     n_reuse = sum(1 for s in (shots or []) if s.get("reuse"))

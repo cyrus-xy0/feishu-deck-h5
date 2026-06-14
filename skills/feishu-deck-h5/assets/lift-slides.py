@@ -584,12 +584,32 @@ def extract_head_slide_rules(src_head_css, slide_key, page_map):
             # "比例不对"). Comments are decorative in selector position; dropping
             # them is semantically safe. Rule-body comments are untouched.
             sel = re.sub(r'/\*[\s\S]*?\*/', ' ', selector)
-            new_sel = re.sub(
-                r'\[data-page="?[\w-]+"?\]\s*(?:>\s*)?\.slide\b',
-                f'.slide[data-slide-key="{slide_key}"]', sel)
-            new_sel = re.sub(
-                r'\[data-page="?[\w-]+"?\]',
-                f'.slide[data-slide-key="{slide_key}"]', new_sel)
+            # A multi-target comma rule is kept whole because THIS slide is ONE
+            # of its targets — but re-anchoring must touch ONLY the comma part(s)
+            # that actually reference this slide. Re-anchoring across the whole
+            # selector string would rewrite a sibling part like
+            # `[data-page="9"] .slide .bar` onto THIS slide's key too, hijacking
+            # page 9's selector. So split on commas and re-anchor per-part. (lift-4)
+            new_parts = []
+            for part in sel.split(','):
+                part_keys = set(re.findall(r'\[data-slide-key="([^"]+)"\]', part))
+                for n in re.findall(r'\[data-page="?([\w-]+)"?\]', part):
+                    mapped = page_map.get(n)
+                    if mapped:
+                        part_keys.add(mapped)
+                if slide_key not in part_keys:
+                    # Targets a different page (or no keyed target) — leave it
+                    # verbatim so it keeps matching its own slide, not this one.
+                    new_parts.append(part)
+                    continue
+                np = re.sub(
+                    r'\[data-page="?[\w-]+"?\]\s*(?:>\s*)?\.slide\b',
+                    f'.slide[data-slide-key="{slide_key}"]', part)
+                np = re.sub(
+                    r'\[data-page="?[\w-]+"?\]',
+                    f'.slide[data-slide-key="{slide_key}"]', np)
+                new_parts.append(np)
+            new_sel = ",".join(new_parts)
             rule = f"{new_sel} {{ {body} }}"
             if _uri_stash:
                 rule = re.sub(r'\x00DURI\d+\x00',
@@ -967,7 +987,8 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
     for _r in scan_asset_refs(inner, src_root):
         if _r["kind"] != "other" or not _r.get("exists"):
             continue
-        rel = _r["url"].split("?", 1)[0].split("#", 1)[0].lstrip("./")
+        rel = _strip_leading_dotslash(
+            _r["url"].split("?", 1)[0].split("#", 1)[0])
         if not rel or rel.startswith("/") or rel.startswith("../") or "/../" in rel:
             continue
         if rel.lower().endswith((".html", ".htm")) and "/" in rel:
@@ -1245,6 +1266,17 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             and abs(dst_deck_json.stat().st_mtime - dst_mtime) > 1e-6):
         print(f"\n✗ {dst_deck_json.name} changed on disk since read "
               f"(concurrent edit by another process); re-read & retry, or --force",
+              file=sys.stderr)
+        sys.exit(4)
+    # Concurrent-CREATE guard (lift-5): the pre-existing-file lock above only
+    # fires when the file existed at read time (dst_mtime is not None). When we
+    # read NO deck.json (dst_mtime is None) we seeded a fresh `deck` from scratch;
+    # if another process created the file in the interim, writing now would blow
+    # away that brand-new deck. Refuse (the seeded deck has only the just-lifted
+    # slides, so this is a clobber, not a merge) unless --force.
+    if dst_mtime is None and not force and dst_deck_json.exists():
+        print(f"\n✗ {dst_deck_json.name} was created on disk since read "
+              f"(concurrent create by another process); re-read & retry, or --force",
               file=sys.stderr)
         sys.exit(4)
 

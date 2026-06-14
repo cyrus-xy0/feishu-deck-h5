@@ -82,16 +82,20 @@ def main(argv=None) -> int:
     try:
         with sync_playwright() as p:
             b = p.chromium.launch()
-            pg = b.new_page(viewport={"width": 1920, "height": 1080},
-                            device_scale_factor=args.scale)
-            if not args.allow_external:
-                # The whole point: live embeds never settle; kill the network.
-                pg.route(re.compile(r"^https?://"), lambda r: r.abort())
-            pg.goto(f"file://{html}#{n}", wait_until="domcontentloaded",
-                    timeout=15000)
-            pg.wait_for_timeout(args.wait)
-            pg.screenshot(path=str(out), timeout=10000)
-            b.close()
+            # delivery-8: close the browser in finally so a navigation/screenshot
+            # failure never leaks the Chromium process.
+            try:
+                pg = b.new_page(viewport={"width": 1920, "height": 1080},
+                                device_scale_factor=args.scale)
+                if not args.allow_external:
+                    # The whole point: live embeds never settle; kill the network.
+                    pg.route(re.compile(r"^https?://"), lambda r: r.abort())
+                pg.goto(f"file://{html}#{n}", wait_until="domcontentloaded",
+                        timeout=15000)
+                pg.wait_for_timeout(args.wait)
+                pg.screenshot(path=str(out), timeout=10000)
+            finally:
+                b.close()
     except Exception as e:
         print(f"shoot-page: failed — {type(e).__name__}: {str(e)[:200]}",
               file=sys.stderr)

@@ -56,6 +56,11 @@ ASSETS_DIR    = SKILL_ROOT / "assets"
 VALIDATE_HTML = ASSETS_DIR / "validate.py"
 RENDER_DECK   = HERE / "render-deck.py"
 
+sys.path.insert(0, str(HERE))
+from _safe_write import (                                  # noqa: E402
+    validate_and_write_deck, restore_deck, contained_dest, atomic_write_text,
+)
+
 
 # ──────────────────────────────────────────────────────── helpers
 
@@ -207,16 +212,6 @@ def _parse_picks(s: str, n: int) -> list[int]:
 
 # ──────────────────────────────────────────────────────── slide extraction
 
-SLIDE_FRAME_RE = re.compile(
-    r'<div\s+class="slide-frame"[^>]*>.*?</div>\s*</div>',
-    re.S,
-)
-# Alternative: catch slides wrapped without slide-frame (just `<div class="slide">`)
-LOOSE_SLIDE_RE = re.compile(
-    r'<div\s+class="slide"[^>]*>.*?</div>\s*(?=<div\s+class="slide"|</div>|$)',
-    re.S,
-)
-
 
 def extract_slide_frames(html_text: str) -> list[str]:
     """Pull all <div class="slide-frame">...</div>...</div> blocks.
@@ -353,7 +348,13 @@ def copy_and_rewrite_assets(frag: str, src_dir: Path, deck_dir: Path,
             missing.append(ref)
             continue
         dest_rel = f"{ns}/{_strip_dotslash(ref)}"
-        dest_path = deck_dir / dest_rel
+        # Containment guard (mutation-3): a `../`-bearing ref must never let the
+        # copy escape the deck dir. The inner-iframe recursion already guards;
+        # mirror it on the primary loop too.
+        dest_path = contained_dest(deck_dir, dest_rel)
+        if dest_path is None:
+            missing.append(ref)
+            continue
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_path, dest_path)
         mapping[ref] = dest_rel
@@ -582,7 +583,14 @@ def _renumber_text_ids(html: str, new_slide_no: int) -> str:
 
 
 def insert_into_json(deck_path: Path, fragments: list[str], position: int,
-                     lifted: bool = True, allow_unsynced: bool = False) -> None:
+                     lifted: bool = True, allow_unsynced: bool = False,
+                     force: bool = False) -> tuple[Path | None, str | None]:
+    """Splice imported slides into deck.json with the validated-write contract.
+
+    Returns (bak, orig_text) so the caller can `restore_deck` the SSOT if a LATER
+    step (the re-render) fails. On schema validation failure the write itself is
+    rolled back here (validate_and_write_deck) and we raise SystemExit.
+    """
     # F-315 (Option A): this mutates deck.json then re-renders, which regenerates
     # index.html. If the sibling index.html carries un-synced browser/hand edits,
     # that re-render would silently destroy them. Resolve BEFORE reading deck.json
@@ -604,10 +612,17 @@ def insert_into_json(deck_path: Path, fragments: list[str], position: int,
         if _action == "autosync":
             _info("index.html has un-synced (lossless) browser edits — folding them "
                   "into deck.json before import…")
-            _ok, _out = _idx_auto_sync(deck_path, _idx)
-            if not _ok:
+            # NB: do NOT bind `_ok` here — that name is the module-level success
+            # logger used at the end of this function; assigning it locally would
+            # shadow it for the whole scope (UnboundLocalError on the later call).
+            _synced, _out = _idx_auto_sync(deck_path, _idx)
+            if not _synced:
                 raise SystemExit(f"import-html-slide: auto-sync FAILED:\n{_out}")
             # folded; the json.loads below now sees the synced deck.json
+    # Optimistic lock (mutation-6): capture mtime at the read below; if deck.json
+    # changes on disk between this read and our write, another session edited it —
+    # refuse rather than silently clobber. --force bypasses.
+    expected_mtime = deck_path.stat().st_mtime
     deck = json.loads(deck_path.read_text(encoding="utf-8"))
     if not isinstance(deck.get("slides"), list):
         raise SystemExit(f"{deck_path.name}: malformed deck.json — missing/invalid "
@@ -653,17 +668,40 @@ def insert_into_json(deck_path: Path, fragments: list[str], position: int,
             new_slide["lifted"] = True
         new_slides.append(new_slide)
 
-    # Backup before write
+    # Optimistic-lock check (mutation-6): refuse if deck.json changed on disk
+    # since we read it above (another concurrent edit). --force bypasses.
+    if not force:
+        if not deck_path.exists():
+            raise SystemExit(
+                f"import-html-slide: REFUSING — {deck_path.name} was DELETED on disk "
+                f"since it was read (concurrent edit). Re-run, or pass --force.")
+        cur_mtime = deck_path.stat().st_mtime
+        if abs(cur_mtime - expected_mtime) > 1e-6:
+            raise SystemExit(
+                f"import-html-slide: REFUSING — {deck_path.name} changed on disk since "
+                f"it was read (concurrent edit by another process). Re-run, or pass "
+                f"--force to overwrite.")
+
+    # Backup the pre-write state ourselves so the CALLER can restore the SSOT if a
+    # LATER step (the re-render) fails. validate_and_write_deck then does the
+    # atomic write + schema re-validate + rollback-on-schema-fail (mutation-1/5),
+    # so we tell it no_backup=True to avoid a redundant second .bak.
+    orig_text = deck_path.read_text(encoding="utf-8") if deck_path.exists() else None
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     bak = deck_path.with_suffix(f".json.bak-pre-import-{ts}")
     shutil.copy(deck_path, bak)
     _info(f"backup at {bak.name}")
 
     deck["slides"][position:position] = new_slides
-    deck_path.write_text(
-        json.dumps(deck, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    if not validate_and_write_deck(deck_path, deck, "import", no_backup=True):
+        # validate_and_write_deck already restored the prior content (in-memory
+        # copy, since no_backup) and printed the schema errors — our .bak survives
+        # for manual recovery, but the SSOT is back to its pre-import state.
+        raise SystemExit(
+            f"import-html-slide: the spliced deck.json failed schema validation "
+            f"and was rolled back. No change written. Backup at {bak.name}.")
     _ok(f"inserted {len(new_slides)} slide(s) into {deck_path.name} at position {position + 1}")
+    return bak, orig_text
 
 
 def re_render(deck_path: Path) -> int:
@@ -726,7 +764,8 @@ def insert_into_html(target_path: Path, fragments: list[str], position: int) -> 
     shutil.copy(target_path, bak)
     _info(f"backup at {bak.name}")
 
-    target_path.write_text(text[:insert_at] + block + text[insert_at:], encoding="utf-8")
+    # mutation-5 / F-269: atomic write so a kill mid-write can't torn the file.
+    atomic_write_text(target_path, text[:insert_at] + block + text[insert_at:])
     _ok(f"inserted {len(renamed)} slide(s) into {target_path.name} at position {position + 1}")
 
 
@@ -759,7 +798,8 @@ def main(argv=None) -> int:
                     help="F-315: import even if the target's index.html carries "
                          "un-synced browser/hand edits (the clobber guard would "
                          "otherwise refuse, since the post-import re-render would "
-                         "destroy them). Use only after syncing or discarding them.")
+                         "destroy them). Also bypasses the optimistic-lock check "
+                         "on deck.json. Use only after syncing or discarding them.")
     args = ap.parse_args(argv)
 
     # Resolve target
@@ -857,13 +897,19 @@ def main(argv=None) -> int:
 
     # Apply
     if mode == "A":
-        insert_into_json(target, accepted_frags, position,
-                         lifted=not args.no_lifted, allow_unsynced=args.force)
+        bak, orig_text = insert_into_json(
+            target, accepted_frags, position,
+            lifted=not args.no_lifted, allow_unsynced=args.force, force=args.force)
         rc = re_render(target)
         if rc != 0:
-            _err("import mutated deck.json but the re-render FAILED — the deck "
-                 "may now be invalid. Fix the error shown above and re-render; "
-                 "NOT reporting success.")
+            # mutation-1: the spliced deck.json passed schema validation but the
+            # re-render failed downstream — restore the SSOT to its pre-import
+            # state instead of leaving the user with a deck that only opens fine
+            # because validate-deck passed but render-deck choked.
+            restore_deck(target, bak, orig_text, "import")
+            _err("import re-render FAILED — deck.json was RESTORED to its "
+                 "pre-import state (no change applied). Fix the error shown "
+                 "above and retry.")
             return rc
     else:
         insert_into_html(target, accepted_frags, position)

@@ -594,7 +594,10 @@ def main():
     # `framework` and `deck-local` come from `referenced` (files in output/).
     shared_files = sorted(shared_refs)
     framework_files, deck_local_files = [], []
-    for rel in sorted(referenced):
+    # delivery-3: a referenced-but-missing asset lands in both `referenced` and
+    # `missing_sources`; it is NOT in output/, so it must not be listed in the
+    # manifest as present (the manifest must reflect actual package contents).
+    for rel in sorted(referenced - missing_sources):
         if rel.startswith("input/"):
             deck_local_files.append(rel)
         elif rel.startswith(f"assets/{SHARED_PREFIX}"):

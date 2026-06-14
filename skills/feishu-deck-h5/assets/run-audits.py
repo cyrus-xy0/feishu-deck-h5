@@ -25,7 +25,13 @@ AUDITS_JS = HERE / "audits.js"
 
 
 def parse_scope(spec):
-    """'49' / '3,5' / '10-12' / '3,10-12' -> [1-based ints]; None -> None(全 deck)."""
+    """'49' / '3,5' / '10-12' / '3,10-12' -> [1-based ints]; None -> None(全 deck).
+
+    Slide ordinals are 1-based, so 0 / negative / reversed (a>b) ranges are
+    INVALID — silently accepting them yields a scope set that matches NO frame
+    (`scopeSet.has(slide_idx)` is always false), turning a scoped run into a
+    no-op false PASS that skips every rule. Reject them loudly with ValueError so
+    the caller can surface the bad input instead of green-lighting nothing."""
     if not spec:
         return None
     out = []
@@ -33,11 +39,25 @@ def parse_scope(spec):
         part = part.strip()
         if not part:
             continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            out.extend(range(int(a), int(b) + 1))
+        if "-" in part.lstrip("-"):  # a range (ignore a leading '-' sign on `a`)
+            a_str, b_str = part.rsplit("-", 1)
+            a, b = int(a_str), int(b_str)
+            if a < 1 or b < 1:
+                raise ValueError(
+                    f"invalid scope range {part!r}: slide ordinals are 1-based "
+                    "(0 / negative not allowed)")
+            if a > b:
+                raise ValueError(
+                    f"invalid scope range {part!r}: start {a} > end {b} "
+                    "(reversed range matches no frame)")
+            out.extend(range(a, b + 1))
         else:
-            out.append(int(part))
+            n = int(part)
+            if n < 1:
+                raise ValueError(
+                    f"invalid scope frame {n!r}: slide ordinals are 1-based "
+                    "(0 / negative not allowed)")
+            out.append(n)
     return sorted(set(out)) or None
 
 
@@ -606,12 +626,18 @@ def audit_slide_keys_bytes(html):
     return findings
 
 
-def audit_escaped_html_bytes(html):
+def audit_escaped_html_bytes(html, scope=None):
     """R-ESC-HTML(err)— 文本里出现被转义的 HTML 标签(如 `&lt;span class=…`)。
     逐字移植 _validate_audits.py audit_escaped_html(源字节;NO-BROWSER 专用,audits.js 已覆盖
-    --visual)。逐帧剥 style/script 后扫 _ESCAPED_TAG_RE;命中即 err。返回统一 findings。"""
+    --visual)。逐帧剥 style/script 后扫 _ESCAPED_TAG_RE;命中即 err。返回统一 findings。
+
+    per-slide rule → honors `scope`(1-based 帧号集合)和 audits.js driver 一致:scope 外
+    的帧不评(否则 `--scope-frames N` 在 no-visual 路径会漏报 off-scope 帧的旧问题,与 --visual
+    路径结果分叉)。scope=None → 全 deck。"""
     findings = []
     for i, fr in enumerate(_extract_slide_frames(html), 1):
+        if scope is not None and i not in scope:
+            continue
         scan = re.sub(r"<style\b[^>]*>.*?</style>", "", fr, flags=re.S | re.I)
         scan = re.sub(r"<script\b[^>]*>.*?</script>", "", scan, flags=re.S | re.I)
         hits = _ESCAPED_TAG_RE.findall(scan)
@@ -632,10 +658,13 @@ def audit_escaped_html_bytes(html):
     return findings
 
 
-def audit_structure_bytes(html):
+def audit_structure_bytes(html, scope=None):
     """R02 / R07(err)— 每帧必有 data-layout + data-screen-label + .wordmark。
     逐字移植 _validate_audits.py audit_structure 的可逐帧部分(R13 单行标题留在 audits.js)。
     NO-BROWSER 专用,audits.js 的 R02-R07-STRUCTURE 已覆盖 --visual 路径。
+
+    per-slide rule → honors `scope`(1-based 帧号集合,与 audits.js driver 一致);scope 外
+    的帧不评。scope=None → 全 deck。
 
     ⚠️ R07 豁免 parity:缺 .wordmark 对 canvas 帧(data-layout="canvas")与 imported deck
     (deck 级 <meta fs-deck-origin=imported>)豁免 —— 与 audits.js R07 / UI1 用的同一
@@ -645,6 +674,8 @@ def audit_structure_bytes(html):
     findings = []
     imported = _deck_imported_bytes(html)   # deck 级 fs-deck-origin=imported(同 audits.js deckOriginImported)
     for i, fr in enumerate(_extract_slide_frames(html), 1):
+        if scope is not None and i not in scope:
+            continue
         layout = _frame_attr(fr, "layout")
         label = _frame_attr(fr, "screen-label")
         if not layout:
@@ -746,19 +777,26 @@ def audit_dom_balance_bytes(html):
     return findings
 
 
-def runner_no_browser_text_findings(html):
+def runner_no_browser_text_findings(html, scope=None):
     """NO-BROWSER source-text rules — run ONLY on the dom_rules=False path.
     These rule codes (R-KEY / R-ESC-HTML / R02 / R07 / R05) are ALSO emitted by
     audits.js on the rendered DOM (the --visual path), so they MUST NOT run when
     dom_rules=True or every finding would double-emit. run_unified_engine calls
     this ONLY on the no-Chromium branch (H1 restore). Order mirrors the old
     STATIC_AUDITS registration (cosmetic). R-DOM div-balance is NOT here — it runs
-    in BOTH paths via runner_source_byte_findings (the DOM rule can't cover it)."""
+    in BOTH paths via runner_source_byte_findings (the DOM rule can't cover it).
+
+    `scope`(1-based 帧号集合 / None=全 deck)只作用于【逐帧 per-slide】规则
+    (R02 / R07 / R-ESC-HTML) —— 与 audits.js driver(`scopeSet.has(slide_idx)`)对齐,
+    使 `--no-visual --scope-frames N` 与 `--visual --scope-frames N` 给出一致 findings
+    (否则 no-Chromium 路径会漏报 off-scope 帧的旧问题、阻断 scoped 编辑)。R05 / R-KEY 是
+    【deck 级】规则(整 deck 求值,等同它们 audits.js 里 isFirstInScope 的 deck-level 孪生),
+    故 scope-independent、不传 scope —— 与 R05/R-KEY 的 audits.js 行为一致。"""
     out = []
-    out.extend(audit_structure_bytes(html))    # R02 / R07
-    out.extend(audit_copy_bytes(html))         # R05
-    out.extend(audit_slide_keys_bytes(html))   # R-KEY
-    out.extend(audit_escaped_html_bytes(html)) # R-ESC-HTML
+    out.extend(audit_structure_bytes(html, scope))    # R02 / R07 (per-slide → scoped)
+    out.extend(audit_copy_bytes(html))                # R05 (deck-level → unscoped)
+    out.extend(audit_slide_keys_bytes(html))          # R-KEY (deck-level → unscoped)
+    out.extend(audit_escaped_html_bytes(html, scope)) # R-ESC-HTML (per-slide → scoped)
     return out
 
 
@@ -1040,7 +1078,11 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
         # restore) — on the --visual path audits.js owns the same codes against
         # the rendered DOM, so running them here too would double-emit. Stable
         # result shape so the caller maps it uniformly with the full-engine path.
-        text_findings = runner_no_browser_text_findings(raw_html)
+        # Thread `scope` so the PER-SLIDE byte rules (R02/R07/R-ESC-HTML) skip
+        # off-scope frames exactly like the audits.js driver does on the --visual
+        # path — keeping `--no-visual --scope-frames N` consistent with --visual.
+        scope_set = set(scope) if scope else None
+        text_findings = runner_no_browser_text_findings(raw_html, scope_set)
         all_findings = runner_findings + text_findings
         rules = list(runner_rules)
         for f in text_findings:
@@ -1167,7 +1209,11 @@ def main():
         print(f"ERROR: 找不到文件 {args.html}", file=sys.stderr)
         sys.exit(2)
 
-    scope = parse_scope(args.slide)
+    try:
+        scope = parse_scope(args.slide)
+    except ValueError as e:
+        print(f"ERROR: --slide {args.slide!r}: {e}", file=sys.stderr)
+        sys.exit(2)
     try:
         result = run_unified_engine(args.html, scope, settle_ms=args.settle_ms)
     except EngineUnavailable as e:

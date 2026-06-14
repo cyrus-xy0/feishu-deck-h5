@@ -104,7 +104,9 @@ def lint_fragment(html: str = "", css: str = "") -> list[dict]:
 
     for sel, body in all_rules:
         # L-TYPESCALE ---------------------------------------------------------
-        for m in re.finditer(r"font(?:-size)?\s*:\s*[^;]*?(\d+(?:\.\d+)?)px", body):
+        # `(?<![\w-])` so a CSS custom property whose NAME ends in "font-size"
+        # (e.g. `--x-font-size: 18px`) is NOT mistaken for a real font-size decl.
+        for m in re.finditer(r"(?<![\w-])font(?:-size)?\s*:\s*[^;]*?(\d+(?:\.\d+)?)px", body):
             px = round(float(m.group(1)))
             if px >= 8 and px not in LADDER and px not in HERO_SIZES:
                 if not has_ts_optout:

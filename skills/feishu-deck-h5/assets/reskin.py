@@ -32,6 +32,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import html as _html
 import json
 import re
 import sys
@@ -405,10 +406,13 @@ def strip_drop_shadows(css: str, warnings: list[str]) -> str:
             return False
         if "inset" in tokens:
             return True
-        # First two numeric tokens are offsets
+        # First two numeric tokens are offsets. Accept fractional values with
+        # OR without a leading zero (`.5px`, `-.5px`, `0.5px`) and any length
+        # unit (px/em/rem/%/…) or none at all — a non-px or no-lead-zero offset
+        # must NOT slip past as "unparseable, keep". A bare `0` is unitless.
         nums = []
         for t in tokens:
-            m = re.match(r"^-?(\d+(?:\.\d+)?)(?:px)?$", t)
+            m = re.match(r"^[+-]?(\d*\.\d+|\d+(?:\.\d+)?)(?:[a-z%]+)?$", t, re.I)
             if m:
                 nums.append(float(m.group(1)))
             if len(nums) == 2:
@@ -464,26 +468,46 @@ def scale_canvas(css: str, from_w: int, to_w: int, warnings: list[str]) -> str:
         scaled = round(n * factor)
         return f"{scaled}px"
 
-    # Skip font-size declarations — they're already on ladder. Scale
-    # everything else.
-    out_lines = []
-    for line in css.split("\n"):
-        if "font-size" in line or re.search(r"\bfont\s*:", line):
-            out_lines.append(line)
-        else:
-            out_lines.append(re.sub(r"(\d+(?:\.\d+)?)px", scale, line))
+    # Scale every Npx EXCEPT the size value inside a `font-size:` or `font:`
+    # declaration (those are already on the 4-tier ladder). We can't skip whole
+    # LINES — minified CSS is one long line, so a line-level skip leaves the
+    # entire stylesheet unscaled the moment any `font-size` appears. Instead,
+    # carve out the font-size / font-shorthand px tokens and scale the rest.
+    #
+    # Strategy: temporarily mask the px value that immediately follows
+    # `font-size:` or the size token in a `font:` shorthand, scale everything
+    # else, then restore the masked values verbatim.
+    masked: list[str] = []
+
+    def _mask(m):
+        masked.append(m.group(0))
+        return f"\x00{len(masked) - 1}\x00"
+
+    # font-size: <N>px   (and the px size token in a `font:` shorthand)
+    work = re.sub(r"font-size\s*:\s*\d+(?:\.\d+)?px", _mask, css)
+    work = re.sub(
+        r"\bfont\s*:\s*[^;{}]*?\d+(?:\.\d+)?px(?:\s*/\s*[\d.]+)?",
+        _mask, work,
+    )
+
+    work = re.sub(r"(\d+(?:\.\d+)?)px", scale, work)
+
+    # Restore masked font tokens.
+    work = re.sub(r"\x00(\d+)\x00", lambda m: masked[int(m.group(1))], work)
+
     warnings.append(
         f"canvas: scaled non-font px by {factor:.3f} (from {from_w} to {to_w})"
     )
-    return "\n".join(out_lines)
+    return work
 
 
 def scope_selectors(css: str, slide_key: str, warnings: list[str]) -> str:
     """Prefix every selector with .slide[data-slide-key="<key>"] so the
     rewritten CSS only applies inside this reskinned slide.
 
-    Skips @keyframes (those don't take a selector prefix), @media (recursed
-    over body) — keeps it simple, doesn't handle deeply nested at-rules.
+    Skips @keyframes / @font-face / @page (those don't take a selector prefix);
+    recurses into conditional-group at-rules (@media, @supports, @container,
+    @layer, @scope) so their inner selectors are scoped too.
     """
     anchor = f'.slide[data-slide-key="{slide_key}"]'
 
@@ -520,11 +544,15 @@ def scope_selectors(css: str, slide_key: str, warnings: list[str]) -> str:
                         depth -= 1
                     pos += 1
                 body = css[start + 1 : pos - 1]
-                if atname in ("keyframes", "-webkit-keyframes", "font-face"):
+                if atname in ("keyframes", "-webkit-keyframes", "font-face", "page"):
                     # Don't scope these — they're keyframe names, not selectors.
                     out.append(f"{atprelude}{{{body}}}")
-                elif atname == "media":
-                    # Recurse — scope the inner content's selectors.
+                elif atname in ("media", "supports", "container", "layer", "scope"):
+                    # Conditional-group at-rules wrap ordinary style rules —
+                    # recurse so their inner selectors are scoped (otherwise an
+                    # @supports/@container/@layer block leaks foreign selectors
+                    # globally onto every slide). (`@layer name;` with no body is
+                    # handled by the semicolon branch below.)
                     scoped_body = scope_selectors(body, slide_key, warnings)
                     out.append(f"{atprelude}{{{scoped_body}}}")
                 else:
@@ -827,14 +855,39 @@ def strip_scale_script(soup: BeautifulSoup, warnings: list[str]) -> None:
 def find_main_container(body: Tag) -> Tag | None:
     """Find the outermost slide-canvas-like container.
 
-    Heuristic: an element with class containing 'slide' or 'stage', OR
-    body's first big div. Returns its inner content node.
+    Heuristic: an element with an EXACT class-token of 'slide'/'stage'/'canvas'/
+    'deck' (e.g. `<div class="slide">`, NOT a decorative `.slide-num` /
+    `.slideshow` page-number div whose class merely CONTAINS the substring),
+    OR body's first big div. Returns its inner content node.
+
+    Among exact-token matches for a given keyword, prefer the OUTERMOST /
+    largest-subtree container (the one with the most descendant tags) — so a
+    tiny preceding `<div class="slide-num">1</div>` can never be picked over the
+    real canvas root, and the whole slide body is never silently dropped.
+    Falls back to a substring match only if no exact-token match exists.
     """
+    def _class_tokens(el: Tag) -> list[str]:
+        return [c.lower() for c in (el.get("class", []) or [])]
+
+    def _n_descendants(el: Tag) -> int:
+        return sum(1 for _ in el.find_all(True))
+
     for sel_class in ("slide", "stage", "canvas", "deck"):
-        for el in body.find_all("div"):
-            classes = " ".join(el.get("class", [])).lower()
-            if sel_class in classes:
-                return el
+        exact = [el for el in body.find_all("div") if sel_class in _class_tokens(el)]
+        if exact:
+            # Prefer the largest-subtree (outermost) match, not the first in
+            # document order — avoids picking a decorative leaf.
+            return max(exact, key=_n_descendants)
+    # No exact token match — fall back to the legacy substring heuristic, but
+    # still prefer the largest-subtree match (across ALL keywords) so a tiny
+    # `.slide-num`/`.slideshow` leaf can't beat the real canvas wrapper just
+    # because it appears earlier in document order.
+    sub = [
+        el for el in body.find_all("div")
+        if any(sc in " ".join(_class_tokens(el)) for sc in ("slide", "stage", "canvas", "deck"))
+    ]
+    if sub:
+        return max(sub, key=_n_descendants)
     # Fallback: the largest direct child of body
     direct_divs = [c for c in body.children if isinstance(c, Tag) and c.name == "div"]
     if direct_divs:
@@ -984,8 +1037,13 @@ def compose_data_html(
     chrome_css = build_header_css(slide_key, rules)
     full_css = chrome_css + "\n/* === Rewritten source CSS === */\n" + rewritten_css
 
+    # Escape extracted foreign text before interpolating into HTML — a source
+    # title like 'A & B' or one containing '<'/'>' would otherwise emit broken
+    # (or injected) markup. JSON fields (data.title / screen_label) are fine
+    # as-is since json.dumps handles them.
     sub_html = (
-        f'<p class="page-sub">{subtitle_text}</p>' if subtitle_text else ""
+        f'<p class="page-sub">{_html.escape(subtitle_text)}</p>'
+        if subtitle_text else ""
     )
 
     # Scale wrapper — fit source canvas into framework stage box visually
@@ -1025,7 +1083,7 @@ def compose_data_html(
     return (
         f"<style>\n{full_css}\n</style>\n"
         f'<div class="header">\n'
-        f'  <h2 class="title-zh">{title_text}</h2>\n'
+        f'  <h2 class="title-zh">{_html.escape(title_text)}</h2>\n'
         f"  {sub_html}\n"
         f"</div>\n"
         f'<div class="stage">\n{stage_inner}\n</div>\n'

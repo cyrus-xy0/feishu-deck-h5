@@ -1028,6 +1028,11 @@
     'R29-32': { coverage: 'universal', signal: 'css-source' },
     'R-VIS-NO-IMAGERY': { coverage: 'universal', signal: 'dom' },
     'R02-R07-STRUCTURE': { coverage: 'universal', signal: 'dom' },
+    // composite rule (emits L1 / L2 / L4) — deck-level CSS-source scan over
+    // deckOuterHTML(); evaluated once on the first in-scope frame. The emitted
+    // codes L1/L2/L4 are registered in the other surfaces (FAMILIES / yaml /
+    // validator-rules.md); this declares the rule's own id for the coverage contract.
+    'L1/L2/L4': { coverage: 'universal', signal: 'css-source' },
     'R-VIS-LIFT-STYLE-LOST': { coverage: 'raw-only', signal: 'dom', optout: 'lifted raw slide style-preservation, raw by design' },
     'R-AUTOBALANCE-PRESENT': { coverage: 'universal', signal: 'dom' },
     'R-LAYOUT-DEPRECATED': { coverage: 'schema-only', signal: 'dom', optout: 'fires only on the FROZEN schema body layouts (F-305 «raw unless ceremonial»); raw is the preferred path and is never flagged — the narrowing IS the rule intent, not a coverage gap. Reads true authored layout from window.__DECK_JSON__ (not data-layout, which a raw page may borrow)' },
@@ -1983,7 +1988,7 @@
           if (!langIsOffendingLatin(text)) return;
           emit(`slide ${slide_idx}: chrome label \`${text}\` looks like a Latin label ` +
             'in a zh-only deck. If it\'s genuinely a brand / product / ' +
-            'acronym, add it to LATIN_BRAND_WHITELIST in validate.py; ' +
+            'acronym, add it to LATIN_BRAND_WHITELIST in audits.js; ' +
             'otherwise translate to CJK (e.g. "MODE 01" → "方式 01", ' +
             '"DEADLINE" → "截止时间", "PREDIT"-style typos → fix).');
         });
@@ -2036,7 +2041,7 @@
               'translation track. Drop the Latin leaf, translate to ' +
               'CJK, opt into bilingual via `<meta name="fs-language" ' +
               'content="zh-en">`, or add the term to ' +
-              'LATIN_BRAND_WHITELIST in validate.py if it is ' +
+              'LATIN_BRAND_WHITELIST in audits.js if it is ' +
               'genuinely a brand / acronym.');
           }
         }
@@ -6838,6 +6843,18 @@
       if (firstInScopeIdx === -1 && (!scopeSet || scopeSet.has(i))) firstInScopeIdx = i;
     });
     const findings = [];
+    // Engine self-check (was dead code): every rule in RULES must be declared in
+    // RULE_META and every narrowed entry must justify itself — the same contract
+    // deck-json/tests/test_rule_contract.py text-parses. Run it at engine load so
+    // a drifted RULE_META is also caught at runtime, not ONLY by the test. Surfaced
+    // via console.warn (not a `rule:` finding) so it stays out of the emitted-code
+    // registry / coverage gate — this is an engine-config diagnostic, not a deck rule.
+    if (!run._contractChecked) {
+      run._contractChecked = true;
+      for (const v of assertRuleContract(RULES.map((r) => r.id), RULE_META)) {
+        try { console.warn('[audits.js RULE_META contract] ' + v); } catch (_e) { /* no console */ }
+      }
+    }
     slides.forEach((slide, idx) => {
       const slide_idx = idx + 1;
       if (scopeSet && !scopeSet.has(slide_idx)) return;
@@ -6883,16 +6900,30 @@
     if ([...ruleCounts.values()].some((n) => n > PER_RULE_CAP)) {
       const kept = new Map();
       const dropped = new Map();
+      // Track the HIGHEST severity among the dropped findings per rule so the
+      // collapse marker inherits it — emitting it as a flat 'warn' would silently
+      // DOWNGRADE the overflow of an error-class rule, so a strict / gate run that
+      // promotes warns→errors would still under-represent a real error tail.
+      const droppedSev = new Map();
+      const SEV_RANK = { warn_soft: 0, warn: 1, error: 2 };
       outFindings = [];
       for (const f of findings) {
         const n = (kept.get(f.rule) || 0) + 1;
         kept.set(f.rule, n);
-        if (n <= PER_RULE_CAP) outFindings.push(f);
-        else dropped.set(f.rule, (dropped.get(f.rule) || 0) + 1);
+        if (n <= PER_RULE_CAP) {
+          outFindings.push(f);
+        } else {
+          dropped.set(f.rule, (dropped.get(f.rule) || 0) + 1);
+          const prev = droppedSev.get(f.rule);
+          const cur = f.severity || 'warn';
+          if (prev === undefined || (SEV_RANK[cur] || 0) > (SEV_RANK[prev] || 0)) {
+            droppedSev.set(f.rule, cur);
+          }
+        }
       }
       for (const [rid, extra] of dropped) {
         outFindings.push({
-          rule: rid, severity: 'warn', slide_idx: 0,
+          rule: rid, severity: droppedSev.get(rid) || 'warn', slide_idx: 0,
           message: `${rid}: 另有 +${extra} 处(deck-wide 超过 ${PER_RULE_CAP} 条已折叠)—— `
             + '同一缺陷在全 deck 反复出现,修根因即可批量消除。',
         });

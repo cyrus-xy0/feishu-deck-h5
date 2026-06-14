@@ -31,12 +31,15 @@ extract/apply-text-pairs 能对「整行」操作。
 """
 from __future__ import annotations
 import argparse
-import datetime
 import json
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from _safe_write import validate_and_write_deck  # noqa: E402
 
 CJK = re.compile(r"[㐀-鿿豈-﫿]")
 
@@ -76,15 +79,19 @@ def merge_slide(slide, gap_scale: float, y_tol_scale: float) -> list:
     for (size, _color, _font, _grad), gels in groups.items():
         y_tol = max(8.0, size * y_tol_scale)
         gap_max = max(12.0, size * gap_scale)
-        # band by center-y
+        # band by center-y. Compare each fragment against the band's FIRST
+        # member (the anchor), NOT a running mean — a running mean lets a slow
+        # y-gradient of fragments "walk" the band's center so that the first and
+        # last fragments end up > y_tol apart yet still merge into one line (two
+        # separate visual lines silently collapsed). Anchoring on the first cy
+        # bounds the band's total vertical extent to y_tol.
         gels.sort(key=lambda e: e.get("y", 0) + e.get("h", 0) / 2)
         bands: list[list] = []
         for e in gels:
             cy = e.get("y", 0) + e.get("h", 0) / 2
             if bands and abs(cy - bands[-1][0]) <= y_tol:
-                row = bands[-1][1]
-                row.append(e)
-                bands[-1][0] = (bands[-1][0] * (len(row) - 1) + cy) / len(row)
+                bands[-1][1].append(e)
+                # bands[-1][0] stays the anchor cy (do NOT drift it).
             else:
                 bands.append([cy, [e]])
         # within each band, sort by x and split into x-contiguous segments
@@ -106,9 +113,32 @@ def merge_slide(slide, gap_scale: float, y_tol_scale: float) -> list:
                 host = seg[0]
                 right = max(e.get("x", 0) + e.get("w", 0) for e in seg)
                 host["w"] = round(right - host.get("x", 0), 2)
-                host_run = dict(host["runs"][0])
-                host_run["text"] = merged
-                host["runs"] = [host_run]
+                # Concatenate EVERY run of EVERY segment member (in x order) into
+                # the host, preserving each run's own size/color/font/grad. A host
+                # (or member) with multiple DIFFERENT-style runs must keep them
+                # (else its non-first runs' styling is lost — the bug we fix), but
+                # ADJACENT runs that share a style are COALESCED into one run so a
+                # line split into per-glyph fragments ("星","巴","克") collapses back
+                # to one logical run ("星巴克") — what extract/apply-text-pairs must
+                # see as a single unit. Empty-text runs are skipped.
+                def _style_key(r):
+                    return (r.get("size"), r.get("color"), r.get("font"), r.get("grad"))
+                new_runs = []
+                for e in seg:
+                    for r in e.get("runs", []):
+                        if r.get("text", "") == "":
+                            continue
+                        if new_runs and _style_key(new_runs[-1]) == _style_key(r):
+                            new_runs[-1]["text"] += r.get("text", "")
+                        else:
+                            new_runs.append(dict(r))
+                if not new_runs:
+                    # Pathological all-empty segment — fall back to a single run
+                    # carrying the (empty) merged text on the host's first style.
+                    fallback = dict(host["runs"][0])
+                    fallback["text"] = merged
+                    new_runs = [fallback]
+                host["runs"] = new_runs
                 for e in seg[1:]:
                     drop_ids.add(id(e))
                 records.append({
@@ -189,16 +219,16 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 4
 
-    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    bak = args.deck.parent / f"{args.deck.name}.bak-pre-merge-{ts}"
-    n = 0
-    while bak.exists():
-        n += 1
-        bak = args.deck.parent / f"{args.deck.name}.bak-pre-merge-{ts}.{n}"
-    bak.write_text(args.deck.read_text(encoding="utf-8"), encoding="utf-8")
-    args.deck.write_text(
-        json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"  ✓ 写回 {args.deck.name} (备份 {bak.name})")
+    # Backup → atomic write → schema validate → rollback-on-fail (shared safe
+    # writer, same guarantee as the single-writer deck-cli). Replaces the old
+    # bare write_text, which left no schema re-validation and could leave an
+    # invalid deck.json on disk.
+    ok = validate_and_write_deck(args.deck, deck, "merge")
+    if not ok:
+        print(f"\n✗ {args.deck.name} 合并后校验失败,已回滚(deck.json 未改动)",
+              file=sys.stderr)
+        return 2
+    print(f"  ✓ 写回 {args.deck.name}")
     return 0
 
 

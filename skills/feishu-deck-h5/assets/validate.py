@@ -542,6 +542,13 @@ def main():
             print(f'ERROR: --scope-frames must be comma-separated 1-based '
                   f'integers, got {args.scope_frames!r}', file=sys.stderr)
             return 2
+        # Slide ordinals are 1-based: 0 / negative silently match NO frame, turning
+        # a scoped run into a no-op false PASS. Reject loudly (parity with
+        # run-audits.parse_scope, audits-js-4).
+        if any(n < 1 for n in scope_frames):
+            print(f'ERROR: --scope-frames are 1-based; 0/negative not allowed, '
+                  f'got {args.scope_frames!r}', file=sys.stderr)
+            return 2
         if not scope_frames:
             scope_frames = None
     if args.screenshots and not args.visual:

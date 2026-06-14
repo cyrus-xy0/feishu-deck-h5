@@ -166,6 +166,15 @@ def main(argv=None) -> int:
                 page.keyboard.press("ArrowRight")
                 page.wait_for_timeout(110)
                 guard += 1
+            # delivery-5: if nav couldn't LAND on the target (a hidden/conditional
+            # frame ArrowRight steps over, or the guard exhausted), do NOT shoot the
+            # current (wrong) frame and mislabel it p{target}-{key}.png. Treat it as
+            # not-found so the operator's visual self-review isn't misled.
+            if page.evaluate(_CUR_JS) != target0:
+                print(f"⚠ could not reach page {m['idx']} ({m['key']}) — "
+                      f"skipped (frame hidden/unreachable)", file=sys.stderr)
+                missing.append(str(m["idx"]))
+                continue
             # Let the cross-fade + the staggered entrance reveal (~0.28s + stagger)
             # fully settle so the shot is the end state, not a mid-animation frame.
             page.wait_for_timeout(650)

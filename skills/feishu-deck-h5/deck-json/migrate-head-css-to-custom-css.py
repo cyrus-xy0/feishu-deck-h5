@@ -68,6 +68,22 @@ from pathlib import Path
 
 _FRAME_OPEN = re.compile(r'<div\b[^>]*class="[^"]*\bslide-frame\b[^"]*"[^>]*>')
 _DIV_TOKEN = re.compile(r'<div\b[^>]*>|</div>')
+# Regions whose contents must NOT be scanned for <div>/</div> depth tokens —
+# a `</div>` inside an HTML comment, a <script>, or a <style> body is not a real
+# DOM close and would otherwise mis-balance the frame-span depth counter.
+_MASKABLE_RE = re.compile(
+    r'<!--.*?-->'
+    r'|<script\b[^>]*>.*?</script\s*>'
+    r'|<style\b[^>]*>.*?</style\s*>',
+    re.S | re.I,
+)
+
+
+def _mask_noncode(html: str) -> str:
+    """Return `html` with comment / <script> / <style> region INNARDS replaced by
+    same-length spaces (offsets preserved) so a stray `</div>` inside them can't
+    throw off div-depth counting. Length is preserved so positions stay valid."""
+    return _MASKABLE_RE.sub(lambda m: " " * (m.end() - m.start()), html)
 _STYLE_RE = re.compile(r'<style(?P<attrs>[^>]*)>(?P<body>.*?)</style>', re.S)
 _SK_RE = re.compile(r'\[data-slide-key="([^"]+)"\]')
 _DP_RE = re.compile(r'\[data-page="?([\w-]+)"?\]')
@@ -80,10 +96,15 @@ _ANIM_KEYWORDS = {
 
 
 def _frame_spans(html: str):
+    # Count <div>/</div> depth over a version of the document where comment /
+    # <script> / <style> innards are masked out, so a `</div>` written inside any
+    # of those (common in raw slides) can't prematurely close — or fail to close —
+    # a slide frame. Masking preserves offsets, so spans stay valid against `html`.
+    scan = _mask_noncode(html)
     spans = []
-    for fm in _FRAME_OPEN.finditer(html):
+    for fm in _FRAME_OPEN.finditer(scan):
         depth, end = 1, len(html)
-        for dm in _DIV_TOKEN.finditer(html, fm.end()):
+        for dm in _DIV_TOKEN.finditer(scan, fm.end()):
             depth += 1 if dm.group(0)[1] != '/' else -1
             if depth == 0:
                 end = dm.start()
@@ -296,10 +317,14 @@ def migrate_raw_inline(deck: dict, *, dry_run: bool):
     moves, _ = collect_raw_inline_styles(deck)
     applied = []
     for slide, key, css_to_move, stripped_html, n_styles in moves:
-        # Idempotency marker — same convention as the head sweep.
-        if "migrated from raw inline <style> by F-272 codemod" in (
-                slide.get("custom_css") or ""):
-            continue
+        # Idempotency here is structural, NOT marker-based: collect_raw_inline_styles
+        # only returns a slide that STILL has a non-framework <style> in its
+        # data.html, and a successful migration strips that <style> out — so a
+        # swept slide simply won't reappear next run. A whole-slide skip keyed on a
+        # prior migration MARKER would strand any <style> RE-ADDED to data.html
+        # after an earlier sweep (the marker is present, yet a real <style> still
+        # needs migrating). So always migrate what collect returned; the header
+        # marker below is purely informational and may legitimately appear twice.
         applied.append((key, n_styles, len(css_to_move.encode("utf-8"))))
         if dry_run:
             continue

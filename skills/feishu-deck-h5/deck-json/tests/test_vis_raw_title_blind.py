@@ -20,8 +20,10 @@ the advisory) without the aggressive block.
 
 These cases pin: (1) custom title in a `.header` pushed off baseline FIRES warn;
 (2) custom title in a `.header` AT baseline stays quiet (no false positive);
-(3) a framework `.title-zh` in a `.header` still DEFERS (RAW-TITLE-POS quiet, the
-schema path R-VIS-TITLE-POSITION keeps ownership unchanged).
+(3) a framework `.title-zh` in a raw `.header` off baseline is covered by BOTH
+RAW-TITLE-POS (warn, advisory) AND R-VIS-TITLE-POSITION (error) — F-307 retired
+the old "RAW-TITLE-POS defers to avoid double-report" contract because raw pages
+don't reliably get the schema rule.
 """
 import sys
 import pathlib
@@ -86,15 +88,21 @@ def test_custom_title_in_header_at_baseline_quiet():
     assert hits == [], f"baseline custom raw title false-positived: {hits}"
 
 
-# ---- must-not-fire: framework .title-zh still DEFERS to TITLE-POSITION ----
-def test_framework_title_in_header_defers_to_title_position():
-    """A real `.title-zh` in a raw `.header` must stay owned by TITLE-POSITION:
-    RAW-TITLE-POS stays quiet (so we don't double-report) and TITLE-POSITION
-    keeps firing (unchanged schema-path severity)."""
+# ---- framework .title-zh in a RAW header: BOTH rules now report (F-307) ----
+def test_framework_title_in_header_raw_also_fires_raw_title_pos():
+    """F-307 removed the old defer. On a RAW page a framework `.title-zh` drifted
+    off baseline is now ALSO covered by R-VIS-RAW-TITLE-POS (warn, advisory) —
+    raw pages don't reliably get the schema rule, so RAW-TITLE-POS no longer
+    yields — while R-VIS-TITLE-POSITION keeps firing as the schema-path owner.
+    (Pre-F-307 this test asserted RAW-TITLE-POS DEFERS / stays quiet; that
+    contract was intentionally retired, so the assertion is flipped to match the
+    shipped behavior. Ground-truth-confirmed: RAW=warn@240, TITLE-POSITION=error.)"""
     drifted = _raw_with_header(240, "title-zh")
     raw_hits = _run("R-VIS-RAW-TITLE-POS", drifted)
-    assert raw_hits == [], \
-        f"RAW-TITLE-POS must DEFER when a framework .title-zh is present: {raw_hits}"
+    assert len(raw_hits) >= 1, \
+        f"RAW-TITLE-POS must cover a drifted framework .title-zh on a raw page (F-307): {raw_hits}"
+    assert all(h["severity"] == "warn" for h in raw_hits), \
+        f"raw title drift MUST be warn, never error (F-256 block): {raw_hits}"
     tp_hits = _run("R-VIS-TITLE-POSITION", drifted)
     assert len(tp_hits) >= 1, \
         f"TITLE-POSITION must still own the framework title (regression): {tp_hits}"

@@ -134,6 +134,43 @@ def test_validator_rules_reference_documents_every_code():
         f"emitted but undocumented in validator-rules.md: {undocumented}"
 
 
+# Rule-shaped tokens that legitimately appear in validator-rules.md prose but are
+# NOT emitted codes — the REVERSE-direction guard's allowlist (contract-2). Each
+# must be justified; a code that drifts in (retired rule kept as if live, a typo'd
+# row, a never-shipped rule documented as shipped) is NOT here → the test fails,
+# forcing a doc fix or an explicit, reviewed addition to this list.
+_REVERSE_GUARD_EXEMPT = {
+    'L3',                 # explicitly "L3 is not currently shipped"
+    'L7',                 # the L7 head-CSS→custom_css CODEMOD task, not a rule code
+    'R-RAW-LOOKS-SCHEMA', # RETIRED 2026-06-12 (documented as retired, not live)
+    'R-VIS',              # the "R-VIS-*" prefix fragment, not a standalone code
+    'R29', 'R32',         # halves of the R29-32 range token (the real code is R29-32)
+    'P1', 'P4', 'P7', 'P10', 'P11',  # PAGE references in calibration notes (页 P11 封面…), not P-rules
+}
+
+
+def test_validator_rules_reference_has_no_dead_codes():
+    """contract-2 · REVERSE direction of the guard above: a rule-shaped code that
+    appears in references/validator-rules.md but is NOT emitted by the validator
+    (and is not an explicitly-exempt prose token) is a dead/retired/typo'd code
+    lingering in the human reference as if live. The forward test only proves
+    engine ⊆ md; this proves md ⊆ engine ∪ exemptions, closing the gap where a
+    retired rule (or a typo) stays documented after the code stopped emitting it."""
+    ref = (ASSETS.parent / "references" / "validator-rules.md").read_text(encoding="utf-8")
+    documented = set(re.findall(r'\b(R-[A-Z][A-Z0-9-]*|R\d+|L\d+|T\d+|P\d+|UI1)\b', ref))
+    for m in re.finditer(r'\bP(\d+)-P?(\d+)\b', ref):          # P50-P55 → P50..P55
+        documented |= {f'P{n}' for n in range(int(m.group(1)), int(m.group(2)) + 1)}
+    if 'R29-R32' in ref or 'R29-32' in ref:                    # range token alias
+        documented.add('R29-32')
+    emitted = CO.enumerate_validate_rules()
+    dead = sorted(documented - emitted - _REVERSE_GUARD_EXEMPT)
+    assert not dead, (
+        "rule codes documented in validator-rules.md but NOT emitted by the "
+        f"validator (retired/typo'd? remove the row or fix the code): {dead}. "
+        "If a token is legitimate prose (a retired/unshipped rule, a page ref, a "
+        "prefix), add it to _REVERSE_GUARD_EXEMPT with a justification.")
+
+
 def test_families_cover_newly_surfaced_codes():
     """The previously-skipped audits' codes must be categorized in FAMILIES so
     check-only's review groups them instead of dumping to '未分类'."""

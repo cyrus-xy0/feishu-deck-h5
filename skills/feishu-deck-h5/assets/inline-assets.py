@@ -208,20 +208,29 @@ def inline_img_tags(html: str, html_path: Path, *, inline_images: bool) -> tuple
 
     def replace_img(match: re.Match[str]) -> str:
         nonlocal count
-        src = match.group(1)
+        # delivery-2: rewrite ONLY the captured src attribute value, never a bare
+        # str.replace over the whole tag — an earlier attribute whose value equals
+        # (or contains) the src filename (e.g. data-name="logo.png" before src) must
+        # not be corrupted. group(2)=quote, group(3)=src value.
+        pre, quote, src = match.group(1), match.group(2), match.group(3)
         asset = resolve_asset(html_path, src)
         if asset is None:
             return match.group(0)
         if not inline_images:
             count += 1
-            return match.group(0).replace(src, attr_escape(upload_staging_ref(asset)))
+            return f"{pre}{quote}{attr_escape(upload_staging_ref(asset))}{quote}"
         uri = data_uri(asset)
         if uri is None:
             return match.group(0)
         count += 1
-        return match.group(0).replace(src, uri)
+        return f"{pre}{quote}{uri}{quote}"
 
-    return re.sub(r"<img\s+[^>]*src=[\"']([^\"']+)[\"']", replace_img, html, flags=re.S | re.I), count
+    return re.sub(
+        r"(<img\s+[^>]*(?<![\w-])src\s*=\s*)([\"'])([^\"']+)\2",
+        replace_img,
+        html,
+        flags=re.S | re.I,
+    ), count
 
 
 def inline_html_style_urls(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:

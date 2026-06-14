@@ -447,6 +447,12 @@
     setMode(deck, queryMode || storedMode || auto);
 
     // ---- Build UI overlay ----
+    // Aborting the old controller (above) detaches its listeners but does NOT
+    // remove the .deck-ui node it appended; a re-run of init() would otherwise
+    // leave a duplicate, partly-dead control bar. Remove any prior overlay first.
+    document.querySelectorAll('.deck-ui').forEach((el) => {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    });
     const ui = buildUI();
     document.body.appendChild(ui);
 
@@ -932,8 +938,12 @@
     // first slide load so initial paint isn't ~700 ms of stagger animation.
     if (deck.hasAttribute('data-nav-armed')) {
       // Already armed — normal flow, animations will run on slide change.
-    } else if (idx !== 0 || frames[idx].classList.contains('is-current')) {
-      // First non-zero nav OR re-asserting current: arm.
+    } else if (frames.some((f) => f.classList.contains('is-current'))) {
+      // Not the first paint: some frame is already current, so this goTo is a
+      // real navigation (or a re-assert of the current slide) → arm the reveal.
+      // We key on "a current frame already exists" rather than `idx !== 0`, which
+      // wrongly armed (and animated ~700ms) the FIRST paint when slide 0 is hidden
+      // and the initial landing target is a non-zero firstVisible() index.
       deck.setAttribute('data-nav-armed', '');
     }
     // The visual swap: toggle the current frame, then scale (present) or
@@ -1242,8 +1252,11 @@
     ui.querySelector('.deck-progress').style.display = isPresent ? 'block' : 'none';
     ui.querySelector('.deck-controls').style.display = isPresent ? 'flex'  : 'none';
     ui.querySelector('.nav-hint').style.display      = isPresent ? 'block' : 'none';
-    ui.querySelector('.ctl.prev').disabled = cur <= 0;
-    ui.querySelector('.ctl.next').disabled = cur >= total - 1;
+    // Gate prev/next on the VISIBLE ordinal (same index space as the indicator
+    // above) — NOT the raw frame index `cur`, which counts hidden 隐藏页 too and
+    // would mis-disable the buttons when hidden slides are not all at the tail.
+    ui.querySelector('.ctl.prev').disabled = pos <= 1;
+    ui.querySelector('.ctl.next').disabled = pos >= total;
   }
 
   function requestFullscreen() {
