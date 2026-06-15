@@ -386,6 +386,58 @@ def _referenced_anim_names(text):
     return names
 
 
+def _root_animation_names(css, slide_key):
+    """Animation names applied to the `.slide` ROOT (not a descendant or pseudo-
+    element) for this slide. The framework owns the root's `transform` (present-
+    mode fit-scale); a recovered page-entrance animation that lands on the root
+    is the one whose keyframes can clobber that scale (F-332)."""
+    names = set()
+    key_sel = '.slide[data-slide-key="%s"]' % slide_key
+    for m in re.finditer(r'([^{}]+)\{([^{}]*)\}', css):
+        sel, body = m.group(1), m.group(2)
+        if 'animation' not in body:
+            continue
+        for one in sel.split(','):
+            one = one.strip()
+            idx = one.find(key_sel)
+            if idx == -1:
+                continue
+            rest = one[idx + len(key_sel):].strip()
+            # root iff nothing (or only a pseudo-CLASS like :hover) follows the
+            # slide-key compound. A descendant (` .x`, `>`, `+`, `~`) or a
+            # pseudo-ELEMENT (`::before`) targets a different box → not the root.
+            if rest == '' or (rest.startswith(':') and not rest.startswith('::')):
+                names |= _referenced_anim_names(body)
+                break
+    return names
+
+
+def _descale_root_animation_keyframes(css, slide_key, report=None):
+    """F-332: strip `transform` from any @keyframes applied to the `.slide` ROOT
+    via an entrance animation. The framework drives present-mode fit-scale through
+    the root's `transform: scale(var(--fs-scale))`. A page-anim recovered onto the
+    root (e.g. `fs-page-enter` with `to{transform:scale(1)}`, fill-mode `both`)
+    freezes the root at the keyframe scale and overrides the fit-scale → the slide
+    renders unscaled and overflows/clips at non-16:9 viewports. Opacity/filter and
+    other entrance props are preserved; only `transform` (the fit-scale carrier)
+    is removed, so the fade survives and the framework keeps the slide fitted."""
+    if not slide_key:
+        return css
+    root_anims = _root_animation_names(css, slide_key)
+    if not root_anims:
+        return css
+    kfs = _extract_keyframes(css)
+    for name in root_anims:
+        block = kfs.get(name)
+        if not block or not re.search(r'(?:-webkit-)?transform\s*:', block):
+            continue
+        descaled = re.sub(r'\s*(?:-webkit-)?transform\s*:[^;}]*;?', '', block)
+        css = css.replace(block, descaled)
+        if report is not None:
+            report.setdefault("root_anim_descaled", []).append(name)
+    return css
+
+
 def _source_author_css(full_html):
     """Concatenate all NON-framework `<style>` block bodies in the source HTML
     (head + deck-level page-anim blocks). These are exactly the styles that
@@ -948,6 +1000,15 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
             )
             report.setdefault("keyframes_pulled", []).extend(
                 n for n in sorted(referenced) if n not in have and n in src_kf)
+
+    # 5.65) Protect the present-mode fit-scale (F-332). 5.55/5.6 can recover a
+    # source page-entrance animation onto the `.slide` ROOT whose keyframes set
+    # `transform` (the framework's fit-scale carrier). With fill-mode `both` the
+    # root freezes at the keyframe scale, overriding `scale(var(--fs-scale))` →
+    # the slide renders unscaled and overflows at non-16:9 viewports. Strip
+    # `transform` from those root-applied keyframes (fade/other props survive).
+    if shake:
+        inner = _descale_root_animation_keyframes(inner, slide_key, report)
 
     # 5.7) Externalize oversized inline base64 images. --shake's head-CSS
     # recovery (5.55) and source markup can carry MB-scale `data:…;base64,…`

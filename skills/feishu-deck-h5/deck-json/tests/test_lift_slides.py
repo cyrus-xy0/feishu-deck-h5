@@ -864,5 +864,124 @@ class LiftFromLegacyHtmlOnlySourceIntoDeckJsonTest(unittest.TestCase):
                          f"{v.stdout}\n{v.stderr}")
 
 
+# F-332 · the framework drives present-mode fit-scale through the `.slide` root's
+# `transform: scale(var(--fs-scale))`. `--shake` recovers a source page-entrance
+# animation (`fs-page-enter`) onto the root; if its keyframes set `transform`
+# (fill-mode `both` freezes the root at `scale(1)`), the fit-scale is overridden
+# and the slide renders unscaled → overflows/clips at non-16:9 viewports. The lift
+# must strip `transform` from root-applied keyframes (the fade survives) while
+# leaving CHILD animations (here `spin` on `.spinner`) untouched.
+SRC_HTML_ROOTANIM = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+@keyframes fs-page-enter { from { opacity:0; transform:translateY(24px) scale(.985);} to { opacity:1; transform:translateY(0) scale(1);} }
+@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+.deck[data-mode="present"] .slide-frame.is-current .slide[data-slide-key="hero"] { animation: fs-page-enter .65s cubic-bezier(.2,.8,.2,1) both; }
+.slide[data-slide-key="hero"] .spinner { animation: spin 2s linear infinite; }
+</style>
+</head><body><div class="deck">
+<div class="slide-frame" data-page="2">
+<div class="slide" data-layout="content-2col" data-slide-key="hero" data-screen-label="02 Hero" data-accent="blue">
+<div class="header"><h2 class="title-zh">Hero</h2></div>
+<div class="stage"><div class="spinner">x</div></div>
+</div>
+</div>
+<div class="slide-frame" data-page="1">
+<div class="slide" data-layout="cover" data-slide-key="tail" data-screen-label="01">
+<div class="stage"><h1>tail</h1></div>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+def _kf_block(css: str, name: str) -> str:
+    """Brace-matched `@keyframes <name> {...}` text, or '' if absent."""
+    m = re.search(r'@(?:-webkit-|-moz-)?keyframes\s+' + re.escape(name) + r'\s*\{', css)
+    if not m:
+        return ""
+    i, depth = m.end(), 1
+    while i < len(css) and depth:
+        if css[i] == '{':
+            depth += 1
+        elif css[i] == '}':
+            depth -= 1
+        i += 1
+    return css[m.start():i]
+
+
+class LiftRootAnimFitScaleTest(unittest.TestCase):
+    """F-332: a page-entrance animation recovered onto the `.slide` root must not
+    carry `transform` — it would clobber the present-mode fit-scale and the slide
+    would render unscaled/overflowing at non-16:9 viewports."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-rootanim-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML_ROOTANIM, encoding="utf-8")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _hero(self) -> str:
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"]
+        self.assertEqual(len(hero), 1,
+                         f"lift did not append exactly one hero slide.\n"
+                         f"stdout:\n{self.proc.stdout}\nstderr:\n{self.proc.stderr}")
+        return hero[0]["data"]["html"]
+
+    def test_lift_succeeded(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
+
+    def test_root_animation_rule_recovered(self):
+        # the page-enter animation must still land on the `.slide` root (we keep
+        # the entrance, only neuter its transform) — else the test is a no-op.
+        css = self._hero()
+        self.assertRegex(
+            css, r'\.slide\[data-slide-key="hero"\][^{}]*\{[^}]*animation[^}]*fs-page-enter',
+            "page-enter animation was not recovered onto the .slide root "
+            "(fixture/recovery changed) — test no longer exercises F-332.")
+
+    def test_root_keyframe_transform_stripped(self):
+        # the clobbering transform must be gone from the root-applied keyframe.
+        kf = _kf_block(self._hero(), "fs-page-enter")
+        self.assertTrue(kf, "fs-page-enter @keyframes was not pulled into the slide.")
+        self.assertNotIn("transform", kf,
+                          "fs-page-enter keyframe still carries `transform` — it "
+                          "freezes the .slide root scale and overrides the "
+                          "present-mode fit-scale (F-332 regressed).")
+
+    def test_root_keyframe_fade_preserved(self):
+        # opacity (the fade) must survive the transform strip — no over-stripping.
+        kf = _kf_block(self._hero(), "fs-page-enter")
+        self.assertIn("opacity", kf,
+                      "transform strip also removed opacity — the fade entrance "
+                      "was lost (over-stripping).")
+
+    def test_child_animation_transform_preserved(self):
+        # a CHILD animation (`spin` on `.spinner`) is not on the root → its
+        # transform must be left intact (the strip must not over-reach).
+        kf = _kf_block(self._hero(), "spin")
+        self.assertTrue(kf, "spin @keyframes was not pulled into the slide.")
+        self.assertIn("rotate", kf,
+                      "child `.spinner` animation lost its transform — the strip "
+                      "over-reached beyond .slide-root animations (F-332).")
+
+
 if __name__ == "__main__":
     unittest.main()
