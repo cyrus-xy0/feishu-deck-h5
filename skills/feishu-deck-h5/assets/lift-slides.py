@@ -488,7 +488,7 @@ _ASSET_REF_PATTERNS = (
     re.compile(r'''<img\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
     re.compile(r'''<source\b[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]''', re.I),
     re.compile(r'''<video\b[^>]*?\b(?:src|poster)\s*=\s*['"]([^'"]+)['"]''', re.I),
-    re.compile(r'''url\(\s*['"]?([^'")]+?)['"]?\s*\)''', re.I),
+    re.compile(r'''url\(\s*(?:&(?:quot|apos|#34|#39);|['"])?((?:[^'")&]|&(?!(?:quot|apos|#34|#39);))+?)(?:&(?:quot|apos|#34|#39);|['"])?\s*\)''', re.I),  # F-333: tolerate an entity-quote (&quot;/&#34;/&apos;/&#39;) OR literal quote wrapping the path, and a LITERAL '&' inside the filename (only a '&' that begins a quote-entity terminates) → capture the CLEAN inner ref, which both classifies and round-trips via inner.replace (it is a literal substring of the original url(...)). Verbatim mirror with import-html-slide.
 )
 
 

@@ -50,11 +50,22 @@ from pathlib import Path
 # and any input/ reference. Captures: prefix path back-tracking + the asset path.
 # Path char class excludes ? and # so cache-busting query strings (e.g.
 # `assets/foo.png?v=3`) don't get glued onto the captured rest.
+#
+# F-333: the path may sit inside an inline style="" attribute whose quotes are
+# HTML-entity-encoded — `url(&quot;input/x.png&quot;)`. The capture must STOP
+# before that trailing `&quot;` (else the bogus `input/x.png&quot;` lands in
+# `referenced`, the real file isn't tracked, and the self-contained prune below
+# DELETES it). But a bare `[^...&]` class would also truncate a LITERAL '&' inside
+# a real filename (`input/Q&A.png`, `R&D-roadmap.png`) — re-introducing the same
+# silent deletion. So the boundary is entity-specific: `_NE` stops only when the
+# '&' actually begins a quote-entity (&quot; / &apos; / &#34; / &#39;), leaving
+# literal-'&' filenames intact.
+_NE = r"(?!&(?:quot|apos|#34|#39);)"   # neg-lookahead: not at the start of a quote-entity
 RX_SKILL = re.compile(
-    r'((?:\.\./)+)(?:skills/feishu-deck-h5/)?(assets|examples|templates|deck-json/templates)/([^\'")\s?#]+)'
+    rf'((?:\.\./)+)(?:skills/feishu-deck-h5/)?(assets|examples|templates|deck-json/templates)/((?:{_NE}[^\'")\s?#])+)'
 )
 RX_INPUT = re.compile(
-    r'((?:\.\./)*)input/([^\'")\s?#]+)'
+    rf'((?:\.\./)*)input/((?:{_NE}[^\'")\s?#])+)'
 )
 # AFTER first rewrite, HTMLs use assets/<file> or ../assets/<file>
 # (no skills/feishu-deck-h5 prefix). Both bare and ../-prefixed refs must
@@ -68,10 +79,10 @@ RX_INPUT = re.compile(
 # left unchanged in --shared=skip mode and shouldn't be classified as
 # already-local refs.
 RX_LOCAL_ASSET = re.compile(
-    r'((?:url\(\s*[\'"]?|(?:src|href|poster|data-src|data-poster)=["\']?))((?:\.\./)*)assets/([^\'")\s?#<]+)'
+    rf'((?:url\(\s*[\'"]?|(?:src|href|poster|data-src|data-poster)=["\']?))((?:\.\./)*)assets/((?:{_NE}[^\'")\s?#<])+)'
 )
 RX_LOCAL_INPUT = re.compile(
-    r'(?<!skills/feishu-deck-h5/)((?:\.\./)*)input/([^\'")\s?#]+)'
+    rf'(?<!skills/feishu-deck-h5/)((?:\.\./)*)input/((?:{_NE}[^\'")\s?#])+)'
 )
 
 def find_skill_root() -> Path:
@@ -334,7 +345,7 @@ def main():
             os.symlink(src_path.resolve(), dst_path)
             return m.group(0)
 
-        re.sub(r"""(?:url\(|src=)['"]?\./([^'")\s?#]+)""", link_deck_local, src)
+        re.sub(rf"""(?:url\(|src=)['"]?\./((?:{_NE}[^'")\s?#])+)""", link_deck_local, src)
 
         # Process already-local refs (second+ runs OR pre-reorg legacy outputs):
         #  - track for prune so existing files aren't deleted

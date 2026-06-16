@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import html
 import json
 import os
 import re
@@ -879,7 +880,11 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     the explicit `_canvas_element_srcs` pass folds those srcs into the SAME text
     buffer so the contract is name-free and obvious, and any bare/relative
     element src (`scene.png`) falls through to the deck-local media pass."""
-    text = _slide_asset_text(slide)
+    # F-333: html.unescape FIRST so a data.html inline style url(&quot;input/x.png&quot;)
+    # is decoded to a literal-quote url before the input/ + deck-local findall passes
+    # below (else they over-capture an &quot;-tailed path and the asset isn't copied).
+    # Safe: `text` is local, never written back. Covers &quot;/&#34;/&apos;/&#39;.
+    text = html.unescape(_slide_asset_text(slide))
     # Belt-and-braces: explicitly append every canvas `data.elements[].src` to the
     # scanned text so a canvas slide's images are guaranteed to be seen by the
     # input/ + deck-local passes below (DECKJSON-UNIFIED-INTERMEDIATE-SPEC §7).

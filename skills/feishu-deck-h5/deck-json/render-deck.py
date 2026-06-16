@@ -2066,7 +2066,11 @@ ENRICHERS = {
 }
 
 
-_ASSET_REF_RE = re.compile(r"(?:input|prototypes)/[^\s\"'<>()\\?#]+")
+# F-333: stop the path capture before an entity-quote (&quot; / &apos; / &#34; /
+# &#39;) so an inline-style `url(&quot;input/x.png&quot;)` yields the clean
+# `input/x.png` for the slide-index manifest — while a LITERAL '&' inside a real
+# filename (`input/R&D.png`) is preserved (a plain `[^...&]` would truncate it).
+_ASSET_REF_RE = re.compile(r"(?:input|prototypes)/(?:(?!&(?:quot|apos|#34|#39);)[^\s\"'<>()\\?#])+")
 
 
 def _scan_slide_assets(slide_html: str) -> list:
@@ -3954,6 +3958,14 @@ def _resolve_bg(out_html: Path, url: str, on_missing=None) -> str:
         return url   # bare — never quote a fragment / placeholder
     if not _is_inlinable_local_ref(url):
         return f"'{url}'"
+    # F-333: only here — a LOCAL inlinable ref — do we unwrap an entity-quote wrapper
+    # left by the inline-body style="" url() pass (`&quot;input/x.png&quot;` → after
+    # unescape `"input/x.png"` → strip the now-literal quotes → input/x.png). Gated on
+    # the entity-QUOTE markers AND placed AFTER the external/data/fragment guards, so a
+    # data: URI / external URL containing &amp; or a named entity is returned untouched,
+    # and a real filename's literal characters are never decoded. Covers &quot;/&#34;/&apos;/&#39;.
+    if any(e in url for e in ("&quot;", "&#34;", "&apos;", "&#39;")):
+        url = html.unescape(url).strip("\"'")
     img_path = (out_html.parent / url).resolve()
     if not img_path.is_file():
         if on_missing is not None:

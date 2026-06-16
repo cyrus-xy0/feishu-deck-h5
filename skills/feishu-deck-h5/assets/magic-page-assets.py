@@ -99,7 +99,18 @@ def is_probable_resource_attr(tag: str, attr: str, ref: str) -> bool:
 
 
 def strip_ref(ref: str) -> str:
-    return unquote(ref.strip().split("#", 1)[0].split("?", 1)[0])
+    # F-333: an inline-style url(&quot;input/x.png&quot;) reaches URL_RE whose bare
+    # ([^)]*) branch captures the whole `&quot;input/x.png&quot;` (else the image is
+    # never uploaded to TOS → 404 on the published Magic Page). ONLY when a
+    # quote-entity wrapper is present do we unescape (→ `"input/x.png"`) and strip the
+    # now-literal quotes; gated so a genuine CSS url() filename carrying some OTHER
+    # named entity stays byte-identical. Covers URL_RE + IMPORT_RE + resource-attr at
+    # one choke point; safe because emit re-quotes a fresh TOS url. (External refs are
+    # filtered out before here.)
+    s = ref.strip()
+    if any(e in s for e in ("&quot;", "&#34;", "&apos;", "&#39;")):
+        s = html_lib.unescape(s).strip("\"'")
+    return unquote(s.split("#", 1)[0].split("?", 1)[0])
 
 
 def resolve_asset(html_path: Path, ref: str) -> Path | None:

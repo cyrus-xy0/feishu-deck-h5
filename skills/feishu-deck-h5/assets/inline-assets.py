@@ -48,7 +48,17 @@ def is_external_ref(ref: str) -> bool:
 
 
 def strip_ref(ref: str) -> str:
-    return unquote(ref.strip().split("#", 1)[0].split("?", 1)[0])
+    # F-333: an inline-style url(&quot;input/x.png&quot;) reaches URL_RE whose
+    # optional-quote group can't consume the &quot;, so the captured ref is the
+    # whole `&quot;input/x.png&quot;`. ONLY when such a quote-entity wrapper is
+    # present do we unescape (→ `"input/x.png"`) and strip the now-literal quotes;
+    # gated so a genuine CSS url() filename carrying some OTHER named entity is left
+    # byte-identical. Safe: strip_ref's output is used only for resolution; the emit
+    # re-quotes/inlines a fresh ref. (External refs are filtered out before here.)
+    s = ref.strip()
+    if any(e in s for e in ("&quot;", "&#34;", "&apos;", "&#39;")):
+        s = html_lib.unescape(s).strip("\"'")
+    return unquote(s.split("#", 1)[0].split("?", 1)[0])
 
 
 def resolve_asset(base_path: Path, ref: str) -> Path | None:
