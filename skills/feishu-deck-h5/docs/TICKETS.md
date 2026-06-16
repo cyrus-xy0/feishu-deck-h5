@@ -1,13 +1,13 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-333**
+> **下一可用号 = F-334**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其 WIP 未提交;
 > 本分支 off HEAD 看不到)。本分支(`fix/code-review-0614`)从 **F-323** 起,跳过 F-322
 > 不复用,合并时与对方的 F-322 行各占一行即可。F-323..F-331 = 2026-06-14 全量 code review
 > 修复批次,明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-332 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-333 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -89,6 +89,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-330 | **F-319 scope 闸加固 + 回归测试**:消息无「slide N」锚点的 in-scope 错(R05 emoji/!/…)不再被静默降级、no-browser 路径 scope 一致、parse_scope 拒非法区间、补 F-319 回归测试 | `deck-json/render-deck.py` / `assets/run-audits.py` / `audits.js` / 新回归测试 · diff-1/2/3/4, audits-js-2/4, renderer-6 |
 | F-331 | **杂项健壮性 + 死代码 + 文档**:iframe scheme 白名单、_lint custom-property 误报、parse_value 类型强转脚枪、dead code 清理、frontend nav/overlay/reveal、PDF 八进制转义、deck-map disabled、translation-qa script 内 CJK、deck-log 版本号、文档契约修正 | 多文件(见 CODE-REVIEW 文档)· renderer-5/7, mutation-4/7/8, sync-6, lift-2/6, frontend-1/3/4/5, subskill-7, misc-1/3/5/8/9, prose-2/3/5/6 |
 | F-332 | **lift `--shake` 整页入场动画顶掉 present fit-scale**(鸣鸣很忙 deck p59 `back-companion-service`「整体放大了/还是有问题」复盘):`lift-slides.py --shake` 的页动画恢复(5.55/5.6)把源站整页入场动画 `fs-page-enter` 连同 `@keyframes` 一起拎到 `.slide` **根元素**上;框架正是用 `.slide` 的 `transform: scale(var(--fs-scale))` 驱动 present 模式 fit-scale,而 keyframe 的 `to{transform:translateY(0) scale(1)}` + `animation-fill-mode:both` 把根冻结在 `scale(1)` → fit-scale 被覆盖 → 整页以原生 1080px 不缩放渲染、在非 16:9 视口溢出裁切(p59 实测 `transform:matrix(1,…)`/rectH 1080/top −49,正常页应 0.7875/851/66)。**仅非 16:9 暴露**故 16:9 截图看不出,反复被误判成「比例/放大」。修法=lift 后置 pass(5.65)`_descale_root_animation_keyframes`:检测挂在 `.slide` 根(选择器末 compound = `.slide[data-slide-key=K]`、非后代/非伪元素)上的 entrance 动画所引用的 keyframes,从中**剥掉 `transform`**(opacity/filter 淡入保留;子元素动画如 `.spinner` 的 `spin` transform 不动)→ 归还框架 fit-scale。与 F-318(letterbox content-bg 接缝)、F-316(进度条误当黑边)同属「上面有条边/放大」家族但根因独立。DONE 2026-06-15(新测类 `LiftRootAnimFitScaleTest` 5/5:lift 成功 / 根动画规则仍在 / 根 keyframe transform 剥净 / 淡入保留 / 子动画 transform 保留;`test_lift_slides` 30/30 + repair+atomic 28/28 零回归;真页 p59 修后 `transform:scale(0.7875)`/rectH 851/top 66 正常 fit) | `assets/lift-slides.py` / `deck-json/tests/test_lift_slides.py` |
+| F-333 | **(开放·TODO)** copy-assets prune 误删用 HTML 实体引号 `&quot;` 的内联 `url()` 背景资产 —— 手写/导入 raw 页若用 `style="background-image:url(&quot;input/foo.png&quot;)"`,下次 render 会**静默丢掉背景图**(真例:`runs/.../northregion-ai-lecture` p47 收尾页背景反复消失,正是用户报的「图不见了」)。根因:`copy-assets.py` 的 prune(L569–581)把 `input/` 里**不在 `referenced` 集**的文件一律 `unlink()`;而收集引用的 `RX_INPUT`(L57)/`RX_LOCAL_INPUT`(L74)字符类 `[^\'")\s?#]+` **没排除 `&`**,于是 `url(&quot;input/foo.png&quot;)` 被捕成 `input/foo.png&quot;`(带 `&quot;` 尾巴的假路径,磁盘上不存在)→ 真文件 `input/foo.png` 不在 referenced → 被删。`render-deck.py` 的 `_ASSET_REF_RE`(L2008)同病(影响 slide-index.json 清单 + lift 拷贝)。**仅 `&quot;`(实体编码双引号)形态中招**:框架自身 renderer 发的是单引号内联 `url('...')`(`'` 已在排除集,安全),单引号/裸 url/`<style>` 块字面双引号三种都扫得对;唯独在 `style=""` 属性里手写双引号被 HTML 转义成 `&quot;` 时崩。修法=三处字符类加 `&`(必要时连 `;`),或扫描前 `html.unescape`;补回归测试(带 `&quot;` 内联 url 的 raw 页过一轮 copy-assets prune 后背景资产仍在)。立项文档 `docs/F-333-ENTITY-URL-ASSET-PRUNE-2026-06-16.md`。p47 已就地绕过(bg url 移进 `<style>` 块用字面双引号)。 | `assets/copy-assets.py` / `deck-json/render-deck.py` |
 
 ## 已裁决(WONTFIX / DONE)
 
