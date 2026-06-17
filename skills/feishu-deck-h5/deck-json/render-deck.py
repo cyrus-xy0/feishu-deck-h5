@@ -1980,7 +1980,7 @@ def _enrich_canvas(ctx, slide):
                         parts.append(
                             f'          <div class="el" data-el-id="{eid}" '
                             f'style="{style};overflow:hidden">'
-                            f'<img loading="lazy" src="{src}" style="position:absolute;'
+                            f'<img loading="lazy" decoding="async" src="{src}" style="position:absolute;'
                             f'width:{iw:.4f}%;height:{ih:.4f}%;'
                             f'left:{ix:.4f}%;top:{iy:.4f}%;object-fit:fill"></div>'
                         )
@@ -1991,7 +1991,7 @@ def _enrich_canvas(ctx, slide):
                           file=sys.stderr)
             parts.append(
                 f'          <img class="el" data-el-id="{eid}" loading="lazy" '
-                f'src="{src}" style="{style}">'
+                f'decoding="async" src="{src}" style="{style}">'
             )
         elif etype == "shape":
             shape_style = style
@@ -2986,14 +2986,18 @@ def main(argv=None) -> int:
     # Vendored locally (assets/gsap/*) so the deck stays offline / self-contained;
     # copy-assets resolves these refs the same way it does feishu-deck.js. Loaded
     # AFTER the runtime so feishu-deck-motion.js can subscribe to fs-slide-enter.
-    # Empty string for every other deck → zero extra bytes, zero behaviour change.
+    # F-339: all `defer` so they execute in document order AFTER parse (matching
+    # the now-deferred feishu-deck.js runtime on the line above) — defer preserves
+    # source order, so runtime→gsap→motion ordering is kept; also keeps GSAP off
+    # the parser-blocking critical path. Empty string for every other deck → zero
+    # extra bytes, zero behaviour change.
     motion_scripts = ""
     if deck["deck"].get("motion_engine") == "gsap":
         motion_scripts = (
-            f'\n  <script src="{asset_path}/gsap/gsap.min.js"></script>'
-            f'\n  <script src="{asset_path}/gsap/CustomEase.min.js"></script>'
-            f'\n  <script src="{asset_path}/gsap/SplitText.min.js"></script>'
-            f'\n  <script src="{asset_path}/feishu-deck-motion.js"></script>'
+            f'\n  <script defer src="{asset_path}/gsap/gsap.min.js"></script>'
+            f'\n  <script defer src="{asset_path}/gsap/CustomEase.min.js"></script>'
+            f'\n  <script defer src="{asset_path}/gsap/SplitText.min.js"></script>'
+            f'\n  <script defer src="{asset_path}/feishu-deck-motion.js"></script>'
         )
 
     final = render_template(shell_tpl.read_text(encoding="utf-8"), {

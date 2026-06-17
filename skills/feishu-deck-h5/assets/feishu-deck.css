@@ -306,6 +306,21 @@ body {
      long decks (esp. mobile browse). */
   content-visibility: auto;
 }
+/* F-338 · scroll-mode (mobile default) compositor relief. In scroll/browse mode
+   the slide's scale transform is STATIC — set once on layout/resize, never
+   animated (present mode is the only path that animates the scale + fs-reveal).
+   So the base `.slide-frame .slide` rule's `will-change:transform` + the
+   `translateZ(0)` baked into its transform promote EVERY laid-out slide to its
+   own 1920×1080 compositor layer for ZERO benefit here — pure GPU memory /
+   backing-store cost on the weak mobile GPUs scroll mode targets (the layer is
+   created the moment content-visibility:auto renders an on-screen frame). Drop
+   both promotion hints in scroll mode only; present mode (line ~277) is left
+   completely untouched, so its tuned page-turn flicker behaviour is unaffected.
+   Mirrors the present-mode non-current relief at line ~262. */
+.deck[data-mode="scroll"] .slide-frame .slide {
+  transform: scale(var(--fs-scale, 1));  /* no translateZ(0) — don't promote a static slide */
+  will-change: auto;
+}
 
 /* ---- Deck UI overlay (progress bar, mode toggle, bottom controls) ---- */
 .deck-ui {

@@ -1,6 +1,11 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-334**
+> **下一可用号 = F-342**
+>
+> ⚠️ **F-334..F-337 由并发分支 `scope-root-cure` 占用**(其 TICKETS 顶「下一可用号 = F-338」;
+> F-334=GSAP 引擎并入 / F-335..F-337=「改一页却渲染/校验/截图很多页」scope 重构,均 WIP 未合
+> origin/main)。本 perf 批次(`perf-runtime-quickwins-imgopt`,off origin/main)避开它们,从
+> **F-338** 起领号,见下「成品 deck 运行时加载性能 quick-wins(F-338..F-341)」。合并时各占一行。
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其 WIP 未提交;
 > 本分支 off HEAD 看不到)。本分支(`fix/code-review-0614`)从 **F-323** 起,跳过 F-322
@@ -90,6 +95,21 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-331 | **杂项健壮性 + 死代码 + 文档**:iframe scheme 白名单、_lint custom-property 误报、parse_value 类型强转脚枪、dead code 清理、frontend nav/overlay/reveal、PDF 八进制转义、deck-map disabled、translation-qa script 内 CJK、deck-log 版本号、文档契约修正 | 多文件(见 CODE-REVIEW 文档)· renderer-5/7, mutation-4/7/8, sync-6, lift-2/6, frontend-1/3/4/5, subskill-7, misc-1/3/5/8/9, prose-2/3/5/6 |
 | F-332 | **lift `--shake` 整页入场动画顶掉 present fit-scale**(鸣鸣很忙 deck p59 `back-companion-service`「整体放大了/还是有问题」复盘):`lift-slides.py --shake` 的页动画恢复(5.55/5.6)把源站整页入场动画 `fs-page-enter` 连同 `@keyframes` 一起拎到 `.slide` **根元素**上;框架正是用 `.slide` 的 `transform: scale(var(--fs-scale))` 驱动 present 模式 fit-scale,而 keyframe 的 `to{transform:translateY(0) scale(1)}` + `animation-fill-mode:both` 把根冻结在 `scale(1)` → fit-scale 被覆盖 → 整页以原生 1080px 不缩放渲染、在非 16:9 视口溢出裁切(p59 实测 `transform:matrix(1,…)`/rectH 1080/top −49,正常页应 0.7875/851/66)。**仅非 16:9 暴露**故 16:9 截图看不出,反复被误判成「比例/放大」。修法=lift 后置 pass(5.65)`_descale_root_animation_keyframes`:检测挂在 `.slide` 根(选择器末 compound = `.slide[data-slide-key=K]`、非后代/非伪元素)上的 entrance 动画所引用的 keyframes,从中**剥掉 `transform`**(opacity/filter 淡入保留;子元素动画如 `.spinner` 的 `spin` transform 不动)→ 归还框架 fit-scale。与 F-318(letterbox content-bg 接缝)、F-316(进度条误当黑边)同属「上面有条边/放大」家族但根因独立。DONE 2026-06-15(新测类 `LiftRootAnimFitScaleTest` 5/5:lift 成功 / 根动画规则仍在 / 根 keyframe transform 剥净 / 淡入保留 / 子动画 transform 保留;`test_lift_slides` 30/30 + repair+atomic 28/28 零回归;真页 p59 修后 `transform:scale(0.7875)`/rectH 851/top 66 正常 fit) | `assets/lift-slides.py` / `deck-json/tests/test_lift_slides.py` |
 | F-333 | **DONE 2026-06-16** copy-assets prune 误删用 HTML 实体引号 `&quot;` 的内联 `url()` 背景资产 —— 手写/导入 raw 页若用 `style="background-image:url(&quot;input/foo.png&quot;)"`,下次 render 会**静默丢掉背景图**(真例:`runs/.../northregion-ai-lecture` p47 收尾页背景反复消失,正是用户报的「图不见了」)。根因:`copy-assets.py` 的 prune(L569–581)把 `input/` 里**不在 `referenced` 集**的文件一律 `unlink()`;而收集引用的 `RX_INPUT`/`RX_LOCAL_INPUT`/`RX_SKILL`/`RX_LOCAL_ASSET` + `render-deck _ASSET_REF_RE` 字符类没排除实体引号,`url(&quot;input/foo.png&quot;)` 被捕成假路径 `input/foo.png&quot;` → 真文件不在 referenced → 被删;另有 inline-assets/magic-page `strip_ref`、`_resolve_bg`、lift/import url() 同病(fails_to_inline/copy/upload)。**修法**(34 个易碎扫描器按消费端分三类):① 删除/清单 sink 用**实体专属否定先行** `_NE=(?!&(?:quot\|apos\|#34\|#39);)` 收紧字符类(只在真 quote-entity 处截断,**保留** `Q&A.png`/`R&D.png` 字面 `&` 文件名——对抗复核证明单纯补 `&` 会把这类文件删掉,即重新引入本 bug);② lift/import url() 改容忍实体引号开/闭 + 内层允许非实体 `&`;③ 纯解析端 `strip_ref`/`_resolve_bg` 做**门控** `html.unescape`+剥引号(仅含 quote-entity 时、且在外链/data:/fragment 判断之后,不破坏含 `&amp;` 的 data: URI、保 F-270)。CSS-only 与 data-URI 扫描器故意不动。**对抗复核**(`f333-adversarial` workflow,4 视角)catch 了「字面 `&` 文件名被删」(high·驱动①)与「`_resolve_bg` 破坏外链实体」(high·驱动③)两个真回归,已并修。零功能回退:既有 136 测试 + 21 新测(端到端 prune 存活 + 单元守卫,含字面 `&`/data: 实体/F-270/CSS 命名实体)全过;p47 已就地绕过。立项+实现文档 `docs/F-333-ENTITY-URL-ASSET-PRUNE-2026-06-16.md`。 | `assets/copy-assets.py` / `assets/inline-assets.py` / `assets/magic-page-assets.py` / `assets/lift-slides.py` / `deck-json/render-deck.py` / `deck-json/import-html-slide.py` / `deck-json/deck-cli.py` / `deck-json/tests/test_copy_assets_deck_json.py` / `deck-json/tests/test_entity_asset_refs.py` |
+
+## 成品 deck 运行时加载性能 quick-wins(F-338..F-341)
+
+> 起因:用户报「飞书 deck H5 本地打开还是有点慢,特别是移动端」。多-agent 性能审计
+> (5 维并行 finder + 逐条对抗式验证,18/22 确认)定位三大病灶:4K 超采背景/PNG 照片巨大、
+> 移动 scroll 模式 100 个常驻合成层、render-blocking。本批做「一行级零风险」+「图片瘦身」两档,
+> 全部框架级修复(不动单个 deck)。分支 `perf-runtime-quickwins-imgopt`(独立 worktree,off
+> origin/main)。立项+实现+实测见 `docs/F-338-PERF-RUNTIME-LOAD-2026-06-17.md`。
+
+| 号 | 一句话 | 归属 / 覆盖 |
+| --- | --- | --- |
+| F-338 | **scroll 模式(移动默认)合成层解除**:base `.slide-frame .slide` 的 `will-change:transform` + `transform` 里的 `translateZ(0)` 把**每一页**都提成 1920×1080 GPU 层,而 scroll 模式 scale 是静态(永不动画)→ 纯显存/合成浪费,弱手机 GPU 上层驱逐抖动。加 `.deck[data-mode="scroll"] .slide-frame .slide{transform:scale(var(--fs-scale,1));will-change:auto}` 一条,**只**解除 scroll 两个提层 hint;present 模式(确实驱动缩放动画)完全不动。镜像 present 非当前页既有解除规则(css:262) | `assets/feishu-deck.css` |
+| F-339 | **defer 运行时脚本**:`feishu-deck.js`(73KB)此前 render-blocking,挂在 HTML 解析关键路径;它本就自门控 `document.readyState`/DOMContentLoaded → 加 `defer` 行为零变化、解析后才执行、首屏可并行 settle。`motion_scripts`(opt-in GSAP)也一并 defer 以保源序(defer 按文档顺序执行,runtime→gsap→motion 次序不变),顺带把 GSAP 库移出关键路径 | `deck-json/templates/_shell.html` / `deck-json/render-deck.py` |
+| F-340 | **`<img>` 加 `decoding="async"`**:渲染器两处 img 发射点(canvas 元素图 + 裁剪图,render-deck.py:1983/1993)此前只有 `loading="lazy"`,JPEG 解码仍在主线程 → 多兆像素/4K 解码卡首屏与滚动。加 `decoding="async"` 把解码移出主线程(纯渲染 hint,无版式/校验影响,导入 deck 的全幅背景 `<img>` 也覆盖) | `deck-json/render-deck.py` |
+| F-341 | **图片瘦身 pass(`assets/optimize-images.py` 新工具)**:导入/照片 deck 常带 4K(3840×2160)全幅背景 + 多兆 PNG 照片,而画布只有 1920×1080 —— 纯下载+解码浪费,移动端首屏最痛(4K 解码 ~4× CPU/内存)。新独立工具:① 长边 >1920 一律降到画布尺寸(保比例);② **完全不透明** PNG ≥150KB 转 JPEG(照片 10–15× 小),并同步重写 index.html/deck.json/slide-index.json 的引用(含 URL 编码中文名);③ 真有透明的 PNG 只降分辨率、保 PNG 无损。**按维度天然幂等**(已≤上限即跳过、转码后源 png 删除)、依赖轻(Pillow 优先,退 sips 仅降分辨率,都无则 no-op)。接进 `finalize.sh`(copy-assets 后、validate 前,**只降分辨率**以保 manifest 一致;完整转码留给独立工具跑就地 deck)。**实测**真实导入 deck(digital-employee-guide-428,50 页):76MB→20MB(74% 小,bg 16MB→4MB),validator 优化前后均 PASS、零断链、幂等;新测 8/8 | `assets/optimize-images.py`(新)/ `assets/finalize.sh` / `deck-json/tests/test_optimize_images.py` |
 
 ## 已裁决(WONTFIX / DONE)
 

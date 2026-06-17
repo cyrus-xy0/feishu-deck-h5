@@ -6,9 +6,14 @@
 # Idempotent — safe to re-run after edits.
 #
 # Usage:
-#     bash assets/finalize.sh <output-dir> [mode] [--strict] [--name <slug>] [--deck-id <deck-id>]
+#     bash assets/finalize.sh <output-dir> [mode] [--strict] [--name <slug>] [--deck-id <deck-id>] [--no-optimize-images]
 #         mode:           local (default) | remote | library
 #         --strict        promote validator warnings to errors (final delivery)
+#         --no-optimize-images
+#                         skip the F-341 raster downscale pass (keep hi-res images
+#                         as-is, e.g. for zoomable detail). Default: downscale
+#                         any image whose longest edge exceeds 1920 (the canvas)
+#                         so decks open fast, especially on mobile.
 #         --name <slug>   emit a delivery-named copy alongside index.html
 #                         convention: lark-<customer>-<presentation-date>
 #                         e.g. --name lark-boyu-starbucks-2026-05-08
@@ -40,11 +45,13 @@ MODE="local"
 STRICT=""
 NAME=""
 DECK_ID=""
+OPTIMIZE_IMAGES=1   # F-341: downscale oversized rasters for fast (mobile) load
 
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
         local|remote|library) MODE="$1"; shift ;;
+        --no-optimize-images) OPTIMIZE_IMAGES=0; shift ;;
         inline)
             echo "✗ 'inline' mode is no longer a finalize.sh subcommand." >&2
             echo "  For single-file inline delivery of THIS run, run:" >&2
@@ -133,6 +140,23 @@ else
 fi
 if ! run_step "copy-assets" python3 "$SCRIPT_DIR/copy-assets.py" "${COPY_ARGS[@]}"; then
     exit 2
+fi
+
+# ---------- 1b · optimize images (downscale oversized rasters) ----------
+# F-341: imported/photo decks routinely carry 4K (3840×2160) full-page
+# backgrounds + multi-MB PNGs for a 1920×1080 canvas — pure download + decode
+# waste that makes decks slow to open, worst on mobile (4K JPEG decode is ~4×
+# the CPU/memory of 1080p). Downscale the OUTPUT copies to the canvas longest
+# edge. Downscale-ONLY here (no PNG→JPEG transcode) so filenames/refs are
+# unchanged and the manifest copy-assets just wrote stays accurate; the
+# standalone tool also transcodes for in-place decks. Non-fatal: a missing
+# Pillow/sips just leaves images as-is. Opt out with --no-optimize-images for
+# decks that intentionally ship hi-res (zoomable detail).
+if [ "$OPTIMIZE_IMAGES" = "1" ]; then
+    echo "  · optimize-images (downscale ≤1920) …"
+    if ! run_step "optimize-images" python3 "$SCRIPT_DIR/optimize-images.py" "$OUT_DIR" --no-transcode --quiet; then
+        echo "  ⚠️ optimize-images failed — continuing with un-optimized images" >&2
+    fi
 fi
 
 # ---------- 2 · validate ----------

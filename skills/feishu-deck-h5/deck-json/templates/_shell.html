@@ -26,7 +26,11 @@
   <div class="deck"{{{ deck_data_attrs }}}>
 {{{ slides_html }}}
   </div>{{{ notes_json }}}
-  <script src="{{ asset_path }}/feishu-deck.js"></script>{{{ motion_scripts }}}
+  <!-- F-339: defer the runtime so it leaves the HTML-parser critical path — it
+       already self-gates on document.readyState/DOMContentLoaded, so deferring
+       keeps identical init timing while letting first paint settle in parallel.
+       motion_scripts are emitted deferred too (render-deck.py) to preserve order. -->
+  <script defer src="{{ asset_path }}/feishu-deck.js"></script>{{{ motion_scripts }}}
   <script src="{{ asset_path }}/edit-mode/deck-edit-mode.js" defer></script>
 </body>
 </html>
