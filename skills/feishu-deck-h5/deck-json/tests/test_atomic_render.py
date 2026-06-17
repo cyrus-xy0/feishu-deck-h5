@@ -186,8 +186,23 @@ def test_gate_fail_rolls_back_previous_index_html(monkeypatch, capsys, tmp_path)
     VH = str(RD.VALIDATE_HTML)
 
     def fake_run(cmd, *a, **k):
-        if isinstance(cmd, (list, tuple)) and VH in [str(c) for c in cmd] \
-                and "--json" not in [str(c) for c in cmd]:
+        cl = [str(c) for c in cmd] if isinstance(cmd, (list, tuple)) else []
+        if VH in cl and "--json" in cl:
+            # F-335/F-319: the scope-aware static gate re-runs `validate.py
+            # --no-visual --json` to attribute findings and demote OUT-of-scope
+            # ones. Now that a chrome-title change no longer forces a full pass
+            # (F-335), this BAD-V2 render auto-scopes to page 1 — so the forced
+            # failure must come back as an IN-scope (slide 1) error here, else the
+            # demotion would (correctly) clear an unbacked failure. Report a real
+            # slide-1 error so the gate failure survives and the rollback fires.
+            return subprocess.CompletedProcess(
+                cmd, 1,
+                stdout=json.dumps({"ok": False, "errors": [
+                    {"path": "$.slides[0]", "msg": "forced FAIL",
+                     "slide": 1, "key": None}],
+                    "warnings": [], "soft_warnings": []}),
+                stderr="")
+        if VH in cl and "--json" not in cl:
             return subprocess.CompletedProcess(cmd, 1, stdout="forced FAIL\n",
                                                stderr="")
         return real_run(cmd, *a, **k)

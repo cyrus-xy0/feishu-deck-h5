@@ -99,6 +99,11 @@ requested slide(s)/run unless the user expands scope.
   spot-check is enough.
 - Do not invent extra deliverables such as inline HTML or zip packages unless the
   user requested that delivery shape.
+- When the user DOES ask to **打包 / package / bundle / 交付 / 发我** an existing
+  run, that is a delivery hand-back action, not a new Mode — do not broad-`find`
+  the run or hand-roll a portability check. Resolve the run by slug and run one
+  command: `bash assets/finalize.sh <slug> remote` (default editable zip; see the
+  「打包 / package — fast path」 table in `references/delivery.md` for shapes A/B/D).
 
 This rule intentionally overrides exhaustive-verification instincts when the user
 asked for a small, bounded operation.

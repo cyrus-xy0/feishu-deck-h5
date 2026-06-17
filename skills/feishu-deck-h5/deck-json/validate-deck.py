@@ -484,12 +484,49 @@ def format_path(path: str, slide_keys: dict[int, str] | None = None) -> str:
     return path
 
 
+def _resolve_scope_indices(tokens, slides):
+    """F-336 · resolve --scope tokens to a set of 0-based RAW slide indices.
+    Page numbers are 1-based ACTIVE positions (skip `_disabled`, matching URL #N
+    / render --scope); a slide key resolves to any slide (incl. disabled).
+    Returns (indices:set[int], bad_tokens:list[str])."""
+    if not isinstance(slides, list):
+        return set(), [t for t in tokens if t.strip()]
+    active = [i for i, s in enumerate(slides)
+              if isinstance(s, dict) and not s.get("_disabled")]
+    key_to_idx = {s.get("key"): i for i, s in enumerate(slides)
+                  if isinstance(s, dict) and s.get("key")}
+    out, bad = set(), []
+    for tok in tokens:
+        tok = tok.strip()
+        if not tok:
+            continue
+        if tok.isdigit():
+            n = int(tok)
+            if 1 <= n <= len(active):
+                out.add(active[n - 1])
+            else:
+                bad.append(tok)
+        elif tok in key_to_idx:
+            out.add(key_to_idx[tok])
+        else:
+            bad.append(tok)
+    return out, bad
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="validate-deck.py", description=__doc__.split("\n")[0])
     ap.add_argument("deck", type=Path, help="path to deck.json")
     ap.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA, help="schema file (default: deck-schema.json beside this script)")
     ap.add_argument("--strict", action="store_true", help="promote warnings to errors")
     ap.add_argument("--no-business-rules", action="store_true", help="skip cross-field business rules")
+    ap.add_argument("--scope", default=None,
+                    help="F-336: restrict the REPORT to findings on these page(s) "
+                         "— comma-separated 1-based ACTIVE page numbers (matching "
+                         "URL #N / render --scope) and/or slide keys. Cross-slide "
+                         "rules still RUN whole-deck (a real dup is still caught); "
+                         "only findings on in-scope slides + deck-level (no slides[i] "
+                         "in the path) are surfaced. Lets a scoped check-only review "
+                         "one page without drowning in pre-existing off-scope noise.")
     ap.add_argument("--json", action="store_true",
                     help="emit findings as JSON {ok, errors, warnings, soft_warnings}, "
                          "each item {path, msg, slide, key} (slide = 0-based index parsed "
@@ -533,6 +570,25 @@ def main(argv=None) -> int:
         i: (s.get("key") if isinstance(s, dict) else None)
         for i, s in enumerate(slides)
     } if isinstance(slides, list) else {}
+
+    # F-336 · --scope: filter the REPORT to in-scope slides + deck-level findings.
+    # Applied AFTER all rules ran (so cross-slide rules still catch real issues)
+    # and after --strict promotion, but before output / exit-code.
+    if args.scope:
+        _scope_idx, _bad = _resolve_scope_indices(str(args.scope).split(","), slides)
+        if _bad or not _scope_idx:
+            print(f"validate-deck: --scope '{args.scope}' — 解析不出有效页:"
+                  f"{', '.join(_bad) or '(空)'}。接受 1-based 活动页号或 slide key,"
+                  f"逗号分隔。", file=sys.stderr)
+            return 2
+
+        def _in_scope(path):
+            _mi = re.search(r"slides\[(\d+)\]", str(path))
+            return (_mi is None) or (int(_mi.group(1)) in _scope_idx)
+        result.errors = [(p, m) for (p, m) in result.errors if _in_scope(p)]
+        result.warnings = [(p, m) for (p, m) in result.warnings if _in_scope(p)]
+        result.soft_warnings = [(p, m) for (p, m) in result.soft_warnings
+                                if _in_scope(p)]
 
     if args.json:
         # F-320 · machine-readable findings for deck-cli's scope-aware pre-write

@@ -149,15 +149,25 @@ def test_iter_auto_scope_and_text_echo(tmp_path):
     r2 = _render(deck, out, "--iter")
     assert "no slide changed" in r2.stdout
 
-    # structural change → full
-    d["slides"].pop()
+    # F-334: a structural INSERT scopes to the genuinely-new page instead of
+    # forcing a full pass (was: assert "added/removed/reordered" → full). Each
+    # page renders independently of position, so the shifted tail need not
+    # re-gate — only the new page does.
+    d["slides"].append({"key": "p8-new", "layout": "raw",
+                        "data": {"html": "<p>brand new page</p>"}})
     deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     r3 = _render(deck, out, "--iter")
-    assert "added/removed/reordered" in r3.stdout
+    assert "auto-scope → pages 8" in r3.stdout, r3.stdout
+
+    # a deletion that leaves the rest untouched → nothing new to re-gate
+    d["slides"].pop()
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r4 = _render(deck, out, "--iter")
+    assert "no slide changed" in r4.stdout, r4.stdout
 
     # --final overrides --iter
-    r4 = _render(deck, out, "--iter", "--final")
-    assert r4.returncode == 0 and "--iter:" not in r4.stdout
+    r5 = _render(deck, out, "--iter", "--final")
+    assert r5.returncode == 0 and "--iter:" not in r5.stdout
 
 
 # ------------------------------------------------------------ W8 · asset ----

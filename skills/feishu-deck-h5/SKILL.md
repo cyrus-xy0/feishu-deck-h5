@@ -69,9 +69,16 @@ These gates apply before dispatching to any subskill:
    layouts (content / stats / flow / chart / table / arch-stack / image-text /
    logo-wall) are frozen; new pages go raw and `R-LAYOUT-DEPRECATED` (advisory)
    nudges any that don't. See `references/deck-generation-policy.md`.
-4. **Validate before delivery or publish.** Any rendered or edited HTML must pass
-   the validator path appropriate to the locked scope before local handoff,
-   simulator use, or publisher confirmation.
+4. **Two gates: scoped on every edit, whole-deck only at delivery.** An
+   intermediate single-page / scoped edit is gated by `render-deck.py --iter`
+   (or `--scope N`): auto-scope validates + re-shoots ONLY the changed page(s),
+   and that is the gate to run after each edit. The whole-deck validator path
+   (`render-deck.py --final` / `finalize.sh` / a whole-deck `check-only`) is the
+   DELIVERY gate — run it before local handoff to the user, simulator use, or
+   publisher / importer confirmation, NOT after every intermediate edit. Either
+   way the locked HTML must pass its appropriate gate before that step; never
+   hand-write / patch around the gate. (A framework / CSS change re-runs only the
+   VISUAL audit deck-wide; content + making-of snapshot stay scoped — F-335.)
 
 ## Scope Discipline
 
@@ -84,6 +91,15 @@ These gates apply before dispatching to any subskill:
   requested page-level action.
 - For page references, `page N`, URL `#N`, and frame index N are canonical. Old
   `screen_label` numeric prefixes are labels, not source-of-truth page numbers.
+- **Single-page edit = scoped loop, not a whole-deck pass.** The canonical
+  intermediate edit is: `deck-cli.py set-page` (or `set --from-file`) →
+  `render-deck.py --iter` → glance at the ONE changed page. Auto-scope already
+  scopes the static gate AND the making-of snapshot to the changed page(s); a
+  framework / CSS change only re-runs the VISUAL audit deck-wide (content +
+  snapshot stay scoped). Do NOT run a whole-deck validate (`finalize.sh` /
+  `check-only` over all pages / `render --final`) on an intermediate one-page
+  edit — that is the #1 cause of "改一页却渲染 / 校验 / 截图很多页". Reserve the
+  whole-deck pass for a delivery checkpoint, a structural change, or `--final`.
 
 ## Multi-Agent Dispatch
 
@@ -204,7 +220,8 @@ For target HTML, bootstrap the existing state before editing:
    slide order and `data-slide-key` values. If it is ordinary or complex HTML,
    wrap pages/sections as raw DeckJSON slides rather than redesigning them.
 5. Run Editor against that imported state, rerender when `deck.json` changed, and
-   run Validator before handoff.
+   run the appropriate gate (scoped `render --iter` for an intermediate edit; the
+   whole-deck validator only at a delivery checkpoint — Hard Gate 4).
 
 For a new deck:
 
@@ -224,10 +241,12 @@ For a new deck:
    Designer worker when multi-agent dispatch is available.
 3. **Renderer** to produce `deck.json`, render HTML, and prepare handoff files.
    Spawn a Renderer worker when multi-agent dispatch is available.
-4. **Validator** before any HTML handoff. Whether the HTML came from Renderer or
-   a later Editor pass, run Validator and fix non-zero findings before local
-   delivery or publish confirmation. Spawn a Validator worker when multi-agent
-   dispatch is available.
+4. **Validator** before a DELIVERY checkpoint (not every intermediate edit —
+   Hard Gate 4). Whether the HTML came from Renderer or a later Editor pass, run
+   the whole-deck Validator and fix non-zero findings before local delivery to
+   the user or publish confirmation; intermediate scoped edits gate via
+   `render --iter`. Spawn a Validator worker when multi-agent dispatch is
+   available.
 5. **Simulator** only if the user asks for pitch rehearsal, customer reaction
    simulation, stakeholder objections, or improvement advice after local HTML
    delivery. Spawn a Simulator worker when multi-agent dispatch is available.
@@ -254,8 +273,10 @@ For an existing deck:
    available.
 4. Use **Renderer** only when a changed `deck.json` or `outline.json` must be
    re-rendered. Spawn a Renderer worker when multi-agent dispatch is available.
-5. Run **Validator** before any HTML handoff after Editor, Translator, or Renderer
-   changes, and fix non-zero findings before local delivery or publish confirmation.
+5. After Editor, Translator, or Renderer changes, gate appropriately: an
+   intermediate scoped edit via `render --iter`; the whole-deck **Validator**
+   before a DELIVERY checkpoint (local delivery to the user or publish
+   confirmation — Hard Gate 4). Fix non-zero findings before that checkpoint.
 6. Use **Simulator** only after the deck has passed Validator and the local HTML
    artifact has been delivered, when the user asks for rehearsal or improvement
    advice.

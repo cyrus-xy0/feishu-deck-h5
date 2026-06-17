@@ -86,8 +86,20 @@ if [ -n "$NAME" ]; then
     fi
 fi
 
+# F-343: accept a slug (or partial run name) in place of the full output path.
+# resolve-run.sh maps `everbright` → runs/*everbright*/output (newest), so
+# delivery never needs a hand-typed path or a broad `find`. An existing path
+# passes straight through. resolve-run prints disambiguation/errors to stderr.
+_FZ_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "$OUT_DIR" ] && [ ! -d "$OUT_DIR" ]; then
+    if RESOLVED="$(bash "$_FZ_DIR/resolve-run.sh" "$OUT_DIR")"; then
+        echo "  · resolved '$OUT_DIR' → $RESOLVED"
+        OUT_DIR="$RESOLVED"
+    fi
+fi
+
 if [ -z "$OUT_DIR" ] || [ ! -d "$OUT_DIR" ]; then
-    echo "usage: bash $(basename "$0") <output-dir> [local|remote|library] [--strict] [--name <slug>] [--deck-id <deck-id>]" >&2
+    echo "usage: bash $(basename "$0") <output-dir|slug> [local|remote|library] [--strict] [--name <slug>] [--deck-id <deck-id>]" >&2
     echo "       output-dir must exist (typically runs/<ts>/output/)" >&2
     echo "       --name convention: lark-<customer>-<YYYY-MM-DD>" >&2
     echo "       library mode: bash $(basename "$0") <output-dir> library --deck-id <deck-id>" >&2

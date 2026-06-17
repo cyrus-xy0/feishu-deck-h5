@@ -2371,65 +2371,195 @@ def _finish_render_log(rc: int) -> None:
 #  reordered, deck-meta edits) or a missing sidecar fall back to a full render.
 # ============================================================================
 _SIDECAR_NAME = ".slide-hashes.json"
-_SIDECAR_SCHEMA = 2     # 2 = + framework hash + _disabled-skip enumeration (F-310)
+_SIDECAR_SCHEMA = 4     # 4 = framework hash split → layout-aware visual_fp +
+                        #     static-engine fp; field-level deck-meta (F-335)
+                        # 3 = screen_label excluded from per-slide hash (F-334)
+                        # 2 = + framework hash + _disabled-skip enumeration (F-310)
 AUTO_SCOPE_MAX_PAGES = 4  # F-310: DEFAULT-ON entrance engages only when ≤4 pages dirty
                           # (--iter is explicit opt-in and takes any count)
 
 
 def _slide_hash(slide: dict) -> str:
-    return hashlib.sha1(json.dumps(slide, ensure_ascii=False,
+    # F-334: screen_label is excluded from the gated-content hash. It is a
+    # human-readable dev label emitted ONLY as the data-screen-label attribute;
+    # the sole gate that reads it (R02) checks existence, never content, and it
+    # is never visible / styled / measured. Hashing it made a --renumber pass
+    # (or any leading-number rewrite) mark every shifted page "dirty" — so
+    # auto-scope fell back to a full gate and a single-page edit got held
+    # hostage by pre-existing errors on unrelated pages. Excluding it means the
+    # diff tracks only pages whose GATED content actually changed.
+    h = {k: v for k, v in slide.items() if k != "screen_label"}
+    return hashlib.sha1(json.dumps(h, ensure_ascii=False,
                                    sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def _deck_meta_hash(deck: dict) -> str:
-    meta = {k: v for k, v in deck.items() if k != "slides"}
-    return hashlib.sha1(json.dumps(meta, ensure_ascii=False,
-                                   sort_keys=True).encode("utf-8")).hexdigest()
+# F-335 · field-level deck-meta. The old _deck_meta_hash was one opaque blob over
+# everything-except-slides, so ANY deck-level edit (a date bump, author, logo
+# position) forced a whole-deck full gate. Split into CHROME (cosmetic, page-
+# independent or cover-only) vs STRUCTURAL (re-styles every page). deck_id is
+# render-minted and must never bust (it is excluded entirely).
+_CHROME_META_PATHS = frozenset({
+    "version", "title",
+    "deck.title", "deck.subtitle", "deck.eyebrow", "deck.kicker",
+    "deck.author", "deck.date", "deck.org", "deck.presenter",
+    "deck.footer", "deck.footnote",
+})
+_EXCLUDE_META_PATHS = frozenset({"deck.deck_id"})   # render-minted → never diff
 
 
-def _framework_hash() -> str:
-    """F-310 · sha1 over the framework bytes every rendered page depends on: the
-    three runtime assets (feishu-deck.css / feishu-deck-patterns.css /
-    feishu-deck.js) PLUS the whole templates/ tree (_shell.html +
-    *.fragment.html + blocks/ + extra-layouts.css) — a template edit reshapes
-    every page of its layout, so it must invalidate the sidecar exactly like a
-    framework-CSS edit (~40 small files, one-pass read, negligible).
-    _SIDECAR_SCHEMA is folded in so a renderer-logic change can invalidate
-    sidecars without touching any asset."""
+def _meta_split(deck: dict) -> tuple[str, str]:
+    """Return (chrome_hash, structural_hash). A change confined to chrome fields
+    re-checks only the cover; a structural change re-styles every page."""
+    chrome, structural = {}, {}
+    for k, v in deck.items():
+        if k == "slides":
+            continue
+        if k == "deck" and isinstance(v, dict):
+            for kk, vv in v.items():
+                path = f"deck.{kk}"
+                if path in _EXCLUDE_META_PATHS:
+                    continue
+                (chrome if path in _CHROME_META_PATHS else structural)[path] = vv
+        else:
+            if k in _EXCLUDE_META_PATHS:
+                continue
+            (chrome if k in _CHROME_META_PATHS else structural)[k] = v
+
+    def _h(d: dict) -> str:
+        return hashlib.sha1(json.dumps(d, ensure_ascii=False,
+                                       sort_keys=True).encode("utf-8")).hexdigest()
+    return _h(chrome), _h(structural)
+
+
+def _hash_files(paths) -> str:
+    """sha1 over a set of files (name + bytes), schema-tagged. Missing files hash
+    as a sentinel so an absent asset is stable, not a crash."""
     h = hashlib.sha1()
     h.update(f"sidecar-schema-{_SIDECAR_SCHEMA}".encode("utf-8"))
-    files = [ASSETS_DIR / "feishu-deck.css",
-             ASSETS_DIR / "feishu-deck-patterns.css",
-             ASSETS_DIR / "feishu-deck.js",
-             ASSETS_DIR / "feishu-deck-motion.js"]
-    files += sorted(TEMPLATES_DIR.rglob("*.html")) + \
-             sorted(TEMPLATES_DIR.rglob("*.css"))
-    for p in files:
-        h.update(p.name.encode("utf-8"))
+    for p in sorted(set(map(str, paths))):
+        pp = Path(p)
+        h.update(pp.name.encode("utf-8"))
         try:
-            h.update(p.read_bytes())
+            h.update(pp.read_bytes())
         except OSError:
             h.update(b"<missing>")
     return h.hexdigest()
 
 
+# F-335 · the global assets that determine how a page LOOKS or what the VISUAL
+# audit reports, regardless of layout: the two stylesheets + runtime JS (pure
+# appearance) and the visual-audit ENGINES (audits.js in-browser rules, validate.py
+# /run-audits.py the headless-Chromium harness, check-distribution.py the geometry
+# auditor) — an engine-logic change can alter visual/geometry findings on ANY page,
+# so it must bust the visual fingerprint → visual_full re-audit. (validate-deck.py,
+# the no-browser JSON/business-rule engine, lives in _STATIC_ENGINE_ASSETS instead.)
+_GLOBAL_VISUAL_ASSETS = (
+    ASSETS_DIR / "feishu-deck.css",
+    ASSETS_DIR / "feishu-deck-patterns.css",
+    ASSETS_DIR / "feishu-deck.js",
+    ASSETS_DIR / "feishu-deck-motion.js",   # opt-in GSAP entrance engine (data-motion="gsap")
+    ASSETS_DIR / "audits.js",
+    ASSETS_DIR / "validate.py",
+    ASSETS_DIR / "run-audits.py",
+    ASSETS_DIR / "check-distribution.py",
+)
+# F-335 · the STATIC rule engine (no browser): the JSON-schema + business-rule
+# validator + its rule table. A change here means a previously-clean page may
+# now have a finding, so the cheap static content audit must re-run deck-wide —
+# but it does NOT change how any page LOOKS, so it must not force the expensive
+# whole-deck Playwright pass.
+_STATIC_ENGINE_ASSETS = (
+    HERE / "validate-deck.py",
+    ASSETS_DIR / "business-rules.yaml",
+    HERE / "deck-schema.json",
+)
+
+
+def _deck_template_files(deck: dict) -> set:
+    """F-335 · LAYOUT-AWARE: only the template files THIS deck actually renders
+    through. The always-included base set = _shell.html + raw.fragment.html (the
+    wrapper EVERY raw / empty-layout slide renders through) + every global
+    stylesheet (extra-layouts.css …) + all shared block fragments — they touch
+    every deck. Per present SCHEMA layout, only its own fragment is added — so
+    editing flow-swim.fragment.html busts only decks that contain a flow-swim
+    slide, not a raw-first deck. A raw slide's AUTHOR html is in the per-slide
+    content hash, but its WRAPPER (raw.fragment.html) is in this base set. Any
+    layout whose fragment can't be resolved falls back to the whole tree (safe
+    side)."""
+    files = set(TEMPLATES_DIR.glob("*.css"))          # global stylesheets
+    # Always-rendered structural wrappers. raw.fragment.html emits .slide-frame/
+    # .slide, the wordmark, and the data-* attrs around the author html for every
+    # raw/empty-layout slide; it MUST be fingerprinted or a wordmark/wrapper edit
+    # on a raw-first deck (the DEFAULT style) would never re-trigger the visual
+    # pass (F-335 review-fix regression).
+    for _nm in ("_shell.html", "raw.fragment.html"):
+        _p = TEMPLATES_DIR / _nm
+        if _p.exists():
+            files.add(_p)
+    files |= set(BLOCKS_DIR.rglob("*.fragment.html"))  # shared blocks (hard to
+    files |= set(BLOCKS_DIR.rglob("*.css"))            # attribute per-deck; cheap)
+    unresolved = False
+    for s in deck.get("slides", []):
+        if s.get("_disabled"):
+            continue
+        layout = (s.get("layout") or "").strip()
+        if layout in ("", "raw"):                      # wrapper already in base set
+            continue
+        variant = (s.get("variant") or "").strip()
+        cands = []
+        if variant:
+            cands.append(TEMPLATES_DIR / f"{layout}-{variant}.fragment.html")
+        cands.append(TEMPLATES_DIR / f"{layout}.fragment.html")
+        hit = next((c for c in cands if c.exists()), None)
+        if hit:
+            files.add(hit)
+        else:
+            unresolved = True
+    if unresolved:
+        files |= set(TEMPLATES_DIR.rglob("*.html"))    # safe fallback
+        files |= set(TEMPLATES_DIR.rglob("*.css"))
+    return files
+
+
+def _visual_fingerprint(deck: dict) -> str:
+    """sha1 over the bytes that determine how THIS deck LOOKS: global visual
+    assets + the layout-aware template set. A mismatch means the visual /
+    geometry / distribution audits must cover all pages — but it must NOT
+    discard the per-slide content diff (content audits do not read CSS)."""
+    return _hash_files(list(_GLOBAL_VISUAL_ASSETS) + sorted(_deck_template_files(deck)))
+
+
+def _static_engine_fingerprint() -> str:
+    """sha1 over the static (no-browser) rule engine. A mismatch re-runs the
+    cheap static content audit deck-wide; it does not force the Playwright pass.
+    _SIDECAR_SCHEMA is folded in (via _hash_files) so a renderer-logic change to
+    the sidecar contract still invalidates old sidecars."""
+    return _hash_files(list(_STATIC_ENGINE_ASSETS))
+
+
 def _sidecar_state(deck: dict) -> dict:
     # ACTIVE slides only (`_disabled` skipped): list position i ↔ frame_index
     # i+1 — the SAME 1-based numbering --scope / URL #N / `deck-log snapshot
-    # --slide N` use (main()'s render loop applies the same skip). Toggling
-    # _disabled changes the key list → structural → full render, which is
-    # right: page numbers shifted. (F-310; schema 1 hashed RAW indexes and
+    # --slide N` use (main()'s render loop applies the same skip). The diff is
+    # BY KEY (see _auto_scope_decision), so inserting / removing / reordering /
+    # toggling _disabled no longer forces a full render (F-334) — only pages
+    # whose gated content changed are re-scoped; shifted-but-identical pages
+    # render byte-identically. (F-310; schema 1 hashed RAW indexes and
     # mis-numbered any deck with a _disabled slide.)
     active = [s for s in deck.get("slides", []) if not s.get("_disabled")]
+    _chrome, _structural = _meta_split(deck)
     return {
         "schema": _SIDECAR_SCHEMA,
         "note": "iteration-loop auto-scope sidecar — per-slide content hashes "
-                "of the last successfully rendered deck.json. --iter and the "
-                "default-on auto-scope diff against this to lock --scope to "
-                "changed pages. Auto-written by render-deck.py; do not "
-                "hand-edit.",
-        "deck_meta": _deck_meta_hash(deck),
-        "framework": _framework_hash(),
+                "of the last successfully rendered deck.json, plus split "
+                "visual / static-engine fingerprints and field-level deck-meta "
+                "(F-335). --iter and the default-on auto-scope diff against this "
+                "to scope the gate / snapshot to changed pages. Auto-written by "
+                "render-deck.py; do not hand-edit.",
+        "meta_chrome": _chrome,
+        "meta_structural": _structural,
+        "visual_fp": _visual_fingerprint(deck),
+        "engine_fp": _static_engine_fingerprint(),
         "slides": [[s.get("key", f"#{i}"), _slide_hash(s)]
                    for i, s in enumerate(active)],
     }
@@ -2475,29 +2605,71 @@ def _slide_echo_text(slide: dict, max_chars: int = 360) -> str:
     return "\n".join(out)
 
 
-def _auto_scope_pages(deck: dict, sidecar_path: Path):
-    """Return (pages, reason). pages=None → full render required."""
+def _auto_scope_decision(deck: dict, sidecar_path: Path) -> dict:
+    """F-335 · the structured auto-scope decision. Returns:
+        content_dirty: [1-based pages] | None   — pages whose GATED CONTENT changed
+                       (by-key slide-hash diff). None ⇒ undiffable (no/incompatible
+                       sidecar) ⇒ first-render-full. ALWAYS computed when diffable,
+                       REGARDLESS of visual/engine/meta busts — a CSS edit no longer
+                       discards the content scope (that was the #1 over-gate trigger).
+        visual_full:   bool — the Playwright VISUAL / geometry / distribution pass
+                       must cover ALL pages (the visual fingerprint or a structural
+                       deck-meta field changed → appearance may shift anywhere).
+        engine_dirty:  bool — the static (no-browser) rule engine changed → re-run
+                       the cheap static CONTENT audit deck-wide (a previously-clean
+                       page may now have a finding), but do NOT force the Playwright
+                       pass.
+        extra_visual:  [pages] — chrome-only deck-meta change → re-check these pages
+                       (the cover renders the deck title/date) without going full.
+        reason:        str — human-readable summary.
+
+    Replaces the old _auto_scope_pages, whose deck_meta / framework guards
+    returned None (full everything) and so silently defeated the per-slide scope
+    on every framework edit, deck-meta touch, or first render."""
+    _full = {"content_dirty": None, "visual_full": True, "engine_dirty": True,
+             "extra_visual": [], "reason": None}
     try:
         prev = json.loads(sidecar_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None, "no sidecar (first render here) — full"
+        return {**_full, "reason": "no sidecar (first render here) — full"}
+    if prev.get("schema") != _SIDECAR_SCHEMA:
+        # older/incompatible sidecar → one-time full, then the rewritten sidecar
+        # upgrades to the current schema.
+        return {**_full, "reason": "sidecar schema upgraded — one-time full"}
     cur = _sidecar_state(deck)
-    if prev.get("deck_meta") != cur["deck_meta"]:
-        return None, "deck-level fields changed — full"
-    # F-310: framework/template bytes shape EVERY page — a CSS/template edit
-    # must bust the diff. A schema-1 sidecar has no "framework" field →
-    # mismatch → one-time full render, then the rewritten sidecar upgrades.
-    if prev.get("framework") != cur["framework"]:
-        return None, "framework/templates changed — full"
-    pk = [k for k, _ in prev.get("slides", [])]
-    ck = [k for k, _ in cur["slides"]]
-    if pk != ck:
-        return None, "slides added/removed/reordered — full"
-    ph = dict(prev["slides"])
-    pages = [i + 1 for i, (k, h) in enumerate(cur["slides"]) if ph.get(k) != h]
-    if not pages:
-        return None, "no slide changed — full (cheap anyway)"
-    return pages, f"{len(pages)} changed page(s)"
+    # by-key CONTENT diff — computed unconditionally (F-335). Order-independent
+    # (F-334), so insert / remove / reorder / _disabled-toggle scope to just the
+    # genuinely-changed page(s), not the shifted tail.
+    ph = dict(prev.get("slides", []))
+    content_dirty = [i + 1 for i, (k, h) in enumerate(cur["slides"]) if ph.get(k) != h]
+    visual_changed = prev.get("visual_fp") != cur["visual_fp"]
+    engine_changed = prev.get("engine_fp") != cur["engine_fp"]
+    # field-level deck-meta: structural re-styles every page (full visual);
+    # chrome-only re-checks just the cover.
+    if prev.get("meta_structural") != cur["meta_structural"]:
+        meta = "structural"
+    elif prev.get("meta_chrome") != cur["meta_chrome"]:
+        meta = "chrome"
+    else:
+        meta = "none"
+    visual_full = visual_changed or (meta == "structural")
+    extra_visual = [1] if (meta == "chrome" and cur["slides"]) else []
+    parts = []
+    if visual_changed:
+        parts.append("visual framework/templates changed → visual full")
+    if meta == "structural":
+        parts.append("structural deck-meta changed → visual full")
+    elif meta == "chrome":
+        parts.append("chrome deck-meta changed → cover re-checked")
+    if engine_changed:
+        parts.append("static rule-engine changed → content audit deck-wide")
+    if content_dirty:
+        parts.append(f"{len(content_dirty)} content page(s) changed")
+    if not parts:
+        parts.append("no slide changed")
+    return {"content_dirty": content_dirty, "visual_full": visual_full,
+            "engine_dirty": engine_changed, "extra_visual": extra_visual,
+            "reason": "; ".join(parts)}
 
 
 def main(argv=None) -> int:
@@ -2618,6 +2790,24 @@ def main(argv=None) -> int:
     # falling back to a full render costs minutes and reads as "scoping worked".
     scope_pages = []
     _scope_key_tokens: list[str] = []
+    # F-335 · scope is no longer one all-or-nothing page list. Three derived
+    # facets flow to three consumers:
+    #   scope_pages    → the static CONTENT gate (F-319) + the visual
+    #                    --scope-frames narrowing.
+    #   visual_full    → True ⇒ the Playwright visual / geometry / distribution
+    #                    pass covers ALL pages (a CSS / template / structural-meta
+    #                    change may shift appearance anywhere); False ⇒ it scopes
+    #                    to scope_pages. Default full; auto-scope narrows it.
+    #   snapshot_pages → the making-of auto-snapshot reshoots exactly these pages.
+    #                    None ⇒ full (first render / --final / explicit-full) ·
+    #                    [] ⇒ skip (nothing content-changed, e.g. a pure framework
+    #                    tweak — never reshoot a 40-page making-of for a CSS edit) ·
+    #                    [p…] ⇒ those pages. Decoupled from the gate scope.
+    #   engine_dirty   → the static rule engine changed ⇒ the static content gate
+    #                    runs deck-wide (no browser), no F-319 demotion this render.
+    visual_full = True
+    snapshot_pages = None
+    engine_dirty = False
     if args.scope:
         for tok in str(args.scope).split(","):
             tok = tok.strip()
@@ -2713,6 +2903,11 @@ def main(argv=None) -> int:
                   f" key 速查: deck-json/locate-slide.py。", file=sys.stderr)
             return 2
         scope_pages = sorted(set(scope_pages))
+        # explicit --scope: the caller has narrowed everything — the static gate,
+        # the visual pass, AND the snapshot all confine to these pages (never
+        # expand the visual pass on a framework bust here).
+        visual_full = False
+        snapshot_pages = list(scope_pages)
 
     # W3 + F-310 · auto-scope: lock the edit scope to the pages whose content
     # actually changed since the last successful render (.slide-hashes.json
@@ -2722,11 +2917,16 @@ def main(argv=None) -> int:
     #   • DEFAULT-ON (F-310): a bare re-render with no scope-ish flag gets the
     #     same --scope treatment automatically when ≤ AUTO_SCOPE_MAX_PAGES
     #     pages changed — announced loudly on stderr, never silently. First
-    #     render here (no sidecar) stays silent-full; structural change /
-    #     framework or deck-meta change / too many dirty pages announce why.
-    #     --final / --visual / --renumber / explicit --scope/--quick always
-    #     win; env DECK_NO_AUTO_SCOPE=1 kills this entrance (the sidecar is
-    #     still maintained).
+    #     render here (no sidecar) stays silent-full. F-335: a framework /
+    #     template / structural-meta change no longer empties the scope — it only
+    #     sets visual_full (the visual pass covers all pages) while the static
+    #     gate + making-of snapshot stay scoped to the genuinely-changed pages;
+    #     too many dirty pages still announce a full pass.
+    #     --visual now COOPERATES (F-335): it narrows to the changed pages unless
+    #     visual_full. --final / explicit --scope / --quick still bypass; env
+    #     DECK_NO_AUTO_SCOPE=1 kills this entrance (the sidecar is still
+    #     maintained). F-334: --renumber participates (decision runs before the
+    #     renumber rewrite; screen_label is out of the content hash).
     # Scope never affects WHAT gets rendered (index.html is always rebuilt in
     # full) — only gate/snapshot/fit-check coverage,判错页号的最坏后果是闸门
     # 覆盖偏窄,绝不会产出残缺 deck。
@@ -2734,7 +2934,8 @@ def main(argv=None) -> int:
     # but SAY what an --iter loop would have cost — the habit of "--final every
     # intermediate edit" is the #1 cause of minutes-long one-page iterations.
     if args.final:
-        _fin_pages, _ = _auto_scope_pages(deck, args.output_dir / _SIDECAR_NAME)
+        _fin = _auto_scope_decision(deck, args.output_dir / _SIDECAR_NAME)
+        _fin_pages = _fin["content_dirty"]
         if _fin_pages and len(_fin_pages) <= AUTO_SCOPE_MAX_PAGES:
             print(f"render-deck --final: full pass as requested — note only "
                   f"{len(_fin_pages)} page(s) changed since the last render "
@@ -2743,42 +2944,75 @@ def main(argv=None) -> int:
                   f"delivery checkpoints.", file=sys.stderr)
 
     _auto_scoped = False
-    _iter_auto = (getattr(args, "iter", False) and not scope_pages
-                  and not args.renumber)
+    # F-334: --renumber no longer disables auto-scope. The decision runs BEFORE
+    # the renumber rewrite (below), and screen_label is excluded from the
+    # content hash, so a renumber (or insert+renumber) scopes the gate to the
+    # genuinely-changed page(s) instead of forcing a full pass that gets held
+    # hostage by pre-existing errors elsewhere. --final still forces full.
+    _iter_auto = (getattr(args, "iter", False) and not scope_pages)
     # NB: gate on args.scope(旗子本身)而不是 scope_pages(解析结果)—— 一个
     # 解析不出来的 `--scope abc` 也算「caller 已表态」,auto-scope 不得接管。
+    # F-335: --visual now COOPERATES with auto-scope (it used to be excluded).
+    # A bare `--visual` on a small edit derives the changed pages and visually
+    # gates only those (still a hard gate); a framework / structural change sets
+    # visual_full and it covers all pages. --final / explicit --scope / --quick
+    # still bypass auto-scope. env DECK_NO_AUTO_SCOPE=1 kills this entrance.
     _default_auto = (not getattr(args, "iter", False) and not args.scope
-                     and not args.quick and not args.final and not args.visual
-                     and not getattr(args, "renumber", False)
+                     and not args.quick and not args.final
                      and not os.environ.get("DECK_NO_AUTO_SCOPE"))
     if _iter_auto or _default_auto:
         _sidecar_path = args.output_dir / _SIDECAR_NAME
-        _auto_pages, _auto_reason = _auto_scope_pages(deck, _sidecar_path)
-        if _iter_auto:
-            if _auto_pages:
-                scope_pages = _auto_pages
+        _dec = _auto_scope_decision(deck, _sidecar_path)
+        _cd = _dec["content_dirty"]
+        engine_dirty = _dec["engine_dirty"]
+        if _cd is None:
+            # first render here / incompatible sidecar → full everything.
+            visual_full = True
+            if _iter_auto:
+                print(f"render-deck --iter: {_dec['reason']} — full render.")
+            # default entrance stays silent on a first render (no sidecar yet).
+        else:
+            # diffable. content_dirty drives the static gate + making-of snapshot;
+            # the visual pass expands to ALL pages ONLY when appearance may have
+            # shifted (visual_full). A framework edit no longer empties the content
+            # scope or floods the snapshot — the #1 over-gate trigger (F-335).
+            _scope = sorted(set(_cd) | set(_dec["extra_visual"]))
+            snapshot_pages = list(_cd)          # reshoot ONLY content-changed pages
+            _engage = bool(_scope) and (_iter_auto
+                                        or len(_scope) <= AUTO_SCOPE_MAX_PAGES)
+            if _engage:
+                scope_pages = _scope
+                visual_full = _dec["visual_full"]
                 args.skip_fit_check = True      # same implication as --scope/--quick
-                print(f"render-deck --iter: auto-scope → pages "
-                      f"{','.join(map(str, scope_pages))} ({_auto_reason}); "
-                      f"unchanged pages keep their last audit — run --final "
-                      f"before delivery.")
+                _vis = "ALL pages" if visual_full else ",".join(map(str, scope_pages))
+                if _iter_auto:
+                    print(f"render-deck --iter: auto-scope → pages "
+                          f"{','.join(map(str, scope_pages))} ({_dec['reason']}); "
+                          f"visual: {_vis}; unchanged pages keep their last audit "
+                          f"— run --final before delivery.")
+                else:
+                    _auto_scoped = True
+                    print(f"AUTO-SCOPE: {_dec['reason']} → static/snapshot scope "
+                          f"{','.join(map(str, scope_pages))}; visual: {_vis} "
+                          f"(F-302 baseline demotion; pass --final for the "
+                          f"whole-deck pass)", file=sys.stderr)
             else:
-                print(f"render-deck --iter: {_auto_reason} render.")
-        elif _sidecar_path.is_file():   # default entrance: first render = silent full
-            if _auto_pages and len(_auto_pages) <= AUTO_SCOPE_MAX_PAGES:
-                scope_pages = _auto_pages
-                _auto_scoped = True
-                args.skip_fit_check = True  # same implication as explicit --scope
-                print(f"AUTO-SCOPE: {len(_auto_pages)} changed page(s) → --scope "
-                      f"{','.join(map(str, _auto_pages))} (scoped gates + F-302 "
-                      "baseline demotion; pass --final to force the whole-deck "
-                      "pass)", file=sys.stderr)
-            elif _auto_pages:
-                print(f"AUTO-SCOPE: off ({len(_auto_pages)} changed pages > "
-                      f"{AUTO_SCOPE_MAX_PAGES}) — full render", file=sys.stderr)
-            else:
-                print(f"AUTO-SCOPE: off ({_auto_reason}) — full render",
-                      file=sys.stderr)
+                # too many changed pages, OR nothing content-changed (a pure
+                # framework / rule-engine bust, or a no-op). Full gate; the
+                # snapshot still reshoots only content-changed pages (often none →
+                # skipped), so a CSS tweak never reshoots the whole making-of.
+                visual_full = True
+                if _scope:
+                    print(f"AUTO-SCOPE: off ({len(_scope)} changed pages > "
+                          f"{AUTO_SCOPE_MAX_PAGES}) — full render", file=sys.stderr)
+                elif _iter_auto:
+                    print(f"render-deck --iter: {_dec['reason']}; making-of "
+                          f"snapshot → {snapshot_pages or 'skipped'}.")
+                else:
+                    print(f"AUTO-SCOPE: no content changed ({_dec['reason']}) — "
+                          f"full visual re-audit; making-of snapshot "
+                          f"{'scoped' if snapshot_pages else 'skipped'}",
+                          file=sys.stderr)
 
     # 2.45 Deck identity — stamp a per-deck id (data-deck-id on <div class="deck">)
     # so the in-browser edit mode can refuse to overwrite a DIFFERENT deck's file.
@@ -3147,11 +3381,80 @@ def main(argv=None) -> int:
                       + ",".join(map(str, scope_pages))) if scope_pages
                      else ("--quick" if args.quick else "full"))
         validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html)]
-        if not args.visual:
+        # F-319: on a SCOPED runs/ render keep the static gate static-only and let
+        # the scope-aware visual block below (--scope-frames + in-scope filter +
+        # F-302 baseline) own the visual gate — otherwise `--scope … --visual`
+        # bypasses all that and rolls back on PRE-EXISTING out-of-scope visual
+        # findings (the 收尾来回 wall). Full / --final / /tmp renders are unchanged.
+        if not args.visual or (scope_pages and _is_runs):
             validate_cmd.append("--no-visual")
         rc = subprocess.run(validate_cmd, capture_output=True, text=True)
         # Always show validator output (digest is helpful)
         print(rc.stdout)
+
+        # F-319 · scope-aware STATIC gate. A `--scope` render is an ITERATION
+        # pass on specific pages; pre-existing static errors on OTHER pages
+        # (validator-rule drift, concurrent edits, legacy debt) must not roll
+        # back an edit confined to in-scope pages — that is the "收尾来回" wall
+        # where editing pages 17,18 got blocked by stale errors on pages 3/8/13.
+        # Re-attribute the static findings to their TRUE slide (re-run
+        # --no-visual --json; deliberately NOT --scope-frames, so deck-level
+        # findings keep slide=null instead of being mis-anchored onto an
+        # in-scope frame) and block on errors whose slide is in scope OR
+        # anchor-free (slide=null — can't be proven off-scope, F-330).
+        # Out-of-scope errors with a KNOWN slide demote to a printed advisory. Full /
+        # --final renders (no scope_pages) are UNCHANGED; --strict-baseline opts
+        # out (same lever that disables the F-302 visual baseline demotion). The
+        # mandatory --final stays the comprehensive whole-deck gate before
+        # delivery, so a leak onto an out-of-scope page is still caught there.
+        _static_rc = rc.returncode
+        # F-335: engine_dirty (the static rule engine changed since the last
+        # render) re-validates the whole deck — a previously-clean off-scope page
+        # may now carry a real finding under the new rule — so the scope demotion
+        # is suppressed for that one render (forcing a full static block).
+        if (_static_rc != 0 and scope_pages and not args.strict_baseline
+                and not engine_dirty):
+            try:
+                _jrc = subprocess.run(
+                    [sys.executable, str(VALIDATE_HTML), str(out_html),
+                     "--no-visual", "--json"],
+                    capture_output=True, text=True)
+                _serrs = json.loads(_jrc.stdout).get("errors", [])
+                _sset = set(scope_pages)
+                # F-330: anchor-free findings (slide=null — R05 banned emoji/'!'/'…'
+                # are body-wide and carry no "slide N") cannot be proven off-scope,
+                # so they must BLOCK, never demote (else a freshly-introduced emoji
+                # on an in-scope edit ships clean). Only a KNOWN out-of-scope slide
+                # demotes; slide=null is treated as in-scope (must-block).
+                _in_scope = [e for e in _serrs
+                             if e.get("slide") is None or e.get("slide") in _sset]
+                _off_scope = [e for e in _serrs
+                              if e.get("slide") is not None and e.get("slide") not in _sset]
+                if not _in_scope:
+                    _static_rc = 0   # in-scope page(s) are static-clean → don't roll back
+                    if _off_scope:
+                        _gc_static = f"ran·scope-demoted({len(_off_scope)} pre-existing)"
+                        print(f"\n  ⓘ [F-319] --scope {_gc_scope}: {len(_off_scope)} "
+                              f"static error(s) on out-of-scope / deck-level pages "
+                              f"— PRE-EXISTING, demoted (not this scoped edit's fault). "
+                              f"Run --final for the full-deck gate.", file=sys.stderr)
+                        for _e in _off_scope[:8]:
+                            _sl = _e.get("slide")
+                            print(f"      · [{_e.get('code')}] "
+                                  f"{'slide ' + str(_sl) if _sl else 'deck-level'}",
+                                  file=sys.stderr)
+                        if len(_off_scope) > 8:
+                            print(f"      … +{len(_off_scope) - 8} more", file=sys.stderr)
+                else:
+                    print(f"\n  ✗ [F-319] --scope {_gc_scope}: {len(_in_scope)} static "
+                          f"error(s) on IN-SCOPE page(s) block this render "
+                          f"({len(_off_scope)} other pre-existing demoted):",
+                          file=sys.stderr)
+                    for _e in _in_scope[:12]:
+                        print(f"      · [{_e.get('code')}] slide {_e.get('slide')}: "
+                              f"{(_e.get('msg') or '')[:110]}", file=sys.stderr)
+            except Exception:
+                pass   # any parse/exec failure → fall back to the original rc (safe)
 
         # 6b. Readability advisory (F-253) — NON-BLOCKING, never affects exit code,
         # and runs REGARDLESS of the static gate's pass/fail. A "字偏小" miss can
@@ -3212,7 +3515,7 @@ def main(argv=None) -> int:
             except Exception:
                 return None      # no/invalid baseline → no demotion
 
-        if (not args.visual and _is_runs and not args.quick):
+        if ((not args.visual or scope_pages) and _is_runs and not args.quick):
             # F-293 · for a single-page `--scope` render, feed the scope INTO the
             # engine (--scope-frames) so audits.js only evaluates the changed
             # frame(s) instead of all N slides (华泰: 50 pages ~7s → just the
@@ -3221,7 +3524,10 @@ def main(argv=None) -> int:
             # (a no-op once the engine is scoped; harmless double-safety).
             _adv_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html),
                         "--visual", "--json"]
-            if scope_pages:
+            # F-335: a framework / template / structural-meta change (visual_full)
+            # re-audits ALL frames — appearance may have shifted anywhere;
+            # otherwise scope the visual engine to just the changed page(s).
+            if scope_pages and not visual_full:
                 _adv_cmd += ["--scope-frames", ",".join(map(str, scope_pages))]
             adv = subprocess.run(
                 _adv_cmd,
@@ -3263,7 +3569,7 @@ def main(argv=None) -> int:
                 # `slide` (1-based int, or null for deck-level). Keep findings
                 # whose slide is in scope (when known) PLUS deck-level (null).
                 def _in_scope(f):
-                    if not scope_pages:
+                    if not scope_pages or visual_full:   # F-335: full visual keeps all
                         return True
                     s = f.get("slide")
                     return (s is None) or (s in scope_pages)
@@ -3272,10 +3578,11 @@ def main(argv=None) -> int:
                 _vis = [f for f in (_warns + _errs)
                         if str(f.get("code", "")).startswith("R-VIS")]
                 if not _engine_down:
+                    _scoped_vis = scope_pages and not visual_full   # F-335
                     _gc_visual = "ran" + (f"(scope={','.join(map(str, scope_pages))})"
-                                          if scope_pages else "")
+                                          if _scoped_vis else "")
                     _gc_geometry = "ran" + (f"(scope={','.join(map(str, scope_pages))})"
-                                            if scope_pages else "")
+                                            if _scoped_vis else "")
                 if _vis:
                     print("\n📐 readability advisory · visual audits "
                           "(NOT a delivery gate · F-253):", file=sys.stderr)
@@ -3437,8 +3744,11 @@ def main(argv=None) -> int:
         # --scope/--quick edits (it is a whole-deck Playwright pass over off-scope
         # pages). Its own Playwright load (~一遍) is the cost; a render under
         # --skip-validate-html skips it with the rest of the HTML gate.
+        # F-335: a visual_full render (framework / structural-meta change) runs the
+        # whole-deck distribution audit — geometry may have shifted on any page;
+        # a content-only scoped edit still skips it (expensive whole-deck pass).
         if (CHECK_DIST.exists() and _is_runs
-                and not scope_pages and not args.quick):
+                and (visual_full or not scope_pages) and not args.quick):
             dist = subprocess.run(
                 [sys.executable, str(CHECK_DIST), str(out_html), "--json"],
                 capture_output=True, text=True,
@@ -3522,7 +3832,7 @@ def main(argv=None) -> int:
                 f"geometry={_gc_geometry} distribution={_gc_distribution} "
                 f"scope={_gc_scope}", file=sys.stderr)
 
-        if rc.returncode != 0:
+        if _static_rc != 0:    # F-319: scope-demoted on --scope (see above)
             print(file=sys.stderr)
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)
             if rc.stderr.strip():
@@ -3750,18 +4060,27 @@ def main(argv=None) -> int:
 
     # 渲染全部成功后:若这份 deck 开着制作日志(log/ 存在)就自动拍一版 making-of。
     # 纯代码实现、不依赖任何 harness hook —— 每个用户 / 每种 harness / 每次 render 都生效。
-    #   --scope N : 锁定编辑 —— 只刷改动页(范围作为边界,见 _maybe_auto_snapshot)。
-    #   --quick   : 纯文本快路 —— 整个跳过截图(不要 making-of 反映这次改动时用)。
-    #   都不给   : 全量 snapshot(新 deck / 大改用)。
-    if scope_pages:
-        print(f"       [scope] making-of 只刷第 {','.join(map(str, scope_pages))} 页"
-              f"(范围内截图,跳整片审计)。")
-        _maybe_auto_snapshot(out_html, scope=scope_pages)
-    elif args.quick:
-        print("       [quick] 跳过自动截图 + fit-check(纯文本编辑快路);"
-              "要把改动页截进 making-of 请改用 --scope N。")
+    # F-335: snapshot scope is DECOUPLED from the gate scope. snapshot_pages —
+    #   [p…] → reshoot only those content-changed pages (the gate may still go
+    #          full visual; the making-of does not) ·
+    #   []   → SKIP: a pure framework / rule-engine render changed no content, so
+    #          we do NOT reshoot the whole making-of for a styling tweak ·
+    #   None → full snapshot (first render / --final / explicit-full), UNLESS
+    #          --quick (text-only fast path) opts out of screenshots entirely.
+    if snapshot_pages is None:
+        if args.quick:
+            print("       [quick] 跳过自动截图 + fit-check(纯文本编辑快路);"
+                  "要把改动页截进 making-of 请改用 --scope N 或 --final。")
+        else:
+            _maybe_auto_snapshot(out_html)
+    elif snapshot_pages:
+        print(f"       [scope] making-of 只刷第 "
+              f"{','.join(map(str, snapshot_pages))} 页(改了内容的页,跳整片审计)。")
+        _maybe_auto_snapshot(out_html, scope=snapshot_pages)
     else:
-        _maybe_auto_snapshot(out_html)
+        print("       [scope] 无内容改动(仅框架/引擎变更)— 跳过 making-of 重拍"
+              "(避免一次 CSS 改动重拍整本);要把新外观记进 making-of 请手动 "
+              "deck-log snapshot。")
 
     # F-315: stamp the self-integrity signature LAST — after every step that may
     # have rewritten index.html (delivery gate, copy-assets / --inline). The sig is

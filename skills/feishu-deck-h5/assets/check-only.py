@@ -976,6 +976,12 @@ def build_parser() -> argparse.ArgumentParser:
                         '默认是逐页业务报告; 排查 framework bug 时用这个.')
     p.add_argument('--report', metavar='PATH',
                    help='把 markdown 报告写到指定路径; 不带则打到 stdout')
+    p.add_argument('--scope', default=None, metavar='N[,N,KEY,...]',
+                   help='F-336: 把报告限定到这些页 — 逗号分隔的 1-based 页号 '
+                        '(= URL #N / data-screen-label 顺序) 和/或 slide key. '
+                        '所有规则照常全 deck 跑 (跨页问题仍能抓到), 但只呈现命中 '
+                        '在 scope 页上的 findings + deck 级 findings. 单页 review '
+                        '不再被存量 off-scope 噪声淹没.')
     return p
 
 
@@ -991,6 +997,44 @@ def run_html_check(path: Path, args: argparse.Namespace) -> tuple[int, str]:
     visual = args.visual or is_gate
 
     _run_all_audits(html, slides, path, iss, strict, visual)
+
+    # F-336 · --scope: filter the REPORT to the locked page(s). All rules already
+    # ran whole-deck (a cross-page problem is still caught); we only surface
+    # findings attributed to an in-scope slide (by `slide N` in the msg OR a
+    # data-slide-key="<in-scope key>") plus deck-level findings (no page anchor).
+    if getattr(args, 'scope', None):
+        keys_in_doc = re.findall(r'data-slide-key="([^"]+)"', html)  # 1-based order
+        key_to_page = {k: i + 1 for i, k in enumerate(keys_in_doc)}
+        scope_pages, scope_keys, bad = set(), set(), []
+        for tok in str(args.scope).split(','):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok.isdigit():
+                scope_pages.add(int(tok))
+            elif tok in key_to_page:
+                scope_pages.add(key_to_page[tok])
+            else:
+                bad.append(tok)
+        if bad or not scope_pages:
+            return 2, (f"check-only: --scope '{args.scope}' 解析不出有效页: "
+                       f"{', '.join(bad) or '(空)'}. 接受 1-based 页号或 slide key.")
+        for p in scope_pages:                       # match findings cited by key too
+            if 1 <= p <= len(keys_in_doc):
+                scope_keys.add(keys_in_doc[p - 1])
+
+        def _keep(item):
+            _c, m = item
+            idxs = set(_slides_of_msg(m))
+            has_key_ref = 'data-slide-key="' in m
+            if not idxs and not has_key_ref:
+                return True                          # deck-level — always surface
+            if idxs & scope_pages:
+                return True
+            return any(f'data-slide-key="{k}"' in m for k in scope_keys)
+        iss.errors = [it for it in iss.errors if _keep(it)]
+        iss.warnings = [it for it in iss.warnings if _keep(it)]
+        iss.soft_warnings = [it for it in iss.soft_warnings if _keep(it)]
 
     # strict 模式 (含 gate): warn 升 error
     if strict:

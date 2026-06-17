@@ -20,7 +20,12 @@ import unittest
 from pathlib import Path
 from urllib.parse import quote
 
-from PIL import Image
+import pytest
+
+# optimize-images.py treats Pillow as optional (degrades to sips / no-op without
+# it), and CI installs only pytest/pyyaml/jsonschema/beautifulsoup4 — so these
+# Pillow-dependent tests must SKIP, not error at collection, when PIL is absent.
+Image = pytest.importorskip("PIL.Image")
 
 HERE = Path(__file__).resolve().parent
 SKILL_ROOT = HERE.parents[1]

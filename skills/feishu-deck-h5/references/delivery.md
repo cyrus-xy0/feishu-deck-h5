@@ -8,6 +8,44 @@ The skill produces files in `runs/<timestamp>/output/`. How those files
 reach the human depends on which harness invoked the skill. Pick the
 right delivery mode and call it out explicitly when handing off.
 
+### 打包 / package — fast path (one command)
+
+When the user just says **打包 / package / bundle / 交付 / 发我** for an
+existing run, do NOT broad-`find` the run folder or hand-roll a
+self-containment check. The whole job is one orchestrated command:
+
+```bash
+# a slug is enough — resolve-run.sh maps it to runs/*<slug>*/output (newest)
+bash assets/finalize.sh <slug-or-output-path> <shape>
+```
+
+`finalize.sh` already runs copy-assets (self-contain) → validate → package,
+so you never invoke those by hand. Pick the shape from what the user will do
+with the deck:
+
+| User intent | shape | command | artifact |
+|---|---|---|---|
+| 自己/客户改文字 · 便携可编辑 (**默认 for a bare "打包"**) | **B** | `finalize.sh <slug> remote [--name lark-<cust>-<YYYY-MM-DD>]` | `deck-editable.zip` (or `<name>.zip`) |
+| 看一眼 / IM 转发 / 单文件 | **A** | `bash build.sh --inline` → ship the inline `.html` | one self-contained `.html` |
+| 入库素材库 / slide-library ingest | **D** | `finalize.sh <slug> library --deck-id lark-<cust>-<date>` | `deck.zip` |
+| 已部署到 Pages / CDN | **C** | ship the URL string | — |
+
+Default a bare **"打包这个 deck"** to **B (`finalize.sh <slug> remote`)** —
+portable, editable, survives transport. `--name` is optional and, if given,
+must follow `lark-<customer>-<YYYY-MM-DD>`; omit it for a quick
+`deck-editable.zip`. Reach for the lower-level `package-deliverable.sh` /
+`copy-assets.py` only with a reason — `package-deliverable.sh` now runs a
+`verify-portable.py` preflight and **refuses** a non-self-contained output
+(self-contain with `finalize.sh` or `copy-assets --shared=copy` first;
+`--skip-portable-check` overrides).
+
+> Why this section exists (F-343): a bare "打包" once took ~8 min — a broad
+> filesystem `find` to locate the run, an agent re-deriving the portability
+> check in shell (BSD `sed`/`tr` quote bugs forced repeated re-runs), and
+> verification heavier than a package needs. The command above is seconds:
+> `resolve-run.sh` kills the locate step, `verify-portable.py` kills the
+> hand-rolled check, and the scope rule below caps the verification.
+
 ### Hand-back rule (read this first)
 
 **Decide whether to surface the file in the reply by the run mode, NOT
@@ -56,11 +94,15 @@ because there is nothing to measure):
 - **Consistency** — does it match its sibling pages' style?
 - **Focus** — is there a clear first-read, or is everything flat?
 
-**How to apply:** after render, **look at each page's screenshot** and
+**How to apply — scope the look to the work (F-335):** for an
+INTERMEDIATE scoped edit, render `--iter` and eyeball ONLY the changed
+page(s) (auto-scope already re-shot just those — don't re-walk all N
+pages). For a DELIVERY checkpoint (the deck crosses the agent → user
+boundary, or before publish), **look at EVERY page's screenshot** and
 walk it through 「标题位 / 饱满度 / 一致性 / 焦点」 before you trust the
 green light. If it fails, fix and re-render. In multi-agent runs, make
-"post-render per-page visual self-review" a **default stage**, not an
-afterthought. This complements the precise-measurement gate (computed
+"post-render visual self-review (changed page(s) intermediate, whole deck
+at delivery)" a **default stage**, not an afterthought. This complements the precise-measurement gate (computed
 `font-size` px, see `check-only` / `validator-rules`): font sizes you
 **measure**, but composition / title position / hollowness you **look at**.
 

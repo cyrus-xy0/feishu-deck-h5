@@ -22,9 +22,11 @@ OUT_DIR="${1:-}"
 shift || true
 
 NAME="deck-editable"
+SKIP_PORTABLE_CHECK=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME="${2:?--name requires a value}"; shift 2 ;;
+    --skip-portable-check) SKIP_PORTABLE_CHECK="1"; shift ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -51,6 +53,22 @@ fi
 # Resolve absolute paths
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Portability preflight (F-343): a blind `zip output/` ships broken paths if the
+# output was never self-contained (skill-relative refs, symlink shared/). This
+# gate makes the low-level packager safe even when entered without finalize.sh.
+# Skip with --skip-portable-check only when you know the destination follows
+# symlinks / keeps the skill folder adjacent.
+if [ -z "$SKIP_PORTABLE_CHECK" ]; then
+  if ! python3 "$SKILL_DIR/assets/verify-portable.py" "$OUT_DIR"; then
+    echo "" >&2
+    echo "✗ refusing to package a non-portable output (see above)." >&2
+    echo "  self-contain first:  python3 assets/copy-assets.py \"$OUT_DIR\" --shared=copy" >&2
+    echo "  or one-shot:         bash assets/finalize.sh \"$OUT_DIR\" remote" >&2
+    echo "  (override with --skip-portable-check if you really mean it)" >&2
+    exit 2
+  fi
+fi
 
 # Locate the deck HTML inside OUT_DIR. Prefer index.html; otherwise pick the
 # only .html file present. Fail if ambiguous.

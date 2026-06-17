@@ -55,10 +55,23 @@ in `deck.json` generation or an existing deck edit.
 
 ### Scoped edit validation
 
-For a single-slide edit, validation may invoke whole-deck render because the tool
-does that internally, but the report must inspect only the locked slide key(s).
-Do not surface unrelated stored findings unless the user asked for whole-deck
-review.
+For a single-slide / scoped edit, the canonical gate is `render-deck.py --iter`
+(or `--scope N`), NOT a whole-deck `check-only.sh` / `finalize.sh`. Auto-scope
+(F-335) scopes the static gate AND the making-of snapshot to the changed page(s);
+a framework / CSS change re-runs only the VISUAL audit deck-wide while content +
+snapshot stay scoped. The whole-deck validator path is the DELIVERY gate (Hard
+Gate 4) — run it before the deck crosses to the user or before publish, not after
+every intermediate edit.
+
+To check-only a scoped review of finished HTML, pass the scope through so the
+auditor narrows the per-page rules to the locked pages:
+
+```bash
+bash skills/feishu-deck-h5/assets/check-only.sh <html> --scope <page-or-key,…>
+```
+
+Either way the report must inspect only the locked slide key(s); do not surface
+unrelated stored findings unless the user asked for whole-deck review.
 
 ## Validation Principles
 
