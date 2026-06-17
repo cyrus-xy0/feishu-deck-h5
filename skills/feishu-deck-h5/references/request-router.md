@@ -228,9 +228,18 @@ Trigger: user gives another deck/existing deck and asks to reuse pages/layout wh
 changing copy, client, or wording.
 
 Action: default toward preserving the source layout. If ambiguous, ask once:
-"保留原版式 lift+换文字,还是用 schema 重新设计?" Use `deck-cli.py paste` for
-DeckJSON-native sources; use `assets/lift-slides.py --shake` for legacy/foreign
-HTML sources; use `deck-json/apply-text-pairs.py` for deterministic copy swaps.
+"保留原版式 lift+换文字,还是用 schema 重新设计?" Tool by case:
+
+- **Lift page(s) into a BRAND-NEW deck** ("开个新 deck 复用某页"): use
+  `deck-json/lift-to-new-deck.py SRC PAGES DEST [--new-key K] [--render]`. It
+  scaffolds a schema-valid deck.json and delegates each slide copy to
+  `deck-cli.py paste` (embedded scoped CSS rekeyed, assets copied, `lifted`
+  stamped). Do NOT hand-build the deck.json — that path repeatedly failed on bad
+  `deck.mode` enum / missing render args / forgotten CSS rekey.
+- **Add a page to an EXISTING deck.json**: `deck-cli.py <dest> paste --from SRC
+  --key K [--new-key NK]` (DeckJSON-native sources).
+- **Legacy / foreign HTML source** (no deck.json): `assets/lift-slides.py --shake`.
+- **Deterministic copy swap** after the lift: `deck-json/apply-text-pairs.py`.
 
 This is distinct from converting external PDF/PPT material, which uses Replica vs
 Rewrite rules in `converting-existing-material.md`.

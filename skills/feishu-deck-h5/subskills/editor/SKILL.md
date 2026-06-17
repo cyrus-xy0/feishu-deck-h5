@@ -124,12 +124,20 @@ Designer + Renderer instead).
   fix the font size / un-grey the text" feedback rounds into one. The soft
   `R-FAMILY-DRIFT` advisory in `validate-deck.py` is the render-time backstop.
 - **LIFT+SWAP**: user wants source deck layout preserved and only copy/client
-  swapped. Use `deck-cli.py paste` for DeckJSON-native sources; use
-  `assets/lift-slides.py --shake` for foreign or older HTML sources; use
-  `deck-json/apply-text-pairs.py` for deterministic text replacement. Resolve
-  source and target pages with `deck-json/locate-slide.py`; after lift/insert/
-  reorder, run `render-deck.py --renumber` on the target DeckJSON when stale
-  `screen_label` prefixes need to match true page/hash order.
+  swapped.
+  - **Into a BRAND-NEW deck** ("开个新 deck 复用某页"): use
+    `deck-json/lift-to-new-deck.py SRC PAGES DEST [--new-key K] [--render]`. It
+    scaffolds a schema-valid deck.json then delegates each slide copy to
+    `deck-cli.py paste`, so the embedded scoped CSS is rekeyed, assets copied,
+    and `lifted` stamped — no hand-built deck.json (that path repeatedly failed
+    on bad `deck.mode` enum / missing render args / forgotten CSS rekey).
+  - **Into an EXISTING deck.json**: `deck-cli.py paste` for DeckJSON-native
+    sources; `assets/lift-slides.py --shake` for foreign or older HTML sources.
+  - Then swap copy with `deck-json/apply-text-pairs.py` (deterministic text
+    replacement). Resolve source/target pages with `deck-json/locate-slide.py`;
+    after lift/insert/reorder, run `render-deck.py --renumber` on the target
+    DeckJSON when stale `screen_label` prefixes need to match true page/hash
+    order (`lift-to-new-deck.py --render` already passes `--renumber`).
 - **Lift into HTML target without DeckJSON**: when the destination is a deck with no
   `deck.json`, do not hand-splice frames. Use the HTML destination mode:
 

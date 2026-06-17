@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-342**
+> **下一可用号 = F-343**
 >
 > ⚠️ **F-334..F-337 由并发分支 `scope-root-cure` 占用**(其 TICKETS 顶「下一可用号 = F-338」;
 > F-334=GSAP 引擎并入 / F-335..F-337=「改一页却渲染/校验/截图很多页」scope 重构,均 WIP 未合
@@ -110,6 +110,18 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-339 | **defer 运行时脚本**:`feishu-deck.js`(73KB)此前 render-blocking,挂在 HTML 解析关键路径;它本就自门控 `document.readyState`/DOMContentLoaded → 加 `defer` 行为零变化、解析后才执行、首屏可并行 settle。`motion_scripts`(opt-in GSAP)也一并 defer 以保源序(defer 按文档顺序执行,runtime→gsap→motion 次序不变),顺带把 GSAP 库移出关键路径 | `deck-json/templates/_shell.html` / `deck-json/render-deck.py` |
 | F-340 | **`<img>` 加 `decoding="async"`**:渲染器两处 img 发射点(canvas 元素图 + 裁剪图,render-deck.py:1983/1993)此前只有 `loading="lazy"`,JPEG 解码仍在主线程 → 多兆像素/4K 解码卡首屏与滚动。加 `decoding="async"` 把解码移出主线程(纯渲染 hint,无版式/校验影响,导入 deck 的全幅背景 `<img>` 也覆盖) | `deck-json/render-deck.py` |
 | F-341 | **图片瘦身 pass(`assets/optimize-images.py` 新工具)**:导入/照片 deck 常带 4K(3840×2160)全幅背景 + 多兆 PNG 照片,而画布只有 1920×1080 —— 纯下载+解码浪费,移动端首屏最痛(4K 解码 ~4× CPU/内存)。新独立工具:① 长边 >1920 一律降到画布尺寸(保比例);② **完全不透明** PNG ≥150KB 转 JPEG(照片 10–15× 小),并同步重写 index.html/deck.json/slide-index.json 的引用(含 URL 编码中文名);③ 真有透明的 PNG 只降分辨率、保 PNG 无损。**按维度天然幂等**(已≤上限即跳过、转码后源 png 删除)、依赖轻(Pillow 优先,退 sips 仅降分辨率,都无则 no-op)。接进 `finalize.sh`(copy-assets 后、validate 前,**只降分辨率**以保 manifest 一致;完整转码留给独立工具跑就地 deck)。**实测**真实导入 deck(digital-employee-guide-428,50 页):76MB→20MB(74% 小,bg 16MB→4MB),validator 优化前后均 PASS、零断链、幂等;新测 8/8 | `assets/optimize-images.py`(新)/ `assets/finalize.sh` / `deck-json/tests/test_optimize_images.py` |
+
+## 新 deck 复用某页一等命令(F-342)
+
+> 起因:用户「开一个新 deck,把 ZhongAn #46 改成医药代表的一天,换内容就行」——
+> 这种「开新 deck 复用某页版式」(LIFT+SWAP into a new deck)此前没有一等命令,只能
+> 手搓:从源 deck.json 抠 slide、把 slide-key 在数百条内嵌 scoped CSS 选择器里 string-replace
+> 改名、再从零拼一个 deck.json、猜 render-deck.py 参数。手搓导致一次复盘里渲染失败 4 次
+> (`deck.mode` 枚举填错 / 漏传 output_dir / 忘了 CSS rekey / 脚本 typo),18 分钟做一页。
+
+| 号 | 一句话 | 归属 |
+| --- | --- | --- |
+| F-342 | **`lift-to-new-deck.py`(新工具)**:一条命令把 deck.json-native 源 deck 的某页(`locate-slide.py` 语法:N/#N/range/list/key/title)lift 成一个**全新独立 deck**。写一份 schema-valid 的空 deck.json 脚手架(deck_meta 只 require title;slides:[] 不单独 lint,首次 paste 追加后才由 deck-cli 写回时 lint),然后**把每页的复制委托给既有 `deck-cli.py paste`**——零逻辑重复,自动继承 F-255 的内嵌 scoped CSS rekey(治「数百选择器孤儿到旧 key」)、data-text-id 剥离、退役 var 重映射、`lifted` 溯源、资产拷贝。`--new-key`(单页时给语义 key)、`--render`(跑 `--final --renumber`)、拒绝覆盖已有 deck.json 的 dest(那是 paste 的活)。**新测 6/6**(产出过 lint / CSS rekey 到新 key / lifted 溯源 / 多页保源 key / `--new-key` 多页拒绝 / 拒覆盖);paste·lift 相邻回归 77 passed 零回归。立项=本工单(复盘「代码解决而非记 Memory」)。 | `deck-json/lift-to-new-deck.py`(新)/ `deck-json/tests/test_lift_to_new_deck.py` |
 
 ## 已裁决(WONTFIX / DONE)
 
