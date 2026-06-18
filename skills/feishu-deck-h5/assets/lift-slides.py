@@ -392,6 +392,15 @@ def _root_animation_names(css, slide_key):
     mode fit-scale); a recovered page-entrance animation that lands on the root
     is the one whose keyframes can clobber that scale (F-332)."""
     names = set()
+    # Pre-guard: a slide whose markup has no `animation` substring (or no rule
+    # braces at all) cannot declare a root animation → the loop below would walk
+    # the whole input and return the SAME empty set, but the greedy `[^{}]+`
+    # backtracks char-by-char on brace-free markup (O(n^2) → ~40s on a 90KB
+    # content slide during `--shake` lift). Both checks are exact no-op proofs:
+    # `_referenced_anim_names` only adds names from `animation:`/`animation-name:`
+    # tokens (each contains "animation"), and the regex requires a literal `{`.
+    if 'animation' not in css or '{' not in css:
+        return set()
     key_sel = '.slide[data-slide-key="%s"]' % slide_key
     for m in re.finditer(r'([^{}]+)\{([^{}]*)\}', css):
         sel, body = m.group(1), m.group(2)
