@@ -330,36 +330,158 @@ _CJK_FINGERPRINT_JS = r"""
 """
 
 
+# ---------------------------------------------------------------------------
+#  PERF-A (AUDIT-2026-06-17) · per-host memoize of the CJK font probe.
+#  probe_effective_cjk_font() launches a whole headless Chromium (~0.4s) on
+#  EVERY `validate.py --visual --json` call (the default advisory 6b pass + every
+#  --json gate), for a result that is a PURE FUNCTION of (a) the framework CSS
+#  `--fs-font-cjk` stack and (b) which of those faces are installed on THIS host
+#  — identical for every deck and every render until one of those changes. We
+#  memoize it keyed on BOTH, so editing feishu-deck.css OR installing/removing a
+#  font forces a fresh probe (otherwise the cache would lie in exactly the
+#  scenario the probe exists to detect). The probe is metadata, NEVER a gate
+#  (see docstring), so the cache can never flip a verdict — it only removes a
+#  redundant browser launch. Fail-safe: any cache problem → live probe.
+#  Set DECK_NO_FONT_PROBE_CACHE=1 to bypass entirely (used by the parity test).
+# ---------------------------------------------------------------------------
+_CJK_PROBE_CACHE_FILE = Path.home() / '.cache' / 'feishu-deck-h5' / 'cjk-font-probe.json'
+_FONT_EXT = ('.ttf', '.otf', '.ttc', '.otc', '.dfont', '.woff', '.woff2')
+
+
+def _host_font_fingerprint():
+    """Cheap, Chromium-free signature of the host's installed fonts. Changes when
+    a font is installed / removed / updated, so a cached probe result keyed on it
+    is invalidated in exactly the scenario the probe exists to detect. Returns a
+    short hex digest, or None when fonts can't be enumerated (→ caller must NOT
+    use the cache and must fall through to a live probe). Never raises."""
+    import os, platform, hashlib
+    try:
+        home = Path.home()
+        sysname = platform.system()
+        if sysname == 'Darwin':
+            dirs = [Path('/System/Library/Fonts'),
+                    Path('/System/Library/Fonts/Supplemental'),
+                    Path('/Library/Fonts'), home / 'Library' / 'Fonts']
+        elif sysname == 'Linux':
+            dirs = [Path('/usr/share/fonts'), Path('/usr/local/share/fonts'),
+                    home / '.fonts', home / '.local' / 'share' / 'fonts']
+        elif sysname == 'Windows':
+            dirs = [Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts',
+                    home / 'AppData' / 'Local' / 'Microsoft' / 'Windows' / 'Fonts']
+        else:
+            return None
+        h = hashlib.sha256()
+        seen = False
+        for d in dirs:
+            try:
+                if not d.is_dir():
+                    continue
+                rows = []
+                for root, _subdirs, files in os.walk(d):
+                    for f in files:
+                        if f.lower().endswith(_FONT_EXT):
+                            try:
+                                st = os.stat(os.path.join(root, f))
+                                rows.append(f'{root}/{f}:{int(st.st_mtime)}:{st.st_size}')
+                            except OSError:
+                                rows.append(f'{root}/{f}')
+                rows.sort()
+                for r in rows:
+                    h.update(r.encode('utf-8', 'replace'))
+                    h.update(b'\n')
+                if rows:
+                    seen = True
+            except OSError:
+                continue
+        return h.hexdigest()[:32] if seen else None
+    except Exception:
+        return None
+
+
+def _cjk_probe_cache_key(css_text):
+    """sha256(framework CSS bytes + host font fingerprint), or None when the host
+    fonts can't be fingerprinted (→ no caching: live probe every time)."""
+    import hashlib
+    fp = _host_font_fingerprint()
+    if not fp:
+        return None
+    h = hashlib.sha256()
+    h.update(css_text.encode('utf-8', 'replace'))
+    h.update(b'\x00')
+    h.update(fp.encode('ascii'))
+    return h.hexdigest()
+
+
+def _cjk_probe_cache_get(key):
+    import json
+    try:
+        data = json.loads(_CJK_PROBE_CACHE_FILE.read_text(encoding='utf-8'))
+        v = data.get(key)
+        return v if isinstance(v, str) and v else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _cjk_probe_cache_put(key, family):
+    import json
+    try:
+        _CJK_PROBE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            data = json.loads(_CJK_PROBE_CACHE_FILE.read_text(encoding='utf-8'))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError, TypeError):
+            data = {}
+        data[key] = family
+        if len(data) > 32:                       # keep the cache file bounded
+            data = dict(list(data.items())[-32:])
+        tmp = _CJK_PROBE_CACHE_FILE.with_name(_CJK_PROBE_CACHE_FILE.name + '.tmp')
+        tmp.write_text(json.dumps(data), encoding='utf-8')
+        tmp.replace(_CJK_PROBE_CACHE_FILE)
+    except OSError:
+        pass
+
+
 def probe_effective_cjk_font(html_path):
     """F-283 step 1 · return the CJK font-family the browser ACTUALLY paints for
     this deck on THIS machine (a fingerprint for cross-machine verdict diffing).
 
-    Renders the deck in a short headless Chromium pass (separate from the audit
-    engine, mirroring _archive_screenshots), awaits fonts, then runs an in-page
-    measureText fingerprint that walks the deck's computed CJK font-family list
-    and returns the first family that actually resolves on this host.
+    Renders a minimal synthetic page (framework CSS only — F-293) in a short
+    headless Chromium pass, awaits fonts, then runs an in-page measureText
+    fingerprint that walks the deck's computed CJK font-family list and returns
+    the first family that actually resolves on this host.
+
+    PERF-A (AUDIT-2026-06-17): the result is a pure function of the framework CSS
+    + host fonts, so it is memoized per-host (see _cjk_probe_cache_*) — a cache
+    hit returns WITHOUT launching Chromium. The probe is metadata, never a gate,
+    so the cache can never change a verdict.
 
     Returns the family name (str), or `_CJK_FONT_UNKNOWN` when no engine is
     available, or None if the page exposes no CJK cascade. NEVER raises — a probe
     failure must not break validation (it is metadata, not a gate)."""
+    import os
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return _CJK_FONT_UNKNOWN
+    # The probe depends only on the framework CSS + host fonts (F-293), so read
+    # the CSS once: it feeds both the cache key and the synthetic probe page.
+    _css_path = Path(__file__).resolve().parent / 'feishu-deck.css'
     try:
-        # F-293 perf: effective_cjk_font depends only on THIS machine's installed
-        # fonts + the framework `--fs-font-cjk` stack — NOT on the target deck's
-        # DOM. The old `page.goto(index.html)` re-loaded the (up to 1.5MB) real
-        # deck a SECOND time per --visual run (~5s on heavy decks) for a result
-        # identical to a tiny page. Fingerprint a MINIMAL synthetic page that just
-        # inlines the framework CSS (defines :root --fs-font-cjk) + one CJK
-        # element, so the probe is ~0.3s regardless of deck size. (html_path kept
-        # for signature/back-compat; no longer loaded.)
-        _css_path = Path(__file__).resolve().parent / 'feishu-deck.css'
-        try:
-            _fw_css = _css_path.read_text(encoding='utf-8')
-        except OSError:
-            _fw_css = ':root{--fs-font-cjk:"方正兰亭黑 Pro GB18030",sans-serif}'
+        _fw_css = _css_path.read_text(encoding='utf-8')
+    except OSError:
+        _fw_css = ':root{--fs-font-cjk:"方正兰亭黑 Pro GB18030",sans-serif}'
+    _use_cache = not os.environ.get('DECK_NO_FONT_PROBE_CACHE')
+    _key = _cjk_probe_cache_key(_fw_css) if _use_cache else None
+    if _key is not None:
+        _hit = _cjk_probe_cache_get(_key)
+        if _hit is not None:
+            return _hit                          # cache hit → NO Chromium launch
+    try:
+        # F-293 perf: fingerprint a MINIMAL synthetic page (framework CSS + one
+        # CJK element), NOT the real deck — the result is identical to a tiny page
+        # and ~0.3s regardless of deck size. (html_path kept for signature/back-
+        # compat; no longer loaded.)
         _probe_html = (
             '<!doctype html><html><head><meta charset="utf-8"><style>'
             + _fw_css
@@ -384,9 +506,10 @@ def probe_effective_cjk_font(html_path):
                 result = page.evaluate(_CJK_FINGERPRINT_JS)
             finally:
                 browser.close()
-        if isinstance(result, dict):
-            return result.get('effective_cjk_font')
-        return None
+        family = result.get('effective_cjk_font') if isinstance(result, dict) else None
+        if family and _key is not None:
+            _cjk_probe_cache_put(_key, family)   # only cache concrete results
+        return family
     except Exception:
         # Chromium launch flake / nav timeout / eval error → environment glitch,
         # not a deck defect. Mark unknown rather than crashing validate.

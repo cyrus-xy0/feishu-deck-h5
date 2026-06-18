@@ -202,6 +202,114 @@ def test_shell_probe_reads_font_names_from_css():
             "--fs-font-cjk, not hard-code them"
 
 
+# --------------------------------------------------------------------------- #
+#  PERF-A (AUDIT-2026-06-17) · per-host probe cache
+#  The probe result is a pure function of the framework CSS + host fonts and is
+#  metadata only (never a gate), so it is memoized per-host to skip a redundant
+#  Chromium launch (~0.4s/--visual --json). These tests lock the contract that
+#  the cache (1) returns the SAME family a live probe returns, (2) is keyed so
+#  editing the CSS or changing the host's installed fonts invalidates it, and
+#  (3) on a hit does NOT touch the engine. The cache can never flip a verdict
+#  because the probe is diagnostic, but we assert the fingerprint is unchanged
+#  end-to-end anyway.
+# --------------------------------------------------------------------------- #
+def test_probe_cache_surface_is_public():
+    """The cache helpers + bypass knob are part of validate.py's surface."""
+    for name in ("_host_font_fingerprint", "_cjk_probe_cache_key",
+                 "_cjk_probe_cache_get", "_cjk_probe_cache_put",
+                 "_CJK_PROBE_CACHE_FILE"):
+        assert hasattr(V, name), f"validate.py lost PERF-A symbol {name}"
+
+
+def test_probe_cache_key_invalidates_on_css_and_is_stable():
+    """The cache key must change when the framework CSS bytes change (so editing
+    --fs-font-cjk forces a re-probe) and be stable for identical input. When the
+    host fonts can't be fingerprinted the key is None → caching disabled (the
+    fail-safe: a live probe every time, never a stale lie)."""
+    fp1 = V._host_font_fingerprint()
+    fp2 = V._host_font_fingerprint()
+    assert fp1 == fp2, "host font fingerprint must be stable across calls"
+    css = CSS.read_text(encoding="utf-8")
+    key_a = V._cjk_probe_cache_key(css)
+    key_a2 = V._cjk_probe_cache_key(css)
+    key_b = V._cjk_probe_cache_key("/* changed */ " + css)
+    if fp1 is None:
+        assert key_a is None, "no font fingerprint → key must be None (cache off)"
+        return
+    assert key_a and key_a == key_a2, "same input must yield the same key"
+    assert key_a != key_b, "different CSS bytes must yield a different key"
+
+
+def test_probe_cache_hit_matches_live_and_skips_engine(tmp_path, monkeypatch):
+    """Core PERF-A contract: a cache HIT returns the exact family a LIVE probe
+    returns, and does so WITHOUT launching Chromium."""
+    if not _has_engine():
+        import pytest
+        pytest.skip("Chromium engine unavailable")
+    if V._host_font_fingerprint() is None:
+        import pytest
+        pytest.skip("host fonts not fingerprintable → cache disabled here")
+    cache = tmp_path / "cjk-font-probe.json"
+    monkeypatch.setattr(V, "_CJK_PROBE_CACHE_FILE", cache)
+
+    # LIVE (cache bypassed) and COLD/WARM (cache on) must all agree.
+    monkeypatch.setenv("DECK_NO_FONT_PROBE_CACHE", "1")
+    live = V.probe_effective_cjk_font(CSS)
+    monkeypatch.delenv("DECK_NO_FONT_PROBE_CACHE", raising=False)
+    assert not cache.exists(), "bypass mode must not write the cache"
+
+    cold = V.probe_effective_cjk_font(CSS)          # miss → live probe + write
+    assert cache.exists(), "a concrete probe result must be cached"
+    warm = V.probe_effective_cjk_font(CSS)          # hit
+    assert live == cold == warm, (
+        f"cache changed the probe result: live={live!r} cold={cold!r} warm={warm!r}")
+
+    # Prove the warm call never reaches the engine: make sync_playwright BOOM
+    # (the function imports it inside, so patching the module attr binds the
+    # bomb). A cache hit returns BEFORE calling it; a miss would raise → except
+    # → the no-engine sentinel. So a non-sentinel result proves no launch.
+    def _boom(*a, **k):
+        raise RuntimeError("engine must not be launched on a cache hit")
+    monkeypatch.setattr("playwright.sync_api.sync_playwright", _boom)
+    hit = V.probe_effective_cjk_font(CSS)
+    assert hit == warm and hit != V._CJK_FONT_UNKNOWN, (
+        "a cache hit must return the cached family without touching Chromium")
+
+
+def test_probe_cache_does_not_change_json_fingerprint():
+    """End-to-end: validate.py --visual --json reports the SAME effective_cjk_font
+    whether the cache is used or bypassed — the optimization is invisible to the
+    cross-machine verdict stamp (the field that lets two machines diff verdicts)."""
+    if not SAMPLE_DECK.is_file():
+        import pytest
+        pytest.skip("examples/sample-deck.html not built (bash build.sh)")
+    if not _has_engine():
+        import pytest
+        pytest.skip("Chromium engine unavailable")
+    import os
+
+    def _eff(bypass: bool) -> str:
+        env = dict(os.environ)
+        if bypass:
+            env["DECK_NO_FONT_PROBE_CACHE"] = "1"
+        else:
+            env.pop("DECK_NO_FONT_PROBE_CACHE", None)
+        out = subprocess.run(
+            [sys.executable, str(ASSETS / "validate.py"), str(SAMPLE_DECK),
+             "--json", "--visual"],
+            capture_output=True, text=True, timeout=240, env=env)
+        return json.loads(out.stdout)["effective_cjk_font"]
+
+    bypassed = _eff(True)
+    cached = _eff(False)    # warms the cache (or hits it)
+    cached2 = _eff(False)   # definitely a hit
+    if bypassed == V._CJK_FONT_UNKNOWN or cached == V._CJK_FONT_UNKNOWN:
+        return  # engine flaked mid-run — sentinel is a valid degrade, not a diff
+    assert bypassed == cached == cached2, (
+        f"cache flipped the json fingerprint: bypass={bypassed!r} "
+        f"cached={cached!r}/{cached2!r}")
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items())
