@@ -3333,13 +3333,21 @@
         const overflowCandidates = slide.querySelector('.stage')
           ? slide.querySelectorAll('.stage *')
           : (layout === 'raw' ? slide.querySelectorAll('*') : slide.querySelectorAll('.stage *'));
-        // ⚠️ lifted-downgrade PRESERVE-EXACTLY:visual-audit.js 的 card_overflow producer
-        // 【从不】在 entry 上写 `lifted` 字段(任何 direction 都没有);validate.py 的消费段
-        // `entry.get('lifted')` 因此恒为 falsy —— 即非 recoverable 的 overflow:hidden 裁切
-        // 在 validate.py 里【永远】是 err,lifted 前缀文案也永不出现(这是原版的死分支)。
-        // 逐字对齐:本规则的 entry 同样不带 lifted,severity/message 不走 lift 降级,
-        // 与 validate.py 现行行为零漂移(R-VIS-TIER / R-VIS-BODY-FLOOR 的 producer 才真带
-        // lifted,故那两条照常降级 —— 见各自 rule)。
+        // lifted-downgrade (F-325): a slide carrying `data-lifted` reproduces a
+        // source deck the human deliberately lifted; its geometry is the SOURCE
+        // author's design (phone mockups that clip, full-bleed shells, viewBox
+        // SVGs, tight nowrap rows), not a fresh defect. So CARD-OVERFLOW findings
+        // on a lifted slide demote err→warn (post-process before `return` below)
+        // — same family as R-VIS-TIER / R-VIS-BODY-FLOOR, surfaced for the human
+        // to judge rather than hard-blocking the render. (This re-animates a
+        // branch once kept dead for validate.py parity; validate.py is now only a
+        // CLI adapter, so the engine owns severity.) `data-allow-clip` on the
+        // element/ancestor still suppresses the finding entirely.
+        const lifted = slideIsLifted(slide);
+        const liftNote = lifted
+          ? ' — LIFTED slide (verbatim from another deck); downgraded to '
+            + 'WARNING, you choose whether to fix.'
+          : '';
         const pushEntry = (entry) => {
           const direction = entry.direction || 'vertical';
           const px = entry.overflow_px || 0;
@@ -3374,8 +3382,8 @@
                 + 'the border / background. The slide still fits the 1920×1080 canvas, so '
                 + 'R-OVERFLOW misses it; the clip-only check missed it too because '
                 + 'overflow is visible. Fix: shorten body copy, drop a row / item, '
-                + 'tighten padding / gap, or give the box more height. (Geometry — '
-                + 'stays ERROR even on lifted slides; a visible spill is a real defect.)',
+                + 'tighten padding / gap, or give the box more height. '
+                + '(Geometry — a visible spill is a real defect.)',
             });
           } else {
             // direction === 'vertical'(overflow:hidden|clip 裁切)或 'leaf-text-spill'
@@ -3462,8 +3470,20 @@
           // 不是缺陷;与 R-OVERFLOW / R-VIS-CANVAS-CENTER 的跳隐藏一致。只移除不可见元素的
           // 误报,绝不漏掉可见内容(可见 → opacity>0)。
           if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          // F-322: 有意截断 opt-out —— 元素自身或祖先标了 `data-allow-clip`(如文档预览框
+          // kb-shell:故意只露文档顶部、下半截断,是设计而非内容丢失;真·可滚动 doc 预览也
+          // 归此类)→ 跳过 overflow 审计。与 data-allow-imbalance/-overlap/-flex-slack 同族。
+          if (el.closest && el.closest('[data-allow-clip]')) return;
           const overflowY = cs.overflowY;
           const overflow = cs.overflow;
+          // F-322: 自身是滚动视口(overflow:auto|scroll)→ 溢出内容由滚动条容纳、用户可
+          // 滚出来,既非永久裁切也非可见外溢,不是 card-overflow 缺陷(框架 fs-doc-scroll
+          // 文档预览、长列表滚动框等都靠它)。跳过该元素本身;其内部真·裁切的子元素仍由
+          // (a) 分支各自评估,且 (a) 的 recoverable 检查会因这个 auto/scroll 祖先把它们降为
+          // warn。此前 `clips` 只认 hidden|clip,把 auto/scroll 漏给了 (a') 可见外溢分支 →
+          // 把有意的滚动框误判成「撑出 N px 外溢」(知识安全页 fs-doc-scroll 1180>732 误报)。
+          if (overflowY === 'auto' || overflowY === 'scroll'
+              || overflow === 'auto' || overflow === 'scroll') return;
           const clips = (overflowY === 'hidden' || overflowY === 'clip'
             || overflow === 'hidden' || overflow === 'clip');
           if (clips) {
@@ -3576,6 +3596,14 @@
             }
           }
         });
+        // F-325 lifted-downgrade: demote every CARD-OVERFLOW err→warn on a lifted
+        // slide (all entries here are this rule) and tag the human-decides note.
+        if (lifted) {
+          for (const f of findings) {
+            if (f.severity === 'error') f.severity = 'warn';
+            f.message += liftNote;
+          }
+        }
         return findings;
       },
     },
@@ -3987,8 +4015,12 @@
         const expectedTop = 61;
         const tolerance = 8;
         if (Math.abs(headerTop - expectedTop) <= tolerance) return [];
+        // F-325 lifted-downgrade: a lifted slide keeps its source deck's header
+        // baseline (the source author's choice); demote err→warn so it surfaces
+        // for review without hard-blocking — same family as R-VIS-TIER.
+        const lifted = slideIsLifted(slide);
         return [{
-          rule: 'R-VIS-TITLE-POSITION', severity: 'error', slide_idx,
+          rule: 'R-VIS-TITLE-POSITION', severity: lifted ? 'warn' : 'error', slide_idx,
           layout, actual_top: headerTop, expected_top: expectedTop,
           message:
             `slide ${slide_idx} (layout \`${layout}\`) · `
@@ -3999,7 +4031,9 @@
             + `\`.slide[data-layout="${layout}"] .header\` to the `
             + 'unified positioning rule (`position:absolute; top:61px; '
             + 'left:73px; right:320px`) so title aligns with the master '
-            + 'spec across all layouts.',
+            + 'spec across all layouts.'
+            + (lifted ? ' — LIFTED slide (verbatim from another deck); '
+              + 'downgraded to WARNING, you choose whether to fix.' : ''),
         }];
       },
     },
@@ -4873,6 +4907,13 @@
           ix: Math.min(a.right, b.right) - Math.max(a.left, b.left),
           iy: Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top),
         });
+        // 升 error(阻断)仅限「静态」块:带 transform 的(slide-in 浮层 / 动效收起态)
+        // 易被审计在非 present 上下文量出幻影交叠(实证:renwu mock 的 .rw-detail-layer
+        // translateX 收起态在 present 下与 tabbar 有 14px 间隙、审计却报 45px)—— 故只 warn 不阻断。
+        const _identityTf = (el) => {
+          const t = getComputedStyle(el).transform;
+          return t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)';
+        };
         // 1) 收候选:最外层 absolute/fixed 文本内容块
         const raw = [];
         for (const el of slide.querySelectorAll('*')) {
@@ -4936,7 +4977,12 @@
             if (seen.has(key)) continue;
             seen.add(key);
             findings.push({
-              rule: 'R-VIS-ABS-OVERLAP', severity: 'warn', slide_idx,
+              rule: 'R-VIS-ABS-OVERLAP',
+              // 大面积二维压字(≥40 design px 双轴)= 肉眼明确缺陷 → 升 error 阻断(别再静默 PASS);
+              // 小面积边缘擦碰仍 warn(防误报)。沿用 R-VIS-TITLE-GAP 的 warn→err 阈值升级先例。
+              severity: (o.ix / scale >= 40 && o.iy / scale >= 40
+                && _identityTf(A.el) && _identityTf(B.el)) ? 'error' : 'warn',
+              slide_idx,
               a_sel: aSel, b_sel: bSel,
               overlap_x: Math.round(o.ix / scale), overlap_y: Math.round(o.iy / scale),
               message:
@@ -4948,6 +4994,56 @@
                 + '确属有意叠放(浮层)→ 给其一加 `data-allow-overlap`。',
             });
             if (findings.length >= 6) return findings;
+          }
+        }
+        // === 媒体框压文字块(F-313 补盲二期)===========================================
+        // 上面只两两配「带文字」的 absolute 块;图片/插画栏(.art 等)自身无文字 →
+        // 被 textContent<4 过滤掉,图文左右分栏时图栏吃进文字栏这一类完全盲掉
+        // (实测:.rail[left96 w700,右沿796] 与 .art[图片,left720] 交叠 76px,渲染门禁全绿放行)。
+        // 这里把「无文字的 absolute 媒体框」当遮挡方,与已收的文字块 `blocks` 求包围盒交叠。
+        if (!['cover', 'image-text', 'end', 'section'].includes(ctx.layout || '')) {
+          const mraw = [];
+          for (const el of slide.querySelectorAll('*')) {
+            if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+            const cs = getComputedStyle(el);
+            if (cs.position !== 'absolute' && cs.position !== 'fixed') continue;
+            if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.1) continue;
+            if (!visIsMediaBox(el)) continue;                          // 必须是图片/媒体框
+            if ((el.textContent || '').trim().length >= 4) continue;   // 带文字的(mock UI 等)归上面 text 分支
+            if (visHasAnyClass(el, ['wordmark', 'grid-bg', 'aurora', 'decor'])) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width < 60 || r.height < 60) continue;               // 跳过小图标 / 头像
+            if (r.width * r.height > slideArea * 0.62) continue;       // 跳过近满幅背景图
+            mraw.push({ el, r });
+          }
+          const media = mraw.filter((c) => !mraw.some((o) => o.el !== c.el && o.el.contains(c.el)));
+          for (const M of media) {
+            if (M.el.closest('[data-allow-overlap]')) continue;
+            for (const T of blocks) {                                  // blocks = 最外层 absolute 文本块
+              if (T.el.contains(M.el) || M.el.contains(T.el)) continue;
+              if (T.el.closest('[data-allow-overlap]')) continue;
+              const o = interOf(M.r, T.r);
+              if (o.ix / scale <= 16 || o.iy / scale <= 16) continue;  // 真二维交叠(≥16 design px,躲阴影/亚像素)
+              const aSel = shortSel(M.el), bSel = shortSel(T.el);
+              const key = `${slide_idx}::${aSel}::${bSel}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              findings.push({
+                rule: 'R-VIS-ABS-OVERLAP',
+                severity: (o.ix / scale >= 40 && o.iy / scale >= 40
+                  && _identityTf(M.el) && _identityTf(T.el)) ? 'error' : 'warn',
+                slide_idx,
+                a_sel: aSel, b_sel: bSel,
+                overlap_x: Math.round(o.ix / scale), overlap_y: Math.round(o.iy / scale),
+                message:
+                  `slide ${slide_idx} · 绝对定位的图片/媒体块 \`${aSel}\` 与文字块 \`${bSel}\` 包围盒相交 `
+                  + `${Math.round(o.ix / scale)}×${Math.round(o.iy / scale)}px —— 图文左右分栏时图片栏吃进文字栏(或文字栏被图盖)。`
+                  + '原 R-VIS-ABS-OVERLAP 只配「带文字」的两块,媒体框无文字 → 这类图压文字盲掉(本次补)。'
+                  + 'Fix: 调整图片或文字栏的 left/right/width 留出 gutter 让两栏不再相交;'
+                  + '确属有意叠放(图上压字)→ 给其一加 `data-allow-overlap` 或改用 image-text 版式。',
+              });
+              if (findings.length >= 6) return findings;
+            }
           }
         }
         return findings;
@@ -5043,6 +5139,12 @@
       evaluate(slide, ctx) {
         const { slide_idx } = ctx;
         const findings = [];
+        // F-325 lifted-downgrade: a lifted slide's full-bleed shells / axes /
+        // watermarks (top+bottom both anchored to fill the parent) are the source
+        // author's design, not a fresh cascade footgun; demote err→warn after
+        // collecting — surfaced for review, not blocking. `data-allow-dual-anchor`
+        // still skips entirely (handled in the candidate filter above).
+        const lifted = slideIsLifted(slide);
         // LAYOUT_CONTAINER_CLASSES 逐字搬 producer:框架布局壳(.stage/.stack/.panel 等)合法
         // 用 top+bottom 双锚撑满父容器供子布局,by design 非 bug;bug 模式在 chrome 元素上。
         const LAYOUT_CONTAINER_CLASSES = [
@@ -5109,6 +5211,13 @@
               + 'fill-parent overlay (rare for slide content).',
           });
         });
+        if (lifted) {
+          for (const f of findings) {
+            if (f.severity === 'error') f.severity = 'warn';
+            f.message += ' — LIFTED slide (verbatim from another deck); '
+              + 'downgraded to WARNING, you choose whether to fix.';
+          }
+        }
         return findings;
       },
     },

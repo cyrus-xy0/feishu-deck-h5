@@ -269,10 +269,10 @@ R-OVERLAP:
 
 R-VIS-ABS-OVERLAP:
   concern:     "A · 客户看不见"
-  symptom:     "这一页两个各自定位 (absolute) 的内容块叠在一起了"
-  consequence: "一块的文字压进了另一块, 文字叠文字 / 文字压框, 读不清"
+  symptom:     "这一页两个各自定位 (absolute) 的内容块叠在一起了 (含图片/插画栏吃进文字栏)"
+  consequence: "一块的文字压进了另一块, 文字叠文字 / 文字压框, 读不清; 大面积重叠 (≥40px 双轴·静态版式) 直接阻断交付, 小面积仅提醒"
   fix:
-    - "改其中一块的位置或缩小高度, 让两块不再相交"
+    - "改其中一块的位置或缩小高度, 让两块不再相交 (图文分栏留出 gutter)"
     - "确属有意叠放的浮层, 给其一加 data-allow-overlap"
 
 R-VIS-TIER:
