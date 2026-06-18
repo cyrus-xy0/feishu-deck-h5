@@ -27,13 +27,17 @@ auto-snapshot handles live iframes itself.) Never hand-roll a
 Usage
 -----
     python3 assets/shoot-page.py <index.html> <page> [--out PATH]
-        [--allow-external] [--wait MS] [--scale {1,2}]
+        [--allow-external] [--wait MS] [--cap S] [--scale {1,2}]
 
     page               1-based page number (= URL #N = frame_index)
     --out PATH         output PNG (default /tmp/shoot-p<N>.png)
     --allow-external   let http(s) through — for shooting the live embed
                        itself; expect slow + non-deterministic pixels
-    --wait MS          settle wait after navigation (default 1800)
+    --wait MS          floor settle wait after navigation (default 2500); an
+                       adaptive animation-settle waits for fs-reveal to finish on
+                       top, so entrance staggers aren't captured mid-flight.
+                       Raise to ~5000 for pages with several heavy local iframes.
+    --cap S            hard wall-clock cap for the whole shot (default 45s)
     --scale {1,2}      device pixel ratio (2 = retina-sharp, default 1)
 
 Exit: 0 shot written · 2 bad input · 3 navigation/screenshot failed.
@@ -42,9 +46,16 @@ from __future__ import annotations
 
 import argparse
 import re
+import signal
 import sys
 import time
 from pathlib import Path
+
+# Adaptive settle: after the floor --wait, poll until no CSS animation is still
+# `running` (fs-reveal entrance staggers), capped so a looping/infinite animation
+# can't stall the shot. Floors below this gave false-empty pages (content captured
+# mid-reveal); this waits exactly as long as the entrance needs, no longer.
+_ANIM_SETTLE_CAP_MS = 4000
 
 
 def main(argv=None) -> int:
@@ -54,8 +65,13 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--allow-external", action="store_true",
                     help="do NOT block http(s) — slow, non-deterministic")
-    ap.add_argument("--wait", type=int, default=1800,
-                    help="settle wait in ms after navigation (default 1800)")
+    ap.add_argument("--wait", type=int, default=2500,
+                    help="floor settle wait in ms after navigation (default 2500; "
+                         "an adaptive animation-settle runs on top — raise to "
+                         "~5000 for pages with several heavy local iframes)")
+    ap.add_argument("--cap", type=int, default=45,
+                    help="hard wall-clock cap in seconds for the whole shot "
+                         "(default 45); guards against a page that never settles")
     ap.add_argument("--scale", type=int, choices=(1, 2), default=1)
     args = ap.parse_args(argv)
 
@@ -78,6 +94,18 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 3
 
+    # Hard wall-clock cap: even with per-call goto/screenshot timeouts a page can
+    # stall far longer (one shot hung ~430s). SIGALRM kills the whole shot; the
+    # delivery-8 inner finally + context-manager exit still tear the browser down.
+    _have_alarm = hasattr(signal, "SIGALRM") and args.cap > 0
+
+    def _on_alarm(signum, frame):
+        raise TimeoutError(f"shoot-page hard cap {args.cap}s exceeded")
+
+    if _have_alarm:
+        signal.signal(signal.SIGALRM, _on_alarm)
+        signal.alarm(args.cap)
+
     t0 = time.time()
     try:
         with sync_playwright() as p:
@@ -93,6 +121,18 @@ def main(argv=None) -> int:
                 pg.goto(f"file://{html}#{n}", wait_until="domcontentloaded",
                         timeout=15000)
                 pg.wait_for_timeout(args.wait)
+                # Adaptive entrance-settle: wait until no CSS animation is still
+                # running so fs-reveal staggers aren't captured mid-flight.
+                # Best-effort — a looping/infinite animation or no getAnimations()
+                # just falls back to the floor --wait above.
+                try:
+                    pg.wait_for_function(
+                        "() => { const a = document.getAnimations ? "
+                        "document.getAnimations() : []; "
+                        "return a.every(x => x.playState !== 'running'); }",
+                        timeout=_ANIM_SETTLE_CAP_MS)
+                except Exception:
+                    pass
                 pg.screenshot(path=str(out), timeout=10000)
             finally:
                 b.close()
@@ -100,6 +140,9 @@ def main(argv=None) -> int:
         print(f"shoot-page: failed — {type(e).__name__}: {str(e)[:200]}",
               file=sys.stderr)
         return 3
+    finally:
+        if _have_alarm:
+            signal.alarm(0)
     print(f"✓ {out}  (page {n}, {time.time() - t0:.1f}s"
           f"{', external ALLOWED' if args.allow_external else ', external blocked'})")
     return 0
