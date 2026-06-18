@@ -5,7 +5,9 @@ first-render gate failures that are textually detectable (measured in the
 FWD-deck session: ~10 first-render blocks, ≥7 of them in these categories):
 
   L-TYPESCALE   font-size px off the 4-tier ladder ∪ hero whitelist
-  L-DUAL-ANCHOR position:absolute with BOTH top: and bottom: (or inset shorthand)
+  L-DUAL-ANCHOR position:absolute top+bottom WITHOUT a full box (no left+right /
+                no inset); deliberate boxes (inset / all 4 edges) + ::before/::after
+                overlays are exempt — aligned with runtime R-VIS-ABSPOS-DUAL-ANCHOR
   L-P50-INLINE  base64 images inside <style>/custom_css approaching the 250KB cap
   L-CHROME-16   16px body text on a non-chrome class
   L-BIG-URL     local url() raster reference that should go through add-asset
@@ -116,17 +118,34 @@ def lint_fragment(html: str = "", css: str = "") -> list[dict]:
                             f"{sorted(LADDER)} ∪ hero whitelist — snap it, or put "
                             f"data-allow-typescale on a hero ancestor."))
         # L-DUAL-ANCHOR -------------------------------------------------------
+        # F-323: align this static early-warning with the runtime
+        # R-VIS-ABSPOS-DUAL-ANCHOR (audits.js), which (a) never evaluates
+        # ::before/::after (pseudo-elements aren't in querySelectorAll),
+        # (b) exempts layout containers, and (c) only flags a genuine *empty
+        # stretch* via a mutation test — it even names `inset:` shorthand and
+        # "redeclare all four edges" as the FIX. So a deliberate full box
+        # (`inset:` OR all four of top/right/bottom/left) and any pseudo-element
+        # overlay are NOT the cascade footgun; flagging them only over-fires vs
+        # the runtime (the old rule flagged `inset:` — the runtime's own fix).
+        # Only top+bottom WITHOUT a full horizontal box (the "added top: without
+        # bottom:auto" trap) is the early signal worth flagging here; genuine
+        # empty-stretch fills still get caught by the runtime mutation test.
         if re.search(r"position\s*:\s*absolute", body) and not has_da_optout:
-            top = re.search(r"(?<![a-z-])top\s*:\s*(?!auto)", body)
-            bot = re.search(r"(?<![a-z-])bottom\s*:\s*(?!auto)", body)
+            is_pseudo = bool(re.search(r"::?(before|after)\b", sel or ""))
+            top   = re.search(r"(?<![a-z-])top\s*:\s*(?!auto)", body)
+            bot   = re.search(r"(?<![a-z-])bottom\s*:\s*(?!auto)", body)
+            left  = re.search(r"(?<![a-z-])left\s*:\s*(?!auto)", body)
+            right = re.search(r"(?<![a-z-])right\s*:\s*(?!auto)", body)
             inset = re.search(r"(?<![a-z-])inset\s*:", body)
-            if (top and bot) or inset:
+            deliberate_box = bool(inset) or bool(top and bot and left and right)
+            if top and bot and not deliberate_box and not is_pseudo:
                 findings.append(dict(
                     sev="err", code="L-DUAL-ANCHOR",
-                    msg=f"{sel}: position:absolute with both top+bottom (or "
-                        f"inset shorthand) — height stretches to the parent "
-                        f"(R-VIS-ABSPOS-DUAL-ANCHOR). Anchor ONE edge + size, "
-                        f"or data-allow-dual-anchor for a true overlay."))
+                    msg=f"{sel}: position:absolute with top+bottom but no full box "
+                        f"(no left+right, no inset) — height stretches to the parent "
+                        f"(R-VIS-ABSPOS-DUAL-ANCHOR). Anchor ONE edge + size, declare "
+                        f"all four edges / `inset:` for a deliberate fill, or "
+                        f"data-allow-dual-anchor for a true overlay."))
         # L-CHROME-16 ---------------------------------------------------------
         for m in re.finditer(r"font(?:-size)?\s*:\s*[^;]*?(?<![\d.])16px", body):
             sl = sel.lower()

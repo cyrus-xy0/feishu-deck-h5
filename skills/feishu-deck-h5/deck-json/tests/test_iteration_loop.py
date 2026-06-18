@@ -56,7 +56,25 @@ def test_lint_catches_fwd_session_failures():
     """
     codes = [f["code"] for f in lint_fragment(css=css) if f["sev"] == "err"]
     assert codes.count("L-TYPESCALE") == 2
-    assert codes.count("L-DUAL-ANCHOR") == 2
+    # F-323: only `.strip` (top+bottom, no full box) is the cascade footgun;
+    # `.full{ inset:0 }` is a deliberate fill (the runtime's own fix) → exempt.
+    assert codes.count("L-DUAL-ANCHOR") == 1
+
+
+def test_lint_dual_anchor_only_flags_half_anchor():
+    # F-323: align L-DUAL-ANCHOR with runtime R-VIS-ABSPOS-DUAL-ANCHOR — flag only
+    # top+bottom WITHOUT a full box; deliberate boxes / pseudo overlays are exempt.
+    def codes(css, html=""):
+        return [f["code"] for f in lint_fragment(html=html, css=css) if f["sev"] == "err"]
+    # genuine footgun (top+bottom, no left/right, no inset) → flag
+    assert "L-DUAL-ANCHOR" in codes(".x .a{position:absolute;top:8px;bottom:8px}")
+    # inset shorthand (the runtime's own recommended fix) → exempt
+    assert "L-DUAL-ANCHOR" not in codes(".x .b{position:absolute;inset:0}")
+    # all four edges declared = deliberate box → exempt
+    assert "L-DUAL-ANCHOR" not in codes(
+        ".x .c{position:absolute;top:8px;bottom:8px;left:8px;right:8px}")
+    # pseudo-element overlay (runtime never evaluates ::before) → exempt
+    assert "L-DUAL-ANCHOR" not in codes(".x .d::before{position:absolute;top:0;bottom:0}")
 
 
 def test_lint_respects_ladder_hero_and_optouts():
