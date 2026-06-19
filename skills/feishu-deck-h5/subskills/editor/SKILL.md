@@ -138,6 +138,29 @@ Designer + Renderer instead).
     after lift/insert/reorder, run `render-deck.py --renumber` on the target
     DeckJSON when stale `screen_label` prefixes need to match true page/hash
     order (`lift-to-new-deck.py --render` already passes `--renumber`).
+- **Scan the source FIRST: `assets/lift-slides.py SRC/index.html --scan`.** It
+  sweeps the whole deck in one read and flags every frame a deck.json lift CANNOT
+  carry — iframe demos (`iframe-embed` / `src=about:blank`, populated by the
+  source's JS), image-slot placeholders (`photo-cell`/`poster-img`/`role=img`
+  with no static image → photos land EMPTY), and frames the lifter can't parse.
+  Plan these up front instead of discovering them page-by-page after the lift: an
+  iframe page is re-homed via `deck-cli.py paste --from <src deck.json> --key
+  <key>` (carries the prototype + keeps the `iframe-embed` schema), NOT lifted to
+  raw; image-slot pages lift but need real images re-attached afterward.
+- **Default to `--shake` when the source slide is a SCHEMA layout**
+  (content-*/stats/flow/chart/table/arch-stack/image-text/logo-wall/section/
+  iframe-embed). A deck.json lift converts the slide to `layout:raw`, and the
+  framework `[data-layout=X]` CSS that styled it does NOT follow a raw slide, so
+  without `--shake` the layout silently collapses. `--shake` inlines that
+  framework CSS (and recovers source-head per-slide rules). Skip `--shake` ONLY
+  for a source page already `layout:raw` AND self-contained (`--preview` →
+  `self_contained:true`, `recommend_shake:false`). When unsure, shake: it is
+  over-inclusive by design and the only cost is pruning dead-rule cruft (which
+  renders harmlessly) vs. a collapsed layout. NOTE: `--preview`'s
+  `recommend_shake` only inspects source-head coupling — it can read `false` for a
+  schema page that still needs the framework-CSS inline (use `--against
+  DST/index.html`, which adds the `target_lacks_layout_css` check), so prefer this
+  schema-layout rule over a bare per-page `recommend_shake`.
 - **Lift into HTML target without DeckJSON**: when the destination is a deck with no
   `deck.json`, do not hand-splice frames. Use the HTML destination mode:
 
@@ -146,10 +169,11 @@ Designer + Renderer instead).
   python3 assets/lift-slides.py SRC/index.html --key <key> DST/index.html [--pos N|end] [--shake]
   ```
 
-  Add `--shake` only when preview recommends it, typically because the source
-  slide depends on head-coupled CSS. `lift-slides.py --to-html` extracts the
-  rendered frame, transforms assets/CSS with the same logic as DeckJSON lift,
-  splices into `.deck`, backs up, and validates the inserted page.
+  Add `--shake` per the schema-layout rule above (any schema layout needs it so
+  its framework `[data-layout=X]` CSS survives lift-to-raw; a source page already
+  `layout:raw` AND self-contained may skip it). `lift-slides.py --to-html`
+  extracts the rendered frame, transforms assets/CSS with the same logic as
+  DeckJSON lift, splices into `.deck`, backs up, and validates the inserted page.
 - **Always pass ABSOLUTE paths to `lift-slides.py` and `render-deck.py`** (src,
   DEST `deck.json`, OUTPUT_DIR). The skill root is usually a symlink
   (`~/.claude/skills/feishu-deck-h5` → `.../Github/feishu-deck-h5/skills/

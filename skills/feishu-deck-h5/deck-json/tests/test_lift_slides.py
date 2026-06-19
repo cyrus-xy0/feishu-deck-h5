@@ -983,5 +983,75 @@ class LiftRootAnimFitScaleTest(unittest.TestCase):
                       "over-reached beyond .slide-root animations (F-332).")
 
 
+# ── F-324: --scan pre-lift health report ─────────────────────────────────────
+# `--scan` sweeps the whole source and flags frames whose content is runtime/JS-
+# injected (so a deck.json lift lands them empty): iframe demos, image-slot
+# placeholders, and frames the lifter can't parse. These guards assert it flags
+# the dynamic classes and leaves a genuinely static page alone (no false
+# positive on a page that fills its picture via <img src>).
+SCAN_SRC = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head>
+<body><div class="deck">
+<div class="slide-frame" data-page="1">
+<div class="slide" data-layout="content-2col" data-slide-key="clean-imgs" data-screen-label="01 Clean">
+<div class="stage">
+<div class="pic"><img src="input/photo.jpg" alt=""></div>
+</div>
+</div>
+</div>
+<div class="slide-frame" data-page="2">
+<div class="slide" data-layout="iframe-embed" data-slide-key="iframe-demo" data-screen-label="02 Demo">
+<div class="stage">
+<iframe id="demo" src="about:blank" loading="lazy"></iframe>
+</div>
+</div>
+</div>
+<div class="slide-frame" data-page="3">
+<div class="slide" data-layout="content-2col" data-slide-key="photo-slots" data-screen-label="03 Photos">
+<div class="stage">
+<div class="photo-cell p1" role="img" aria-label="a"></div>
+<div class="photo-cell p2" role="img" aria-label="b"></div>
+</div>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+class LiftSlidesScanTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-scan-test-")
+        src = Path(cls.tmp) / "index.html"
+        src.write_text(SCAN_SRC, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src), "--scan"],
+            capture_output=True, text=True)
+        cls.out = cls.proc.stdout
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_scan_exits_clean(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"--scan exited {self.proc.returncode}\n{self.proc.stderr}")
+
+    def test_scan_flags_iframe_embed(self):
+        self.assertIn("[iframe-embed]", self.out)
+        self.assertIn("iframe-demo", self.out)
+
+    def test_scan_flags_empty_image_slots(self):
+        self.assertIn("[empty-image-slots]", self.out)
+        self.assertIn("photo-slots", self.out)
+        self.assertIn("2 image-slot placeholder", self.out)
+
+    def test_scan_does_not_flag_static_image_page(self):
+        # a content page that fills its picture via <img src> is NOT a false
+        # positive — its key must never appear in the flagged listing.
+        self.assertNotIn("clean-imgs", self.out)
+        self.assertIn("1 frame(s) lift cleanly", self.out)
+
+
 if __name__ == "__main__":
     unittest.main()

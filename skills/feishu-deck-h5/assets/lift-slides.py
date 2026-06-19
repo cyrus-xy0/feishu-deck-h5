@@ -1825,6 +1825,101 @@ def cmd_preview(src_html_path, sel, against=None):
     return 0
 
 
+# ── F-324: pre-lift WHOLE-SOURCE health scan ─────────────────────────────────
+# `--preview` judges ONE slide; `--scan` sweeps the whole source in one read and
+# flags every frame whose content is populated at RUNTIME — an iframe demo the
+# source injects by JS (src=about:blank / iframe-embed), image-slot/photo-cell
+# placeholders with no static image, or a frame the lifter can't even parse.
+# deck.json is JS-free, so a raw lift lands all of that EMPTY/broken. Surfacing
+# it BEFORE the lift collapses a page-by-page post-lift screenshot+forensics hunt
+# into one upfront table (the exact cost this command exists to remove).
+_SLOT_CLASSES = r'photo-cell|poster-img|img-slot|image-slot|photo-slot'
+# Match the whole opening TAG of a placeholder element, so a div carrying BOTH
+# role="img" AND a slot class counts once (not twice) — the printed slot count
+# must be the element count.
+_PLACEHOLDER_RE = re.compile(
+    r'<\w+\b[^>]*?(?:role\s*=\s*["\']img["\']'
+    r'|class\s*=\s*["\'][^"\']*\b(?:' + _SLOT_CLASSES + r')\b)[^>]*>',
+    re.I)
+_IMG_URL_RE = re.compile(r'url\(\s*["\']?(?!data:)[^)"\']*\.(?:jpe?g|png|webp|gif)', re.I)
+_ABOUT_BLANK_IFRAME_RE = re.compile(r'<iframe\b[^>]*\bsrc\s*=\s*["\']about:blank', re.I)
+
+
+def cmd_scan(src_html_path):
+    """Read-only whole-source health report: which frames carry runtime/dynamic
+    content that a deck.json lift cannot carry. The per-frame head-CSS scan (the
+    expensive part) runs ONLY for frames that actually have image-slot
+    placeholders, so the sweep stays cheap on big single-file sources."""
+    src_html_path = Path(src_html_path).resolve()
+    src_lines = src_html_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    full_src = "".join(src_lines)
+    starts = find_frame_lines(src_lines)
+    dirty, clean = [], 0
+    for i in range(len(starts)):
+        fs = starts[i]
+        fe = starts[i + 1] - 1 if i + 1 < len(starts) else len(src_lines)
+        try:
+            info, inner = extract_one(src_lines, fs, fe)
+        except ValueError:
+            info, inner = {"key": None, "label": None, "orig_layout": None}, ""
+        flags = []
+        key = info.get("key")
+        if not key:
+            flags.append(("unparseable",
+                          "lifter can't read this frame's key/layout — a lift by key will skip or "
+                          "fail it (run --index to confirm). Re-author or lift its source page."))
+        else:
+            layout = info.get("orig_layout")
+            if layout == "iframe-embed" or _ABOUT_BLANK_IFRAME_RE.search(inner):
+                flags.append(("iframe-embed",
+                              "iframe demo (src=about:blank / iframe-embed) is populated by the "
+                              "source's JS — a lift-to-raw lands it BLANK. Lift it as an "
+                              "iframe-embed schema slide (deck.json data.src=prototypes/<demo>.html) "
+                              "and carry the prototype, e.g. `deck-cli paste --from <src deck.json> "
+                              "--key " + key + "` rather than lift-slides --shake."))
+            # Empty image slot = a photo placeholder whose image isn't static in
+            # the frame body (no <img>, no url()). Such photos are slot/JS-injected
+            # and land empty on lift. We deliberately do NOT exempt frames whose
+            # head CSS has a matching photo-slot url(): observed cases (ai-lecture-
+            # hall) keep such a rule yet still lift empty (--shake doesn't reliably
+            # recover it), so a head exemption produces false-NEGATIVES — and for a
+            # pre-lift advisory, over-warning is far cheaper than missing a page
+            # that lands blank.
+            n_ph = len(_PLACEHOLDER_RE.findall(inner))
+            has_img = ("<img" in inner) or bool(_IMG_URL_RE.search(inner))
+            if n_ph and not has_img:
+                flags.append(("empty-image-slots",
+                              f"{n_ph} image-slot placeholder(s) "
+                              "(photo-cell/poster-img/role=img) with NO static <img>/url() in the "
+                              "frame body — photos here are slot/JS-injected and MAY land EMPTY on "
+                              "lift. Verify after rendering; attach real images if blank."))
+        if flags:
+            dirty.append((i + 1, info, flags))
+        else:
+            clean += 1
+
+    inline_scripts = [m for m in re.findall(r'<script\b[^>]*>([\s\S]*?)</script>', full_src)
+                      if m.strip()]
+    total_js = sum(len(s) for s in inline_scripts)
+
+    print(f"SCAN · {src_html_path.name} · {len(starts)} frame(s)")
+    if not dirty:
+        print("  ✓ all frames lift cleanly (static HTML/CSS/assets).")
+    else:
+        print(f"  ⚠ {len(dirty)} frame(s) carry DYNAMIC content a deck.json lift cannot carry "
+              "(JS-free) — a raw lift lands them empty/broken:")
+        for idx, info, flags in dirty:
+            print(f"   #{idx:<3} {(info.get('key') or '?'):<30} {info.get('orig_layout') or '?'}")
+            for tag, detail in flags:
+                print(f"        [{tag}] {detail}")
+        print(f"  ✓ {clean} frame(s) lift cleanly (static HTML/CSS/assets).")
+    if inline_scripts:
+        print(f"  ℹ source has {len(inline_scripts)} inline <script> block(s) (~{total_js/1024:.0f} "
+              "KB) outside the framework — any page whose content/charts/images they build at "
+              "runtime loses it on lift (deck.json has no JS slot).")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Lift slides from a source feishu-deck-h5 deck into a target deck.json",
@@ -1837,6 +1932,11 @@ def main():
     ap.add_argument("--index", action="store_true",
                     help="print a slide manifest (key|layout|label|bytes) for SRC and exit "
                          "(for foreign decks without a slide-index.json sidecar)")
+    ap.add_argument("--scan", action="store_true",
+                    help="F-324: read-only WHOLE-SOURCE health report — flag every frame whose "
+                         "content is runtime/JS-injected (iframe demo, image-slot placeholders, "
+                         "unparseable) and will land EMPTY on a deck.json lift. Run this BEFORE "
+                         "lifting to plan special-casing up front. Writes nothing.")
     ap.add_argument("--key",
                     help="comma-separated slide-keys to lift (alternative to positional FRAMES)")
     ap.add_argument("--shake", action="store_true",
@@ -1870,6 +1970,9 @@ def main():
     if args.index:
         print_manifest(args.src_html)
         return 0
+
+    if args.scan:
+        return cmd_scan(args.src_html)
 
     if args.preview:
         rest = list(args.rest)
