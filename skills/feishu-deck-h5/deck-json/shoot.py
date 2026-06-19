@@ -29,6 +29,7 @@ Exit: 0 if every requested page was shot; 2 on bad input / engine missing; 3 if
 some requested pages were not found.
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -81,6 +82,10 @@ def main(argv=None) -> int:
     ap.add_argument("--aspect", default="16:9",
                     help="viewport aspect W:H. 16:9=design clip (default); other "
                          "ratios (16:10, 21:9) shoot the full letterboxed viewport.")
+    ap.add_argument("--allow-external", action="store_true",
+                    help="let http(s) through (for shooting a live external embed). "
+                         "Default BLOCKS external requests so remote webfonts fail "
+                         "fast and the screenshot doesn't stall on document.fonts.ready.")
     args = ap.parse_args(argv)
 
     index = _resolve_index(args.target)
@@ -115,6 +120,14 @@ def main(argv=None) -> int:
         ctx = browser.new_context(viewport={"width": DESIGN_W, "height": vp_h},
                                   device_scale_factor=1)
         page = ctx.new_page()
+        # Block external http(s) by default: a live embed / remote webfont never
+        # settles, and page.screenshot() then stalls ~30s on "waiting for fonts to
+        # load…" before timing out (the exact trap shoot-page.py already avoids).
+        # Aborting external requests makes document.fonts.ready resolve immediately;
+        # local file:// assets still load. --allow-external opts back in for the
+        # rare case of shooting the live external embed itself.
+        if not args.allow_external:
+            page.route(re.compile(r"^https?://"), lambda r: r.abort())
         # ?mode=present → the framework inits straight into present mode (its own
         # currentIdx/pager/is-current state is internally consistent from the
         # start — the basis for driving it by keyboard below).
@@ -180,10 +193,10 @@ def main(argv=None) -> int:
             page.wait_for_timeout(650)
             fn = out_dir / f"p{m['idx']:02d}-{m['key']}.png"
             if design_mode:
-                page.screenshot(path=str(fn),
+                page.screenshot(path=str(fn), timeout=15_000,
                                 clip={"x": 0, "y": 0, "width": DESIGN_W, "height": DESIGN_H})
             else:
-                page.screenshot(path=str(fn))   # full viewport → letterbox visible
+                page.screenshot(path=str(fn), timeout=15_000)   # full viewport → letterbox visible
             written.append((m, fn))
         browser.close()
 

@@ -197,6 +197,41 @@ versioned, growing library shared across all decks. Old per-deck `input/`
 copies go stale; `assets/` root pollution makes the brand asset surface
 unmaintainable. Single source of truth = `assets/shared/clientlogo/`.
 
+### Add a NEW image / logo onto an existing page — the fast loop
+
+Dropping a logo / photo onto a page is a `custom_css` edit, **not** a renderer
+change. Do **not** read `render-deck.py` / `_css_utils.py` to "confirm" how it
+works, and do **not** hand-edit `index.html`. Five steps:
+
+1. **Place the asset in the right library** (see the sections above): client brand
+   → `assets/shared/clientlogo/<中文名>.png`; 飞书 product → `assets/shared/feishu-products/`;
+   a one-off image with no shared home → `deck-cli.py <deck.json> add-asset <file>`
+   (optimises + lands in the run's `input/`). **Never** dump it in `assets/` root.
+2. **Write the `custom_css`.** A bare `.slide` selector auto-scopes to the page —
+   `scope_selectors` rewrites `.slide::after{…}` → `.slide[data-slide-key="KEY"]::after{…}`,
+   so target the page root's pseudo-element directly. Reference the file with the
+   same relative path the rest of the deck uses (the `<style>` is injected inline
+   in `index.html`, so URLs resolve against the document).
+
+   ```css
+   /* co-brand logo, top-left, next to the 飞书 wordmark (cover wordmark ends ~x=355) */
+   .slide::after {
+     content: ""; position: absolute; top: 118px; left: 380px;
+     width: 320px; height: 64px; z-index: 20; pointer-events: none;
+     background: url('assets/shared/clientlogo/鸣鸣很忙集团.png') center / 268px auto no-repeat;
+   }
+   ```
+
+3. **Dark bg + a dark-ink logo? Put it on a light chip or it vanishes** — every
+   default cover / section bg is dark. Layer a white rounded card under the logo:
+   `background: url(…) center/<w> auto no-repeat, #fff; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.22);`
+4. **Apply + re-render scoped:** `deck-cli.py <deck.json> set-page <key> --css <file>`
+   (writes `custom_css`, auto-backup, pre-write lint), then
+   `render-deck.py <deck.json> <out> --iter --scope <key>`.
+5. **Look at it** with `deck-json/shoot.py --pages <key>` or `assets/shoot-page.py`
+   — the blessed screenshot tools (they block external requests so the shot doesn't
+   stall on `document.fonts.ready`). Never hand-roll a Playwright script.
+
 ### Digital employee portraits (mandatory) — TWO source folders
 
 **Decision rule (apply in order):**
