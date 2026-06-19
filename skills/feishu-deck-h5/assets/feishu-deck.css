@@ -242,6 +242,22 @@ body {
   background-image: none !important;
   background-color: transparent !important;
 }
+/* F-344 · extends F-318 ONE LEVEL DEEPER. Lifted/raw pages frequently carry their
+   own full-bleed background wrapper (.qilu-page / .source-frame-wrap / .ppt-stage /
+   .slide65-redo …) that re-paints the content-bg image (at the 16:9 slide crop) or a
+   flat dark solid OVER the now-transparent .slide → the exact seam F-318 removed
+   reappears, just nested inside the slide. F-318's `.slide-frame > .slide` selector
+   can't reach those arbitrary descendants. feishu-deck.js::markBleedPanels
+   geometry-detects them (≥95% slide coverage + content-bg-or-dark-solid backdrop),
+   preserves any decorative gradient glows in --fs-bleed-grads, and tags them
+   .fs-bleed-panel; this rule drops their opaque backdrop so the frame's single
+   content-bg layer shows through seamlessly. Doubled class keeps specificity above
+   the panel's own per-slide rule (wins over !important regardless of source order).
+   Present-mode only, same contract as F-318 (scroll mode keeps the panel's bg). */
+.deck[data-mode="present"] .slide .fs-bleed-panel.fs-bleed-panel {
+  background-color: transparent !important;
+  background-image: var(--fs-bleed-grads, none) !important;
+}
 .deck[data-mode="present"] .slide-frame.is-current {
   opacity: 1; pointer-events: auto;
   content-visibility: visible;

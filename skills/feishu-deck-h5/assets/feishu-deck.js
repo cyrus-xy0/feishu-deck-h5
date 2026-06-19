@@ -428,6 +428,71 @@
       .then(() => { try { centerSlideInCanvas(slide); } catch (e) { /* best-effort */ } });
   }
 
+  // F-344 · Letterbox seam auto-fix. Lifted/raw pages often carry a full-slide
+  // opaque background panel of their own (e.g. .qilu-page / .source-frame-wrap /
+  // .ppt-stage / .slide65-redo) that paints EITHER the framework content-bg image
+  // (cropped to the 16:9 .slide) OR a flat dark solid, CONFINED to the slide. In
+  // present mode the .slide-frame paints that SAME content-bg across the WHOLE
+  // frame — incl. the top/bottom letterbox — and .slide is transparent (F-318); but
+  // the child panel re-covers the slide area at a DIFFERENT crop / flat tone, so a
+  // luma seam shows at the slide↔letterbox boundary on any non-16:9 viewport
+  // ("黑边"). We tag such panels so the stylesheet can drop their redundant backdrop
+  // (keeping decorative gradient glows) and let the frame's seamless content-bg show
+  // through. Coverage is a viewport-independent ratio, so one pass per slide is
+  // enough; it rides alongside maybeBalance (init pass + is-current retry) → no new
+  // observer, no extra reflow beyond what maybeBalance already forced. The visual
+  // effect is gated to present mode in CSS (.fs-bleed-panel), so scroll mode — which
+  // has no letterbox and no frame content-bg fill — is untouched.
+  function markBleedPanels(slide) {
+    if (!slide || slide.hasAttribute('data-fs-bleed-checked')) return;
+    const layout = slide.getAttribute('data-layout');
+    if (layout !== 'raw' && layout !== 'iframe-embed' && layout !== 'canvas') return;
+    const sr = slide.getBoundingClientRect();
+    const sArea = sr.width * sr.height;
+    if (sArea < 900) return;                   // not laid out yet — observer will retry
+    slide.setAttribute('data-fs-bleed-checked', '');
+    // The frame's content-bg url is the seamless backdrop panels should defer to.
+    let frameUrl = '';
+    const frame = slide.closest('.slide-frame');
+    if (frame) {
+      const fm = getComputedStyle(frame).backgroundImage.match(/url\((["']?)(.*?)\1\)/);
+      if (fm) frameUrl = fm[2];
+    }
+    const splitLayers = (s) => {               // top-level comma split (paren-aware)
+      const out = []; let depth = 0, cur = '';
+      for (let k = 0; k < s.length; k++) {
+        const ch = s[k];
+        if (ch === '(') depth++; else if (ch === ')') depth--;
+        if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += ch;
+      }
+      if (cur.trim()) out.push(cur.trim());
+      return out;
+    };
+    slide.querySelectorAll('*').forEach((el) => {
+      if (el.classList.contains('fs-bleed-panel')) return;
+      const r = el.getBoundingClientRect();
+      if ((r.width * r.height) / sArea < 0.95) return;     // must blanket the slide
+      const cs = getComputedStyle(el);
+      const bi = cs.backgroundImage;
+      const layers = (bi && bi !== 'none') ? splitLayers(bi) : [];
+      const hasFrameBg = !!frameUrl && layers.some((l) => l.indexOf('url(') >= 0 && l.indexOf(frameUrl) >= 0);
+      let darkSolid = false;                   // opaque dark solid backdrop?
+      const cm = cs.backgroundColor.match(/rgba?\(([^)]+)\)/);
+      if (cm) {
+        const p = cm[1].split(',').map(parseFloat);
+        const a = p.length > 3 ? p[3] : 1;
+        if (a >= 0.9 && (p[0] + p[1] + p[2]) / 3 < 70) darkSolid = true;
+      }
+      if (!hasFrameBg && !darkSolid) return;   // leave hero photos / light panels alone
+      // Keep gradient layers + any NON-content-bg url (hero); drop only the redundant
+      // frame content-bg url, and flatten the dark solid to transparent.
+      const keep = layers.filter((l) => l.indexOf('gradient') >= 0
+        || (l.indexOf('url(') >= 0 && (!frameUrl || l.indexOf(frameUrl) < 0)));
+      el.style.setProperty('--fs-bleed-grads', keep.length ? keep.join(', ') : 'none');
+      el.classList.add('fs-bleed-panel');
+    });
+  }
+
   function init() {
     const deck = document.querySelector('.deck');
     if (!deck) return null;
@@ -669,7 +734,7 @@
     // The handful content-visibility skipped (probe height 0) stay untagged and
     // are balanced on first enter by the observer below (a retry, not the
     // primary path).
-    requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => maybeBalance(f.querySelector('.slide'))); });
+    requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => { const s = f.querySelector('.slide'); maybeBalance(s); try { markBleedPanels(s); } catch (e) { /* never break the deck over layout */ } }); });
     // F-301 · re-measure the band anchor once webfonts settle: a late font swap
     // can rewrap the title/subtitle and change the header bbox bottom. Cheap,
     // idempotent, and skipped for opted-out decks (same data-no-autobalance
@@ -693,7 +758,7 @@
         // untagged because content-visibility:auto had skipped its layout then
         // (maybeBalance no-ops if it was already tagged at init, which is the
         // common case — see the init pass above).
-        if (now) requestAnimationFrame(() => { if (signal.aborted) return; maybeBalance(m.target.querySelector('.slide')); });
+        if (now) requestAnimationFrame(() => { if (signal.aborted) return; const s = m.target.querySelector('.slide'); maybeBalance(s); try { markBleedPanels(s); } catch (e) { /* never break the deck over layout */ } });
       }
     });
     frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
