@@ -258,6 +258,39 @@ body {
   background-color: transparent !important;
   background-image: var(--fs-bleed-grads, none) !important;
 }
+/* F-345 · runtime decor mirror for LIFTED / custom full-bleed decoration. The
+   declarative data-decor mirror (see §decor below) only covers framework decor
+   TOKENS; a lifted page (raw/iframe/canvas) often paints CUSTOM radial glows + a
+   darkening ::before vignette directly on a full-slide wrapper (.qilu-page …) that the
+   frame can't know about, so the decoration stops at the 16:9 slide edge and the
+   letterbox stays un-decorated → the same horizontal luma seam ("黑边"). When
+   feishu-deck.js::markBleedPanels finds such a panel it captures its decoration (with
+   per-layer sizing) into --fs-bleed-deco-* and the frame's own backdrop into
+   --fs-bleed-frame-*, then tags the frame .fs-bleed-host; this re-paints the frame as
+   [decoration ON TOP of the original backdrop] so the SAME decoration now covers the
+   letterbox + slide uniformly. The decoration rides in the frame BACKGROUND (never a
+   ::after) so it always sits behind the slide content — critical for the darkening
+   vignette, which must not dim the cards/text. The panel's own slide-confined copy is
+   zeroed (.fs-bleed-panel drops its backdrop; .fs-bleed-promoted drops its ::before
+   vignette) so nothing is painted twice. Present-mode only, same contract as F-318. */
+.deck[data-mode="present"] .slide-frame.fs-bleed-host {
+  background-image:
+    var(--fs-bleed-deco-image, none),
+    var(--fs-bleed-frame-image, var(--fs-asset-content-bg)) !important;
+  background-size:
+    var(--fs-bleed-deco-size, auto),
+    var(--fs-bleed-frame-size, cover) !important;
+  background-position:
+    var(--fs-bleed-deco-position, center),
+    var(--fs-bleed-frame-position, center) !important;
+  background-repeat:
+    var(--fs-bleed-deco-repeat, no-repeat),
+    var(--fs-bleed-frame-repeat, no-repeat) !important;
+}
+.deck[data-mode="present"] .slide .fs-bleed-promoted.fs-bleed-promoted::before {
+  background-image: none !important;
+  background-color: transparent !important;
+}
 .deck[data-mode="present"] .slide-frame.is-current {
   opacity: 1; pointer-events: auto;
   content-visibility: visible;

@@ -428,21 +428,28 @@
       .then(() => { try { centerSlideInCanvas(slide); } catch (e) { /* best-effort */ } });
   }
 
-  // F-344 · Letterbox seam auto-fix. Lifted/raw pages often carry a full-slide
-  // opaque background panel of their own (e.g. .qilu-page / .source-frame-wrap /
-  // .ppt-stage / .slide65-redo) that paints EITHER the framework content-bg image
-  // (cropped to the 16:9 .slide) OR a flat dark solid, CONFINED to the slide. In
-  // present mode the .slide-frame paints that SAME content-bg across the WHOLE
-  // frame — incl. the top/bottom letterbox — and .slide is transparent (F-318); but
-  // the child panel re-covers the slide area at a DIFFERENT crop / flat tone, so a
-  // luma seam shows at the slide↔letterbox boundary on any non-16:9 viewport
-  // ("黑边"). We tag such panels so the stylesheet can drop their redundant backdrop
-  // (keeping decorative gradient glows) and let the frame's seamless content-bg show
-  // through. Coverage is a viewport-independent ratio, so one pass per slide is
-  // enough; it rides alongside maybeBalance (init pass + is-current retry) → no new
-  // observer, no extra reflow beyond what maybeBalance already forced. The visual
-  // effect is gated to present mode in CSS (.fs-bleed-panel), so scroll mode — which
-  // has no letterbox and no frame content-bg fill — is untouched.
+  // F-344 / F-345 · Letterbox seam auto-fix for lifted/raw pages. Such pages carry a
+  // full-slide background panel of their own (e.g. .qilu-page / .source-frame-wrap /
+  // .ppt-stage / .slide65-redo). Two seam classes, both healed here:
+  //   (1) F-344 — the panel re-paints the framework content-bg (at the 16:9 slide
+  //       crop) or a flat dark solid OVER the now-transparent .slide (F-318). The
+  //       .slide-frame already paints that SAME content-bg across the WHOLE frame
+  //       (incl. the top/bottom letterbox), so the panel's slide-confined copy seams
+  //       at the slide↔letterbox boundary on any non-16:9 viewport ("黑边"). Fix:
+  //       drop the panel's redundant backdrop so the frame's single layer shows.
+  //   (2) F-345 — the panel carries CUSTOM full-bleed DECORATION the frame lacks:
+  //       radial glows in its background + a darkening ::before vignette. These stop
+  //       at the slide edge, so the letterbox stays un-decorated → the very same luma
+  //       seam the declarative data-decor mirror (feishu-deck.css ~§decor) already
+  //       fixes for framework decor TOKENS. Fix: MIRROR the custom decoration onto the
+  //       viewport-filling frame (in its BACKGROUND, so it stays behind the slide
+  //       content — the vignette must not dim cards/text) and zero the panel's own
+  //       copy so nothing paints twice. This is the runtime generalisation of the
+  //       data-decor mirror for lifted/custom decoration.
+  // Coverage is a viewport-independent ratio, so one pass per slide suffices; it rides
+  // alongside maybeBalance (init pass + is-current retry) → no new observer, no extra
+  // reflow beyond what maybeBalance already forced. Every visual effect is gated to
+  // present mode in CSS, so scroll mode — no letterbox, no frame content-bg — is untouched.
   function markBleedPanels(slide) {
     if (!slide || slide.hasAttribute('data-fs-bleed-checked')) return;
     const layout = slide.getAttribute('data-layout');
@@ -451,13 +458,23 @@
     const sArea = sr.width * sr.height;
     if (sArea < 900) return;                   // not laid out yet — observer will retry
     slide.setAttribute('data-fs-bleed-checked', '');
-    // The frame's content-bg url is the seamless backdrop panels should defer to.
-    let frameUrl = '';
     const frame = slide.closest('.slide-frame');
+    // The frame's content-bg url is the seamless backdrop panels should defer to. We
+    // compare by BASENAME, not full path: a lifted page's panel references the image
+    // from its OWN assets dir (runs/<deck>/assets/…) while the frame's framework var
+    // resolves to the skill assets dir — different URLs, identical image. Matching the
+    // filename drops the redundant copy regardless of which directory it came from.
+    let frameBase = '';
     if (frame) {
       const fm = getComputedStyle(frame).backgroundImage.match(/url\((["']?)(.*?)\1\)/);
-      if (fm) frameUrl = fm[2];
+      if (fm) frameBase = fm[2].split(/[?#]/)[0].split('/').pop();
     }
+    const isFrameBg = (l) => l.indexOf('url(') >= 0 && !!frameBase && l.indexOf(frameBase) >= 0;
+    // A framework data-decor glow token already mirrors itself onto .slide-frame::after
+    // declaratively; promoting here too would fight over the same paint, so the
+    // F-345 frame-promote path skips those (the F-344 backdrop drop still applies).
+    const hasDecorToken = /\b(?:blue-glow|violet-glow|teal-glow|aurora|mix-glow|orange-spark)\b/
+      .test(slide.getAttribute('data-decor') || '');
     const splitLayers = (s) => {               // top-level comma split (paren-aware)
       const out = []; let depth = 0, cur = '';
       for (let k = 0; k < s.length; k++) {
@@ -468,14 +485,18 @@
       if (cur.trim()) out.push(cur.trim());
       return out;
     };
+    const pick = (arr, i) => (arr.length ? arr[i % arr.length] : '');
     slide.querySelectorAll('*').forEach((el) => {
       if (el.classList.contains('fs-bleed-panel')) return;
       const r = el.getBoundingClientRect();
       if ((r.width * r.height) / sArea < 0.95) return;     // must blanket the slide
       const cs = getComputedStyle(el);
       const bi = cs.backgroundImage;
-      const layers = (bi && bi !== 'none') ? splitLayers(bi) : [];
-      const hasFrameBg = !!frameUrl && layers.some((l) => l.indexOf('url(') >= 0 && l.indexOf(frameUrl) >= 0);
+      const imgs = (bi && bi !== 'none') ? splitLayers(bi) : [];
+      const sizes = splitLayers(cs.backgroundSize);
+      const poss = splitLayers(cs.backgroundPosition);
+      const reps = splitLayers(cs.backgroundRepeat);
+      const hasFrameBg = imgs.some(isFrameBg);
       let darkSolid = false;                   // opaque dark solid backdrop?
       const cm = cs.backgroundColor.match(/rgba?\(([^)]+)\)/);
       if (cm) {
@@ -483,11 +504,65 @@
         const a = p.length > 3 ? p[3] : 1;
         if (a >= 0.9 && (p[0] + p[1] + p[2]) / 3 < 70) darkSolid = true;
       }
-      if (!hasFrameBg && !darkSolid) return;   // leave hero photos / light panels alone
-      // Keep gradient layers + any NON-content-bg url (hero); drop only the redundant
-      // frame content-bg url, and flatten the dark solid to transparent.
-      const keep = layers.filter((l) => l.indexOf('gradient') >= 0
-        || (l.indexOf('url(') >= 0 && (!frameUrl || l.indexOf(frameUrl) < 0)));
+      // Decorative full-bleed layers the frame lacks: gradient glows on the panel and
+      // a darkening ::before vignette (inset:0). Capture them WITH their per-layer
+      // size/position/repeat so they can be mirrored onto the frame faithfully.
+      const glowIdx = [];
+      imgs.forEach((l, i) => { if (l.indexOf('gradient') >= 0) glowIdx.push(i); });
+      const heroLayers = imgs.filter((l) => l.indexOf('url(') >= 0 && !isFrameBg(l));
+      let beforeImg = '', beforeSize = '', beforePos = '', beforeRep = '';
+      const bcs = getComputedStyle(el, '::before');
+      if (bcs && bcs.content && bcs.content !== 'none' && bcs.position === 'absolute'
+          && bcs.top === '0px' && bcs.bottom === '0px' && bcs.left === '0px' && bcs.right === '0px') {
+        if (bcs.backgroundImage && bcs.backgroundImage.indexOf('gradient') >= 0) {
+          beforeImg = bcs.backgroundImage; beforeSize = bcs.backgroundSize;
+          beforePos = bcs.backgroundPosition; beforeRep = bcs.backgroundRepeat;
+        } else {                                // a translucent flat darkening tint
+          const bm = bcs.backgroundColor.match(/rgba?\(([^)]+)\)/);
+          if (bm) {
+            const q = bm[1].split(',').map(parseFloat); const ba = q.length > 3 ? q[3] : 1;
+            if (ba > 0.02 && ba < 0.96) {
+              beforeImg = 'linear-gradient(' + bcs.backgroundColor + ', ' + bcs.backgroundColor + ')';
+              beforeSize = 'cover'; beforePos = 'center'; beforeRep = 'no-repeat';
+            }
+          }
+        }
+      }
+      const hasDeco = glowIdx.length > 0 || !!beforeImg;
+      if (!hasFrameBg && !darkSolid && !hasDeco) return;   // plain / hero-only panel — leave it
+      const promote = hasDeco && !!frame && !hasDecorToken;
+      // --- F-345 · promote the panel's full-bleed decoration up to the frame BACKGROUND
+      // (decoration ON TOP of the frame's captured backdrop) so it covers letterbox +
+      // slide uniformly and stays behind the slide content. ---
+      if (promote) {
+        const di = [], dz = [], dp = [], dr = [];
+        if (beforeImg) {                         // darkening vignette sits on top
+          di.push(beforeImg); dz.push(beforeSize || 'cover');
+          dp.push(beforePos || 'center'); dr.push(beforeRep || 'no-repeat');
+        }
+        glowIdx.forEach((i) => {                 // then the glows, with their own sizing
+          di.push(imgs[i]); dz.push(pick(sizes, i) || 'auto');
+          dp.push(pick(poss, i) || 'center'); dr.push(pick(reps, i) || 'no-repeat');
+        });
+        const fcs = getComputedStyle(frame);     // preserve the frame's own backdrop as the lower layer
+        frame.style.setProperty('--fs-bleed-frame-image', fcs.backgroundImage);
+        frame.style.setProperty('--fs-bleed-frame-size', fcs.backgroundSize);
+        frame.style.setProperty('--fs-bleed-frame-position', fcs.backgroundPosition);
+        frame.style.setProperty('--fs-bleed-frame-repeat', fcs.backgroundRepeat);
+        frame.style.setProperty('--fs-bleed-deco-image', di.join(', '));
+        frame.style.setProperty('--fs-bleed-deco-size', dz.join(', '));
+        frame.style.setProperty('--fs-bleed-deco-position', dp.join(', '));
+        frame.style.setProperty('--fs-bleed-deco-repeat', dr.join(', '));
+        frame.classList.add('fs-bleed-host');
+        el.classList.add('fs-bleed-promoted');   // zero this panel's own ::before vignette
+      }
+      // --- panel backdrop neutralise (F-344): drop the content-bg / dark solid; for a
+      // promoted panel its glows now live on the frame, so keep ONLY a real hero image
+      // (never lost); otherwise (legacy / data-decor) keep glows on the panel. ---
+      const keep = promote
+        ? heroLayers
+        : imgs.filter((l) => l.indexOf('gradient') >= 0
+            || (l.indexOf('url(') >= 0 && !isFrameBg(l)));
       el.style.setProperty('--fs-bleed-grads', keep.length ? keep.join(', ') : 'none');
       el.classList.add('fs-bleed-panel');
     });

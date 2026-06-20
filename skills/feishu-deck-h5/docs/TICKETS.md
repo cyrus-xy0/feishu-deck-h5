@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-345**
+> **下一可用号 = F-346**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-343 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-345 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -124,6 +124,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | --- | --- | --- |
 | F-342 | **`lift-to-new-deck.py`(新工具)**:一条命令把 deck.json-native 源 deck 的某页(`locate-slide.py` 语法:N/#N/range/list/key/title)lift 成一个**全新独立 deck**。写一份 schema-valid 的空 deck.json 脚手架(deck_meta 只 require title;slides:[] 不单独 lint,首次 paste 追加后才由 deck-cli 写回时 lint),然后**把每页的复制委托给既有 `deck-cli.py paste`**——零逻辑重复,自动继承 F-255 的内嵌 scoped CSS rekey(治「数百选择器孤儿到旧 key」)、data-text-id 剥离、退役 var 重映射、`lifted` 溯源、资产拷贝。`--new-key`(单页时给语义 key)、`--render`(跑 `--final --renumber`)、拒绝覆盖已有 deck.json 的 dest(那是 paste 的活)。**新测 6/6**(产出过 lint / CSS rekey 到新 key / lifted 溯源 / 多页保源 key / `--new-key` 多页拒绝 / 拒覆盖);paste·lift 相邻回归 77 passed 零回归。立项=本工单(复盘「代码解决而非记 Memory」)。 | `deck-json/lift-to-new-deck.py`(新)/ `deck-json/tests/test_lift_to_new_deck.py` |
 | F-344 | **letterbox 黑边自动消缝(框架 JS+CSS,承 F-318/F-307)**:lifted/raw 页常自带「铺满整页的不透明背景面板」(`.qilu-page`/`.source-frame-wrap`/`.ppt-stage`/`.slide65-redo`…),在 16:9 `.slide` 内重画 content-bg(slide 裁剪)或实色;而 present 模式 `.slide-frame` 按**整窗**裁剪同一张 content-bg 填 letterbox(F-318)→ 非 16:9 屏上 slide↔letterbox 交界出现亮度接缝(俗称「黑边」)。F-318 只把 `.slide` 直接子级置透明,够不到这些任意命名的后代面板。`feishu-deck.js::markBleedPanels` 用几何检出此类面板(≥95% slide 覆盖 + content-bg 或不透明实色背景),保留装饰 glow 渐变进 `--fs-bleed-grads`、标 `.fs-bleed-panel`;`feishu-deck.css` 仅 present 模式把其底色转透明 → 露出 frame 单层无缝 content-bg。挂在 `maybeBalance` 同两处懒钩子(init 跑批 + is-current MutationObserver retry),零新 observer、零额外 reflow;scroll 模式不动(CSS 门控)。真 deck(齐鲁制药)9 页接缝清零、对照页(封面/agenda/根级 content-bg 页)零回归;新测 6/6(指纹×3 + 运行时 present 消缝/scroll 不动/小卡片不误伤)。立项=用户「别每次手工修、内置到技能」。 | `assets/feishu-deck.js` / `assets/feishu-deck.css` / `deck-json/tests/test_letterbox_seam_fix.py` |
+| F-345 | **letterbox 黑边二期·自定义满幅装饰升帧消缝(承 F-344/F-318,运行时 JS 镜像)**:F-344 消的是「面板重画 content-bg / 实色」那类缝;但 lift 页常把**自定义满幅装饰**(径向 glow + `::before` 压暗 vignette)只画在 slide 内的满幅 wrapper(`.qilu-page`…)上、frame 不知情 → 装饰止于 16:9 slide 边、letterbox 不带装饰 → 同一道亮度接缝(齐鲁制药 p2「黑边」实为此类,**非** F-344;F-344 只把面板底色转透明,glow/vignette 仍 slide-confined → 缝残留)。这正是框架既有 `data-decor` 声明式 mirror 为内置 token 解决的事(present 模式把 glow 画到 `.slide-frame::after`、清零 slide 自身那份);F-345 把它**泛化到运行时任意自定义装饰**:`markBleedPanels` 几何检出满幅面板后,连**每层 size/position/repeat** 一并抓出 glow 渐变 + `::before` vignette,连同 frame 自身底色(`--fs-bleed-frame-*`)一起重写进 **frame 背景**(装饰叠底色之上)、标 `.fs-bleed-host` → 同一套装饰现覆盖 letterbox+slide。装饰走 frame **背景**而非 `::after`,**永远在 slide 内容之下**(压暗 vignette 不会糊住卡片/正文——这是不用 `::after` 的关键)。面板自身那份清零(`.fs-bleed-panel` 去底 + `.fs-bleed-promoted` 去 `::before`),content-bg 层**按 basename 比对**(面板引自己 assets 目录的同名图、frame 用 skill 目录 framework var,路径不同图相同)→ 仍认出丢弃。仅 present 门控,scroll 不动;命中 `data-decor` token 的页跳过(交声明式 mirror,免抢同一 paint)。真 deck 齐鲁 p2:上/下边界亮度台阶清零(底部两侧像素 `8,11,21` 相等)、装饰外观不变。新测 10/10(指纹×5 含 host 规则/basename/`::before` + 运行时 升帧/边界无缝像素探针/纯 content-bg 走 F-344 不升帧/小卡片不误伤/scroll 不动)。立项=用户「装饰铺满整帧·框架级根治 p2 黑边」(F-344 合 main 后下一格)。 | `assets/feishu-deck.js` / `assets/feishu-deck.css` / `deck-json/tests/test_letterbox_seam_fix.py` |
 
 ## 已裁决(WONTFIX / DONE)
 
