@@ -251,6 +251,22 @@ R-DECK-TYPESCALE-BUDGET:
     - "内容页的字号回到 4 档阶梯 {16 脚注 / 24 正文 / 28 小标题 / 48 标题}, 删掉多余的豁免注释"
     - "确属整 deck 有意 (如数据大屏): 给整 deck 加 data-allow-typescale-budget, 或写 /* allow:typescale-budget */"
 
+R-DECK-EYEBROW-BUDGET:
+  concern:     "C · 复用时会打架"
+  symptom:     "全 deck 太多内容页带 (class 标记的) eyebrow/kicker 小标签 (超过 ⌈内容页数/3⌉)"
+  consequence: "'每页一个小标签'是 AI slop 指纹, 显得模板化; 飞书 content 页本该是单行纯标题"
+  fix:
+    - "删掉内容页上重复的 eyebrow/kicker, 只在少数承上启下 / 分隔页保留"
+    - "确属有意: 给整 deck 加 data-allow-eyebrow-budget, 或写 /* allow:eyebrow-budget */"
+
+R-DECK-RADIUS-DRIFT:
+  concern:     "C · 复用时会打架"
+  symptom:     "全 deck 作者 CSS 有近重复的盒子圆角 (一簇里 ≥3 个肉眼几乎一样的值, 如 11/12/13, 或密集圆角梯)"
+  consequence: "近重复圆角是'每个盒子重新目测'的指纹, 看着碎; 抽到别处拼接时圆角风格接不上"
+  fix:
+    - "把每簇近重复圆角统一成一个值, 最好抽成共享 --fs-* token; 刻意的分级体系 (8/16/24) 不在此列, pill/dot 用 999px 不算"
+    - "确属有意: 给整 deck 加 data-allow-radius, 或写 /* allow:radius */"
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  补全 (2026-05-31) — 逐页业务报告 (默认输出) 需要每条会触发的规则都有
@@ -623,6 +639,14 @@ R-VIS-DIM-TEXT:
   consequence: "深色底上发灰的句子投影出来看不清, 客户读不到这段内容"
   fix:
     - "正文用纯白 #fff; 灰白档 (--fs-text-40 等) 只留给角标 / 页码等装饰"
+
+R-VIS-CONTRAST-WCAG:
+  concern:     "A · 客户看不见"
+  symptom:     "这一页正文与浅色/彩色实色背景对比度不足 (低于 WCAG AA: 正文 4.5:1 / 大字 3:1)"
+  consequence: "浅卡上的浅灰字、浅底上的白字, 投影或打印时读起来吃力, 客户看不清"
+  fix:
+    - "加大文字与背景的明度差 (正文 ≥4.5:1, 大字/粗体 ≥3:1), 或换更深/更浅的文字色"
+    - "确属设计意图 (装饰性弱文字): 给该元素加 data-allow-contrast"
 
 R-VIS-FILL:
   concern:     "A · 客户看不见"

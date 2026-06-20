@@ -1085,6 +1085,11 @@
     'R-DECK-TITLE-DRIFT': { coverage: 'universal', signal: 'dom' },
     'R-DECK-PALETTE-DRIFT': { coverage: 'universal', signal: 'css-source' },
     'R-DECK-TYPESCALE-BUDGET': { coverage: 'universal', signal: 'css-source' },
+    // 跨页一致性续 (DECK-LEVEL · F-349 eyebrow 预算 / F-350 圆角体系) + 对比度地板
+    // (F-351 WCAG)。均 name-free、universal(raw+schema 都跑);opt-out 是逃生口非收窄。
+    'R-DECK-EYEBROW-BUDGET': { coverage: 'universal', signal: 'dom' },
+    'R-DECK-RADIUS-DRIFT': { coverage: 'universal', signal: 'css-source' },
+    'R-VIS-CONTRAST-WCAG': { coverage: 'universal', signal: 'dom' },
   };
 
   // Contract assertion — pure data check, never throws at engine load (a bad entry
@@ -3891,6 +3896,121 @@
               + `--fs-text-40 / 0.40 是 chrome 专用档,别用在句子型正文上)。`
               + `Fix: 正文用 var(--fs-text) 或 ≥ 0.84 亮度,次要说明 ≥ 0.72;`
               + `真要暗的注记 → 用 .footnote / .source 等 chrome 类,或元素加 data-allow-dim-text。`,
+          });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-VIS-CONTRAST-WCAG · 正文与【有效背景】对比度低于 WCAG AA (F-351, 2026-06-20).
+      //   与 R-VIS-DIM-TEXT 互补、零重叠:DIM-TEXT 假设画布是纯黑、用启发式 eff 亮度
+      //   (alpha×相对亮度 < 0.5)逮"深色画布上发灰的字",看不见【浅色 / 彩色实色背景】上的
+      //   低对比(浅卡上的浅灰字、浅黄 callout 上的白字 —— 投影/打印读不清,是 AI slop 高频坑)。
+      //   本条只在【能解析出的不透明实色 + 偏亮(relLum≥0.35)背景】上算真·WCAG 对比度
+      //   (gamma-correct 相对亮度 + (L1+.05)/(L2+.05) 比值),正文 <4.5:1 / 大字·粗体 <3:1 → warn。
+      //   保守至上(地板规则宁漏勿误报):背景是渐变 / 图片 / 半透明 / 解析不到不透明底 / 偏暗
+      //   (那是 DIM-TEXT 的地盘)→ 一律豁免,绝不二次报。豁免链与 DIM-TEXT 同款(hero / chrome /
+      //   ALL-CAPS eyebrow / 双语 -en / mock 内 / data-allow-contrast|data-allow-dim-text)。
+      //   warn(对比度是 AA 下限的启发执行,绝不 error 阻断存量交付)。
+      id: 'R-VIS-CONTRAST-WCAG',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx, isHeroLayout } = ctx;
+        if (isHeroLayout) return [];
+        // gamma-correct WCAG 相对亮度 + 对比度比值(self-contained,无现成 helper)。
+        const _lin = (c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+        const _relLum = (r, g, b) => 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b);
+        const _ratio = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+        const _rgb = (s) => {
+          const m = (s || '').match(/rgba?\(([^)]+)\)/);
+          if (!m) return null;
+          const p = m[1].split(',').map((x) => parseFloat(x));
+          if (p.length < 3) return null;
+          return { r: p[0], g: p[1], b: p[2], a: p.length >= 4 ? p[3] : 1 };
+        };
+        // 解析【有效背景】:从元素自身向上走,首个不透明实色 background-color 即文字落底;
+        // 中途遇到 background-image(渐变/图片)/ 半透明底 → 解析不可靠,返回 null = 豁免。
+        const _bg = (el) => {
+          for (let n = el; n && n !== slide.parentElement; n = n.parentElement) {
+            const cs = getComputedStyle(n);
+            if (cs.backgroundImage && cs.backgroundImage !== 'none') return null;
+            const c = _rgb(cs.backgroundColor);
+            if (c) {
+              if (c.a >= 0.999) return c;     // 不透明实色 = 命中
+              if (c.a > 0) return null;        // 半透明底 → 无法干净合成 → 豁免
+            }
+            if (n === slide) break;
+          }
+          return null;                          // 没解析到不透明底(暗画布 = DIM-TEXT 地盘)→ 豁免
+        };
+        const findings = [];
+        const seen = new Set();
+        slide.querySelectorAll('*').forEach((el) => {
+          if (el.ownerSVGElement || el.tagName === 'TEXT' || el.tagName === 'tspan') return;
+          if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+          let txt = '';
+          for (const nn of el.childNodes) if (nn.nodeType === 3) txt += nn.textContent;
+          txt = txt.trim();
+          if (txt.length < 8) return;                                   // sentence-like body only
+          if (/[A-Z]/.test(txt) && !/[a-z一-鿿]/.test(txt)) return;   // ALL-CAPS eyebrow/footer
+          {
+            const _cls = (el.className && el.className.baseVal !== undefined
+              ? el.className.baseVal : (el.className || '')).toString();
+            if (/(?:^|\s)[\w-]*-en(?:\s|$)/.test(_cls)) return;          // bilingual EN sub-track
+          }
+          if (visHasAnyClass(el, VIS_CONTENT_CHROME_CLASSES) || visIsStaticChrome(el)) return;
+          let inMock = false;
+          for (let n = el; n && n !== slide; n = n.parentElement) {
+            if (visHasAnyClass(n, VIS_TIER_MOCK)) { inMock = true; break; }
+          }
+          if (inMock) return;
+          let allowOut = false;
+          for (let n = el; n; n = n.parentElement) {
+            if (n.dataset && (n.dataset.allowContrast != null || n.dataset.allowDimText != null)) { allowOut = true; break; }
+          }
+          if (allowOut) return;
+          const fg = _rgb(cs.color);
+          if (!fg) return;
+          // 饱和品牌强调色文字(蓝/绿/橙/紫…)是刻意着色,非"洗白的灰",豁免(与 DIM-TEXT 的
+          // maxc-minc>40 同口径;否则飞书品牌蓝 #3370ff、品牌绿 #16a34a 等浅卡上的彩字会误报)。
+          if (Math.max(fg.r, fg.g, fg.b) - Math.min(fg.r, fg.g, fg.b) > 40) return;
+          const bg = _bg(el);
+          if (!bg) return;                                              // 有效背景不可解析 → 豁免
+          const bgLum = _relLum(bg.r, bg.g, bg.b);
+          if (bgLum < 0.35) return;                                     // 偏暗背景 = DIM-TEXT 地盘,零重叠
+          // 文字半透明 → 先合成到实色背景上再算(WCAG 要求按实际渲染色)。
+          const a = fg.a;
+          const fr = a * fg.r + (1 - a) * bg.r;
+          const fgc = a * fg.g + (1 - a) * bg.g;
+          const fb = a * fg.b + (1 - a) * bg.b;
+          // 浅色文字 + 浅背景 = 多半是"浅字盖在更暗的层 / scrim 上"被祖先 walk 误解析成浅底
+          // (caption-over-scrim 这类可读模式;对抗验证实测此为主要 FP),保守跳过(宁漏勿误报);
+          // 本规则聚焦【深/中灰文字落在浅实色卡】这一最可靠、DIM-TEXT 看不见的低对比情形。
+          if (_relLum(fr, fgc, fb) > 0.55) return;
+          const cr = _ratio(_relLum(fr, fgc, fb), bgLum);
+          const px = parseFloat(cs.fontSize) || 0;
+          const wt = parseInt(cs.fontWeight, 10) || 400;
+          const isLarge = px >= 24 || (px >= 18.66 && wt >= 700);       // WCAG 大字档
+          const need = isLarge ? 3.0 : 4.5;
+          if (cr >= need) return;
+          const sel = shortSel(el);
+          const key = `${slide_idx}::${sel}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const preview = txt.length > 40 ? txt.slice(0, 40) + '…' : txt;
+          findings.push({
+            rule: 'R-VIS-CONTRAST-WCAG', severity: 'warn', slide_idx,
+            selector: sel, contrast_ratio: Math.round(cr * 100) / 100, required: need,
+            message:
+              `slide ${slide_idx} · \`${sel}\` 正文 ("${preview}") 与其背景对比度仅 `
+              + `${cr.toFixed(2)}:1,低于 WCAG AA 下限 ${need}:1(${isLarge ? '大字/粗体' : '正文'})`
+              + ` —— 浅色/彩色实色底上的低对比文字,投影或打印时读起来吃力(DIM-TEXT 只看深色`
+              + `画布、看不到这种浅底低对比,本条专补)。Fix: 加大文字与背景的明度差(正文 ≥4.5:1、`
+              + `大字/粗体 ≥3:1),或换更深/更浅的文字色;确属设计意图 → 元素加 `
+              + `\`data-allow-contrast\`。(advisory · never blocks)`,
           });
         });
         return findings;
@@ -6930,6 +7050,141 @@
             + 'off-tier sizes back onto the ladder (or into shared `--fs-*` tokens) '
             + 'and keep `allow:typescale` for the genuine hero exceptions. '
             + 'Deliberate? add `data-allow-typescale-budget` to the deck. '
+            + '(advisory · never blocks)',
+        }];
+      },
+    },
+
+    {
+      // R-DECK-EYEBROW-BUDGET · 跨页 eyebrow 密度预算 (F-349, 2026-06-20).
+      //   AI slop 高频指纹:每页标题上方都扣一个 uppercase tracking 小标签(eyebrow/kicker)。
+      //   飞书 content 页本是单行纯标题(deck 既有约定:content/story 页无 eyebrow);R56 只在
+      //   框架 `.header .eyebrow` 上强制【结构】,从不数【密度】。本条按 taste-skill「最多 1
+      //   eyebrow / 3 sections」立 deck 级预算:数【内容页(非 hero)中带 eyebrow 的页数】,
+      //   超过 ⌈内容页数 / 3⌉ → warn。eyebrow 判定 = class token ∈ {eyebrow,kicker,overline}
+      //   (含框架 `.header .eyebrow`,token-exact·零误报)。【刻意不猜 un-classed 小标签】:
+      //   对抗验证实测,基于文字样式的 de-facto 启发(uppercase/tracked/small)会把 KPI 指标标
+      //   (GMV/ARR)、双语 EN gloss(revenue)、状态徽标(LIVE)这类【非 eyebrow】的复现小标签全
+      //   误报。地板规则 FP 是大忌:宁可漏(raw 页手搓未加类的 eyebrow)也绝不误报;作者要纳入时
+      //   加 `.eyebrow`/`.kicker` 类即可(框架本就这么渲)。
+      //   hero 版式(cover/section/quote…)的 eyebrow 是合法的,不计入(只数内容页)。deck 带
+      //   data-allow-eyebrow-budget(或 /* allow:eyebrow-budget */)整豁免。warn。
+      id: 'R-DECK-EYEBROW-BUDGET',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RDECK_EYEBROW_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次
+        if (typeof window !== 'undefined') window.__RDECK_EYEBROW_DONE__ = true;
+        if (typeof document === 'undefined') return [];
+        if (document.querySelector('[data-allow-eyebrow-budget]')) return [];
+        if (allStyleText().indexOf('allow:eyebrow-budget') >= 0) return [];
+
+        const slides = document.querySelectorAll('.slide');
+        let content = 0, withEye = 0;
+        slides.forEach((sl) => {
+          const layout = sl.getAttribute('data-layout') || '';
+          if (HERO_LAYOUTS.has(layout)) return;     // 只数内容页(hero 的 eyebrow 合法)
+          content += 1;
+          // class-marked eyebrow/kicker/overline(含框架 `.header .eyebrow`)。CSS 类选择器
+          // `.eyebrow` 是 token-exact(`.eyebrow-x` 不匹配)。可见性过滤一道。
+          const eyeEl = sl.querySelector('.eyebrow, .kicker, .overline');
+          if (eyeEl) {
+            const cs = getComputedStyle(eyeEl);
+            if (cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity !== 0) withEye += 1;
+          }
+        });
+        if (content < 1) return [];
+        const budget = Math.ceil(content / 3);
+        if (withEye <= budget) return [];
+
+        return [{
+          rule: 'R-DECK-EYEBROW-BUDGET', severity: 'warn', slide_idx,
+          eyebrow_pages: withEye, content_pages: content, budget,
+          message:
+            `deck 在 ${content} 个内容页里有 ${withEye} 页带 eyebrow/kicker 小标签(预算 `
+            + `⌈${content}/3⌉=${budget})—— "每页标题上方都扣一个 uppercase 小标签"的 AI 指纹。`
+            + '飞书 content 页本是单行纯标题,eyebrow 该留给 section/分隔等仪式时刻。'
+            + 'Fix: 删掉内容页上重复的 eyebrow,只在少数承上启下页保留;'
+            + '确属设计意图? deck 加 `data-allow-eyebrow-budget`(或 `/* allow:eyebrow-budget */`)。'
+            + '(advisory · never blocks)',
+        }];
+      },
+    },
+
+    {
+      // R-DECK-RADIUS-DRIFT · 跨页圆角【近重复漂移】 (F-350, 2026-06-20).
+      //   与 R-DECK-PALETTE-DRIFT 同构(那条逮近重复强调色,这条逮近重复圆角)。走 CSS 源扫
+      //   (只扫【作者 / per-page CSS】iterStyleBlocks(false)+inline style —— 框架统一基线排除)。
+      //   抓 border-radius / border-*-radius(含四角 longhand)的 px 值,排 0(直角)、排胶囊/整圆
+      //   (≥100px 或 % token,刻意的 pill/dot 不是盒子圆角)。**不罚刻意的分级圆角体系**
+      //   (chip/card/sheet=8/16/24,间距大、各自单独 → 合法设计,是 CEILING 模型的事不是地板该管),
+      //   只罚【近重复漂移】:3px 容差单链聚类后,某一簇里挤了 ≥3 个肉眼几乎一样的圆角
+      //   (11/12/13:本想同一个"~12"手敲出三个),或密集圆角梯(8/10/12/14/16 每级仅差 2px 糊成
+      //   一坨)→ warn。对抗验证定校准:tiered 8/16/24 与 rem 8/12/16 静默、near-dup 11/12/13 与密集
+      //   梯触发。deck 带 data-allow-radius(或 /* allow:radius */)整豁免。warn。
+      id: 'R-DECK-RADIUS-DRIFT',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        if (typeof window !== 'undefined' && window.__RDECK_RADIUS_DONE__) return [];
+        if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次
+        if (typeof window !== 'undefined') window.__RDECK_RADIUS_DONE__ = true;
+        if (typeof document === 'undefined') return [];
+        if (document.querySelector('[data-allow-radius]')) return [];
+        if (allStyleText().indexOf('allow:radius') >= 0) return [];
+
+        // 只扫作者 / per-page CSS(排框架统一基线)+ inline style 属性。data: URI 剥掉。
+        let txt = '';
+        for (const { css } of iterStyleBlocks(false)) txt += '\n' + css;
+        const inlineEls = document.querySelectorAll('[style]');
+        for (const el of inlineEls) txt += '\n' + (el.getAttribute('style') || '');
+        txt = txt.replace(/data:[^"'\s)]+/g, '');
+
+        // border-radius / border-*-radius(含四角 longhand,故 `(?:-[a-z]+)*` 允许多段)的
+        // px 盒子圆角集合。% token 跳过(pill/dot 角),不丢整条声明 → longhand 里混 % 的 px 角仍收。
+        const radii = new Set();
+        let m;
+        const DECL = /border(?:-[a-z]+)*-radius\s*:\s*([^;}{]+)/gi;
+        while ((m = DECL.exec(txt))) {
+          let pm;
+          const NUM = /(\d+(?:\.\d+)?)\s*(px|rem|em|%)?/g;
+          while ((pm = NUM.exec(m[1]))) {
+            const unit = pm[2] || 'px';
+            if (unit === '%') continue;               // 百分比角 = pill/dot,跳过该 token
+            let n = parseFloat(pm[1]);
+            if (unit === 'rem' || unit === 'em') n *= 16;  // 近似换算
+            n = Math.round(n);
+            if (n <= 0) continue;                     // 0 = 直角
+            if (n >= 100) continue;                   // 胶囊 / 整圆,不是盒子圆角
+            radii.add(n);
+          }
+        }
+        const vals = [...radii].sort((a, b) => a - b);
+        if (vals.length < 3) return [];               // <3 个盒子圆角:不可能有 ≥3 近重复簇
+
+        // 3px 容差单链聚类(同 PALETTE-DRIFT 的近重复思路);某簇含 ≥3 个【不同】值才报
+        // (= ≥3 个近重复,手调漂移)。刻意分级体系(8/16/24,间距 >3px)各成单值簇 → 不报。
+        const clusters = [];
+        let cur = [vals[0]];
+        for (let i = 1; i < vals.length; i++) {
+          if (vals[i] - vals[i - 1] <= 3) cur.push(vals[i]);
+          else { clusters.push(cur); cur = [vals[i]]; }
+        }
+        clusters.push(cur);
+        const dup = clusters.filter((cl) => cl.length >= 3);
+        if (!dup.length) return [];
+
+        const sysList = dup.map((cl) => cl.map((v) => v + 'px').join(' ≈ ')).join(' | ');
+        return [{
+          rule: 'R-DECK-RADIUS-DRIFT', severity: 'warn', slide_idx,
+          radius_clusters: dup.length, values: vals,
+          message:
+            `deck 作者 CSS 有近重复的盒子圆角(${sysList})—— "每个盒子重新目测圆角"的指纹:`
+            + '一簇里挤了 ≥3 个肉眼几乎一样的圆角(本想同一个值却手敲出好几个),或密集圆角梯。'
+            + '把每簇近重复圆角统一成一个值(最好抽成共享 `--fs-*` token);刻意的分级体系'
+            + '(如 8/16/24 三档)不在此列,pill/dot 用 999px 也不算。'
+            + '确属设计意图? deck 加 `data-allow-radius`(或 `/* allow:radius */`)。'
             + '(advisory · never blocks)',
         }];
       },

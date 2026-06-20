@@ -35,7 +35,11 @@ ROOT = DECKJSON.parent
 ASSETS = ROOT / "assets"
 RENDER = DECKJSON / "render-deck.py"
 
-CODES = ["R-DECK-TITLE-DRIFT", "R-DECK-PALETTE-DRIFT", "R-DECK-TYPESCALE-BUDGET"]
+CODES = ["R-DECK-TITLE-DRIFT", "R-DECK-PALETTE-DRIFT", "R-DECK-TYPESCALE-BUDGET",
+         "R-DECK-EYEBROW-BUDGET", "R-DECK-RADIUS-DRIFT"]
+# Per-rule must-fire/edge behaviour for the two newer codes (F-349 / F-350) lives in
+# test_deck_eyebrow_budget.py / test_deck_radius_drift.py; here they ride the STATIC
+# wiring tests + the clean-examples calibration (all R-DECK-* must stay silent).
 
 FIX_TITLE = TESTS / "fixtures" / "deck-title-drift-must-fire.deck.json"
 FIX_PALETTE = TESTS / "fixtures" / "deck-palette-drift-must-fire.deck.json"

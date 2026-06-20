@@ -102,9 +102,11 @@ FAMILIES = [
                               'R-VIS-SHORT-LABEL-FLOOR', 'R-VIS-SVG-TEXT-FLOOR',
                               'R-VIS-CANVAS-CENTER',
                               'R-VIS-BAND-COLLIDE', 'R-VIS-DEAD-ANIM', 'R-VIS-DEAD-RULE',
-                              'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS', 'R-VIS-RAW-TITLE-STACK']),
+                              'R-VIS-FILL', 'R-VIS-RAW-TITLE-POS', 'R-VIS-RAW-TITLE-STACK',
+                              'R-VIS-CONTRAST-WCAG']),
     ('跨页一致性',           ['R-DECK-TITLE-DRIFT', 'R-DECK-PALETTE-DRIFT',
-                              'R-DECK-TYPESCALE-BUDGET', 'R-FAMILY-DRIFT']),
+                              'R-DECK-TYPESCALE-BUDGET', 'R-FAMILY-DRIFT',
+                              'R-DECK-EYEBROW-BUDGET', 'R-DECK-RADIUS-DRIFT']),
 ]
 
 CONTEXT_NOTES = {
