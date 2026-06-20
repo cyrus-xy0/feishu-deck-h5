@@ -141,3 +141,67 @@ def test_line_is_nofill_false_when_no_ln():
     fake = _FakeShape()
     fake._element = fake._element.getparent()
     assert bp._line_is_nofill(fake) is False
+
+
+# ── letterbox-seam ("黑边") prevention: _fullbleed_frame_css ─────────────────────
+# A full-bleed PPTX page paints its bg only inside the 16:9 .slide; in present
+# mode the .slide-frame fills the viewport and shows the GENERIC content-bg in the
+# letterbox → a seam on non-16:9 screens. compose_slide bakes a per-slide
+# custom_css that mirrors the page's OWN backing onto the frame. The framework
+# runtime heal (markBleedPanels) only sees CSS backgrounds, not these <img>/rect
+# elements, so this static rule is what actually closes the seam for imports.
+
+_FULL_IMG = {"id": "i1", "type": "image", "src": "input/bg-001.jpg",
+             "x": 0, "y": 0, "w": 1920, "h": 1080}
+
+
+def test_fullbleed_frame_css_image_emits_frame_rule():
+    css = bp._fullbleed_frame_css("slide-007", [_FULL_IMG])
+    assert css is not None
+    assert bp._FRAME_BG_MARKER in css
+    # targets the FRAME (parent of .slide) for THIS slide key, present mode only
+    assert '.deck[data-mode="present"] .slide-frame' in css
+    assert ':has(> .slide[data-slide-key="slide-007"])' in css
+    assert 'url("input/bg-001.jpg")' in css
+    assert "background-size: cover" in css
+
+
+def test_fullbleed_frame_css_layers_top_first():
+    """Element order is bottom→top; CSS background-image lists TOP first, so the
+    emitted layer order must be REVERSED (top image wins the paint)."""
+    bottom = dict(_FULL_IMG, id="b", src="input/bottom.jpg")
+    top = dict(_FULL_IMG, id="t", src="input/top.png")
+    css = bp._fullbleed_frame_css("slide-001", [bottom, top])  # bottom listed first
+    i_top = css.index('url("input/top.png")')
+    i_bot = css.index('url("input/bottom.jpg")')
+    assert i_top < i_bot, "top layer must come first in CSS background-image"
+
+
+def test_fullbleed_frame_css_solid_only_flat_fills():
+    """A page whose only full-bleed backing is a solid rect → flat-fill the frame
+    that colour (prevents a coloured slide seaming against the dark letterbox)."""
+    rect = {"id": "r", "type": "shape", "kind": "rect", "fill": "#0B0F18",
+            "x": 0, "y": 0, "w": 1920, "h": 1080}
+    css = bp._fullbleed_frame_css("slide-003", [rect])
+    assert css is not None
+    assert "background-color: #0B0F18" in css
+    assert "background-image: none" in css
+
+
+def test_fullbleed_frame_css_solid_backs_image_stack():
+    """When both a full-bleed solid and image exist, the solid is the base colour
+    under the image stack (not #000)."""
+    rect = {"id": "r", "type": "shape", "kind": "rect", "fill": "#123456",
+            "x": 0, "y": 0, "w": 1920, "h": 1080}
+    css = bp._fullbleed_frame_css("slide-004", [rect, _FULL_IMG])
+    assert "background-color: #123456" in css
+    assert 'url("input/bg-001.jpg")' in css
+
+
+def test_fullbleed_frame_css_none_when_not_fullbleed():
+    """A page with no full-bleed backing (small/inset elements only) gets NO
+    custom_css — it keeps the framework's generic letterbox."""
+    small = {"id": "s", "type": "image", "src": "input/icon.png",
+             "x": 800, "y": 400, "w": 320, "h": 240}
+    assert bp._fullbleed_frame_css("slide-009", [small]) is None
+    assert bp._fullbleed_frame_css("slide-010", []) is None

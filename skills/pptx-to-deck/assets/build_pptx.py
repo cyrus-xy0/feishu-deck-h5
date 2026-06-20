@@ -1379,6 +1379,74 @@ def _lifted_marker(deck_stem: str, slide_no: int) -> str:
     return f"pptx:{deck_stem}#{slide_no}"
 
 
+# Marker prefix for the auto-emitted frame-background block, so the rule is
+# recognisable / idempotently re-strippable downstream (mirrors lift-slides'
+# convention of fingerprinting generated CSS).
+_FRAME_BG_MARKER = "/* fs-frame-bg auto */"
+
+
+def _fullbleed_frame_css(slide_key: str, elements: list) -> "str | None":
+    """Per-slide custom_css that paints THIS page's own full-bleed background onto
+    the `.slide-frame` in present mode — the letterbox-seam ("黑边") prevention.
+
+    WHY: in present mode `.slide-frame` fills the whole viewport and paints the
+    GENERIC `--fs-asset-content-bg` across the top/bottom letterbox, while a
+    full-bleed PPTX page paints its OWN background only inside the fixed-16:9
+    `.slide`. On any non-16:9 screen the two mismatch at the slide↔letterbox
+    boundary → visible bars/seam. The framework runtime heal
+    (feishu-deck.js::markBleedPanels, F-344/F-345) only inspects CSS
+    `background-image`/`background-color`, so it catches lifted CSS-panel pages
+    but NOT the `<img>` element / backing-rect backgrounds THIS importer emits.
+    So we bake a static, self-contained rule that re-paints the page's own
+    backing onto the frame; the letterbox then extends the page background
+    seamlessly with no runtime-JS or framework dependency (static render safe).
+
+    Returns None for pages with no full-bleed backing (a genuinely transparent /
+    default-white page keeps the framework's generic letterbox).
+
+    The selector targets the frame via `:has(> .slide[data-slide-key=…])`; it
+    already carries `[data-slide-key=`, so render-deck's `scope_selectors` passes
+    it through verbatim (it only prefixes selectors that DON'T name a slide key).
+    Present-mode only — scroll mode has no letterbox, same contract as F-318.
+    """
+    cw, ch = SLIDE_W, SLIDE_H
+
+    def _is_fullbleed(e):
+        return (e.get("w", 0) >= cw * 0.97 and e.get("h", 0) >= ch * 0.97
+                and abs(e.get("x", 0)) <= cw * 0.03 and abs(e.get("y", 0)) <= ch * 0.03)
+
+    img_srcs: list = []
+    solid: "str | None" = None
+    for e in elements:                       # bottom→top element order
+        if not _is_fullbleed(e):
+            continue
+        t = e.get("type")
+        if t == "image" and e.get("src"):
+            img_srcs.append(e["src"])
+        elif t == "shape" and e.get("kind") == "rect" and e.get("fill"):
+            solid = e["fill"]                # last full-bleed solid is the base color
+
+    if not img_srcs and not solid:
+        return None
+
+    sel = ('.deck[data-mode="present"] .slide-frame'
+           f':has(> .slide[data-slide-key="{slide_key}"])')
+    if img_srcs:
+        # CSS background-image lists TOP layer first → reverse the bottom→top
+        # element order. Solid (if any) backs the stack; #000 otherwise.
+        layers = ", ".join(f'url("{u}")' for u in reversed(img_srcs))
+        return (f"{_FRAME_BG_MARKER}\n{sel} {{\n"
+                f"  background-color: {solid or '#000'};\n"
+                f"  background-image: {layers};\n"
+                f"  background-position: center;\n"
+                f"  background-size: cover;\n"
+                f"  background-repeat: no-repeat;\n}}")
+    # full-bleed solid colour only → flat-fill the frame the same colour.
+    return (f"{_FRAME_BG_MARKER}\n{sel} {{\n"
+            f"  background-color: {solid};\n"
+            f"  background-image: none;\n}}")
+
+
 # ── slide → canvas elements ────────────────────────────────────────────────────
 def compose_slide(slide, idx: int, cv: Canvas, prs, input_dir: Path,
                   img_counter: list, deck_stem: str) -> dict:
@@ -1409,8 +1477,9 @@ def compose_slide(slide, idx: int, cv: Canvas, prs, input_dir: Path,
     for shape in slide.shapes:
         elements += emit_shape(shape, cv, xf, idgen, input_dir, img_counter)
 
-    return {
-        "key": f"slide-{slide_no:03d}",
+    slide_key = f"slide-{slide_no:03d}"
+    sd = {
+        "key": slide_key,
         "layout": "canvas",
         "screen_label": f"{slide_no:02d}",
         # IMPORTED PROVENANCE: this slide is verbatim-carried from a foreign
@@ -1424,6 +1493,13 @@ def compose_slide(slide, idx: int, cv: Canvas, prs, input_dir: Path,
             "elements": elements,
         },
     }
+    # Letterbox-seam ("黑边") prevention: if this page is full-bleed, mirror its own
+    # background onto the present-mode .slide-frame so the letterbox doesn't show the
+    # generic content-bg. See _fullbleed_frame_css for the full rationale.
+    frame_css = _fullbleed_frame_css(slide_key, elements)
+    if frame_css:
+        sd["custom_css"] = frame_css
+    return sd
 
 
 def _default_renderer() -> Path:
