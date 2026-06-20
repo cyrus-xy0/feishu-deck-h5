@@ -46,6 +46,19 @@ Designer + Renderer instead).
   updated, html refused) when the renderer entity-escaped the text — then sync
   with a `--quick` render. If NEW is much longer than OLD the tool warns about
   overflow; eyeball or do a `--scope` render when the page was already tight.
+
+  ```text
+  ✓ exit 3 = deck.json WAS written but index.html was refused
+    (entity-escaped, or match count ≠ 1). The two representations now
+    disagree — reconcile before doing anything else:
+        render-deck.py <deck.json> <out>/ --quick
+  ✗ treat exit 3 like exit 0 and render/deliver as-is (ships deck.json and
+    index.html out of sync).
+  ```
+
+  Counter-intuitive: this exit code is NOT a 0/1 binary, and `exit 3` here
+  (partial write, needs re-render) is a DIFFERENT meaning than `exit 3` in
+  deck-cli (schema rollback) — see `references/deck-state-contract.md`.
 - **`EDIT` (fragment edit) — the canonical loop (W1/W3, iteration-loop)**:
 
   ```
@@ -82,6 +95,20 @@ Designer + Renderer instead).
     (deck-cli exit 6, render exit 8): handle manually (`sync-index-to-deck.py`,
     re-apply in `deck.json`) or `--force` to DISCARD. Canvas (PPTX-import) decks
     hit this — prefer editing canvas content in `deck.json`, not the browser.
+
+  ```text
+  ✓ read the exit code first: deck-cli exit 6 / render exit 8 = REFUSED
+    (canvas/schema/baked browser edit not yet in deck.json). Recover the
+    手改 first, THEN retry:
+        sync-index-to-deck.py <deck-dir>   # fold browser edits back into deck.json
+    (or redo the edit in deck.json). raw-slide edits auto-sync — no action.
+  ✗ see the refusal and reach for `--force` (silently DISCARDS the user's
+    browser 手改).
+  ```
+
+  Counter-intuitive: these exit codes are NOT a 0/1 binary, and `exit 6`
+  (deck-cli) means a different thing than `exit 3` — see
+  `references/deck-state-contract.md`.
   See `references/round-trip-integrity.md` § "Automatic clobber guard".
 
 - **`EDIT` (manual scope)**: when you DO know the page numbers, `--scope N`
@@ -226,6 +253,17 @@ Designer + Renderer instead).
   every step (writing nothing); add **`--apply`** to actually run. Always preview
   first: `heal-lifted`'s "provably-safe" premise was once falsified and rolled
   back (docs/archive), so never assume a blind direct run is safe.
+
+  ```text
+  ✓ default run = dry-run (plan only, writes nothing); read the plan, THEN:
+        deck-json/repair-lifted.py <deck>            # preview
+        deck-json/repair-lifted.py <deck> --apply    # run, after confirming
+  ✗ go straight to `--apply` and mutate in place with no preview.
+  ```
+
+  Counter-intuitive: exit codes here are NOT a 0/1 binary — `--apply`
+  transparently passes through whichever sub-tool's exit code (e.g. a
+  schema rollback) failed; see `references/deck-state-contract.md`.
 - Each step keeps its own `deck.json.bak-pre-<cmd>-<ts>` + re-validate-with-rollback,
   and `lift-slides.py` now write-after-validates + rolls back too (F-281b), so a
   lift/repair that would produce an invalid `deck.json` never lands on disk.
@@ -335,3 +373,6 @@ Designer + Renderer instead).
   sanctioned path for "add one new page to an existing deck".
 - `../../assets/capture-frames.py` — bespoke-motion pages: one command for
   mid+settled frame capture + §3.5 settle assertions (motion-system.md §3.4).
+- `../../references/deck-state-contract.md` — single-source contract for deck.json
+  / deck-cli state + errors + exit codes (per-tool, non-binary; `exit 3` differs
+  between deck-cli and fast-text).

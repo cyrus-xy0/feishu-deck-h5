@@ -79,6 +79,17 @@ These gates apply before dispatching to any subskill:
    way the locked HTML must pass its appropriate gate before that step; never
    hand-write / patch around the gate. (A framework / CSS change re-runs only the
    VISUAL audit deck-wide; content + making-of snapshot stay scoped — F-335.)
+   - The validator must be EXECUTED, not read. `validate.py` contract:
+     exit 0 = pass · 1 = fail (delivery-blocking) · 2 = file-not-found.
+   - Treat exit 1 as delivery-blocking. Never paper over a red gate by editing
+     `assets/audits.js` / the engine or attaching an opt-out — fix the content or
+     `deck.json`, never the engine.
+   - `warn_soft` = editorial advisory; `--strict` does NOT raise it to err
+     (current warn_soft: `R-VIS-NO-IMAGERY` / `R-SELF-CONTAINED` /
+     `R-LAYOUT-DEPRECATED`). Full severity model (warn / err / warn_soft +
+     `--strict` escalation) lives in `references/validator-rules.md`.
+   - Validator green ≠ done. Before delivery, squint the deck once at 1920×1080
+     (a floor signal, not an aesthetic verdict).
 
 ## Scope Discipline
 
@@ -100,6 +111,27 @@ These gates apply before dispatching to any subskill:
   `check-only` over all pages / `render --final`) on an intermediate one-page
   edit — that is the #1 cause of "改一页却渲染 / 校验 / 截图很多页". Reserve the
   whole-deck pass for a delivery checkpoint, a structural change, or `--final`.
+
+## Controller Communication Contract
+
+Index of WHERE each calibration moment lives — do not copy the wording here; the
+canonical home owns the phrasing (single-source discipline, same as the
+Authoritative Mode Enum):
+
+- Single-page scope-lock «state-once» form → Confirmation Policy in
+  `references/request-router.md`.
+- Raw / beyond-default design «确认门» form → `references/design-first.md`.
+- Result / absolute run-path «announce once» → this SKILL.md (Shared Contracts,
+  the `new-run` entry).
+- Do not over-confirm: batch-confirm, do not ask page by page (same as the
+  «加一页» rule in `references/request-router.md`).
+
+Stance — push back on the record: the four Hard Gates and the validator floor
+outrank «make it prettier / just ship it / stop asking». «直接出» waives the
+confirmation pause ONLY; it never waives the floor. When a user request would
+break the floor, name the floor + why + offer a compliant alternative that still
+serves their intent (per-warning instantiation — Bump / rename / opt-out
+options — is in `references/design-first.md`).
 
 ## Multi-Agent Dispatch
 
@@ -127,8 +159,14 @@ For every spawned worker:
   or slide range concurrently.
 - Tell it that other workers may be active and that it must not revert unrelated
   edits.
-- Require a concise final report listing files changed, commands run, validation
-  status, and blockers.
+- Two named handback channels. On completion → reply `result:` with
+  files-changed / commands-run / validation-status (exit code) / residual-risk.
+- When blocked on a decision only the controller/user can make (ambiguous scope,
+  a gate failure needing user sign-off) → reply `needs-input:` with the exact
+  question + options, then STOP. Do not guess past a scope/design/gate decision;
+  end the turn there, do not fabricate a `result:`.
+- On integration, the controller scans for `needs-input:` first; otherwise it
+  consumes `result:`.
 - If the step writes files, require the worker to re-read the latest on-disk
   file immediately before editing.
 - Tell it NOT to run its own end-to-end verification (full deck renders,
@@ -298,7 +336,9 @@ For an existing deck:
   auto-backup, schema-fail rollback, and the pre-write lint. Ad-hoc scripts
   that write deck.json directly are an anti-pattern (see editor subskill,
   "canonical loop"). Iterate with `render-deck.py --iter`; deliver with
-  `--final`.
+  `--final`. The full deck.json / deck-cli / exit-code state + error contract is
+  in `references/deck-state-contract.md`; the full anti-pattern table is in
+  `references/anti-patterns.md`.
 - Bespoke entrance/emphasis motion ("高级感"动效) is **opt-in** and lives ONLY in
   `slide.custom_css` (CSS-only, round-trips). Never head `<style>`, `<script>`, or a
   JS lib (GSAP/anime.js/WAAPI) — deck.json has no JS slot, so any script is wiped on
@@ -404,8 +444,10 @@ is mounted, stop and ask the user to mount/select a writable project folder.
 
 Workers should load only the reference files they need:
 
+- `references/anti-patterns.md`
 - `references/request-router.md`
 - `references/deck-generation-policy.md`
+- `references/deck-state-contract.md`
 - `references/design-phase.md`
 - `references/design-first.md`
 - `references/content-density.md`

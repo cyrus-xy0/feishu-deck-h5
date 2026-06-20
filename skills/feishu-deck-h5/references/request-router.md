@@ -119,11 +119,20 @@ Scope confirmation and design confirmation are independent:
   plus the six-dimensional design spec before authoring, even if it is only one
   slide.
 
-Examples:
+The two gates are **orthogonal** — either, both, or neither may fire. Decide each
+column independently; do not collapse "many pages" into "needs design" or "creative
+page" into "needs scope confirmation":
 
-- "第 7 页标题 28 改 32" = single-slide small edit, proceed.
-- "第 7 页改成双手架构 hero" = single-slide scope, but beyond-default design, so
-  run the design confirmation first.
+| Near-identical prompt | scope trigger? (>1 page) | design trigger? (beyond default) | What to do |
+| --- | --- | --- | --- |
+| "第 7 页标题 28 改 32" | no (single page) | no (pure size tweak) | both quiet → just do it |
+| "第 7 页改成双手架构 hero" | no (single page) | yes (bespoke/raw hero) | design gate only → run Q0-Q4 + spec first, then author the one page |
+| "全 deck 把『美宜佳』替换成『天福』" | yes (whole deck) | no (pure copy swap) | scope gate only → confirm the range, then `deck-json/apply-text-pairs.py` (fast-text); no design confirmation |
+| "把全 deck 每页都改成双手架构 hero" | yes (many pages) | yes (bespoke on each) | both fire → confirm scope AND run design gate |
+
+So scope size and design depth are read on separate axes: a large pure-copy swap
+needs scope confirmation but never trips the design gate, and a single bespoke hero
+trips the design gate without needing a scope question.
 
 ## Edit vs Generation boundary (decidable)
 
@@ -146,6 +155,20 @@ or creative the change feels:
 So: "改既有 run 目录里的 deck = EDIT 系(Editor,不开新 run);产出一份新 run 工件
 = GENERATION(走 design)". There is no third "substantive edit → GENERATION"
 path; substantive edits to an existing deck stay in the EDIT family.
+
+Minimal pairs — each row differs from its neighbor by one phrase that flips the
+**artifact target**, not by how big or creative the change is:
+
+| Near-identical prompt | Family / mode | Because (artifact target) |
+| --- | --- | --- |
+| "把既有 run 的第 7 页整页重做成 hero" | EDIT family (`EDIT`) | edits an artifact already on disk in its run; bespoke design passes the design gate but **no new run is opened** |
+| 同样要求,但还没有 run / deck.json,从 PDF 起做一份新 deck | GENERATION family (`GENERATION`) | produces a fresh run artifact from external material → `new-run.sh` + design-first |
+| "换文字 lift 别人的页进我的 run" | EDIT family (`LIFT+SWAP`) | pastes into an existing run's deck and swaps copy; the target is the existing artifact, not a new run |
+| "照着这个 HTML 重新做一份" | GENERATION family (`GENERATION_FROM_SOURCE_HTML`) | the HTML is source/inspiration; output is a brand-new run artifact the Renderer owns |
+
+The flips above are all driven by whether a new run artifact is produced —
+"整页重做" / "hero" / "重新做" by themselves do **not** push an in-run edit into
+GENERATION.
 
 ## Import vs re-create: when conversions pass the Designer
 
