@@ -271,17 +271,21 @@ def collect(html: str):
 # at. Works on deck.json DIRECTLY (no index.html needed) — render-time
 # scope_selectors() then scopes the moved CSS to the slide key.
 
-def collect_raw_inline_styles(deck: dict):
+def collect_raw_inline_styles(deck: dict, keys=None):
     """For every raw slide, pull every top-level `<style>` body out of its
     data.html. Returns (moves, total_styles):
       moves = list of (slide_ref, key, css_to_move, stripped_html, n_styles)
               — slide_ref is the actual slide dict (so the caller can mutate it).
     A `<style data-source="framework">` (shouldn't appear in raw data.html, but
-    be safe) is LEFT IN PLACE. data.html with no <style> is skipped."""
+    be safe) is LEFT IN PLACE. data.html with no <style> is skipped.
+    `keys` (set|None): restrict to those slide-keys (None = every raw slide) —
+    lets deck-cli `consolidate-css --key K` converge a single page."""
     moves = []
     total_styles = 0
     for slide in deck.get("slides", []):
         if slide.get("layout") != "raw":
+            continue
+        if keys is not None and slide.get("key") not in keys:
             continue
         data = slide.get("data") or {}
         html = data.get("html")
@@ -311,10 +315,11 @@ def collect_raw_inline_styles(deck: dict):
     return moves, total_styles
 
 
-def migrate_raw_inline(deck: dict, *, dry_run: bool):
+def migrate_raw_inline(deck: dict, *, dry_run: bool, keys=None):
     """Apply collect_raw_inline_styles to `deck` (in place unless dry_run).
-    Returns a list of (key, n_styles, n_bytes) actually migrated."""
-    moves, _ = collect_raw_inline_styles(deck)
+    Returns a list of (key, n_styles, n_bytes) actually migrated.
+    `keys` (set|None) restricts to those slide-keys (None = all raw slides)."""
+    moves, _ = collect_raw_inline_styles(deck, keys=keys)
     applied = []
     for slide, key, css_to_move, stripped_html, n_styles in moves:
         # Idempotency here is structural, NOT marker-based: collect_raw_inline_styles

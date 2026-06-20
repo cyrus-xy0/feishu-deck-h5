@@ -582,9 +582,27 @@ def _renumber_text_ids(html: str, new_slide_no: int) -> str:
     return out
 
 
+def _consolidate_slide_css(slide: dict) -> None:
+    """F-347: fold a freshly-imported raw slide's embedded <style> into its
+    custom_css (the single-source home that round-trips + wins the cascade
+    predictably), so the page can't later silently override custom_css edits with
+    a stray embedded block. Reuses the migrate codemod's per-slide core; no-op if
+    the fragment has no <style>. Never raises into the import path."""
+    try:
+        import importlib.util
+        mp = HERE / "migrate-head-css-to-custom-css.py"
+        spec = importlib.util.spec_from_file_location("_mig_css_imp", mp)
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+        for key, n, _b in mig.migrate_raw_inline({"slides": [slide]}, dry_run=False):
+            _info(f"folded {n} embedded <style> → custom_css (single-source home)")
+    except Exception as e:                       # never block an import on this
+        _warn(f"css consolidation skipped: {e}")
+
+
 def insert_into_json(deck_path: Path, fragments: list[str], position: int,
                      lifted: bool = True, allow_unsynced: bool = False,
-                     force: bool = False) -> tuple[Path | None, str | None]:
+                     force: bool = False, consolidate_css: bool = True) -> tuple[Path | None, str | None]:
     """Splice imported slides into deck.json with the validated-write contract.
 
     Returns (bak, orig_text) so the caller can `restore_deck` the SSOT if a LATER
@@ -666,6 +684,11 @@ def insert_into_json(deck_path: Path, fragments: list[str], position: int,
         # out when the user wants the slide treated as native + fully re-gated.
         if lifted:
             new_slide["lifted"] = True
+        # F-347: converge per-page CSS to its single home AT IMPORT (prevention),
+        # so a lifted page never arrives with an embedded <style> that later
+        # silently overrides custom_css edits. --no-consolidate-css opts out.
+        if consolidate_css:
+            _consolidate_slide_css(new_slide)
         new_slides.append(new_slide)
 
     # Optimistic-lock check (mutation-6): refuse if deck.json changed on disk
@@ -794,6 +817,11 @@ def main(argv=None) -> int:
     ap.add_argument("--no-copy-assets", action="store_true",
                     help="Do NOT copy + rewrite the slide's local assets into the "
                          "target deck (leave refs as-authored).")
+    ap.add_argument("--no-consolidate-css", action="store_true",
+                    help="F-347: do NOT fold the imported fragment's embedded "
+                         "<style> into custom_css (leave it embedded). By default "
+                         "it IS folded so the page arrives with one CSS home and "
+                         "can't silently override later custom_css edits.")
     ap.add_argument("--force", action="store_true",
                     help="F-315: import even if the target's index.html carries "
                          "un-synced browser/hand edits (the clobber guard would "
@@ -899,7 +927,8 @@ def main(argv=None) -> int:
     if mode == "A":
         bak, orig_text = insert_into_json(
             target, accepted_frags, position,
-            lifted=not args.no_lifted, allow_unsynced=args.force, force=args.force)
+            lifted=not args.no_lifted, allow_unsynced=args.force, force=args.force,
+            consolidate_css=not args.no_consolidate_css)
         rc = re_render(target)
         if rc != 0:
             # mutation-1: the spliced deck.json passed schema validation but the

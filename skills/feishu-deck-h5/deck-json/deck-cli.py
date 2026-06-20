@@ -190,7 +190,7 @@ def _edit_scope_keys(args, updated: dict):
     gate, so this change can never WEAKEN a gate it doesn't understand."""
     cmd = getattr(args, "cmd", None)
     if cmd in ("set-page", "set-accent", "set-decor", "set-notes",
-               "set-variant", "insert") and getattr(args, "key", None):
+               "set-variant", "insert", "consolidate-css") and getattr(args, "key", None):
         return {args.key}
     if cmd == "set":
         path = getattr(args, "path", "") or ""
@@ -481,6 +481,26 @@ def cmd_set(deck: dict, args) -> tuple[int, dict | None]:
     return 0, deck
 
 
+_STYLE_BLOCK_RE = re.compile(r"<style(?P<attrs>[^>]*)>(?P<body>.*?)</style>", re.S | re.I)
+
+
+def _embedded_style_count(html) -> int:
+    """F-347: number of NON-framework <style> blocks in a slide's data.html.
+    These are the silent-override trap — the renderer injects custom_css as the
+    `.slide` FIRST CHILD, so any embedded <style> sits LATER in source order and
+    WINS the cascade at equal specificity (cost ~2 render cycles this session on a
+    3-block lifted page). `data-source="framework"` blocks don't count."""
+    if not isinstance(html, str) or "<style" not in html.lower():
+        return 0
+    n = 0
+    for m in _STYLE_BLOCK_RE.finditer(html):
+        a = m.group("attrs") or ""
+        if 'data-source="framework"' in a or "data-source='framework'" in a:
+            continue
+        n += 1
+    return n
+
+
 def cmd_set_page(deck: dict, args) -> tuple[int, dict | None]:
     """W1 (iteration-loop): one-shot page payload update — data.html / custom_css
     from files, plus title / lifted — with the W4 static pre-write lint so the
@@ -535,6 +555,64 @@ def cmd_set_page(deck: dict, args) -> tuple[int, dict | None]:
         slide["lifted"] = True
         changed.append("lifted=true")
     print(f"  slides[{idx}] (key={args.key}) ← {', '.join(changed)}")
+
+    # F-347: warn about the custom_css silent-override trap. If this page still
+    # carries embedded <style> AND we just wrote custom_css, the embedded blocks
+    # (injected after custom_css) can override it at equal specificity — exactly
+    # the trap that ate ~2 render cycles this session. Point at the one-shot cure.
+    n_emb = _embedded_style_count((slide.get("data") or {}).get("html", ""))
+    if n_emb and css_txt is not None:
+        print(f"  ⚠ this page has {n_emb} embedded <style> block(s); custom_css is "
+              f"injected as .slide's first child, so those blocks can SILENTLY "
+              f"OVERRIDE your rules at equal specificity. Cure: "
+              f"`deck-cli.py <deck> consolidate-css --key {args.key}` (fold them "
+              f"into custom_css → one home, predictable last-wins), or `!important`.",
+              file=sys.stderr)
+    return 0, deck
+
+
+def cmd_consolidate_css(deck: dict, args) -> tuple[int, dict | None]:
+    """F-347: fold a raw page's embedded <style> block(s) into its custom_css —
+    the single-source home that round-trips with deck.json AND wins the cascade
+    predictably (last-wins within one <style>), killing the silent-override trap
+    where custom_css (injected as .slide first-child) loses to later embedded
+    blocks. Default: every raw page; --key: one page. Behaviour-preserving (it
+    only MOVES CSS, source order kept), idempotent (a migration marker guards
+    re-folding). Re-render afterwards to drop the blocks from index.html."""
+    import importlib.util
+    mig_path = Path(__file__).resolve().parent / "migrate-head-css-to-custom-css.py"
+    try:
+        spec = importlib.util.spec_from_file_location("_mig_css", mig_path)
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+    except Exception as e:
+        print(f"deck-cli: consolidate-css — can't load migrate codemod: {e}",
+              file=sys.stderr)
+        return 2, None
+
+    keys = None
+    if getattr(args, "key", None):
+        try:
+            idx = find_slide_index(deck, args.key)
+        except KeyError as e:
+            print(f"deck-cli: {e}", file=sys.stderr); return 1, None
+        keys = {deck["slides"][idx].get("key")}
+
+    applied = mig.migrate_raw_inline(deck, dry_run=args.dry_run, keys=keys)
+    if not applied:
+        where = f"page '{args.key}'" if keys else "any raw page"
+        print(f"deck-cli: consolidate-css — nothing to do "
+              f"({where} has no embedded <style>, or is already consolidated).")
+        return 0, None
+    verb = "would fold" if args.dry_run else "folded"
+    for key, n_styles, n_bytes in applied:
+        print(f"  {verb} {n_styles} embedded <style> block(s) "
+              f"({n_bytes} B) → slides[{key}].custom_css")
+    if args.dry_run:
+        print("deck-cli: --dry-run, deck unchanged.")
+        return 0, None
+    print(f"deck-cli: consolidated {len(applied)} page(s). Re-render to drop the "
+          f"embedded blocks from index.html.")
     return 0, deck
 
 
@@ -1282,6 +1360,15 @@ def main(argv=None) -> int:
     sp.add_argument("--skip-lint", action="store_true",
                     help="bypass the W4 static pre-write lint (NOT recommended)")
 
+    sp = sub.add_parser("consolidate-css",
+                        help="fold a raw page's embedded <style> into custom_css "
+                             "(single-source home; kills the custom_css silent-"
+                             "override trap). Default: all raw pages.")
+    sp.add_argument("--key", default=None,
+                    help="one slide-key (default: every raw page)")
+    sp.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="report what would move, write nothing")
+
     sp = sub.add_parser("set-accent", help="set slide accent color")
     sp.add_argument("key"); sp.add_argument("color")
 
@@ -1386,6 +1473,7 @@ def main(argv=None) -> int:
     WRITE_CMDS = {
         "set":         cmd_set,
         "set-page":    cmd_set_page,
+        "consolidate-css": cmd_consolidate_css,
         "set-accent":  cmd_set_accent,
         "set-decor":   cmd_set_decor,
         "set-notes":   cmd_set_notes,

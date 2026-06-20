@@ -125,6 +125,52 @@ def test_set_page_refuses_bad_fragment_then_skip_lint(tmp_path):
     assert r2.returncode == 0
 
 
+def _mk_deck_with_embedded_style(tmp_path: Path, css_body: str) -> Path:
+    """rawpage whose data.html carries an embedded <style> (the override trap)."""
+    deck = _mk_deck(tmp_path)
+    d = json.loads(deck.read_text(encoding="utf-8"))
+    d["slides"][-1]["data"]["html"] = (
+        f"<style>{css_body}</style>"
+        '<div class="header"><h2 class="title-zh">T</h2></div>'
+        '<div class="stage"><p class="body">body copy here</p></div>')
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return deck
+
+
+def test_consolidate_css_folds_embedded_style_idempotent(tmp_path):
+    # F-347: embedded <style> → custom_css (single home; kills the override trap)
+    rule = '.slide[data-slide-key="rawpage"] .body{font-size:24px}'
+    deck = _mk_deck_with_embedded_style(tmp_path, rule)
+
+    # dry-run reports but writes nothing
+    r0 = _cli(deck, "consolidate-css", "--key", "rawpage", "--dry-run")
+    assert r0.returncode == 0 and "would fold" in r0.stdout
+    assert "<style" in json.loads(deck.read_text(encoding="utf-8"))[
+        "slides"][-1]["data"]["html"], "dry-run must not mutate"
+
+    # real run folds into custom_css and strips the <style> from data.html
+    r1 = _cli(deck, "consolidate-css", "--key", "rawpage")
+    assert r1.returncode == 0, r1.stdout + r1.stderr
+    s = json.loads(deck.read_text(encoding="utf-8"))["slides"][-1]
+    assert "<style" not in s["data"]["html"]
+    assert "font-size:24px" in (s.get("custom_css") or "")
+
+    # idempotent: nothing left to fold
+    r2 = _cli(deck, "consolidate-css", "--key", "rawpage")
+    assert r2.returncode == 0 and "nothing to do" in r2.stdout
+
+
+def test_set_page_warns_on_embedded_style_override(tmp_path):
+    # F-347: writing custom_css to a page that still has embedded <style> warns
+    deck = _mk_deck_with_embedded_style(tmp_path, ".x{color:#fff}")
+    c = tmp_path / "f.css"
+    c.write_text('.slide[data-slide-key="rawpage"] .body{font-size:24px}',
+                 encoding="utf-8")
+    r = _cli(deck, "set-page", "rawpage", "--css", str(c))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "embedded <style>" in r.stderr and "consolidate-css" in r.stderr
+
+
 def test_set_from_file_raw_string(tmp_path):
     deck = _mk_deck(tmp_path)
     f = tmp_path / "v.css"
