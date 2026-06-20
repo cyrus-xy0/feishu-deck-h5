@@ -68,7 +68,12 @@ These gates apply before dispatching to any subskill:
    quote / end) — per F-305 «raw unless ceremonial» the body-content schema
    layouts (content / stats / flow / chart / table / arch-stack / image-text /
    logo-wall) are frozen; new pages go raw and `R-LAYOUT-DEPRECATED` (advisory)
-   nudges any that don't. See `references/deck-generation-policy.md`.
+   nudges any that don't. See `references/deck-generation-policy.md`. For the
+   raw-page authoring contract (the fixed constants — canvas 1920×1080, the
+   {16,24,28,48} ladder, raw renders no header, the motion scope one-liner, the
+   `allow` syntax) plus the insert/set-page/render fast recipe and the
+   per-page speed discipline, read `references/raw-page-quickstart.md` FIRST —
+   it exists so those never-changing facts are not re-discovered each time.
 4. **Two gates: scoped on every edit, whole-deck only at delivery.** An
    intermediate single-page / scoped edit is gated by `render-deck.py --iter`
    (or `--scope N`): auto-scope validates + re-shoots ONLY the changed page(s),
@@ -454,6 +459,7 @@ Workers should load only the reference files they need:
 - `references/assets-and-files.md`
 - `references/layout-recipes.md`
 - `references/extra-layouts-and-raw.md`
+- `references/raw-page-quickstart.md`
 - `references/narrative-patterns.md`
 - `references/richness-primitives.md`
 - `references/motion-system.md`

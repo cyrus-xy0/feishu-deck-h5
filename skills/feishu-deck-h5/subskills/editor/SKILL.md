@@ -119,7 +119,12 @@ Designer + Renderer instead).
   Use `--quick` instead when you don't need the making-of updated this run (skips the
   snapshot entirely, ~12-18s). Full render (no flag) only for a new deck or a
   whole-deck change. See `references/editing-discipline.md` → "Re-render speed".
-- **`EDIT` insert a NEW page you authored (html+css fragment)**: use
+- **`EDIT` insert a NEW page you authored (html+css fragment)**: read
+  `references/raw-page-quickstart.md` FIRST (fixed constants — canvas 1920×1080,
+  {16,24,28,48} ladder, raw renders no header, motion scope one-liner, `allow`
+  syntax — plus the insert/set-page/render recipe and the don't-re-derive speed
+  discipline; `#N` from the URL already gives the index, insert range-checks it,
+  so do NOT re-confirm the insertion point with repeated deck-map runs). Then use
   **`deck-json/import-html-slide.py`** (Mode A, target = deck.json) — it wraps the
   fragment as a raw slide, validates each candidate, inserts at a numeric index /
   `end` / after-key, and auto re-renders. `--yes` for non-interactive. Do NOT

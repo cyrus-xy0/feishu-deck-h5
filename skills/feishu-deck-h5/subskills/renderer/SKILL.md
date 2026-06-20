@@ -40,7 +40,13 @@ rely on cached chat summaries or earlier reads of `outline.json`,
    example when starting from scratch.
 3. Follow the design plan's raw-first stance: `layout: "raw"` is the default;
    schema layouts are only for approved pure standard shapes. Keep raw CSS in
-   `slide.custom_css`; do not put per-slide CSS in `<head>`.
+   `slide.custom_css`; do not put per-slide CSS in `<head>`. For the fixed raw
+   contract you should NOT re-derive each run (canvas 1920×1080, the
+   {16,24,28,48} ladder + `/* allow:typescale */`, raw renders no `.header` so
+   author your own title, scope every rule to `.slide[data-slide-key="K"]`, the
+   `is-current` + reduced-motion motion one-liner, SVG `<text>` floor → use HTML
+   labels), read `references/raw-page-quickstart.md`. Author the focal/hero
+   element bold the first time — do not escalate timid→bold across render cycles.
    - **底色归 `.slide-frame`,不在 `.slide` 写整页背景(mandatory)。** 普通
      raw / content 单页的底色由框架 master 机制铺:`.slide-frame` 按 layout 分发
      `#000 var(--fs-asset-content-bg) center/cover`(= `lark-content-bg.jpg`,飞书
