@@ -94,3 +94,26 @@ def test_dual_anchor_error_when_authored_warn_when_lifted():
         f"authored dual-anchor should be ERROR: {auth}"
     assert lift and all(f["severity"] == "warn" for f in lift), \
         f"lifted dual-anchor should downgrade to WARN: {lift}"
+
+
+# ── R-VIS-DEAD-RULE (F-353) ───────────────────────────────────────────────────
+# A dead rule = a selector matching 0 elements that declares an important visual
+# prop, in the slide's OWN <style>. `.ghost-xyz-f353` exists nowhere → dead;
+# display:grid is the tracked prop. AUTHORED → error (a real silent defect);
+# LIFTED → warn (faithfully-recovered source CSS, often a redundant duplicate /
+# a rule for an element the lift didn't carry; correctness is render+visual-
+# verified). This is the false alarm that fired on a perfectly-rendering lifted
+# page (ctg arr-history → 齐鲁: 20 blocking errors on a fine page).
+_DEAD_INNER = ('<style>.ghost-xyz-f353{display:grid}</style>'
+               '<div class="stage" style="position:absolute;inset:80px">'
+               '<div class="card" style="font-size:24px;color:#fff">x</div></div>')
+
+
+def test_dead_rule_error_when_authored_warn_when_lifted():
+    auth, lift = _flip("R-VIS-DEAD-RULE", _DEAD_INNER)
+    assert any(f["severity"] == "error" for f in auth), \
+        f"authored dead rule should be ERROR: {auth}"
+    assert lift and all(f["severity"] == "warn" for f in lift), \
+        f"lifted dead rule should downgrade to WARN: {lift}"
+    assert any("LIFTED slide" in f["message"] for f in lift), \
+        "lifted dead-rule finding should carry the downgrade note"

@@ -6526,8 +6526,22 @@
           const note = _DEAD_RULE_PROP_NOTE[entry.prop] || ['元素退回浏览器默认值', entry.prop || '?'];
           const _effect = note[0];
           const _label = note[1];
+          // F-353 lifted-downgrade: a "dead" rule on a LIFTED slide (data-lifted)
+          // is faithfully-recovered source CSS — often a redundant duplicate, or a
+          // rule for an element the lift didn't carry over. The page's correctness
+          // is verified by render + visual review, not by every recovered selector
+          // matching, so firing this as a blocking err is a false alarm (it ate ~7
+          // render-debug minutes on a page that rendered perfectly). Downgrade
+          // error→warn on data-lifted slides (same family as the F-325 geometry
+          // lifted-downgrade); AUTHORED decks keep err — a dead rule there is a
+          // genuine silent defect.
+          const _liftTail = entry.lifted
+            ? '(几何/DOM 判定 · LIFTED slide —— 从源 deck 忠实搬运的恢复 CSS,'
+              + '常是冗余副本或指向未随 lift 带入的元素;页面正确性以渲染+视觉为准,'
+              + '故降 warn、不阻断。同 F-325 lifted-downgrade 族。)'
+            : '(几何/DOM 判定 —— 规则静默失效就是真缺陷。)';
           findings.push({
-            rule: 'R-VIS-DEAD-RULE', severity: 'error', slide_idx,
+            rule: 'R-VIS-DEAD-RULE', severity: entry.lifted ? 'warn' : 'error', slide_idx,
             selector: entry.selector, reason: entry.reason, prop: entry.prop,
             value: entry.value, lifted: entry.lifted,
             message:
@@ -6537,8 +6551,7 @@
               + '字号/排版闸全绿,只有运行时 querySelectorAll 才暴露。'
               + 'Fix: 把选择器修正到合法、运行时真能命中的形态(常见即把 `-frame.is-current` '
               + '还原成 `.slide-frame.is-current`,或把损坏的伪类写对);若该规则本就该删,'
-              + '连声明一起删,别留死规则。(几何/DOM 判定,lift 页同样报 err —— '
-              + '规则静默失效就是真缺陷。)',
+              + '连声明一起删,别留死规则。' + _liftTail,
           });
         }
         return findings;
