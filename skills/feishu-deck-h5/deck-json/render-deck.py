@@ -2723,6 +2723,15 @@ def main(argv=None) -> int:
                          "prefer it unless you explicitly don't want the log updated. "
                          "Do NOT use after layout / font-size / add-remove-element "
                          "changes — those need the full visual pass.")
+    ap.add_argument("--shoot", action="store_true",
+                    help="F-354 · ONE-PASS VERIFY for a scoped edit. After the "
+                         "render, run the visual gate on the scoped page(s) AND "
+                         "screenshot each — so an edit→check loop is ONE command "
+                         "(`--scope N --shoot`) instead of render + validate + "
+                         "shoot-page as three separate round-trips. Prints the "
+                         "per-page visual findings + each PNG path (`.shoot-pN.png`). "
+                         "Requires --scope (no-op + warning without it). "
+                         "Playwright-gated; degrades with a note if Chromium absent.")
     ap.add_argument("--scope", default=None,
                     help="LOCKED EDIT SCOPE — comma-separated 1-based page numbers "
                          "(= URL #N = frame_index) AND/OR slide keys, e.g. "
@@ -4098,6 +4107,41 @@ def main(argv=None) -> int:
     except Exception:
         pass  # never let the stamp fail a successful render
     _index_align_mtime(out_html, args.deck)
+
+    # F-354 · one-pass verify. After a scoped render, run the visual gate on the
+    # scoped page(s) + screenshot each, so the agent's edit→check loop is ONE
+    # command instead of render → validate → shoot-page (three Chromium
+    # round-trips). Findings + PNG path are printed for the agent to read. Numbers
+    # are 1-based page index (= URL #N = --scope's own numbering), so hidden slides
+    # don't skew the mapping. Best-effort: a Chromium hiccup never fails the render.
+    if getattr(args, "shoot", False):
+        if not scope_pages:
+            print("  ⚠ --shoot needs --scope (which page to verify) — skipped.",
+                  file=sys.stderr)
+        else:
+            _shoot_page = ASSETS_DIR / "shoot-page.py"
+            for _n in scope_pages:
+                print(f"\n──── SHOOT · page {_n} (one-pass verify) ────",
+                      file=sys.stderr)
+                try:
+                    _vr = subprocess.run(
+                        [sys.executable, str(VALIDATE_HTML), str(out_html),
+                         "--visual", "--scope-frames", str(_n)],
+                        capture_output=True, text=True)
+                    print(_vr.stdout, file=sys.stderr)
+                except Exception as _e:
+                    print(f"  visual gate skipped: {_e}", file=sys.stderr)
+                _png = out_html.parent / f".shoot-p{_n}.png"
+                try:
+                    subprocess.run(
+                        [sys.executable, str(_shoot_page), str(out_html),
+                         str(_n), "--out", str(_png)],
+                        capture_output=True, text=True)
+                    print(f"  SHOT: {_png}" if _png.exists()
+                          else "  SHOT: (screenshot failed — Chromium unavailable?)",
+                          file=sys.stderr)
+                except Exception as _e:
+                    print(f"  SHOT skipped: {_e}", file=sys.stderr)
     return 0
 
 

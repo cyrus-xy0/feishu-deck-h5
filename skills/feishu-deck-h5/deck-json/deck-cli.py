@@ -531,7 +531,12 @@ def cmd_set_page(deck: dict, args) -> tuple[int, dict | None]:
     # geometry still belongs to the browser). --skip-lint to override.
     if (html_txt is not None or css_txt is not None) and not args.skip_lint:
         from _lint_fragment import lint_fragment, format_findings
-        fs = lint_fragment(html_txt or "", css_txt or "")
+        # F-355: a LIFTED slide's typescale/dual-anchor are verbatim-recovered
+        # source styling → lint demotes them err→warn so this page no longer needs
+        # a wholesale --skip-lint. AUTHORED pages still hard-fail pre-write (the
+        # whole point: catch off-ladder/dual-anchor BEFORE a render round-trip).
+        _lifted = bool(slide.get("lifted")) or bool(getattr(args, "lifted", False))
+        fs = lint_fragment(html_txt or "", css_txt or "", lifted=_lifted)
         errs = [f for f in fs if f["sev"] == "err"]
         if fs:
             print(format_findings(fs))

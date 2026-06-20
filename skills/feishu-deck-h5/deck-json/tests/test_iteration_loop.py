@@ -93,6 +93,26 @@ def test_lint_p50_base64_in_style():
     assert "L-P50-INLINE" in codes
 
 
+def test_lint_lifted_downgrades_typescale_and_dual_anchor():
+    # F-355: a LIFTED slide's verbatim source styling demotes L-TYPESCALE /
+    # L-DUAL-ANCHOR err→warn (so the page no longer needs a wholesale --skip-lint),
+    # while AUTHORED pages keep err. L-P50-INLINE (base64 bloat) stays err regardless.
+    css = ".x .h{font-size:77px} .x .a{position:absolute;top:8px;bottom:8px}"
+    blob = base64.b64encode(b"x" * 300 * 1024).decode()
+    p50 = f'.y{{background:url("data:image/png;base64,{blob}")}}'
+
+    auth = lint_fragment(css=css + p50, lifted=False)
+    lift = lint_fragment(css=css + p50, lifted=True)
+    auth_err = {f["code"] for f in auth if f["sev"] == "err"}
+    lift_err = {f["code"] for f in lift if f["sev"] == "err"}
+    lift_warn = {f["code"] for f in lift if f["sev"] == "warn"}
+
+    assert {"L-TYPESCALE", "L-DUAL-ANCHOR", "L-P50-INLINE"} <= auth_err
+    assert "L-TYPESCALE" not in lift_err and "L-DUAL-ANCHOR" not in lift_err
+    assert {"L-TYPESCALE", "L-DUAL-ANCHOR"} <= lift_warn
+    assert "L-P50-INLINE" in lift_err  # base64 bloat never demotes
+
+
 # --------------------------------------------------------- W1 · set-page ----
 def test_set_page_writes_html_css_lifted(tmp_path):
     deck = _mk_deck(tmp_path)

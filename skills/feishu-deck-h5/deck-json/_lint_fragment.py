@@ -95,8 +95,15 @@ def _style_blocks(html: str):
     return inline, embedded
 
 
-def lint_fragment(html: str = "", css: str = "") -> list[dict]:
-    """Return findings: [{sev:'err'|'warn', code, msg}]."""
+def lint_fragment(html: str = "", css: str = "", lifted: bool = False) -> list[dict]:
+    """Return findings: [{sev:'err'|'warn', code, msg}].
+
+    F-355: on a LIFTED slide (verbatim-recovered source content) the typescale /
+    dual-anchor findings are the source author's call, not a fresh defect — they
+    demote err→warn (same lifted-leniency family as R-VIS-TIER / F-353). This lets
+    the pre-write lint stay ON for lifted pages instead of being `--skip-lint`'d
+    wholesale — the habit that let real AUTHORED-page violations slip past to a
+    post-render round-trip. L-P50-INLINE (base64 bloat) stays err regardless."""
     findings = []
     inline, embedded = _style_blocks(html or "")
     all_rules = (_iter_rules(css or "") + _iter_rules(embedded) + inline)
@@ -113,7 +120,7 @@ def lint_fragment(html: str = "", css: str = "") -> list[dict]:
             if px >= 8 and px not in LADDER and px not in HERO_SIZES:
                 if not has_ts_optout:
                     findings.append(dict(
-                        sev="err", code="L-TYPESCALE",
+                        sev=("warn" if lifted else "err"), code="L-TYPESCALE",
                         msg=f"{sel}: font-size {px}px is off the ladder "
                             f"{sorted(LADDER)} ∪ hero whitelist — snap it, or put "
                             f"data-allow-typescale on a hero ancestor."))
@@ -140,7 +147,7 @@ def lint_fragment(html: str = "", css: str = "") -> list[dict]:
             deliberate_box = bool(inset) or bool(top and bot and left and right)
             if top and bot and not deliberate_box and not is_pseudo:
                 findings.append(dict(
-                    sev="err", code="L-DUAL-ANCHOR",
+                    sev=("warn" if lifted else "err"), code="L-DUAL-ANCHOR",
                     msg=f"{sel}: position:absolute with top+bottom but no full box "
                         f"(no left+right, no inset) — height stretches to the parent "
                         f"(R-VIS-ABSPOS-DUAL-ANCHOR). Anchor ONE edge + size, declare "
