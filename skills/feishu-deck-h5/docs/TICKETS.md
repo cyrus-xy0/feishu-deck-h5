@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-352**
+> **下一可用号 = F-353**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-351 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-352 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -131,6 +131,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-349 | **`R-DECK-EYEBROW-BUDGET`(deck-wide·跨页一致性)**:taste-skill「最多 1 eyebrow / 3 sections」的地板化——数【内容页(非 hero)中带 eyebrow/kicker 的页数】,超过 ⌈内容页/3⌉ → warn,治「每页标题上方都扣一个 uppercase 小标签」的 AI slop 指纹(grounds 既有「content 页纯标题无 eyebrow」约定)。eyebrow 判定=**仅 class token** `eyebrow`/`kicker`/`overline`(含框架 `.header .eyebrow`,token-exact)。**对抗验证加固:砍掉 de-facto 文字启发**(uppercase/tracked/small 会把 KPI 指标标/双语 EN gloss/状态徽标三类误报)——地板宁漏勿误报。universal·opt-out `data-allow-eyebrow-budget`。立项=参考 `Leonxlnx/taste-skill` 设计能力的「抄作业」分析(只抄可机检地板,不抄设计系统/三 Dial/成品模板)。新测 8 + 跨页一致性静态接线 + 干净示例零误报 + 3 类 FP 对抗回归。 | `assets/audits.js` / `assets/check-only.py` / `assets/business-rules.yaml` / `references/validator-rules.md` / `deck-json/tests/test_deck_eyebrow_budget.py` |
 | F-350 | **`R-DECK-RADIUS-DRIFT`(deck-wide·跨页一致性)**:taste-skill「一套圆角体系」的地板化——仿 `R-DECK-PALETTE-DRIFT` 的**近重复**思路扫【作者 CSS】(`iterStyleBlocks(false)`+inline,排框架基线)的 `border-radius`/`border-*-radius`(含四角 longhand;% token 跳过保留 px 角),排 0 与 pill/dot(≥100px 或 %),3px 容差单链聚类,**某簇含 ≥3 个近重复值才报**(11/12/13 或密集梯 8/10/12/14/16)。**对抗验证定校准:刻意分级体系(8/16/24)豁免**(不罚设计意图,那是 CEILING)。universal·css-source·opt-out `data-allow-radius`。同 F-349 立项。新测 9 + 静态接线 + 零误报。 | `assets/audits.js` / `assets/check-only.py` / `assets/business-rules.yaml` / `references/validator-rules.md` / `deck-json/tests/test_deck_radius_drift.py` |
 | F-351 | **`R-VIS-CONTRAST-WCAG`(per-slide·视觉)**:WCAG AA 对比度地板,与 `R-VIS-DIM-TEXT`【零重叠互补】——DIM-TEXT 假设暗画布、用启发式 eff 亮度逮「深底发灰字」;本条解析文字的【有效背景】(祖先链首个不透明实色 bg),仅当背景偏亮(relLum≥0.35)才算 gamma-correct 真 WCAG 比值,正文 <4.5:1 / 大字·粗体 <3:1 → warn,专补「浅卡上的浅灰字 / 浅底上的白字」这类 DIM-TEXT 结构性看不见的 slop。**保守至上**(地板宁漏勿误报):渐变/图片/半透明/解析不到/偏暗背景一律豁免(暗背景=DIM-TEXT 地盘→零双报)。universal·dom·opt-out `data-allow-contrast`。同 F-349 立项。新测 7 + 视觉基线零漂移。**注**:同批分析里的「`R-VIS-CANVAS-CENTER` raw 孪生」经核查 **已被 F-301 关闭**(coverage 早升 universal)→ 不另立工单、不重复建。 | `assets/audits.js` / `assets/check-only.py` / `assets/business-rules.yaml` / `references/validator-rules.md` / `deck-json/tests/test_vis_contrast_wcag.py` |
+| F-352 | **`validate.py` scoped-edit 护栏(把「改一页却全 deck 校验」从文字规则变成代码闸)**:改一页后对整 deck 跑无 scope 校验会翻出与本次改动无关的存量 error——SKILL/`editing-discipline.md` 早有文字规则(「scope the render to the page(s) you edited」/「Default to `--scope N`」)但靠自觉、反复破功(本 session 又犯)。本条落成代码:`validate.py` 读同目录 `last-render.log` 的 `GATE-COVERAGE … scope=` token,若上次是**页级 scoped 渲染**(`scope=` 含数字 / `auto:N`;`full`/`--quick` 无数字不算)、本次又是无 scope 的全量跑(无 `--slide`/`--scope-frames`)且没带 `--full` → **退码 2 拒绝**(沿用 F-348 的 0/1/2 契约),提示改用 `--slide`/`--scope-frames`(改哪验哪)或 `--full`(交付级全量)。新增 `--full` 开关兼作用户逃生口;`render-deck.py` 三处内部校验调用一律带 `--full`(它本就是全 deck 闸 + 自带 F-319 scope 降级,且 `last-render.log` 渲染期被截断重写、GATE-COVERAGE 最后才写,故内部调用本就不会误触——`--full` 是显式加固防未来重排)→ 流水线零影响。立项=用户「这事说了无数次还犯,落到代码上别再靠记性」。新测 7/7(页级/auto scoped 拒绝 + `--full`/`--slide`/`--scope-frames`/full-log/无-log 放行);render 回归 36/36 绿。 | `assets/validate.py` / `deck-json/render-deck.py` / `deck-json/tests/test_validate_scope_guard.py` |
 
 ## 已裁决(WONTFIX / DONE)
 

@@ -652,6 +652,15 @@ def main():
                         'R-CSSVAR / R-DECK-* / R-VIS-NO-IMAGERY …) still scan the '
                         'whole DOM and emit once, anchored on the first in-scope '
                         'frame — they are NOT suppressed by scope.')
+    p.add_argument('--full', action='store_true',
+                   help='F-352 · force the full-deck gate even right after a '
+                        'page-SCOPED render. Without it, an unscoped full run '
+                        'whose sibling last-render.log shows the last render was '
+                        'page-scoped is REFUSED — a full validate then surfaces '
+                        'pre-existing out-of-scope debt unrelated to the confined '
+                        'edit (the "改一页却校验很多页" trap). This is the delivery '
+                        '/ render-pipeline path; for a confined edit use --slide '
+                        'or --scope-frames instead.')
     args = p.parse_args()
     # F-293 · parse --scope-frames into the engine scope list (1-based ordinals).
     # Distinct from --slide (post-run report filter); this is the REAL scope fed
@@ -681,6 +690,41 @@ def main():
     if not path.is_file():
         print(f'ERROR: file not found: {path}', file=sys.stderr)
         return 2
+
+    # F-352 · scoped-edit guardrail. A full-deck `validate.py <html>` run right
+    # after a page-SCOPED render surfaces pre-existing out-of-scope debt that has
+    # nothing to do with the confined edit (the recurring "改一页却校验/渲染很多页"
+    # trap). Detect it from the sibling last-render.log GATE-COVERAGE line: a
+    # page-scoped render records scope=<digits> / scope=auto:N (a full render
+    # records scope=full / --quick — no digit). On an unscoped full run (no
+    # --slide / --scope-frames) without the --full override, refuse and point at
+    # the scoped flags. render-deck.py's own internal gate passes --full (it IS
+    # the full-deck gate, with its own F-319 scope demotion), so the render
+    # pipeline is unaffected.
+    if args.slide is None and scope_frames is None and not args.full:
+        _rlog = path.parent / 'last-render.log'
+        _scope_tok = None
+        if _rlog.is_file():
+            try:
+                for _line in reversed(_rlog.read_text(
+                        encoding='utf-8', errors='replace').splitlines()):
+                    _m = re.search(r'GATE-COVERAGE\b.*\bscope=(\S+)', _line)
+                    if _m:
+                        _scope_tok = _m.group(1)
+                        break
+            except OSError:
+                pass
+        if _scope_tok and re.search(r'\d', _scope_tok):
+            print(f'⛔ REFUSED: the last render was page-scoped '
+                  f'(last-render.log: scope={_scope_tok}).', file=sys.stderr)
+            print('   A full-deck validate would surface pre-existing '
+                  'out-of-scope findings unrelated to your edit '
+                  '(the 改一页却校验很多页 trap).', file=sys.stderr)
+            print('   · validate only what you changed:  '
+                  '--slide <key>   or   --scope-frames <N[,N]>', file=sys.stderr)
+            print('   · really want the delivery-grade full pass:  --full',
+                  file=sys.stderr)
+            return 2
 
     html = path.read_text(encoding='utf-8')
     # `slides` is still needed for the human header count (`slides: N`) and the

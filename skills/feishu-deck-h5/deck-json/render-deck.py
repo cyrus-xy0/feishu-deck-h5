@@ -3380,7 +3380,10 @@ def main(argv=None) -> int:
         _gc_scope = ((("auto:" if _auto_scoped else "")
                       + ",".join(map(str, scope_pages))) if scope_pages
                      else ("--quick" if args.quick else "full"))
-        validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html)]
+        # --full (F-352): this internal call IS the full-deck gate (the F-319
+        # scope demotion below re-attributes findings ourselves), so it must
+        # bypass validate.py's scoped-edit guardrail rather than refuse itself.
+        validate_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html), "--full"]
         # F-319: on a SCOPED runs/ render keep the static gate static-only and let
         # the scope-aware visual block below (--scope-frames + in-scope filter +
         # F-302 baseline) own the visual gate — otherwise `--scope … --visual`
@@ -3417,7 +3420,7 @@ def main(argv=None) -> int:
             try:
                 _jrc = subprocess.run(
                     [sys.executable, str(VALIDATE_HTML), str(out_html),
-                     "--no-visual", "--json"],
+                     "--no-visual", "--json", "--full"],   # F-352: pipeline gate, not a user scoped-run
                     capture_output=True, text=True)
                 _serrs = json.loads(_jrc.stdout).get("errors", [])
                 _sset = set(scope_pages)
@@ -3523,7 +3526,7 @@ def main(argv=None) -> int:
             # once. The post-run `_in_scope` filter below stays as a backstop
             # (a no-op once the engine is scoped; harmless double-safety).
             _adv_cmd = [sys.executable, str(VALIDATE_HTML), str(out_html),
-                        "--visual", "--json"]
+                        "--visual", "--json", "--full"]   # F-352: pipeline gate (scoped below when applicable)
             # F-335: a framework / template / structural-meta change (visual_full)
             # re-audits ALL frames — appearance may have shifted anywhere;
             # otherwise scope the visual engine to just the changed page(s).
