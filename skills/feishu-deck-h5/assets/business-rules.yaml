@@ -733,6 +733,14 @@ R-IFRAME-REMOTE:
     - "把远程内容本地化: 截图静态化, 或抓取后用本地 HTML 重建"
     - "确认现场必有网络且已登录, 在 iframe 上加 data-allow-remote-iframe 显式接受"
 
+R-EMBED-OPAQUE-BG:
+  concern:     "D · 放映功能不全"
+  symptom:     "raw 页用 <iframe src=data:text/html…> 整版内嵌看板, 但 iframe 内部的 html / body / .stage-host / .slide 画了不透明深色底 (#04070E / var(--ink) / 深色渐变)"
+  consequence: "内层深底盖住 deck 的近黑藏青背景, 在 slide / letterbox 边缘露出一圈比 deck 更黑的生硬黑边, 看板像贴了块黑框而不是融进 deck — 投屏时客户一眼就看到 (齐鲁指挥中心 #27/#28/#29 反复踩)"
+  fix:
+    - "把 iframe 内部的 html / body / .stage-host / .slide 的 background 设为 transparent, 让 deck 底透上来 (齐鲁指挥中心系列的修法)"
+    - "若确属故意满版自带深色主题, 在 iframe (或祖先 .slide) 加 data-allow-embed-bg 显式接受"
+
 # ---- deck.json-side schema validator (validate-deck.py) · contract-1 补齐 ----
 #  这三条由 deck-json/validate-deck.py (schema + 业务校验) 发出, 之前不在 coverage
 #  闸门可见范围, 现已纳入 enumerate_validate_rules 的第 4 个扫描面.

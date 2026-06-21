@@ -86,7 +86,7 @@ FAMILIES = [
                               'R-CSS-INLINE-BUDGET', 'R-CSS-CROSS-PAGE',
                               'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT',
                               'R-LAYOUT-DEPRECATED', 'R-IFRAME-REMOTE',
-                              'R-DEMO-IFRAME']),
+                              'R-DEMO-IFRAME', 'R-EMBED-OPAQUE-BG']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
     ('演示模式 / 运行时',    ['R29-32']),
     ('性能预算',             ['P50', 'P51', 'P52', 'P53', 'P54', 'P55']),

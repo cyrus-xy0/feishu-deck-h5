@@ -1079,6 +1079,9 @@
     // 离线可用性最低防线 (2026-06-11) — 远程 iframe 让 load 事件在离线/headless 下挂死,
     // 现场无网/未登录时 live demo 静默失效。name-free,raw + schema 同覆盖。
     'R-IFRAME-REMOTE': { coverage: 'universal', signal: 'dom' },
+    // 内嵌看板 iframe 的不透明深色内底 = 边缘黑边 (2026-06-21) — 解码 data: 载荷查内层
+    // html/body/.stage-host/.slide 的 background。name-free,raw + schema 同覆盖。
+    'R-EMBED-OPAQUE-BG': { coverage: 'universal', signal: 'dom' },
     'UI1': { coverage: 'universal', signal: 'dom' },
     // 跨页一致性 (DECK-LEVEL · F-257) — deck 级求值,name-free,均 universal(raw+schema
     // 都跑;opt-out 是显式逃生口,不是 coverage 收窄)。
@@ -6816,6 +6819,99 @@
               + 'live demo 当场失效。把内容本地化(截图静态化 / 抓取后用本地 HTML 重建),'
               + '或确认现场必有网络+已登录后,用 data-allow-remote-iframe 显式接受。',
           });
+        });
+        return findings;
+      },
+    },
+
+    {
+      // R-EMBED-OPAQUE-BG · 内嵌看板 iframe 的不透明深色内底 = 边缘黑边 (2026-06-21)
+      // 一个 raw 页用 <iframe src="data:text/html;…"> 整版内嵌看板时,iframe 元素 + 外层
+      // .slide 可透明、letterbox 也吃 deck content-bg —— 但 iframe 内部那份 HTML 自己的
+      // html / body / .stage-host / .slide 若画了【不透明深色】底(#04070E / var(--ink) /
+      // linear-gradient(#0A0F1A…)),就盖住了 deck 的近黑藏青底,在 slide / letterbox 边缘
+      // 露出一圈比 deck 更黑的生硬黑边。齐鲁指挥中心 #27/#28/#29 反复踩、要人盯三次才修干净,
+      // 根因正是这一层:外层修了透明、内层没修,而内层在 base64 data: URI 里,过去【没有任何
+      // 校验能看见它】(其余规则一律 strip data: 以免误命中 #hex)。已验证修法 = 把内层那几个
+      // 满幅包裹设 background:transparent,让 deck 底透上来。
+      //
+      // 判定:解码 data:text/html 的 base64 / percent 载荷,在内部 CSS 里找上述满幅选择器的
+      // background,解析(含一层 var() 解引用)首个颜色 —— 不透明(alpha≥.5)且暗(相对亮度
+      // <.18)才报。低 alpha 的辉光渐变 / transparent / 浅色满版(白底看板)都不报。name-free
+      // (认 data: 载荷不认类名,故 embed-frame 类只 3/8 页带也不漏);warn(自带底是设计判断)。
+      // 确属故意满版自带深色主题 → iframe 或祖先 .slide 加 data-allow-embed-bg 显式接受。
+      id: 'R-EMBED-OPAQUE-BG',
+      severity: 'warn',
+      evaluate(slide, ctx) {
+        const { slide_idx } = ctx;
+        const findings = [];
+        const COVER = ['html', 'body', '.stage-host', '.slide'];
+        const isCover = (s) => {
+          const t = s.trim(); const last = t.split(/\s+/).pop();
+          return COVER.indexOf(t) >= 0 || COVER.indexOf(last) >= 0;
+        };
+        // first color token of a bg value → {lum 0..1, alpha 0..1} or null (unknown)
+        const colorOf = (val) => {
+          let m = val.match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+))?/i);
+          if (m) return { lum: (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255,
+                          alpha: m[4] === undefined ? 1 : +m[4] };
+          m = val.match(/#([0-9a-f]{6})\b/i);
+          if (m) { const n = parseInt(m[1], 16);
+            return { lum: (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255, alpha: 1 }; }
+          m = val.match(/#([0-9a-f]{3})\b/i);
+          if (m) { const h = m[1], r = parseInt(h[0] + h[0], 16), g = parseInt(h[1] + h[1], 16), b = parseInt(h[2] + h[2], 16);
+            return { lum: (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255, alpha: 1 }; }
+          if (/(^|[\s,(])black([\s,)]|$)/i.test(val)) return { lum: 0, alpha: 1 };
+          return null;                       // transparent / unknown / named-light → skip
+        };
+        slide.querySelectorAll('iframe').forEach((fr) => {
+          const src = (fr.getAttribute('src') || '').trim();
+          const head = src.match(/^data:text\/html([^,]*),/i);
+          if (!head) return;                 // only inline-HTML data: iframes
+          // opt-out: iframe or ancestor (up to slide) carries data-allow-embed-bg
+          for (let p = fr; p; p = p.parentElement) {
+            if (p.hasAttribute && p.hasAttribute('data-allow-embed-bg')) return;
+            if (p === slide) break;
+          }
+          let inner;
+          try {
+            const payload = src.slice(head[0].length);
+            inner = /;base64/i.test(head[1]) ? atob(payload) : decodeURIComponent(payload);
+          } catch (e) { return; }
+          // CSS lives in <style> blocks; scanning the raw inner HTML would let the
+          // markup BEFORE the first rule bleed into that rule's selector (…<style>body
+          // → "body" buried in a long token). Gather <style> text first, then scan.
+          let css = '', sm; const sre = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+          while ((sm = sre.exec(inner))) css += sm[1] + '\n';
+          if (!css) css = inner;             // no <style> (rare) — fall back to raw
+          // one-level var() map, then scan flat CSS rule blocks for cover-selector bg
+          const vars = {}; let vm; const vre = /(--[\w-]+)\s*:\s*([^;]+);/g;
+          while ((vm = vre.exec(css))) vars[vm[1]] = vm[2].trim();
+          const resolve = (v) => v.replace(/var\(\s*(--[\w-]+)\s*\)/g, (_, n) => vars[n] || '');
+          const offenders = []; let bm; const bre = /([^{}]+)\{([^{}]*)\}/g;
+          while ((bm = bre.exec(css))) {
+            const sels = bm[1].split(',');
+            if (!sels.some(isCover)) continue;
+            let dm, bg = null; const dre = /background(?:-color)?\s*:\s*([^;}]+)/gi;
+            while ((dm = dre.exec(bm[2]))) bg = dm[1].trim();   // last bg decl wins
+            if (!bg) continue;
+            const col = colorOf(resolve(bg));
+            if (col && col.alpha >= 0.5 && col.lum < 0.18) {
+              const sel = (sels.find(isCover) || sels[0]).trim();
+              if (offenders.indexOf(sel) < 0) offenders.push(sel);
+            }
+          }
+          if (offenders.length) {
+            findings.push({
+              rule: 'R-EMBED-OPAQUE-BG', severity: 'warn', slide_idx,
+              selectors: offenders.join(' / '),
+              message:
+                `slide ${slide_idx}: 内嵌看板 iframe 内部的 ${offenders.join(' / ')} 画了不透明深色底 — `
+                + '盖住 deck 背景,在 slide / letterbox 边缘露出比 deck 更黑的硬黑边(齐鲁指挥中心系列的根因)。'
+                + '把内部 html / body / .stage-host / .slide 的 background 设为 transparent,让 deck 底透上来;'
+                + '若确属故意满版自带深色主题,在 iframe(或祖先 .slide)加 data-allow-embed-bg 显式接受。',
+            });
+          }
         });
         return findings;
       },
