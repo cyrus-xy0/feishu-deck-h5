@@ -163,6 +163,19 @@ Designer + Renderer instead).
   `R-FAMILY-DRIFT` advisory in `validate-deck.py` is the render-time backstop.
 - **LIFT+SWAP**: user wants source deck layout preserved and only copy/client
   swapped.
+  - **Fast path — one DeckJSON page into an existing deck (the common case, incl.
+    lift+translate):** `deck-cli.py paste --from SRC --key K <pos>` → `locate-slide.py`
+    for the landed position → swap/translate the copy in ONE `apply-text-pairs.py <deck>
+    pairs.json` pass (`--dry-run` first: every pair must hit exactly once) → ONE
+    `render-deck.py --scope N --shoot`. **Render economy — budget one shoot, not four:**
+    never spend a chromium render to learn what deck.json already states — is the canvas
+    dark (read a sibling slide's `decor`/`accent`, or the deck theme; a globally-dark deck
+    carries the dark bg to a pasted raw page with no decor/accent needed), where the page
+    landed (`locate-slide.py`), or whether it needs `--shake` (`--preview`). The error
+    oracle is `last-render.log` (`errors: N` / PASS), NOT the `--shoot` advisory tail:
+    deck-wide rollups (R20 font-tier, palette / radius drift) are pre-existing deck noise
+    on other lifted pages, not your page — recognize them, never re-render to "diagnose"
+    them.
   - **Into a BRAND-NEW deck** ("开个新 deck 复用某页"): use
     `deck-json/lift-to-new-deck.py SRC PAGES DEST [--new-key K] [--render]`. It
     scaffolds a schema-valid deck.json then delegates each slide copy to
