@@ -58,6 +58,22 @@ custom_css **可以**直接 `var(--fs-ease-out)`、`calc(var(--i,0) * var(--fs-s
    (`grep '@keyframes\|animation:'` 它的 data.html);`iframe-embed` / live demo 页。
    理由:会跟既有动画打架、或动到 live 内容。
 
+## 2b. 框架默认:进入即重启(restart-on-enter)
+
+翻页**进入**某页时,框架自动把该页入场动效**从头重放**——你**不必**为"重播"再手写 is-current 包裹或 JS:
+
+- **有限 CSS keyframe 动画**:该页 `.slide` 子树里每个**有限**作者动画(`getAnimations({subtree:true})` 枚举)
+  归零重放。**排除**:框架自有 `fs-*`(已由 fs-reveal 机制重播)、`animation-iteration-count: infinite`
+  环境循环(重启只会让呼吸/光晕抖一下)、CSS `transition`(状态驱动,非入场动画)。
+  → §2.2 的 is-current 包裹**仍推荐**(它额外保证隐藏页静止、不在后台空跑),但"进入重播"**不再依赖它**——
+  即使忘了 scope 到 is-current,有限动画照样会在进入时重播。
+- **`<video>`**:归零重播(早有的行为)。**`<iframe>`**:整体重载(克隆换新元素 → src 从头解析);
+  `data:` / 同源零网络。内嵌原型 / live demo(如 `iframe-embed`、`prototype-embed.md`)的**内部动画**因此也从头播。
+- **首屏不重启**:打开 deck 直接落地的第一页**不**重启(否则首帧就放整段 stagger);只有真正"从别页翻进来"才重启。
+- **静止态必须仍然有效**(§2 铁律不变):重启 = 回到动画第 0 帧,该帧必须是合理可见态,否则会闪。
+- **退出**:给元素(或整页,挂在祖先上)加 `data-no-restart` 关掉重启 —— 留给可交互 iframe、重型 / 远程 embed、
+  或不想每次重播的内容。运行时实现见 `assets/feishu-deck.js` 的 `restartFrameMotion`。
+
 ## 3. 方法(layout-last + 逐页动态设计)
 
 1. **先定稿**:布局 / 内容定稿、validator 过了,**再**加动效。动一个还在动的布局 = 白做

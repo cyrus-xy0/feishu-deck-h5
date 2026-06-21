@@ -52,6 +52,9 @@
 - SVG 连线 draw-in:`<path pathLength="1">` + resting `stroke-dashoffset:0`,keyframe
   `from{stroke-dashoffset:1}`。实心形状(箭头/节点)用 scale+opacity pop,**不用** dash
   (dash 只作用于 stroke,对 fill 无效);scale 要先 `transform-box:fill-box; transform-origin:center`。
+- **进入自动重播,别手写**:翻进某页时框架自动重启该页的有限 CSS 动画(排除框架 `fs-*` 与 infinite 循环)、
+  `<video>` 与内嵌 `<iframe>`(整体重载)——is-current 包裹仍推荐(隐藏页不空跑),但"重播"不依赖它。
+  首屏落地页不重播。可交互 / 重型 embed 用 `data-no-restart` 关掉。详见 `motion-system.md` §2b。
 
 ## 插一页 / 改一页 · 三命令配方
 
