@@ -1,0 +1,243 @@
+<!doctype html>
+<!--
+  feishu-chat-demo · SCAFFOLD for an in-deck "live agent conversation" demo
+  ============================================================================
+  WHAT  A self-contained feishu/Lark-style chat UI (lark-design-prototype design
+        language) you embed in a deck page via <iframe>. Use it whenever a slide
+        needs to SHOW a conversation with an AI assistant / digital employee.
+
+  WHY AN IFRAME (not inline in the slide)  Authentic feishu chat uses native
+        ~13–15px fonts. The deck's validator enforces a {16,24,28,48} ladder
+        (body floor 24). Inlining would force the chat to 24px+ and stop looking
+        like feishu. The iframe escape-hatch lets the prototype keep its native
+        fonts; the deck-page wrapper vouches it (data-ui-screenshot) so the
+        font-floor audit, which can't introspect iframe text, downgrades to
+        warn_soft. (Same pattern the shipped haizheng / CAPA demos use.)
+
+  HOW TO USE
+   1. cp this file → runs/<deck>/prototypes/<name>/index.html  (then fill content)
+   2. Avatars: ../../assets/shared/digital_employee_avatars_50/<file>.png
+      (relative from prototypes/<name>/ up to the run's assets/).
+   3. Embed it on a raw deck page (author the page fragment, NOT here):
+        <div class="screen" data-ui-screenshot>
+          <iframe src="prototypes/<name>/index.html" title="… demo" loading="eager"></iframe>
+        </div>
+      …and in that page's custom_css give .screen a frame, e.g.:
+        .slide[data-slide-key="K"] .screen{
+          position:absolute; left:73px; right:73px; top:232px; bottom:44px;
+          border-radius:18px; border:1px solid rgba(255,255,255,.14);
+          background:#0a1020; padding:8px; overflow:hidden;
+          box-shadow:0 30px 80px -28px rgba(0,0,0,.78); }
+        .slide[data-slide-key="K"] .screen iframe{
+          width:100%; height:100%; border:0; border-radius:12px;
+          background:#fff; display:block; }
+
+  MULTIPLE CONVERSATIONS ON ONE SLIDE  Keep ONE iframe; inside it wrap N copies
+        of .thread (each its own conversation) in a flex row:
+          <div class="cols"> <section class="col">…</section> ×N </div>
+        See the commented .cols/.col rules below. One vouched iframe is far
+        easier to scale + validate than N iframes.
+
+  RULES  No emoji (feishu-prototype: icons come from the UD catalog only — the
+        inline <svg> set at the bottom). Restrained color: feishu blue for
+        AI/primary + one status color; body text stays #1f2329. Resting state
+        is VISIBLE — the staged reveal only hides-then-shows when JS runs, with
+        a 1.7s hard safety-net, so a failed/slow load never loses content and a
+        screenshot is never caught mid-reveal.
+  ============================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>feishu chat demo · scaffold</title>
+<style>
+  :root{
+    /* lark-design-prototype tokens — do not remap to abstract names */
+    --blue:#1456f0; --blue-soft:#1456f014; --blue-line:#1456f033;
+    --title:#1f2329; --text:#373b42; --caption:#646a73; --placeholder:#8f959e;
+    --border-card:#dee0e3; --border-comp:#d0d3d6; --divider:#1f232914;
+    --bg-body:#ffffff; --bg-base:#f2f3f5; --bg-content:#f5f6f7;
+    --green:#16a34a; --green-soft:#16a34a14; --amber:#9a6a00; --amber-soft:#f5a62314;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",-apple-system,sans-serif;
+    background:var(--bg-base); color:var(--title); -webkit-font-smoothing:antialiased}
+  svg{width:1em;height:1em;display:block;fill:currentColor}
+  .app{height:100%; display:flex; flex-direction:column; background:var(--bg-base)}
+
+  /* ---- feishu app top bar ---- */
+  .topbar{height:54px; flex:none; display:flex; align-items:center; gap:12px;
+    padding:0 22px; background:var(--bg-body); border-bottom:0.5px solid var(--divider)}
+  .topbar .logo{width:30px; height:30px; border-radius:8px; flex:none; background:var(--blue);
+    color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700}
+  .topbar .tt{font-size:16px; font-weight:600; color:var(--title)}
+  .topbar .tt .sub{font-size:13px; font-weight:400; color:var(--caption); margin-left:8px}
+  .topbar .sp{flex:1}
+  .topbar .org{font-size:13px; color:var(--caption); display:flex; align-items:center; gap:8px}
+  .topbar .org .av{width:26px; height:26px; border-radius:7px; object-fit:cover; flex:none}
+
+  /* ---- MULTI-COLUMN composition (uncomment when showing N conversations) ----
+  .cols{flex:1; min-height:0; display:flex; gap:18px; padding:18px 22px 12px; align-items:stretch}
+  .col{flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column;
+    background:var(--bg-body); border:0.5px solid var(--border-card); border-radius:14px; overflow:hidden}
+  .col-head{flex:none; padding:14px 18px 12px; border-bottom:0.5px solid var(--divider);
+    background:linear-gradient(180deg,#f7f9ff,#fff)}
+  .col .thread{background:var(--bg-content)}
+  ----------------------------------------------------------------------------- */
+
+  /* ---- chat thread (the reusable unit) ---- */
+  .thread{flex:1; min-height:0; overflow:hidden; padding:16px 18px;
+    display:flex; flex-direction:column; gap:12px; background:var(--bg-content)}
+  .row{display:flex; gap:8px; max-width:100%}
+  .row.me{justify-content:flex-end}
+  .bubble{background:var(--blue); color:#fff; border-radius:12px 12px 4px 12px;
+    padding:9px 13px; font-size:14.5px; line-height:1.5; max-width:80%}
+  .ava{width:30px; height:30px; border-radius:8px; flex:none; object-fit:cover;
+    background:var(--blue); color:#fff; font-size:14px; font-weight:600;
+    display:flex; align-items:center; justify-content:center}
+  .ans{max-width:86%; display:flex; flex-direction:column; gap:8px; min-width:0}
+
+  .say{background:var(--bg-body); border:0.5px solid var(--border-card); border-radius:4px 12px 12px 12px;
+    padding:9px 13px; font-size:14.5px; line-height:1.55; color:var(--text); align-self:flex-start}
+  .say b{color:var(--title); font-weight:600}
+  .say .q{display:block; margin-top:6px; color:var(--blue); font-weight:600; font-size:14px}
+
+  .think{display:inline-flex; align-items:center; gap:7px; align-self:flex-start;
+    background:var(--bg-base); border-radius:8px; padding:6px 11px; font-size:12.5px; color:var(--caption)}
+  .think .sp{width:12px; height:12px; border:2px solid #c7ccd4; border-top-color:var(--blue);
+    border-radius:50%; animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* structured answer card */
+  .card{background:var(--bg-body); border:0.5px solid var(--border-card); border-radius:12px;
+    padding:13px 15px; font-size:13.5px; line-height:1.5; color:var(--text)}
+  .card .ch{display:flex; align-items:center; gap:8px; margin-bottom:9px}
+  .card .ch .doc{width:20px; height:20px; border-radius:6px; background:var(--blue-soft); color:var(--blue);
+    font-size:13px; display:flex; align-items:center; justify-content:center; flex:none}
+  .card .ch h4{font-size:14.5px; font-weight:600; color:var(--title)}
+  .card .ch .pill{margin-left:auto; font-size:11.5px; font-weight:600; padding:2px 8px; border-radius:5px;
+    background:var(--green-soft); color:var(--green); display:inline-flex; align-items:center; gap:4px}
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:5px 12px; margin:2px 0}
+  .kv .k{color:var(--caption); white-space:nowrap}
+  .kv .v{color:var(--title); font-weight:500}
+  .kv .v em{font-style:normal; color:var(--blue); font-weight:600}
+  .li{position:relative; padding-left:14px; margin:5px 0; color:var(--text)}
+  .li::before{content:""; position:absolute; left:2px; top:8px; width:5px; height:5px; border-radius:50%;
+    background:var(--blue)}
+  .li b{color:var(--title); font-weight:600}
+  .verdict{margin-top:10px; padding:9px 12px; border-radius:9px; background:var(--blue-soft);
+    border:0.5px solid var(--blue-line); font-size:13.5px; color:var(--title); line-height:1.5}
+  .verdict b{color:var(--blue); font-weight:600}
+
+  .cite{display:inline-flex; align-items:center; gap:7px; align-self:flex-start; background:var(--bg-base);
+    border-radius:8px; padding:6px 10px; font-size:12px; color:var(--caption); max-width:100%}
+  .cite .ic{font-size:14px; color:var(--blue); flex:none}
+  .cite b{color:var(--title); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .act{display:inline-flex; align-items:center; gap:7px; align-self:flex-start; font-size:12.5px;
+    font-weight:600; color:var(--blue); background:var(--blue-soft); border:0.5px solid var(--blue-line);
+    border-radius:8px; padding:6px 12px}
+  .act .ic{font-size:14px}
+
+  /* ---- composer (optional; shows it's a real chat) ---- */
+  .composer{flex:none; background:var(--bg-body); border-top:0.5px solid var(--divider); padding:10px 14px}
+  .inputbar{display:flex; align-items:center; gap:10px; height:42px; border:0.5px solid var(--border-comp);
+    border-radius:21px; padding:0 8px 0 14px; background:var(--bg-body)}
+  .inputbar .ph{flex:1; color:var(--placeholder); font-size:14px}
+  .inputbar .send{width:30px; height:30px; border-radius:50%; background:var(--blue); color:#fff;
+    font-size:17px; display:flex; align-items:center; justify-content:center; flex:none}
+
+  /* ---- staged reveal: resting VISIBLE; .js hides gates then shows in order ---- */
+  @keyframes rise{from{opacity:0; transform:translateY(9px)} to{opacity:1; transform:none}}
+  html.js .gate{opacity:0}
+  html.js .gate.shown{animation:rise .5s cubic-bezier(.2,.7,.3,1) both; opacity:1}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- top bar: assistant identity (left) + org/owner (right) -->
+  <div class="topbar">
+    <span class="logo">小</span>
+    <span class="tt">小助手<span class="sub">数字员工 · 企业豆包</span></span>
+    <span class="sp"></span>
+    <span class="org">某某公司 · 某某部门
+      <img class="av" src="../../assets/shared/digital_employee_avatars_50/32_east_asian_woman_glasses_sweater.png" alt="助手">
+    </span>
+  </div>
+
+  <!-- ONE conversation thread. Duplicate inside a .cols row for N scenarios. -->
+  <div class="thread">
+    <!-- user turn -->
+    <div class="row me"><div class="bubble">这里写用户的问题 / 诉求（一句口语化的话）</div></div>
+
+    <!-- AI turn: avatar + answer. data-step orders the staged reveal. -->
+    <div class="row">
+      <img class="ava" src="../../assets/shared/digital_employee_avatars_50/32_east_asian_woman_glasses_sweater.png" alt="助手">
+      <div class="ans">
+        <div class="say gate" data-step="1">AI 的口语回应，可带一个<b>重点</b>或追问。
+          <span class="q">① 追问要素一？② 追问要素二？</span></div>
+      </div>
+    </div>
+
+    <div class="row me gate" data-step="2"><div class="bubble">用户补充的信息</div></div>
+
+    <!-- structured answer card: the "AI value" — a generated record / retrieved
+         evidence / extracted knowledge. Swap kv ↔ li ↔ verdict as needed. -->
+    <div class="row">
+      <img class="ava" src="../../assets/shared/digital_employee_avatars_50/32_east_asian_woman_glasses_sweater.png" alt="助手">
+      <div class="ans">
+        <div class="card gate" data-step="3">
+          <div class="ch"><span class="doc" data-ic="doc"></span><h4>结构化结果卡片标题</h4>
+            <span class="pill"><span data-ic="check"></span>状态标签</span></div>
+          <div class="kv">
+            <span class="k">字段一</span><span class="v">值 <em>强调</em></span>
+            <span class="k">字段二</span><span class="v">值</span>
+          </div>
+          <div class="verdict"><b>结论：</b>一句把价值点说清的话。</div>
+        </div>
+        <span class="cite gate" data-step="3"><span class="ic" data-ic="doc"></span>来源：<b>某某系统 / 知识库</b></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- optional composer -->
+  <div class="composer">
+    <div class="inputbar"><span class="ph">发送给 小助手</span><span class="send" data-ic="send"></span></div>
+  </div>
+</div>
+
+<script>
+// ---- inline UD-catalog icons (currentColor, 24 viewBox). Add only from UD. ----
+var I={
+  user:'<svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-2a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm-8 11a8 8 0 1 1 16 0 1 1 0 1 1-2 0 6 6 0 0 0-12 0 1 1 0 1 1-2 0Z"/></svg>',
+  doc:'<svg viewBox="0 0 24 24"><path d="M7 12a1 1 0 0 1 1-1h8a1 1 0 1 1 0 2H8a1 1 0 0 1-1-1Zm1 4a1 1 0 1 0 0 2h4a1 1 0 1 0 0-2H8Z"/><path d="M3 2.993C3 1.888 3.895 1 5 1h9.257a2 2 0 0 1 1.414.586l4.743 4.744A2 2 0 0 1 21 7.744V21c0 1.105-.894 2-1.998 2H4.996A1.99 1.99 0 0 1 3 21.009V2.993ZM14 3H5v18h14V8.02c-.48 0-2.69-.01-4.005-.016a1 1 0 0 1-.995-1V3Z"/></svg>',
+  check:'<svg viewBox="0 0 24 24"><path d="M12 23c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Zm5.03-14.78a1 1 0 0 1 0 1.41l-6.01 6.02a1.5 1.5 0 0 1-2.12 0l-2.93-2.93a1 1 0 1 1 1.41-1.42l2.58 2.58 5.66-5.66a1 1 0 0 1 1.41 0Z"/></svg>',
+  history:'<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.97 8.97 0 0 0 13 21a9 9 0 0 0 0-18Zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12Z"/></svg>',
+  bulb:'<svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-4 12.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26A7 7 0 0 0 12 2Zm-2 18a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1h-4v1Z"/></svg>',
+  send:'<svg viewBox="0 0 24 24"><path d="M21.707 16.293a1 1 0 0 1-1.414 0L12 8l-8.293 8.293a1 1 0 0 1-1.414-1.414l8.293-8.293a2 2 0 0 1 2.828 0l8.293 8.293a1 1 0 0 1 0 1.414Z"/></svg>',
+};
+document.querySelectorAll('[data-ic]').forEach(function(e){var k=e.getAttribute('data-ic'); if(I[k]) e.innerHTML=I[k];});
+
+// staged reveal — gates fade in by data-step order; 1.7s hard safety-net
+// guarantees full visibility (snapshot-safe, JS-failure-safe).
+(function(){
+  document.documentElement.className='js';
+  var threads=[].slice.call(document.querySelectorAll('.thread'));
+  var seqs=threads.map(function(t){
+    return [].slice.call(t.querySelectorAll('.gate')).sort(function(a,b){
+      return (+a.getAttribute('data-step'))-(+b.getAttribute('data-step'));
+    });
+  });
+  function run(){
+    seqs.forEach(function(seq, ci){
+      var t=120 + ci*90;
+      seq.forEach(function(el, gi){ t += 200 + (gi===0?100:0); setTimeout(function(){ el.classList.add('shown'); }, t); });
+    });
+    setTimeout(function(){ [].slice.call(document.querySelectorAll('.gate')).forEach(function(el){ el.classList.add('shown'); }); }, 1700);
+  }
+  if(document.readyState!=='loading') run(); else document.addEventListener('DOMContentLoaded', run);
+})();
+</script>
+</body>
+</html>

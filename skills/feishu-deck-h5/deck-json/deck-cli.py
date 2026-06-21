@@ -161,6 +161,27 @@ def find_slide_index(deck: dict, key: str) -> int:
     raise KeyError(f"slide with key '{key}' not found")
 
 
+def resolve_slide_ref(deck: dict, ref: str):
+    """Resolve a slide reference to a 0-based index, accepting (in order): an
+    exact semantic key, a 1-based page index ('36'), or a '#36' frame hash —
+    the same ways a user cites a page. Returns None when nothing matches so
+    callers can print a friendly error. `get-page` rides on this so reading a
+    slide never needs a hand-rolled 'json.load + guess the field names' script."""
+    slides = deck.get("slides", [])
+    try:
+        return find_slide_index(deck, ref)            # exact key wins
+    except KeyError:
+        pass
+    bare = str(ref).lstrip("#").strip()
+    if bare.isdigit():
+        n = int(bare)
+        return n - 1 if 1 <= n <= len(slides) else None
+    try:
+        return find_slide_index(deck, bare)           # '#key' style
+    except KeyError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Backup + rollback
 # ---------------------------------------------------------------------------
@@ -378,6 +399,49 @@ def cmd_show(deck: dict, args) -> int:
     except KeyError as e:
         print(f"deck-cli: {e}", file=sys.stderr); return 1
     print(json.dumps(deck["slides"][idx], ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_get_page(deck: dict, args) -> int:
+    """Read-only dump of ONE slide's authored content, addressed by key OR a
+    1-based page index (`36` / `#36`). This is the clean replacement for ad-hoc
+    'json.load(deck); slides[i].html' extractors — the exact pattern that gets
+    the slide object shape (data.html / custom_css / title) guessed wrong and
+    burns a round-trip. Default prints a readable summary plus the raw html &
+    css; --html / --css / --title print just that field, unescaped, ready to
+    pipe to a file (`get-page X --html > frag.html`)."""
+    idx = resolve_slide_ref(deck, args.ref)
+    if idx is None:
+        print(f"deck-cli: get-page — no slide matches '{args.ref}' "
+              f"(use a key, or a 1-based page index like 36 / #36)",
+              file=sys.stderr)
+        return 1
+    s = deck["slides"][idx]
+    data = s.get("data") or {}
+    html = data.get("html") or ""
+    css = s.get("custom_css") or ""
+    title = data.get("title") or ""
+    if args.html:
+        sys.stdout.write(html + ("" if html.endswith("\n") else "\n"))
+        return 0
+    if args.css:
+        sys.stdout.write(css + ("" if css.endswith("\n") else "\n"))
+        return 0
+    if args.title:
+        print(title)
+        return 0
+    print(f"page {idx + 1} · key={s.get('key')} · layout={s.get('layout')} · "
+          f"screen_label={s.get('screen_label')!r}")
+    if title:
+        print(f"title: {title}")
+    print(f"fields: {sorted(s.keys())}  |  data.html: {len(html)} chars  |  "
+          f"custom_css: {len(css)} chars")
+    if html:
+        print("\n--- data.html ---")
+        print(html)
+    if css:
+        print("\n--- custom_css ---")
+        print(css)
     return 0
 
 
@@ -1428,6 +1492,13 @@ def main(argv=None) -> int:
     sub.add_parser("list", help="list slides")
     sp = sub.add_parser("get", help="get value at dotted path"); sp.add_argument("path")
     sp = sub.add_parser("show", help="pretty-print one slide"); sp.add_argument("key")
+    sp = sub.add_parser("get-page",
+        help="dump ONE slide's authored content by key or 1-based index (#N) — "
+             "read-side replacement for ad-hoc extractors")
+    sp.add_argument("ref", help="slide key, or 1-based page index (36 / #36)")
+    sp.add_argument("--html", action="store_true", help="print raw data.html only")
+    sp.add_argument("--css", action="store_true", help="print raw custom_css only")
+    sp.add_argument("--title", action="store_true", help="print data.title only")
     sp = sub.add_parser("lint", help="validate against schema")
     sp.add_argument("--strict", action="store_true",
                     help="promote warnings to errors (default: lenient)")
@@ -1562,7 +1633,7 @@ def main(argv=None) -> int:
         print(f"deck-cli: invalid JSON: {e}", file=sys.stderr); return 2
 
     READ_CMDS = {"list": cmd_list, "get": cmd_get, "show": cmd_show,
-                 "add-asset": cmd_add_asset}
+                 "get-page": cmd_get_page, "add-asset": cmd_add_asset}
     if args.cmd in READ_CMDS:
         return READ_CMDS[args.cmd](deck, args)
     if args.cmd == "lint":

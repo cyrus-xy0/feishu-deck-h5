@@ -350,5 +350,66 @@ class CrossDeckPasteIntoLegacyHtmlTest(unittest.TestCase):
                          f"final deck.json failed strict validation:\n{vr.stdout}\n{vr.stderr}")
 
 
+class DeckCliGetPageTest(unittest.TestCase):
+    """`get-page` is the read-side replacement for ad-hoc 'json.load + guess the
+    field names' extractors: address a slide by key OR 1-based index (#N), and
+    --html/--css/--title dump the raw field, unescaped, for piping. F-357."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="deck-cli-getpage-")
+        self.deck = Path(self.tmp) / "deck.json"
+        shutil.copy(SAMPLE, self.deck)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, *args) -> tuple[int, str, str]:
+        proc = subprocess.run(
+            [sys.executable, str(CLI), str(self.deck), *args],
+            capture_output=True, text=True,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def _load(self) -> dict:
+        return json.loads(self.deck.read_text(encoding="utf-8"))
+
+    def test_key_index_and_hash_resolve_to_same_slide(self):
+        key = self._load()["slides"][0]["key"]
+        rc_k, out_k, _ = self._run("get-page", key)
+        rc_i, out_i, _ = self._run("get-page", "1")
+        rc_h, out_h, _ = self._run("get-page", "#1")
+        self.assertEqual((rc_k, rc_i, rc_h), (0, 0, 0), "all three refs should resolve")
+        head = lambda o: o.splitlines()[0]
+        self.assertEqual(head(out_k), head(out_i), "key and index disagree")
+        self.assertEqual(head(out_i), head(out_h), "index and #hash disagree")
+        self.assertIn(f"key={key}", head(out_k))
+
+    def test_bad_ref_exits_1(self):
+        rc, out, err = self._run("get-page", "no-such-slide-xyz")
+        self.assertEqual(rc, 1)
+        self.assertIn("no slide matches", err)
+
+    def test_html_flag_prints_raw_unescaped_field(self):
+        # self-contained: a raw slide with multi-line html, so the test always
+        # exercises the dump path (the sample deck has no raw slide).
+        raw_html = '<div class="x">原始 <b>HTML</b>\n第二行</div>'
+        deck = {
+            "version": "1.0",
+            "deck": {"title": "t", "author": "a", "date": "2026-06"},
+            "slides": [{"key": "raw-one", "layout": "raw", "data": {"html": raw_html}}],
+        }
+        p = Path(self.tmp) / "raw.json"
+        p.write_text(json.dumps(deck, ensure_ascii=False), encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(CLI), str(p), "get-page", "raw-one", "--html"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        # raw field round-trips verbatim — a real newline, NOT the JSON-escaped
+        # "\n" that `show` would print.
+        self.assertEqual(proc.stdout.rstrip("\n"), raw_html)
+        self.assertIn("\n第二行", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
