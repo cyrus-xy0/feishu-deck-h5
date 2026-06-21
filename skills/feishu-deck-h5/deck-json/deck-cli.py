@@ -47,7 +47,9 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
+import hashlib
 import html
 import json
 import os
@@ -1068,6 +1070,82 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     return copied
 
 
+def _extract_inline_images(slide: dict, dst_dir: Path, key: str) -> list[str]:
+    """Extract LARGE inline `data:image/...;base64,…` URIs from a pasted slide
+    into deck-local asset files (`assets/lift-<key>-<hash>.<ext>`) and rewrite the
+    references to that relative path.
+
+    Why: an inline base64 photo (e.g. a 370KB lifted hero image) bloats deck.json
+    — every read / lint / render / snapshot re-parses it, and it is the P50
+    base64-in-fragment anti-pattern add-asset exists to avoid. Cross-deck paste is
+    exactly where a foreign slide's inline images arrive, so extract here: same net
+    result as hand-running add-asset, but automatic and lossless (the bytes are
+    written verbatim — no re-encode). SMALL data: URIs (tiny inline SVG icons /
+    sprites below the threshold) are LEFT inline — not worth a file each.
+
+    Runs AFTER _copy_slide_assets so the freshly-written `assets/lift-*` refs are
+    not mis-scanned as "missing in source". Returns the written relative paths.
+    """
+    MIME_EXT = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+                "image/gif": "gif", "image/webp": "webp", "image/avif": "avif",
+                "image/svg+xml": "svg", "image/bmp": "bmp"}
+    THRESHOLD = 8192  # base64 chars (~6KB binary); below this, keep inline
+    # Non-greedy optional params (`;charset=…`) keep this LINEAR — it never
+    # backtracks across the blob. Blob class is the base64 alphabet only.
+    pat = re.compile(
+        r'data:(image/[\w.+-]+)(?:;[\w.=+-]+)*?;base64,([A-Za-z0-9+/=]+)')
+    mapping: dict[str, str] = {}   # full data: URI -> relative asset path
+    written: list[str] = []
+
+    def collect(v):
+        if isinstance(v, str):
+            for m in pat.finditer(v):
+                full, mime, blob = m.group(0), m.group(1).lower(), m.group(2)
+                if full in mapping or len(blob) < THRESHOLD:
+                    continue
+                try:
+                    raw = base64.b64decode(blob)
+                except Exception:
+                    continue
+                ext = MIME_EXT.get(mime, "bin")
+                h = hashlib.md5(raw).hexdigest()[:8]
+                rel = f"assets/lift-{key}-{h}.{ext}"
+                out = dst_dir / rel
+                out.parent.mkdir(parents=True, exist_ok=True)
+                if not out.exists():
+                    out.write_bytes(raw)
+                mapping[full] = rel
+                written.append(rel)
+        elif isinstance(v, dict):
+            for x in v.values():
+                collect(x)
+        elif isinstance(v, list):
+            for x in v:
+                collect(x)
+
+    collect(slide.get("custom_css"))
+    collect(slide.get("data"))
+    if not mapping:
+        return []
+
+    def rewrite(v):
+        if isinstance(v, str):
+            for full, rel in mapping.items():
+                v = v.replace(full, rel)
+            return v
+        if isinstance(v, dict):
+            return {k: rewrite(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [rewrite(x) for x in v]
+        return v
+
+    if isinstance(slide.get("custom_css"), str):
+        slide["custom_css"] = rewrite(slide["custom_css"])
+    if "data" in slide:
+        slide["data"] = rewrite(slide["data"])
+    return written
+
+
 # Framework-drift modernization: retired CSS custom properties an OLD deck may
 # reference. var(--undefined) silently kills the whole declaration on render (a
 # `font:` shorthand → 16px fallback) → R-CSSVAR. Map to the current equivalent.
@@ -1189,6 +1267,10 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     src_dir = src_path.resolve().parent
     dst_dir = args.deck.resolve().parent
     report = _copy_slide_assets(slide, src_dir, dst_dir)
+    # Lift large inline base64 images out of deck.json into asset files (keeps the
+    # deck small + dodges the P50 base64-in-fragment trap). After the copy so the
+    # new assets/lift-* refs aren't mis-scanned as missing-in-source.
+    extracted = _extract_inline_images(slide, dst_dir, new_key)
 
     slides = deck.setdefault("slides", [])
     n = len(slides)
@@ -1219,6 +1301,8 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
         print(f"    deck-local assets copied: {report['local']}")
     if report["missing"]:
         print(f"    ⚠ assets MISSING in source (broken refs after paste): {report['missing']}")
+    if extracted:
+        print(f"    inline base64 → asset file(s): {extracted}")
     return 0, deck
 
 
