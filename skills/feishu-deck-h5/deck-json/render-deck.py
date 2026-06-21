@@ -4142,12 +4142,17 @@ def main(argv=None) -> int:
         else:
             _shoot_page = ASSETS_DIR / "shoot-page.py"
             for _n in scope_pages:
-                print(f"\n──── SHOOT · page {_n} (one-pass verify) ────",
-                      file=sys.stderr)
+                print(f"\n──── SHOOT · page {_n} (one-pass verify · focused on "
+                      f"this page) ────", file=sys.stderr)
                 try:
+                    # F-361: add `--slide _n` so findings are FOCUSED to this page
+                    # (F-254 filter). Without it the per-page verdict FAILs on a
+                    # PRE-EXISTING deck-wide finding on a page this edit never
+                    # touched, burying "is MY edited page clean?" in noise. The
+                    # whole-deck gate is still `--final`.
                     _vr = subprocess.run(
                         [sys.executable, str(VALIDATE_HTML), str(out_html),
-                         "--visual", "--scope-frames", str(_n)],
+                         "--visual", "--scope-frames", str(_n), "--slide", str(_n)],
                         capture_output=True, text=True)
                     print(_vr.stdout, file=sys.stderr)
                 except Exception as _e:

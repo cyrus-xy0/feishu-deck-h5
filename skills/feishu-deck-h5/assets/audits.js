@@ -3119,7 +3119,9 @@
         }
         // (c) 内容 <iframe>(豁免 iframe-embed 版式)→ warn 性质(走 _lev 同三态)。
         if (!isIframeLayout && slide.querySelector('iframe')) {
-          push(`slide ${slide_idx}: <iframe> 正文嵌入 — 内嵌文字字号检查够不到、不可控。`
+          push(`slide ${slide_idx}: <iframe> 正文嵌入 — 内嵌文字字号检查够不到、不可控`
+            + '(字号下限审计看不进 iframe;要查/改里面的字号,用 '
+            + '`deck-cli inspect-text <key>` 把页内 + iframe 原型的字号一并列出)。'
             + '把要呈现的内容用 HTML/.ui-* 重建,或只作示意缩略图(非 iframe-embed 版式)。');
         }
         return findings;

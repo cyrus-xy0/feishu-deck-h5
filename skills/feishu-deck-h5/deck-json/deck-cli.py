@@ -199,6 +199,26 @@ def backup_path(deck_path: Path, command: str) -> Path:
     return cand
 
 
+def prune_backups(deck_path: Path, keep: int = 15) -> int:
+    """Keep only the most-recent `keep` `<deck>.bak-pre-*` backups (by mtime),
+    delete the rest. One backup is written per mutation, so an actively-edited
+    deck otherwise accumulates them into the hundreds (a real deck dir held ~100).
+    Best-effort: never raises, returns the count deleted. (F-363)"""
+    try:
+        baks = sorted(deck_path.parent.glob(deck_path.name + ".bak-pre-*"),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return 0
+    removed = 0
+    for old in baks[keep:]:
+        try:
+            old.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def _edit_scope_keys(args, updated: dict):
     """F-320 · the set of slide KEYS this edit could legitimately affect, for the
     scope-aware pre-write lint. Return:
@@ -309,6 +329,9 @@ def write_deck_with_validation(deck_path: Path, deck: dict, command: str,
         if not no_backup:
             bak = backup_path(deck_path, command)
             shutil.copy2(deck_path, bak)
+            # F-363: cap backup accumulation. The just-made `bak` is newest, so
+            # it survives the prune and stays available for rollback below.
+            prune_backups(deck_path)
 
     # 2. Write (atomic — F-269: a kill mid-write must not leave a torn deck.json)
     atomic_write_text(deck_path, json.dumps(deck, ensure_ascii=False, indent=2),
@@ -442,6 +465,82 @@ def cmd_get_page(deck: dict, args) -> int:
     if css:
         print("\n--- custom_css ---")
         print(css)
+    return 0
+
+
+def _fontsize_map(style_text: str) -> list[tuple[str, str]]:
+    """(selector, size) for every `font-size:Npx` / `font:… Npx…` decl in a CSS
+    string. Coarse block split — good enough for a font inventory."""
+    rows: list[tuple[str, str]] = []
+    for m in re.finditer(r'([^{}]+)\{([^}]*)\}', style_text):
+        body = m.group(2)
+        fm = re.search(r'font(?:-size)?:\s*[^;]*?([0-9.]+)px', body)
+        if fm:
+            sel = m.group(1).strip().splitlines()[-1].strip()
+            rows.append((sel[:48], fm.group(1) + "px"))
+    return rows
+
+
+def _visible_text(h: str) -> str:
+    t = re.sub(r'<(script|style)\b[^>]*>.*?</\1>', ' ', h, flags=re.S | re.I)
+    t = re.sub(r'<[^>]+>', ' ', t)
+    t = re.sub(r'&[a-z]+;|&#\d+;', ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+
+def cmd_inspect_text(deck: dict, args) -> int:
+    """Read-only: dump a slide's effective TEXT + a font-size map, FOLLOWING any
+    iframe `src` into its embedded prototype file (prototypes/<…>.html) and
+    listing that file's font-sizes too.
+
+    This is the "the demo text is too small" fix: the rendered text of an
+    iframe-embedded demo otherwise lives two files deep (page → iframe src →
+    prototype CSS) and has to be hand-traced before you can even find the sizes
+    to change. (F-362)"""
+    idx = resolve_slide_ref(deck, args.ref)
+    if idx is None:
+        print(f"deck-cli: inspect-text — no slide matches '{args.ref}' "
+              f"(use a key, or a 1-based page index like 36 / #36)",
+              file=sys.stderr)
+        return 1
+    s = deck["slides"][idx]
+    html = (s.get("data") or {}).get("html") or ""
+    css = s.get("custom_css") or ""
+    deck_dir = args.deck.parent
+
+    print(f"page {idx + 1} · key={s.get('key')} · layout={s.get('layout')}")
+    page_styles = css + "\n" + "\n".join(
+        re.findall(r'<style[^>]*>(.*?)</style>', html, re.S))
+    pfm = _fontsize_map(page_styles)
+    print(f"\n--- page font-sizes ({len(pfm)}) ---")
+    for sel, sz in pfm:
+        print(f"  {sz:>7}  {sel}")
+    if not pfm:
+        print("  (none in custom_css / inline <style>)")
+    print("\n--- page text ---")
+    print("  " + (_visible_text(html)[:600] or "(none)"))
+
+    srcs = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.I)
+    if not srcs:
+        print("\n(no iframe — nothing further to follow)")
+    for src in srcs:
+        if src.startswith(("data:", "http://", "https://", "//")):
+            print(f"\n--- iframe src={src[:48]}… (inline/remote — not followed) ---")
+            continue
+        proto = (deck_dir / src).resolve()
+        print(f"\n--- iframe → {src} ---")
+        if not proto.is_file():
+            print(f"  (prototype file not found: {proto})")
+            continue
+        ph = proto.read_text(encoding="utf-8", errors="replace")
+        ps = "\n".join(re.findall(r'<style[^>]*>(.*?)</style>', ph, re.S))
+        ifm = _fontsize_map(ps)
+        sizes = sorted({float(sz[:-2]) for _, sz in ifm})
+        print(f"  font-sizes ({len(ifm)} decls): "
+              + (", ".join(f"{x:g}px" for x in sizes) or "none"))
+        for sel, sz in ifm:
+            print(f"    {sz:>7}  {sel}")
+        print(f"  text: {_visible_text(ph)[:400]}")
     return 0
 
 
@@ -1499,6 +1598,10 @@ def main(argv=None) -> int:
     sp.add_argument("--html", action="store_true", help="print raw data.html only")
     sp.add_argument("--css", action="store_true", help="print raw custom_css only")
     sp.add_argument("--title", action="store_true", help="print data.title only")
+    sp = sub.add_parser("inspect-text",
+                        help="dump a page's effective text + font-size map, "
+                             "following iframe src into embedded prototype files")
+    sp.add_argument("ref", help="slide key, or 1-based page index (36 / #36)")
     sp = sub.add_parser("lint", help="validate against schema")
     sp.add_argument("--strict", action="store_true",
                     help="promote warnings to errors (default: lenient)")
@@ -1633,7 +1736,8 @@ def main(argv=None) -> int:
         print(f"deck-cli: invalid JSON: {e}", file=sys.stderr); return 2
 
     READ_CMDS = {"list": cmd_list, "get": cmd_get, "show": cmd_show,
-                 "get-page": cmd_get_page, "add-asset": cmd_add_asset}
+                 "get-page": cmd_get_page, "add-asset": cmd_add_asset,
+                 "inspect-text": cmd_inspect_text}
     if args.cmd in READ_CMDS:
         return READ_CMDS[args.cmd](deck, args)
     if args.cmd == "lint":

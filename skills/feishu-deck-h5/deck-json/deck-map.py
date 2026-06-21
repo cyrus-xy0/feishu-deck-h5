@@ -118,7 +118,14 @@ def _text_of(frag: str, *selectors_classes: str) -> str | None:
 
 def map_html(html: str) -> list[dict]:
     """Map a rendered deck HTML by its `<div class="slide-frame">` blocks."""
-    frame_re = re.compile(r'<div\s+class="slide-frame"[^>]*>', re.S)
+    # Match `.slide-frame` the way the DOM / browser / shoot.py do
+    # (querySelectorAll('.slide-frame')) — i.e. slide-frame as a WHOLE WORD in the
+    # class list, regardless of attribute order or extra classes. The old strict
+    # `class="slide-frame"` form silently DROPPED any frame with a modifier class
+    # (`slide-frame is-current`, `slide-frame fs-bleed-host`) → the count fell
+    # behind the real frame index and every URL `#N` lookup after such a frame was
+    # off-by-one vs the browser. (F-360)
+    frame_re = re.compile(r'<div\b(?=[^>]*\bclass="[^"]*\bslide-frame\b)[^>]*>', re.S)
     rows: list[dict] = []
     for n, (s, e) in enumerate(_depth_match_divs(html, frame_re), 1):
         frame = html[s:e]
