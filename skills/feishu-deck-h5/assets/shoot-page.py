@@ -73,7 +73,20 @@ def main(argv=None) -> int:
                     help="hard wall-clock cap in seconds for the whole shot "
                          "(default 45); guards against a page that never settles")
     ap.add_argument("--scale", type=int, choices=(1, 2), default=1)
+    ap.add_argument("--viewport", default="1920x1080",
+                    help="WxH viewport (default 1920x1080 = native 16:9). Use a "
+                         "NON-16:9 size (e.g. 1600x1000) to EXPOSE top/bottom "
+                         "letterbox bars — the 16:9 default hides them, so a "
+                         "letterbox/'黑边' bug on a raw/iframe slide is invisible "
+                         "at the default. Reproduce the user's window aspect here.")
     args = ap.parse_args(argv)
+    try:
+        _vw, _vh = (int(x) for x in args.viewport.lower().split("x"))
+        assert _vw > 0 and _vh > 0
+    except (ValueError, AssertionError):
+        print(f"shoot-page: bad --viewport {args.viewport!r} (expected WxH, e.g. 1600x1000)",
+              file=sys.stderr)
+        return 2
 
     html = args.index_html.resolve()
     if not html.exists():
@@ -113,7 +126,7 @@ def main(argv=None) -> int:
             # delivery-8: close the browser in finally so a navigation/screenshot
             # failure never leaks the Chromium process.
             try:
-                pg = b.new_page(viewport={"width": 1920, "height": 1080},
+                pg = b.new_page(viewport={"width": _vw, "height": _vh},
                                 device_scale_factor=args.scale)
                 if not args.allow_external:
                     # The whole point: live embeds never settle; kill the network.
