@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-356**
+> **下一可用号 = F-357**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-355 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-356 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -135,6 +135,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-353 | **`R-VIS-DEAD-RULE` lifted 页降 advisory(代码补上文档早承诺的 `lift→warn`)**:死规则(选择器零匹配又声明重要视觉属性)在 lifted 页本应 err→warn——`validator-rules.md` 早标 `ERR(lift→warn)`,但 `audits.js` producer 把 severity 硬编 `error`、文案还写「lift 页同样报 err」,**文档与代码相反**。后果:把 ctg 第6页 `arr-history` lift 进齐鲁后,一个**渲染完全正常**的页抛 20 条 blocking error(死规则其实是 `--shake` 忠实搬运的源 CSS 冗余副本/指向未带入的元素),白排查 ~7 分钟。修=producer 按 `entry.lifted`(本就已算好)将 severity 降 `warn`、文案改「LIFTED slide → 降 warn 不阻断」,同 F-325 geometry lifted-downgrade 族;authored 页仍 err(那才是真缺陷)。render 闸本就豁免 dead-code(见 `test_gate_tuning`),本修让**独立 `validate.py`** 与之一致。立项=用户「这个错误要复盘·页面没问题却浪费时间·实现真的修复」(并关掉了误诊的 de-double PR #50)。新测 1(authored→err / lifted→warn + 降级文案)+ rule-contract 5/5 + 真页 arr-history 20 err→0。 | `assets/audits.js` / `deck-json/tests/test_vis_lifted_downgrade.py` |
 | F-354 | **`render-deck.py --scope N --shoot` 单遍验证(改页验证从 3 次往返压到 1 条命令)**:改一页的循环本是 `render` → `validate --slide` → `shoot-page` 三次独立 Chromium 往返(各 10–70s),是本 session 反复「太慢」的大头。`--shoot`:渲完后在同一条命令里对 scoped 页跑视觉门(`validate --visual --scope-frames N`)+ 截该页图(`shoot-page #N`),打印逐页 findings + `.shoot-pN.png` 路径 → agent 一条命令 + 读一张图。需配 `--scope`(无则告警跳过);Playwright 缺失优雅降级、不阻断渲染;按页号(=URL #N=frame_index,与 --scope 同口径,隐藏页不串位,真机 p12=qilu-org-body 验过)。立项=用户「还是很慢·复盘·1实现」。新测 2(无 scope 告警 / scoped 出 SHOOT 段)+ 真机 e2e。 | `deck-json/render-deck.py` / `deck-json/tests/test_render_shoot.py` |
 | F-355 | **写入前 lint(W4)lifted 感知 → 不再整页 `--skip-lint`**:`set-page` 的 W4 写入前 lint 能在渲染前就拦 off-ladder 字号 / dual-anchor(L-TYPESCALE / L-DUAL-ANCHOR),但我习惯性 `--skip-lint`(因 lifted 页带源作者字号会被误报 err),连带把 authored 页(如 org-body)的真违规也跳过、拖到渲染后才暴露、逼出返工。修=`lint_fragment(..., lifted=)`:lifted 页把 L-TYPESCALE / L-DUAL-ANCHOR 降 warn(同 F-353/F-325 lifted-leniency 族),`set-page` 按该页 `lifted` 自动传入 → lifted 页不再需要 `--skip-lint`、authored 页保持 err 在写入前当场拦(省一轮 render 往返);L-P50-INLINE(base64 膨胀)永不降级。立项同 F-354。新测 1(lifted 降级 / authored 仍 err / p50 不降)+ lint 回归 6/6。 | `deck-json/_lint_fragment.py` / `deck-json/deck-cli.py` / `deck-json/tests/test_iteration_loop.py` |
+| F-356 | **进入即重启 slide 入场动效(`restartFrameMotion`):CSS 动画 + video + iframe 翻页进入时一律从头重播**:present 模式所有 slide 常驻 DOM,一页的 CSS keyframe 入场 + 内嵌 `<iframe>`(`data:`/原型)的内部动画在初次加载时就播完了,翻到时早已结束——此前只有 `<video>` 有 restart-on-enter,CSS / iframe 没有(用户撞上齐鲁 #26 IIT iframe「进入不重播」)。`feishu-deck.js` 的 is-current MutationObserver 在**真导航**(用本批 mutation 前是否已有 current 帧的快照区分**首屏落地**——首屏不重启,保留 fs-reveal 一贯抑制)时新增 `restartFrameMotion(frame, slide)`:① 内嵌 `<iframe>` 克隆换新元素 → src 从头解析(`data:`/同源零网络),重播其内部动画;② `slide.getAnimations({subtree:true})` 重启每个**有限**作者 CSS 动画(排除框架 `fs-*`=已由 fs-reveal re-arm、`iteration:infinite` 环境循环、CSS transition)——即使没 scope 到 `.is-current` 也重播(用户「别一次次让我手写」)。opt-out `data-no-restart`(元素或祖先,`closest`);`shoot.py` 截图前给所有 frame 挂 `data-no-restart`,保「settled 末帧」截图语义不变(无像素 / findings 基线漂移)。立项=用户「这页进入动画要从头播 + 所有 deck 的动画/视频都这样,加到技能上别再说」。Playwright e2e:iframe remount + 有限 CSS `currentTime` 归零 + 首屏不误触 + opt-out 双向**均验**;真机齐鲁 #26 iframe 重载过。文档 `motion-system.md` §2b + `raw-page-quickstart.md`。 | `assets/feishu-deck.js` / `deck-json/shoot.py` / `references/motion-system.md` / `references/raw-page-quickstart.md` |
 
 ## 已裁决(WONTFIX / DONE)
 

@@ -148,6 +148,15 @@ def main(argv=None) -> int:
                 pass
         page.wait_for_timeout(300)
 
+        # Restart-on-enter (feishu-deck.js restartFrameMotion) replays a slide's
+        # CSS animations and reloads its embedded iframes every time we navigate to
+        # it. A screenshot wants the SETTLED end state (see the 650ms wait below),
+        # not a mid-replay frame — and we don't want every ArrowRight step reloading
+        # the iframes it passes. Opt all frames out for the shoot only; the live
+        # deck is unaffected. (Honoured via closest('[data-no-restart]').)
+        page.evaluate("() => document.querySelectorAll('.slide-frame')"
+                      ".forEach(f => f.setAttribute('data-no-restart',''))")
+
         meta = page.evaluate(_META_JS)
         by_idx = {m["idx"]: m for m in meta}
         by_key = {m["key"]: m for m in meta}
