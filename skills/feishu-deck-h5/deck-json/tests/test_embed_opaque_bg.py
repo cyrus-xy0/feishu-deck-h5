@@ -77,16 +77,15 @@ def test_opaque_dark_body_fires_warn():
 
 
 def test_dark_gradient_fit_slide_fires():
-    """Inner .slide{linear-gradient(#0A0F1A…)} — the dark canvas gradient fires
-    (first color stop is near-black, opaque)."""
+    """Inner .slide{linear-gradient(#04070E…)} — a stark near-black first stop fires."""
     hits = _run(_slide(_iframe(
-        ".slide{background:linear-gradient(155deg,#0A0F1A 0%,#070B14 60%,#0A0E18 100%);}")))
-    assert len(hits) >= 1, f"dark gradient canvas not flagged: {hits}"
+        ".slide{background:linear-gradient(155deg,#04070E 0%,#02040a 100%);}")))
+    assert len(hits) >= 1, f"stark dark gradient canvas not flagged: {hits}"
 
 
 def test_var_resolved_body_fires():
-    """qilu-digital-avatar-section shape: body{background:var(--ink)} where
-    --ink:#080912 — one level of var() is resolved, so it fires."""
+    """body{background:var(--ink)} where --ink:#080912 (no override) — one level of
+    var() is resolved → opaque near-black → fires."""
     hits = _run(_slide(_iframe(":root{--ink:#080912;} body{background:var(--ink);}")))
     assert len(hits) >= 1, f"var(--ink) opaque dark not flagged: {hits}"
 
@@ -110,6 +109,24 @@ def test_all_transparent_silent():
         "html,body{background:transparent;} .stage-host{background:transparent;} "
         ".slide{background:transparent;}")))
     assert hits == [], f"transparent inner false-positived: {hits}"
+
+
+def test_cascade_transparent_override_silent():
+    """The section-divider shape: a dark base (body:var(--ink)) then a later
+    `transparent !important` override. The EFFECTIVE bg is transparent, so it must
+    NOT fire — the rule resolves the cascade, not the base declaration."""
+    hits = _run(_slide(_iframe(
+        ":root{--ink:#080912;} body{background:var(--ink);} "
+        "body{background:transparent !important;}")))
+    assert hits == [], f"transparent-!important override should silence: {hits}"
+
+
+def test_dark_navy_silent():
+    """A dark NAVY full-bleed bg (#0a1230, L≈0.07) ≈ the deck navy — not a black
+    edge. Only stark near-black (<0.05) fires; a dark navy that matches the deck does
+    not (the phase1-preview-actions false-positive fix)."""
+    hits = _run(_slide(_iframe("html,body{background:#0a1230;}")))
+    assert hits == [], f"dark-navy bg should not fire (threshold too loose): {hits}"
 
 
 def test_light_full_bleed_silent():

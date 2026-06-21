@@ -6862,9 +6862,11 @@
       // 校验能看见它】(其余规则一律 strip data: 以免误命中 #hex)。已验证修法 = 把内层那几个
       // 满幅包裹设 background:transparent,让 deck 底透上来。
       //
-      // 判定:解码 data:text/html 的 base64 / percent 载荷,在内部 CSS 里找上述满幅选择器的
-      // background,解析(含一层 var() 解引用)首个颜色 —— 不透明(alpha≥.5)且暗(相对亮度
-      // <.18)才报。低 alpha 的辉光渐变 / transparent / 浅色满版(白底看板)都不报。name-free
+      // 判定:解码 data:text/html 的 base64 / percent 载荷,按【层叠】求每个满幅元素的【生效】
+      // 背景(!important 压普通、同级后者胜 —— section 分隔页常 base 设 var(--ink) 再
+      // `transparent !important` 盖掉,只认 base 会误报),解析(含一层 var() 解引用)首个颜色 ——
+      // 不透明(alpha≥.5)且【接近纯黑】(相对亮度<.05:#04070E≈.03/#080912≈.04 报;深藏青
+      // #0a1230≈.07、deck 底≈.10 不报)才判。低 alpha 辉光 / transparent / 浅色满版都不报。name-free
       // (认 data: 载荷不认类名,故 embed-frame 类只 3/8 页带也不漏);warn(自带底是设计判断)。
       // 确属故意满版自带深色主题 → iframe 或祖先 .slide 加 data-allow-embed-bg 显式接受。
       id: 'R-EMBED-OPAQUE-BG',
@@ -6873,10 +6875,6 @@
         const { slide_idx } = ctx;
         const findings = [];
         const COVER = ['html', 'body', '.stage-host', '.slide'];
-        const isCover = (s) => {
-          const t = s.trim(); const last = t.split(/\s+/).pop();
-          return COVER.indexOf(t) >= 0 || COVER.indexOf(last) >= 0;
-        };
         // first color token of a bg value → {lum 0..1, alpha 0..1} or null (unknown)
         const colorOf = (val) => {
           let m = val.match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+))?/i);
@@ -6915,18 +6913,33 @@
           const vars = {}; let vm; const vre = /(--[\w-]+)\s*:\s*([^;]+);/g;
           while ((vm = vre.exec(css))) vars[vm[1]] = vm[2].trim();
           const resolve = (v) => v.replace(/var\(\s*(--[\w-]+)\s*\)/g, (_, n) => vars[n] || '');
-          const offenders = []; let bm; const bre = /([^{}]+)\{([^{}]*)\}/g;
+          // Resolve the EFFECTIVE background per full-cover ELEMENT across the whole
+          // stylesheet, honoring the cascade: a section embed sets `body:var(--ink)`
+          // then overrides it with `background:transparent !important`, so firing on the
+          // base decl is a false positive. Per element: !important beats non-important;
+          // among equal importance the later decl wins (specificity is uniform here).
+          const eff = {}; let ord = 0, bm; const bre = /([^{}]+)\{([^{}]*)\}/g;
           while ((bm = bre.exec(css))) {
             const sels = bm[1].split(',');
-            if (!sels.some(isCover)) continue;
-            let dm, bg = null; const dre = /background(?:-color)?\s*:\s*([^;}]+)/gi;
-            while ((dm = dre.exec(bm[2]))) bg = dm[1].trim();   // last bg decl wins
-            if (!bg) continue;
-            const col = colorOf(resolve(bg));
-            if (col && col.alpha >= 0.5 && col.lum < 0.18) {
-              const sel = (sels.find(isCover) || sels[0]).trim();
-              if (offenders.indexOf(sel) < 0) offenders.push(sel);
+            const tg = COVER.filter((e) => sels.some((s) => {
+              const t = s.trim(); return t === e || t.split(/\s+/).pop() === e; }));
+            if (!tg.length) continue;
+            let dm, bg = null, imp = false; const dre = /background(?:-color)?\s*:\s*([^;}]+)/gi;
+            while ((dm = dre.exec(bm[2]))) { bg = dm[1].trim(); imp = /!\s*important/i.test(bg); }
+            if (bg === null) continue;
+            ord++;
+            for (const e of tg) {
+              const cur = eff[e];
+              if (!cur || (imp && !cur.imp) || (imp === cur.imp && ord > cur.ord)) eff[e] = { bg, imp, ord };
             }
+          }
+          const offenders = [];
+          for (const e of COVER) {
+            if (!eff[e]) continue;
+            const col = colorOf(resolve(eff[e].bg));
+            // STARK near-black only — a dark NAVY that matches the deck (#0a1230≈L.07,
+            // deck #11182f≈L.10) is not a black edge; #04070E≈L.03 / #080912≈L.04 are.
+            if (col && col.alpha >= 0.5 && col.lum < 0.05) offenders.push(e);
           }
           if (offenders.length) {
             findings.push({
