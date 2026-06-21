@@ -822,6 +822,12 @@
       });
     }
     const mediaObserver = new MutationObserver((muts) => {
+      // Snapshot BEFORE applying this batch: was any frame current already? Lets
+      // us tell a real navigation (→ replay entrance motion) from the initial
+      // landing establishment (first paint — leave fs-reveal suppressed, there is
+      // nothing to replay). Can't key on data-nav-armed here: goTo sets it before
+      // the is-current toggle, so it is already present when this observer runs.
+      const prevAnyCurrent = mediaState.some(Boolean);
       for (const m of muts) {
         const i = frames.indexOf(m.target);
         if (i < 0) continue;
@@ -832,8 +838,10 @@
         // Retry channel: balance a present-mode slide that the init pass left
         // untagged because content-visibility:auto had skipped its layout then
         // (maybeBalance no-ops if it was already tagged at init, which is the
-        // common case — see the init pass above).
-        if (now) requestAnimationFrame(() => { if (signal.aborted) return; const s = m.target.querySelector('.slide'); maybeBalance(s); try { markBleedPanels(s); } catch (e) { /* never break the deck over layout */ } });
+        // common case — see the init pass above). On a real nav (prevAnyCurrent)
+        // also replay the slide's entrance motion — CSS keyframes + embedded
+        // iframes — see restartFrameMotion.
+        if (now) requestAnimationFrame(() => { if (signal.aborted) return; const s = m.target.querySelector('.slide'); if (prevAnyCurrent) restartFrameMotion(m.target, s); maybeBalance(s); try { markBleedPanels(s); } catch (e) { /* never break the deck over layout */ } });
       }
     });
     frames.forEach((f) => mediaObserver.observe(f, { attributes: true, attributeFilter: ['class'] }));
@@ -1052,6 +1060,45 @@
       });
       if (slide) slide.dispatchEvent(new CustomEvent('fs-slide-leave', { bubbles: true }));
     }
+  }
+
+  // Replay a slide's entrance motion when NAVIGATING to it (NOT on first paint).
+  // Present mode keeps every slide in the DOM at once, so a slide's CSS keyframe
+  // animations and any embedded-iframe animation have already played — and
+  // finished — long before the presenter reaches it. Re-entering restarts them so
+  // motion reads the same on revisit as on a fresh load, the same restart-on-enter
+  // contract <video> already follows (see syncFrameMedia). Opt a single element
+  // (or a whole slide, via an ancestor) out with data-no-restart.
+  function restartFrameMotion(frame, slide) {
+    if (!frame) return;
+    // (a) Embedded iframes are separate documents we usually can't script into
+    // (data: / cross-origin are opaque), so re-mount each one — a fresh element
+    // reloads its src from scratch, replaying whatever runs inside. data: and
+    // same-origin reload with no network; opt heavy / interactive embeds out with
+    // data-no-restart.
+    frame.querySelectorAll('iframe').forEach((f) => {
+      if (f.closest('[data-no-restart]')) return;   // element- or slide-level opt-out
+      f.replaceWith(f.cloneNode(false));
+    });
+    // (b) Same-document CSS keyframe animations: replay every FINITE author
+    // animation in the slide subtree — even one not scoped to .is-current (so it
+    // "just works" without per-page wiring). Skipped: framework-owned fs-* motion
+    // (already re-armed on nav), infinite ambient loops (restarting only stutters),
+    // and CSS transitions (state-driven, not entrance motion → not a CSSAnimation).
+    if (!slide || !slide.getAnimations) return;
+    let anims;
+    try { anims = slide.getAnimations({ subtree: true }); } catch (e) { return; }
+    anims.forEach((a) => {
+      try {
+        if (typeof CSSAnimation !== 'undefined' && !(a instanceof CSSAnimation)) return;
+        if (a.animationName && a.animationName.indexOf('fs-') === 0) return;
+        const el = a.effect && a.effect.target;
+        if (el && el.closest && el.closest('[data-no-restart]')) return;
+        const tm = a.effect && a.effect.getTiming ? a.effect.getTiming() : null;
+        if (tm && tm.iterations === Infinity) return;   // ambient loop — leave running
+        a.cancel(); a.play();
+      } catch (e) { /* never break nav over one animation */ }
+    });
   }
 
   // Play an autoplay <video>, unmuting it UNLESS the author asked for silence.
