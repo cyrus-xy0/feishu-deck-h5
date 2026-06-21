@@ -396,9 +396,10 @@ For an existing deck:
   delivery.
 - Chinese-only is the default language unless the user explicitly asks for
   bilingual or external English-facing output.
-- For each generation run, record the user's asks in `PROMPTS.md`; for production
-  deck work, keep the making-of log under `runs/<deck>/log/` via
-  `log-tool/deck-log.py` when practical.
+- For each generation run, record the user's asks in `PROMPTS.md`. The making-of
+  log (`runs/<deck>/log/` via `log-tool/deck-log.py`) is **off by default** since
+  2026-06-21 to save render time — turn it on with `deck-log on` when you want to
+  capture a deck's production process.
 - Do not hand back a single linked HTML file as final delivery. Run the delivery
   workflow so framework assets/shared assets are portable or the output is truly
   self-contained.

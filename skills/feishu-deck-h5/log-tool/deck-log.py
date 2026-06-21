@@ -30,7 +30,7 @@
     turns     <deck-dir> [--all]         预览从 transcript 捞到的回合(调试)
     render    <deck-dir> [--inline]      journal + transcript 回合 → making-of.html
     diagnose  <deck-dir>                 输出供大模型分析"哪些是 skill bug"的 digest + 提示词
-    on | off | status                    全局开关(默认开;off=写 ~/.claude/deck-log.off → render 不捞 transcript)
+    on | off | status                    全局自动 making-of 开关(默认关;on=写 ~/.claude/deck-log.on → render 自动 snapshot+捞输入/回复)
 
 设计取舍见同目录 README.md 与 SKILL.md 的「制作日志」一节。
 """
@@ -45,7 +45,8 @@ from pathlib import Path
 
 HOME = Path(os.path.expanduser("~"))
 ACTIVE_PTR = HOME / ".claude" / "deck-log.active"   # 内容 = 当前活跃 deck 的 log/ 绝对路径
-OFF_SWITCH = HOME / ".claude" / "deck-log.off"      # 存在即全局停录(凌驾一切,仿 lark-broadcast.off)
+OFF_SWITCH = HOME / ".claude" / "deck-log.off"      # 存在即全局硬关(凌驾一切,仿 lark-broadcast.off)
+ON_SWITCH  = HOME / ".claude" / "deck-log.on"       # 存在=开启自动 making-of/transcript 捞取;默认关(2026-06-21,省 render 时间)
 
 DESIGN_W, DESIGN_H = 1920, 1080
 
@@ -444,8 +445,9 @@ def cmd_init(args) -> int:
         print("  (render 时会从它捞这一刻起的 输入+回复;无需 hook)")
     else:
         print("  ⚠️ 没自动找到 transcript;render 前用 `--transcript <path>` 指一下,否则只记版本/问题。")
-    if OFF_SWITCH.exists():
-        print("  ⚠️ 全局开关当前为 OFF(~/.claude/deck-log.off 存在);render 不会捞 transcript。`deck-log on` 打开。")
+    if not (ON_SWITCH.exists() and not OFF_SWITCH.exists()):
+        print("  ℹ️ 全局自动 making-of 当前为 OFF(默认关);render 不会自动 snapshot/捞回复。"
+              "`deck-log on` 开启,或随时手动 `deck-log snapshot`。")
     return 0
 
 
@@ -1046,22 +1048,27 @@ def cmd_diff(args) -> int:
 
 # ----------------------------------------------------------------------------- on/off/status
 def cmd_off(args) -> int:
+    if ON_SWITCH.exists():
+        ON_SWITCH.unlink()
     OFF_SWITCH.parent.mkdir(parents=True, exist_ok=True)
     OFF_SWITCH.write_text(f"off since {_now_iso()}\n", encoding="utf-8")
-    print("⏸  deck-log 全局已关(render 不再从 transcript 捞输入/回复)。`deck-log on` 重新打开。")
+    print("⏸  deck-log 已关(默认态):render 不自动 snapshot,也不从 transcript 捞输入/回复。`deck-log on` 打开。")
     return 0
 
 
 def cmd_on(args) -> int:
     if OFF_SWITCH.exists():
         OFF_SWITCH.unlink()
-    print("▶️  deck-log 全局已开(默认态)。")
+    ON_SWITCH.parent.mkdir(parents=True, exist_ok=True)
+    ON_SWITCH.write_text(f"on since {_now_iso()}\n", encoding="utf-8")
+    print("▶️  deck-log 已开:每次 render 自动给有 log/ 的 deck 拍一版 making-of(并从 transcript 捞输入/回复)。")
     return 0
 
 
 def cmd_status(args) -> int:
-    on = not OFF_SWITCH.exists()
-    print(f"全局开关:{'ON ▶️' if on else 'OFF ⏸ (~/.claude/deck-log.off 存在)'}")
+    on = ON_SWITCH.exists() and not OFF_SWITCH.exists()
+    capture = not OFF_SWITCH.exists()   # 手动 snapshot 仍会捞 transcript,除非硬关 .off
+    print(f"全局自动 making-of:{'ON ▶️ (~/.claude/deck-log.on)' if on else 'OFF ⏸ (默认关;`deck-log on` 开启)'}")
     if ACTIVE_PTR.exists():
         active = ACTIVE_PTR.read_text(encoding="utf-8").strip()
         log_dir = Path(active)
@@ -1070,9 +1077,9 @@ def cmd_status(args) -> int:
         print(f"当前活跃 deck:{active}")
         print(f"  版本数:{sum(1 for e in ev if e.get('t')=='version')} · "
               f"问题:{sum(1 for e in ev if e.get('t')=='problem')}")
-        tps = _relevant_transcripts(log_dir, sess) if on else []
+        tps = _relevant_transcripts(log_dir, sess) if capture else []
         print(f"  记录的主 transcript:{sess.get('transcript') or '(未记录)'}")
-        if on:
+        if capture:
             tk = _deck_tokens(log_dir, sess)
             n = sum(len(extract_turns(str(tp), sess.get('start_ts'), tk)) for tp in tps)
             print(f"  跨 {len(tps)} 个会话 transcript 现可捞回合数:{n}")

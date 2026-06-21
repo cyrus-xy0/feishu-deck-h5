@@ -35,20 +35,23 @@ The maintainer (you, between sessions) periodically reviews a batch of
 - See "MAKING-OF LOG" below for the per-run making-of record (`deck-log`), which
   is the primary self-improvement / diagnose loop now.
 
-## MAKING-OF LOG — default-on per run
+## MAKING-OF LOG — opt-in (default-off since 2026-06-21)
 
 The making-of log records how a deck was produced so teammates can reconstruct the
 process and maintainers can diagnose skill/framework defects. Store it under
 `runs/<deck>/log/`, never under `output/`.
 
-Tool: `log-tool/deck-log.py` (schema/details in `log-tool/README.md`). It is
-default-on for generation-class deck work unless explicitly disabled with
-`deck-log off`.
+Tool: `log-tool/deck-log.py` (schema/details in `log-tool/README.md`). As of
+2026-06-21 the auto-snapshot is **default-off** to save render time; enable it
+globally with `deck-log on` (writes `~/.claude/deck-log.on`), or record a single
+deck with `deck-log init <deck>` + manual `deck-log snapshot`. `deck-log off`
+(writes `~/.claude/deck-log.off`) is a hard kill that also suppresses manual
+transcript capture.
 
-`assets/new-run.sh` now auto-initializes the making-of log when it creates a run
-directory. It prints `deck-log : making-of log started` on success. `deck-log
-init` is idempotent and preserves the original `start_ts`, so repeated init will
-not lose early turns, but it is normally unnecessary.
+`assets/new-run.sh` auto-initializes the making-of log only when `deck-log on` is
+active; by default it prints `deck-log : making-of OFF by default` and creates no
+`log/`. `deck-log init` is idempotent and preserves the original `start_ts`, so
+repeated init will not lose early turns.
 
 Fixed actions:
 

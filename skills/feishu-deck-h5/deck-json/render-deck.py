@@ -2166,6 +2166,16 @@ def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
 # Main render
 # ---------------------------------------------------------------------------
 
+def _autosnap_enabled() -> bool:
+    """making-of 自动截图是否开启。默认关(2026-06-21,省 render 时间)—— 必须
+    `deck-log on`(写 ~/.claude/deck-log.on)显式开启;遗留 ~/.claude/deck-log.off
+    仍作硬关(凌驾一切)。手动 `deck-log snapshot` 不受此闸约束。"""
+    home_claude = Path(os.path.expanduser("~")) / ".claude"
+    if (home_claude / "deck-log.off").exists():
+        return False
+    return (home_claude / "deck-log.on").exists()
+
+
 def _maybe_auto_snapshot(out_html, scope=None) -> None:
     """渲染成功后,给开着制作日志(log/)的 deck 自动拍一版 deck-log snapshot。
 
@@ -2174,9 +2184,10 @@ def _maybe_auto_snapshot(out_html, scope=None) -> None:
     (含无 hook 机制的 Mira / cron / headless)、每次 render 都自动记,不靠任何人自觉。
     与 `deck-log init` 焊进 new-run.sh 是同一思路。
 
-    范围 gate:只在 deck 已 init 过制作日志(run 根下有 log/)时才拍 —— 临时转换 /
-    pptx 中间产物(没 log/)一概不碰。停录用 ~/.claude/deck-log.off 或
-    env DECK_LOG_NO_AUTOSNAP=1。
+    默认关(2026-06-21):自动 making-of 默认不拍,省 render 时间 —— 必须先
+    `deck-log on`(写 ~/.claude/deck-log.on)显式开启。开启后仍只对已 init 过
+    制作日志(run 根下有 log/)的 deck 拍,临时转换 / pptx 中间产物(没 log/)
+    一概不碰。硬关 ~/.claude/deck-log.off 或 env DECK_LOG_NO_AUTOSNAP=1。
 
     铁律:这段绝不能让 render 失败 —— 任何缺失 / 异常 / 超时只安静跳过,不动 return 0。
     """
@@ -2188,7 +2199,7 @@ def _maybe_auto_snapshot(out_html, scope=None) -> None:
             return
         if os.environ.get("DECK_LOG_AUTOSNAP") == "1":  # 防递归:snapshot 子进程内的 render 不再二次拍
             return
-        if (Path(os.path.expanduser("~")) / ".claude" / "deck-log.off").exists():
+        if not _autosnap_enabled():     # 默认关:除非 `deck-log on` 显式开启,否则不拍
             return
         deck_log = Path(__file__).resolve().parent.parent / "log-tool" / "deck-log.py"
         if not deck_log.exists():                   # 纯 main 没带 deck-log → 静默跳过
@@ -4079,7 +4090,17 @@ def main(argv=None) -> int:
     #          we do NOT reshoot the whole making-of for a styling tweak ·
     #   None → full snapshot (first render / --final / explicit-full), UNLESS
     #          --quick (text-only fast path) opts out of screenshots entirely.
-    if snapshot_pages is None:
+    if not _autosnap_enabled():
+        # 默认关(2026-06-21):routine render 不再自动截图,省时间。只对已有 making-of
+        # 的 deck 提示一次它被暂停,避免"怎么不更新了"的困惑。
+        try:
+            _has_log = (Path(out_html).resolve().parent.parent / "log").is_dir()
+        except Exception:
+            _has_log = False
+        if _has_log:
+            print("       [deck-log] making-of 默认关闭,本次未自动截图"
+                  "(`deck-log on` 全局恢复;或手动 `deck-log snapshot`)。")
+    elif snapshot_pages is None:
         if args.quick:
             print("       [quick] 跳过自动截图 + fit-check(纯文本编辑快路);"
                   "要把改动页截进 making-of 请改用 --scope N 或 --final。")
