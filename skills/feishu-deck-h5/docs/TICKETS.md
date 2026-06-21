@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-358**
+> **下一可用号 = F-359**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-356 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-358 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -137,6 +137,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-355 | **写入前 lint(W4)lifted 感知 → 不再整页 `--skip-lint`**:`set-page` 的 W4 写入前 lint 能在渲染前就拦 off-ladder 字号 / dual-anchor(L-TYPESCALE / L-DUAL-ANCHOR),但我习惯性 `--skip-lint`(因 lifted 页带源作者字号会被误报 err),连带把 authored 页(如 org-body)的真违规也跳过、拖到渲染后才暴露、逼出返工。修=`lint_fragment(..., lifted=)`:lifted 页把 L-TYPESCALE / L-DUAL-ANCHOR 降 warn(同 F-353/F-325 lifted-leniency 族),`set-page` 按该页 `lifted` 自动传入 → lifted 页不再需要 `--skip-lint`、authored 页保持 err 在写入前当场拦(省一轮 render 往返);L-P50-INLINE(base64 膨胀)永不降级。立项同 F-354。新测 1(lifted 降级 / authored 仍 err / p50 不降)+ lint 回归 6/6。 | `deck-json/_lint_fragment.py` / `deck-json/deck-cli.py` / `deck-json/tests/test_iteration_loop.py` |
 | F-356 | **进入即重启 slide 入场动效(`restartFrameMotion`):CSS 动画 + video + iframe 翻页进入时一律从头重播**:present 模式所有 slide 常驻 DOM,一页的 CSS keyframe 入场 + 内嵌 `<iframe>`(`data:`/原型)的内部动画在初次加载时就播完了,翻到时早已结束——此前只有 `<video>` 有 restart-on-enter,CSS / iframe 没有(用户撞上齐鲁 #26 IIT iframe「进入不重播」)。`feishu-deck.js` 的 is-current MutationObserver 在**真导航**(用本批 mutation 前是否已有 current 帧的快照区分**首屏落地**——首屏不重启,保留 fs-reveal 一贯抑制)时新增 `restartFrameMotion(frame, slide)`:① 内嵌 `<iframe>` 克隆换新元素 → src 从头解析(`data:`/同源零网络),重播其内部动画;② `slide.getAnimations({subtree:true})` 重启每个**有限**作者 CSS 动画(排除框架 `fs-*`=已由 fs-reveal re-arm、`iteration:infinite` 环境循环、CSS transition)——即使没 scope 到 `.is-current` 也重播(用户「别一次次让我手写」)。opt-out `data-no-restart`(元素或祖先,`closest`);`shoot.py` 截图前给所有 frame 挂 `data-no-restart`,保「settled 末帧」截图语义不变(无像素 / findings 基线漂移)。立项=用户「这页进入动画要从头播 + 所有 deck 的动画/视频都这样,加到技能上别再说」。Playwright e2e:iframe remount + 有限 CSS `currentTime` 归零 + 首屏不误触 + opt-out 双向**均验**;真机齐鲁 #26 iframe 重载过。文档 `motion-system.md` §2b + `raw-page-quickstart.md`。 | `assets/feishu-deck.js` / `deck-json/shoot.py` / `references/motion-system.md` / `references/raw-page-quickstart.md` |
 | F-357 | **deck 页构建提速(齐鲁 CAPA demo 页 21min 复盘)**:把"重复发现 + 隔离摩擦"砍掉。① `deck-cli.py` 加只读 `get-page <key\|#N> [--html\|--css\|--title]`——按 key 或 1-based 页码吐某页 html/css/title(`--html` 输出**原始未转义**、可 `> frag.html`),**消灭"手写 `json.load` extractor 猜错 `data.html`/`key` 字段名"的空跑**(「别用临时脚本碰 deck.json」反模式的读侧孪生;`show` 吐 JSON-escaped 整对象,读内容用 `get-page`);`resolve_slide_ref` 同认 key / `36` / `#36`。② `raw-page-quickstart.md` 钉死 **deck.json slide 对象形状**(`data.html`/`custom_css`/标题在 html)+ **隔离/worktree session 写 `runs/` 产物的 tmp+cp 配方**(Write 工具拒写共享 checkout → 写 job tmp 再 `cp`;deck.json 走 deck-cli 不受影响,别研究 worktree / 别 ExitWorktree)。③ 新脚手架 `deck-json/templates/prototypes/feishu-chat-demo.html`——feishu 聊天 demo 起手式(lark-design-prototype token + 气泡/AI答/思考态/结构化卡片/kv/引用/动作 chip + UD 图标 + 静止态可见 +1.7s 兜底的健壮入场重放),「对话类 demo 别从零搓 / 多段对话 = 一 iframe 内 N 列 `.thread`」,接 `prototype-embed.md`。测试 `test_deck_cli_smoke.py::DeckCliGetPageTest`(key/index/#N 解析一致 + 坏 ref rc1 + `--html` 原始未转义),全 13 passed。 | `deck-json/deck-cli.py` / `deck-json/tests/test_deck_cli_smoke.py` / `deck-json/templates/prototypes/feishu-chat-demo.html` / `references/raw-page-quickstart.md` / `references/prototype-embed.md` |
+| F-358 | **mockup 沙箱(`data-mockup` / `role="img"` 子树豁免页面正文闸)**:手机/产品 UI mockup 是「产品界面的图」不是页面正文,内部小字号/灰阶白字/按钮阴影本就合理。给 mock 根标一次 `data-mockup`(或语义 `role="img"`),内部自动豁免 R20/typescale、R-WHITE-TEXT、R12(`audits.js` 共享 `inMockupRoot` 祖先走查)+ 写入前 L-TYPESCALE 静态预检(`_lint_fragment.py` 认 `data-mockup`)——一个标记替代逐元素撒 `data-allow-typescale`+`-white-opacity`+`-drop-shadow`,深色 mockup 不再让你反复过门禁加 flag。立项=用户连续两轮「有点慢」复盘(慢在逐条 advisory 加 flag 重渲)。新测 5(R20/R12/R-WHITE-TEXT/L-TYPESCALE 在 data-mockup/role=img 下不报 + 无 mock 时照报对照);现有 49 规则测试 + golden 快照零漂移;真页齐鲁 #48 手机 demo 三 flag → 单 `data-mockup`。 | `assets/audits.js` / `deck-json/_lint_fragment.py` / `deck-json/tests/test_validate_static_rules.py` / `deck-json/tests/test_iteration_loop.py` / `references/validator-rules.md` / `subskills/editor/SKILL.md` |
 
 ## 已裁决(WONTFIX / DONE)
 
