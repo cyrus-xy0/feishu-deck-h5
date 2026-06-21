@@ -119,6 +119,12 @@ Designer + Renderer instead).
   Use `--quick` instead when you don't need the making-of updated this run (skips the
   snapshot entirely, ~12-18s). Full render (no flag) only for a new deck or a
   whole-deck change. See `references/editing-discipline.md` → "Re-render speed".
+- **`EDIT` multi-page / clone-to-N** (restyle a divider series, or replicate one
+  page's treatment to several pages): read `references/editing-discipline.md` E0
+  "Multi-page" FIRST — inspect the model + all targets in ONE parallel batch
+  (`deck-map --sections` for positions, `show <key>` for content), `set-page <key>`
+  each, then verify them ALL in a single `--scope a,b,c --shoot`. Serializing the
+  inspect/verify per page (and re-`--help`-ing settled flags) is the time-sink.
 - **`EDIT` insert a NEW page you authored (html+css fragment)**: read
   `references/raw-page-quickstart.md` FIRST (fixed constants — canvas 1920×1080,
   {16,24,28,48} ladder, raw renders no header, motion scope one-liner, `allow`

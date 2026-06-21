@@ -36,6 +36,18 @@ grown 65→69, hitting the wrong slide. Both vanish if you use `show`/`get`/`dec
   <index.html> N --scale 2` glance. Do NOT read renderer internals, trawl `.bak`
   history, or screenshot twice (`--shoot` already made one; re-shoot only at 2× to
   read small text). Scope-flag details under "Re-render speed" below.
+- **Multi-page / clone-to-N — batch it, never serialize.** When one edit spans
+  several pages (restyle a chapter-divider series; replicate one page's treatment
+  to N others), the single-page path above still applies per page — but run each
+  *phase* ONCE across all pages, not the whole path N times. Inspect the model +
+  every target in ONE parallel batch (`deck-map --sections` / `--layout L` shows
+  the series AND its positions — never regex `index.html` for frame numbers;
+  `show <key>` for full content). Apply `set-page <key>` per page (drift-proof).
+  Verify them ALL in ONE `render-deck.py <deck> <out> --scope n1,n2,n3 --shoot`
+  (per-page PNGs in one render). Don't re-`--help` settled flags or hand-roll
+  Playwright per page. (2026-06-21: a 4-divider clone-treatment ran ~20
+  round-trips doing each phase one page at a time — serial `show`, re-`--help`,
+  `index.html` regex for positions deck-map already prints, manual Playwright.)
 
 ### E0a. "Delete the XX block" — grep the literal text FIRST (scope lock)
 
