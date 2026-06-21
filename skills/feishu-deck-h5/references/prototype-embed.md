@@ -246,6 +246,13 @@ item below has bitten us before:
 > 有 `.cols` 注释)。embed 契约(iframe + `data-ui-screenshot` 凭证 + screen-frame CSS)写在
 > 脚手架头注里。它本就是 lark-design-prototype 设计系统的产物——「用 feishu 原型技能」即此。
 
+> 🎮 **可点击「陪练 / 演练 / 决策模拟」demo** —— 用脚手架
+> `deck-json/templates/prototypes/feishu-sim-demo.html`:多屏 phone 流程 设置 → 模拟(选项分支 +
+> 即时反馈 + 教练点评)→ 评分,点着走。与上面的 chat-demo **互补**(单轮对话用 chat,**交互演练
+> 用 sim**)。embed = phone-frame iframe(CSS 见头注),`?s=setup|sim|eval` 可深链各屏做截图核验。
+> ⚠️ **lift 陷阱**:把带 iframe demo 的页 lift / 改写进另一个 deck 时,交互 demo 容易被悄悄退化成
+> **静态手机样机**(看着像 app、却点不动)。要「活的可点」就从本脚手架重建,别留静态图充数。
+
 1. **Always copy the prototype HTML to the deck's outputs/ folder before
    embedding.** Never use `file:///Users/.../Downloads/...` or any user-local
    absolute path. When the deck is shared, the recipient won't have that file.

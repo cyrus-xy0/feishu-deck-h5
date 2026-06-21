@@ -1,0 +1,195 @@
+<!doctype html>
+<!--
+  feishu-sim-demo · SCAFFOLD for an in-deck CLICKABLE coaching / decision SIMULATOR
+  ============================================================================
+  WHAT  A self-contained phone-framed, multi-screen *interactive* demo: the
+        viewer clicks through 设置 → 模拟(选项分支 + 即时反馈) → 评分. Use it for
+        AI 陪练 / 销售陪练 / 培训 / 决策演练 demos — the SIMULATOR pattern, distinct
+        from `feishu-chat-demo.html` (a one-shot assistant CONVERSATION). If the
+        page just shows a chat thread, use feishu-chat-demo instead.
+
+  WHY THIS EXISTS  A lifted/adapted page can silently lose its interactive iframe
+        demo and degrade to a STATIC phone mockup (looks like an app, but clicks
+        do nothing). When a slide needs a "live, clickable" coaching demo, build
+        it from this scaffold — don't hand-roll the phone + screen state each time.
+        (See prototype-embed.md "live UI prototypes".)
+
+  WHY AN IFRAME  Authentic product UI uses native ~12–15px fonts; the deck floor is
+        {16,24,28,48}. The iframe escape-hatch keeps native fonts; the deck page
+        vouches it (data-ui-screenshot) so the font-floor audit downgrades to
+        warn_soft. (Same as the shipped haizheng / aia-coach demos.)
+
+  HOW TO USE
+   1. cp → runs/<deck>/prototypes/<name>/index.html, then fill the FILL: blocks.
+   2. Embed it on the deck page as a phone-frame iframe (author the page, NOT here):
+        <div class="phone-frame" data-ui-screenshot>
+          <iframe src="prototypes/<name>/index.html" title="… demo" loading="eager"></iframe>
+        </div>
+      …and in that page's custom_css give .phone-frame a device shell, e.g.:
+        .slide[data-slide-key="K"] .phone-frame{
+          width:360px; height:720px; border-radius:38px; background:#11141c;
+          box-shadow:0 0 0 8px #11141c, 0 0 0 9px #2c3142; overflow:hidden; position:relative; }
+        .slide[data-slide-key="K"] .phone-frame iframe{
+          width:100%; height:100%; border:0; border-radius:38px; background:#11141c; display:block; }
+
+  VERIFY  Screens are deep-linkable: ?s=setup|sim|eval (so a headless shot can
+        capture each state; click an .opt to verify the sim branch). The default
+        screen (setup) renders fully with no JS, so a failed load never blanks.
+
+  RULES  No emoji (UD icons or text glyphs only). Restrained color: one accent +
+        a status color. Click-driven (NOT timed) — the resting screen is visible.
+  ============================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>feishu sim demo · scaffold</title>
+<style>
+  :root{
+    --accent:#3C7FFF; --good:#33D6C0; --warn:#FE7F00;   /* one accent + good/warn status */
+    --bg:#11141c; --surf:#1b1f29; --surf2:#222734; --line:rgba(255,255,255,.10);
+    --t1:rgba(255,255,255,.94); --t2:rgba(255,255,255,.66); --t3:rgba(255,255,255,.45);
+    --font:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{font-family:var(--font);background:var(--bg);color:var(--t2);
+    -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  .screenwrap{height:100%;display:flex;flex-direction:column;overflow:hidden}
+  .status{flex:0 0 34px;padding:11px 24px 0;display:flex;justify-content:space-between;align-items:center;font:700 14px/1 var(--font);color:#fff}
+  .nav{flex:0 0 44px;padding:0 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .nav .back{font:600 24px/1 var(--font);color:var(--accent)}
+  .nav .ttl{flex:1;text-align:center;margin-right:24px;font:700 16px/1 var(--font);color:#fff;display:flex;align-items:center;justify-content:center;gap:7px}
+  .nav .live{width:7px;height:7px;border-radius:50%;background:var(--good);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(51,214,192,.5)}70%{box-shadow:0 0 0 7px rgba(51,214,192,0)}100%{box-shadow:0 0 0 0 rgba(51,214,192,0)}}
+  .nav .more{color:var(--t3);font:700 19px/1 var(--font)}
+  .scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:16px 15px;display:flex;flex-direction:column;gap:14px}
+  .scroll::-webkit-scrollbar{width:0}
+  .foot{flex:0 0 auto;padding:12px 15px 16px}
+  .cta{width:100%;height:50px;border-radius:25px;background:var(--accent);color:#fff;font:600 16px/1 var(--font);display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 8px 22px rgba(60,127,255,.32);transition:transform .12s,background .15s}
+  .cta:active{transform:scale(.97)}
+  .cta.ghost{background:transparent;border:1px solid var(--line);color:var(--t1);box-shadow:none}
+  [data-screen]{display:none;flex:1;min-height:0;flex-direction:column}
+  [data-screen].on{display:flex}
+
+  .card{border-radius:14px;padding:14px;background:var(--surf);border:1px solid var(--line)}
+  .card.hero{background:linear-gradient(150deg,rgba(60,127,255,.18),rgba(51,214,192,.10))}
+  .kick{font:700 11px/1 var(--font);letter-spacing:.1em;color:var(--good)}
+  .h{font:700 16px/1.35 var(--font);color:#fff}
+  .sub{font:500 13px/1.4 var(--font);color:var(--t2)}
+  .row3{display:flex;gap:10px;align-items:flex-start;font:500 13.5px/1.4 var(--font);color:var(--t2);margin-top:8px}
+  .row3 .n{flex:none;width:19px;height:19px;border-radius:50%;background:var(--surf2);color:var(--good);font:700 11px/19px var(--font);text-align:center}
+
+  .msg{display:flex;gap:8px;max-width:100%}
+  .msg.me{justify-content:flex-end}
+  .ava{flex:none;width:30px;height:30px;border-radius:9px;background:var(--surf2);color:#fff;font:700 14px/30px var(--font);text-align:center}
+  .bub{max-width:80%;border-radius:4px 13px 13px 13px;padding:9px 12px;font:500 14px/1.5 var(--font);background:var(--surf);color:var(--t1);border:1px solid var(--line)}
+  .bub.me{background:var(--accent);color:#fff;border:none;border-radius:13px 4px 13px 13px}
+  .ask{font:600 12.5px/1 var(--font);color:var(--t3);margin:4px 0 2px}
+  .opt{width:100%;text-align:left;border-radius:12px;padding:11px 13px;background:var(--surf);border:1px solid var(--line);font:500 14px/1.45 var(--font);color:var(--t1);transition:.12s;margin-bottom:9px}
+  .opt.sel{border-color:var(--accent);background:rgba(60,127,255,.12)} .opt.dim{opacity:.4}
+  .react{display:none;flex-direction:column;gap:10px} .react.on{display:flex;animation:rise .4s both}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .tip{border-radius:12px;padding:11px 13px;font:500 13px/1.5 var(--font);background:rgba(51,214,192,.1);border:1px solid rgba(51,214,192,.28);color:var(--t1)}
+  .tip.warn{background:rgba(254,127,0,.1);border-color:rgba(254,127,0,.3)}
+  .tip .hh{font:700 12px/1 var(--font);margin-bottom:6px;color:var(--good)} .tip.warn .hh{color:#ffb066} .tip b{color:#fff}
+
+  .erow{display:flex;align-items:center;gap:10px;padding:11px 13px;border-radius:12px;background:var(--surf);border:1px solid var(--line)}
+  .erow .ic{flex:none;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 13px/1 var(--font)}
+  .erow.good .ic{background:rgba(51,214,192,.18);color:var(--good)} .erow.warn .ic{background:rgba(254,127,0,.18);color:var(--warn)}
+  .erow .x{flex:1;font:600 14px/1.3 var(--font);color:var(--t1)} .erow .x small{display:block;font:500 12px/1.35 var(--font);color:var(--t2);margin-top:2px}
+  .point{border-radius:12px;padding:12px 14px;background:linear-gradient(150deg,rgba(60,127,255,.16),rgba(51,214,192,.08));border:1px solid var(--line);font:500 13.5px/1.5 var(--font);color:var(--t1)} .point b{color:#fff}
+</style>
+</head>
+<body>
+<div class="screenwrap">
+  <div class="status"><span>9:41</span><span>●●● ▌</span></div>
+  <div class="nav"><span class="back">‹</span><span class="ttl" id="navttl">演练标题</span><span class="more">⋯</span></div>
+
+  <!-- ===== SETUP ===== -->
+  <div data-screen="setup" class="on">
+    <div class="scroll">
+      <!-- FILL: 角色 / 对手 persona -->
+      <div class="card hero"><div class="h">对手角色 · 一句画像</div><div class="sub">身份 · 立场 · 关注点</div></div>
+      <!-- FILL: 情境 -->
+      <div class="card"><span class="kick">演练情境</span><div class="h" style="margin-top:7px">一句话情境</div><div class="sub" style="margin-top:6px">对方的开场 / 挑战是什么</div></div>
+      <!-- FILL: 本轮目标 -->
+      <div><div class="sub" style="color:var(--t1);font-weight:700">本轮目标</div>
+        <div class="row3"><span class="n">1</span><span>目标一</span></div>
+        <div class="row3"><span class="n">2</span><span>目标二</span></div>
+        <div class="row3"><span class="n">3</span><span>目标三</span></div></div>
+    </div>
+    <div class="foot"><button class="cta" data-go="sim">开始演练 →</button></div>
+  </div>
+
+  <!-- ===== SIM (the clickable core: prompt → choose → branch feedback) ===== -->
+  <div data-screen="sim">
+    <div class="scroll" id="simscroll">
+      <div class="msg"><span class="ava">他</span><div class="bub">对方抛出的<b style="color:#fff">异议 / 问题</b>。</div></div>
+      <div class="ask">选择你的回应（看对方反应 + 教练点评）</div>
+      <div id="opts">
+        <!-- FILL: 2–3 options. data-opt key maps to REACT below. -->
+        <button class="opt" data-opt="a">选项 A（偏弱的回应）</button>
+        <button class="opt" data-opt="b">选项 B（到位的回应）</button>
+        <button class="opt" data-opt="c">选项 C（回避型回应）</button>
+      </div>
+      <div class="react" id="react"></div>
+    </div>
+    <div class="foot" id="simfoot" style="display:none"><button class="cta" data-go="eval">完成本轮 · 看评分 →</button></div>
+  </div>
+
+  <!-- ===== EVAL ===== -->
+  <div data-screen="eval">
+    <div class="scroll">
+      <div><div class="h">本轮点评</div><div class="sub">即时复盘这一轮的判断链</div></div>
+      <!-- FILL: scored rows (good / warn) -->
+      <div class="erow good"><span class="ic">✓</span><span class="x">做对的维度<small>为什么对</small></span></div>
+      <div class="erow warn"><span class="ic">!</span><span class="x">待加强维度<small>差在哪 + 怎么补</small></span></div>
+      <div class="point">一句收口：短板 → 接下来的训练方向（可指向 deck 上的雷达 / 评估面板）。</div>
+    </div>
+    <div class="foot"><button class="cta ghost" data-go="setup">再练一轮 ↺</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var screens=[].slice.call(document.querySelectorAll('[data-screen]'));
+  var navttl=document.getElementById('navttl');
+  // FILL: per-screen nav titles
+  var TITLES={setup:'演练标题',sim:'模拟中',eval:'本轮评分'};
+  function show(name){
+    screens.forEach(function(s){s.classList.toggle('on',s.getAttribute('data-screen')===name);});
+    navttl.innerHTML = name==='sim' ? '<span class="live"></span>'+TITLES.sim : (TITLES[name]||'演练');
+    var sc=document.querySelector('[data-screen].on .scroll'); if(sc) sc.scrollTop=0;
+  }
+  document.querySelectorAll('[data-go]').forEach(function(b){
+    b.addEventListener('click',function(){var t=b.getAttribute('data-go'); if(t==='sim') resetSim(); show(t);});
+  });
+  // FILL: each option's branch — the other party's reaction + a coach tip (good:true = strong).
+  var REACT={
+    a:{me:'选项 A 的话术',  ai:'（对方反应：被带偏 / 没被说服）', tip:{warn:true, h:'教练提示', html:'弱在哪 + 该怎么接。'}},
+    b:{me:'选项 B 的话术',  ai:'（对方反应：被正面接住、认可）', tip:{warn:false,h:'教练提示 · 这步到位', html:'对在哪 + 再补什么就满分。'}},
+    c:{me:'选项 C 的话术',  ai:'（对方反应：回避 = 默认承认短板）', tip:{warn:true, h:'教练提示', html:'回避的代价 + 正解方向。'}}
+  };
+  var react=document.getElementById('react'),foot=document.getElementById('simfoot'),opts=document.getElementById('opts');
+  function resetSim(){react.classList.remove('on');react.innerHTML='';foot.style.display='none';
+    [].forEach.call(opts.children,function(o){o.classList.remove('sel','dim');});}
+  opts.addEventListener('click',function(e){
+    var btn=e.target.closest('.opt'); if(!btn) return; var r=REACT[btn.getAttribute('data-opt')]; if(!r) return;
+    [].forEach.call(opts.children,function(o){o.classList.add('dim');o.classList.remove('sel');});
+    btn.classList.add('sel');btn.classList.remove('dim');
+    react.innerHTML='<div class="msg me"><div class="bub me">'+r.me+'</div></div>'+
+      '<div class="msg"><span class="ava">他</span><div class="bub">'+r.ai+'</div></div>'+
+      '<div class="tip'+(r.tip.warn?' warn':'')+'"><div class="hh">'+(r.tip.warn?'⚠ ':'★ ')+r.tip.h+'</div>'+r.tip.html+'</div>';
+    react.classList.add('on');foot.style.display='';
+    var sc=document.getElementById('simscroll');setTimeout(function(){sc.scrollTop=sc.scrollHeight;},60);
+  });
+  var s=(location.search.match(/[?&]s=([a-z]+)/)||[])[1];
+  if(s==='sim') resetSim();
+  show(s&&TITLES[s]?s:'setup');
+})();
+</script>
+</body>
+</html>
