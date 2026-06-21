@@ -7,6 +7,36 @@ These four failure modes recurred in the 2026-05-14 CTG run and burned
 30+ minutes of debug time each. Read this section BEFORE doing any
 delete-slide / insert-slide / reorder-slide / custom-layout work.
 
+### E0. Look before you touch — inspect with the CLI, never hand-roll JSON
+
+BEFORE reading or changing a slide, use the deck tools. An ad-hoc
+`python -c "json.load(...)"` to peek at fields is the #1 time-sink: it guesses
+the structure and gets it wrong. (2026-06-21 lesson: one wrong path —
+`data.custom_css` instead of top-level `custom_css` — read as "the page lost its
+CSS" and triggered a 25-backup hunt + a false "latent bug"; separately,
+`slides[26]` reused a STALE page number into a deck a concurrent session had
+grown 65→69, hitting the wrong slide. Both vanish if you use `show`/`get`/`deck-map`.)
+
+- **Inspect with the tools, by key:** `deck-cli.py <deck> show <key>` prints the
+  WHOLE slide (every field + where it lives) · `deck-cli.py <deck> get
+  slides.N.path` for one value · `deck-map.py <deck> --sections` (or `--layout
+  LAYOUT`) shows the chapter-divider sequence at a glance — the fastest answer to
+  "change page X to chapter N".
+- **Field homes — don't guess:** `custom_css` is a **top-level** slide field, NOT
+  `data.custom_css`. Raw-page body = `data.html`. Schema / section content =
+  `data.{title, chapter_num, lede, parent_label, cols, …}`. One `show` confirms.
+- **Address by KEY, not a remembered index.** `show <key>` / `set-page <key>` are
+  drift-proof. For a field-level `set slides.N.data.X`, N is an **array index** —
+  read it fresh and re-confirm `slides.N.key` immediately before the `set`;
+  indices shift when slides are inserted or a concurrent session edits (it happens
+  mid-task — re-read, don't trust an earlier map). A URL `#N` is a **page
+  position** = deck-map index when nothing is `_disabled`, NOT a fixed array index.
+- **Single-field fast path — don't over-investigate:** `show` → `set`/`set-page` →
+  `render-deck.py <deck> <output_dir> --scope N --shoot` → ONE `shoot-page.py
+  <index.html> N --scale 2` glance. Do NOT read renderer internals, trawl `.bak`
+  history, or screenshot twice (`--shoot` already made one; re-shoot only at 2× to
+  read small text). Scope-flag details under "Re-render speed" below.
+
 ### E0a. "Delete the XX block" — grep the literal text FIRST (scope lock)
 
 When the user points at a page and says delete/change "the XX blocks", elements

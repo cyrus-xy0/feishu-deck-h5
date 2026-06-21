@@ -15,6 +15,7 @@ so you never have to archaeology a montage by hand again.
     deck-map.py <index.html | deck.json>          # human table
     deck-map.py <file> --json                      # machine-readable JSON
     deck-map.py <file> --key tongdianjuli          # only matching rows
+    deck-map.py <file> --sections                  # only chapter dividers (= --layout section)
 
 stdlib only. Python 3.11+.
 """
@@ -187,6 +188,9 @@ def main(argv=None) -> int:
     ap.add_argument("--json", action="store_true", help="machine-readable JSON output")
     ap.add_argument("--key", help="only rows whose key matches")
     ap.add_argument("--index", type=int, help="only the row at this 1-based frame index")
+    ap.add_argument("--layout", help="only rows whose layout matches (e.g. section, raw, agenda)")
+    ap.add_argument("--sections", action="store_true",
+                    help="only section / chapter-divider slides (alias for --layout section)")
     args = ap.parse_args(argv)
 
     if not args.file.is_file():
@@ -214,6 +218,9 @@ def main(argv=None) -> int:
         rows = [r for r in rows if r["index"] == args.index]
     if args.key:
         rows = [r for r in rows if r.get("key") == args.key]
+    layout_filter = "section" if args.sections else args.layout
+    if layout_filter:
+        rows = [r for r in rows if (r.get("layout") or "") == layout_filter]
 
     if args.json:
         print(json.dumps({"deck": deck_name, "pages": len(rows), "slides": rows},
