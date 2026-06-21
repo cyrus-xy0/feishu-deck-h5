@@ -452,6 +452,52 @@ def test_dom_allow_optout_no_fire():
     assert "R-DOM" not in _err_codes(R_DOM, html)
 
 
+# ==========================================================================
+# F-358  mockup sandbox  (a data-mockup / role="img" subtree is a PICTURE of a
+#         product UI, not page content -> its internals are exempt from R20
+#         typescale, R-WHITE-TEXT, and R12 drop-shadow)
+# ==========================================================================
+
+def test_r20_mockup_sandbox_no_fire():
+    # Off-ladder per-page font fires normally...
+    fires = _doc('[data-slide-key="k"] .lbl { font-size: 14px; }',
+                 _slide("content", '<div class="lbl">x</div>'))
+    assert "R20" in _all_codes(R20, fires)
+    # ...but is exempt when the selector targets only data-mockup internals.
+    exempt = _doc('[data-slide-key="k"] .lbl { font-size: 14px; }',
+                  _slide("content",
+                         '<div class="phone" data-mockup>'
+                         '<div class="lbl">x</div></div>'))
+    assert "R20" not in _all_codes(R20, exempt)
+
+
+def test_r12_mockup_sandbox_no_fire():
+    # A real drop shadow inside a data-mockup subtree is simulated UI chrome.
+    html = _doc(".slide .btn { box-shadow: 0 8px 24px rgba(0,0,0,0.4); }",
+                _slide("content",
+                       '<div class="phone" data-mockup>'
+                       '<div class="btn">x</div></div>'))
+    assert "R12" not in _all_codes(R12, html)
+
+
+def test_white_text_mockup_data_attr_no_fire():
+    # Soft-white inside a data-mockup subtree is simulated-UI grey text -> exempt.
+    html = _doc(".slide .cbody { font-size: 24px; color: rgba(255,255,255,0.6); }",
+                _slide("content",
+                       '<div class="phone" data-mockup>'
+                       '<div class="cbody">正文</div></div>'))
+    assert "R-WHITE-TEXT" not in _all_codes(R_WHITE_TEXT, html)
+
+
+def test_white_text_role_img_mockup_no_fire():
+    # A role="img" subtree is a graphic (a picture of a UI) -> its grey text exempt.
+    html = _doc(".slide .cbody { font-size: 24px; color: rgba(255,255,255,0.6); }",
+                _slide("content",
+                       '<div class="phone" role="img">'
+                       '<div class="cbody">正文</div></div>'))
+    assert "R-WHITE-TEXT" not in _all_codes(R_WHITE_TEXT, html)
+
+
 if __name__ == "__main__":
     # Allow running without pytest: python3 test_validate_static_rules.py
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

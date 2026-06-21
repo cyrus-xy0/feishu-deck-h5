@@ -86,6 +86,18 @@ def test_lint_respects_ladder_hero_and_optouts():
     assert [f for f in lint_fragment(html=html, css=css) if f["sev"] == "err"] == []
 
 
+def test_lint_mockup_silences_typescale():
+    # F-358: a data-mockup root (a simulated UI) silences L-TYPESCALE for the
+    # fragment, so phone / product-UI mockups don't need data-allow-typescale
+    # sprinkled on every off-ladder leaf.
+    css = ".x .lbl{font-size:14px} .x .num{font-size:19px}"
+    assert "L-TYPESCALE" in [f["code"] for f in lint_fragment(css=css)
+                             if f["sev"] == "err"]
+    html = '<div class="phone" data-mockup></div>'
+    assert "L-TYPESCALE" not in [
+        f["code"] for f in lint_fragment(html=html, css=css) if f["sev"] == "err"]
+
+
 def test_lint_p50_base64_in_style():
     blob = base64.b64encode(b"x" * 300 * 1024).decode()
     css = f'.x{{background:url("data:image/png;base64,{blob}")}}'

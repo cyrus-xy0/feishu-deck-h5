@@ -108,7 +108,7 @@ def lint_fragment(html: str = "", css: str = "", lifted: bool = False) -> list[d
     inline, embedded = _style_blocks(html or "")
     all_rules = (_iter_rules(css or "") + _iter_rules(embedded) + inline)
     frag_all = (html or "") + "\n" + (css or "")
-    has_ts_optout = "data-allow-typescale" in frag_all
+    has_ts_optout = "data-allow-typescale" in frag_all or "data-mockup" in frag_all
     has_da_optout = "data-allow-dual-anchor" in frag_all
 
     for sel, body in all_rules:

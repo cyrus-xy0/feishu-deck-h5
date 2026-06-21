@@ -80,6 +80,19 @@
     return out;
   };
 
+  // F-358 mockup sandbox: a simulated-UI mockup subtree (a `.phone`/UI mock marked
+  // `data-mockup`, or any `role="img"` graphic) is a PICTURE of a product UI, not
+  // page content — so its internals are exempt from the page-content chrome rules
+  // (R20 / typescale, R-WHITE-TEXT, R12 drop-shadow). One marker on the root replaces
+  // sprinkling data-allow-typescale + data-allow-white-opacity + data-allow-drop-shadow.
+  const inMockupRoot = (el, stop) => {
+    for (let p = el; p && p !== stop; p = p.parentElement) {
+      if (p.nodeType === 1 &&
+          (p.hasAttribute('data-mockup') || p.getAttribute('role') === 'img')) return true;
+    }
+    return false;
+  };
+
   // DEAD-ANIM / DEAD-RULE host stripper. A rule targeting a pseudo-element
   // (::before/::after/…) or a dynamic state (:hover/:focus/…) NEVER matches
   // querySelectorAll (pseudo-elements aren't selectable; states aren't active at
@@ -1382,6 +1395,7 @@
           if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
           const chain = classChain(el, slide);
           if (chain.some((c) => UI_MOCK.includes(c))) continue;          // UI-mock 窗体豁免
+          if (inMockupRoot(el, slide.parentElement)) continue;           // F-358 mockup 沙箱
           if (dsCommentExempt(el)) continue;                             // /* allow:drop-shadow */ 注释豁免
           let optOut = false;
           for (let p = el; p && p !== slide.parentElement; p = p.parentElement) {
@@ -1522,6 +1536,7 @@
           // data-allow-white-opacity opt-out 的元素作为定位锚。
           let anchor = null;
           for (const el of candidates) {
+            if (inMockupRoot(el, slide.parentElement)) continue;   // F-358 mockup 沙箱
             let optOut = false;
             for (let p = el; p && p !== slide.parentElement; p = p.parentElement) {
               if (p.hasAttribute && p.hasAttribute('data-allow-white-opacity')) { optOut = true; break; }
@@ -1563,6 +1578,7 @@
           if (!SOFT_WHITE_DECL_RE.test(styleAttr)) continue;
           const fsM = FS_PX_RE.exec(styleAttr);
           if (fsM && parseInt(fsM[1], 10) <= 14) continue;   // inline chrome floor 豁免
+          if (inMockupRoot(el, slide.parentElement)) continue;   // F-358 mockup 沙箱
           let optOut = false;
           for (let p = el; p && p !== slide.parentElement; p = p.parentElement) {
             if (p.hasAttribute && p.hasAttribute('data-allow-white-opacity')) { optOut = true; break; }
@@ -2222,6 +2238,16 @@
         // CPython set-hash 得到)实测为 [48, 24, 28, 16];min 保留首个达到最小 key 者。等距时这给出:
         // 20→24 / 26→24 / 38→48(并非升序的 16/24/28)。须照搬该迭代序才能逐字对齐。
         // 若框架 CSS 改了台阶值(集合不再是这四个),退回升序遍历(此时 4-tier 已变,对齐基准也变)。
+        // F-358: off-ladder font on a mockup-internal selector is simulated UI, not page text.
+        const selectorAllInMockup = (selector) => {
+          if (typeof document === 'undefined') return false;
+          let els;
+          try { els = document.querySelectorAll(selector); } catch (e) { return false; }
+          if (!els.length) return false;
+          for (const el of els) { if (!inMockupRoot(el, null)) return false; }
+          return true;
+        };
+
         const PY_LADDER_ORDER = [48, 24, 28, 16];
         const ladderIter = PY_LADDER_ORDER.every((v) => TYPE_LADDER_PX.has(v))
           && TYPE_LADDER_PX.size === PY_LADDER_ORDER.length
@@ -2244,6 +2270,7 @@
             if (selector.indexOf('[data-page=') < 0 && selector.indexOf('[data-slide-key=') < 0) continue;
             if (selector.indexOf('@') >= 0) continue;
             if (body.indexOf('allow:typescale') >= 0) continue;
+            if (selectorAllInMockup(selector)) continue;   // F-358 mockup 沙箱
             const block = stripCssComments(body);
             for (const size of collectFontSizes(block)) {
               if (TYPE_LADDER_PX.has(size)) continue;

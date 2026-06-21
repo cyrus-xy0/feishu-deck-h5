@@ -176,6 +176,13 @@ Designer + Renderer instead).
     deck-wide rollups (R20 font-tier, palette / radius drift) are pre-existing deck noise
     on other lifted pages, not your page — recognize them, never re-render to "diagnose"
     them.
+  - **UI mockups are sandboxed — mark the root, don't sprinkle flags:** when a page
+    embeds a simulated product UI (phone / chat / dashboard mock), put `data-mockup`
+    (or `role="img"`) on the mock ROOT once. F-358 exempts everything inside from the
+    page-content chrome rules (R20 / typescale, R-WHITE-TEXT grey text, R12 button
+    shadow) AND the static pre-write L-TYPESCALE lint — so a dark mockup never makes you
+    iterate the gate adding `data-allow-typescale` / `-white-opacity` / `-drop-shadow`
+    per element.
   - **Into a BRAND-NEW deck** ("开个新 deck 复用某页"): use
     `deck-json/lift-to-new-deck.py SRC PAGES DEST [--new-key K] [--render]`. It
     scaffolds a schema-valid deck.json then delegates each slide copy to
