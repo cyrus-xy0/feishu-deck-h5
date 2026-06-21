@@ -75,6 +75,13 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
    output to `<output_dir>/last-render.log` and ends with an errors-only
    digest — on a BLOCK, read the log instead of re-running.
 
+   For fast VISUAL iteration on one raw page (layout / text / wrapping / color),
+   `deck-json/preview-slide.py <deck.json> <page>` (or `--key <slide_key>`) drops
+   that single slide into the framework shell and screenshots it 1:1 at 1920×1080
+   in ~1s — no deck.json write, no validation, no autosnapshot. Iterate with it,
+   then commit + validate once via `render-deck.py --scope N`. Caveat: it does NOT
+   run JS motion / iframe-embed content / fitText — those still need the real render.
+
 6. Confirm the render actually updated `index.html` by checking renderer output,
    mtime, or expected slide key/content.
    If schema validation fails before render, inspect with
