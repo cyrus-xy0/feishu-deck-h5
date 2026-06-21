@@ -238,6 +238,14 @@ DOM tree and fighting every collision by hand.
 Decks regularly embed live UI prototypes. There's a checklist for this — every
 item below has bitten us before:
 
+> 💬 **Agent / 对话类 demo 别从零搓** —— 用脚手架
+> `deck-json/templates/prototypes/feishu-chat-demo.html`(`cp` 到
+> `runs/<deck>/prototypes/<name>/index.html` 再填内容):自带 lark-design-prototype token +
+> 聊天组件(气泡 / AI 答 / 思考态 / 结构化卡片 / kv / 引用 / 动作 chip)+ UD 图标 + 健壮入场
+> 重放(静止态可见 + 1.7s 兜底)。**多段对话同屏** = 一个 iframe 内 N 个 `.thread` 列(脚手架里
+> 有 `.cols` 注释)。embed 契约(iframe + `data-ui-screenshot` 凭证 + screen-frame CSS)写在
+> 脚手架头注里。它本就是 lark-design-prototype 设计系统的产物——「用 feishu 原型技能」即此。
+
 1. **Always copy the prototype HTML to the deck's outputs/ folder before
    embedding.** Never use `file:///Users/.../Downloads/...` or any user-local
    absolute path. When the deck is shared, the recipient won't have that file.

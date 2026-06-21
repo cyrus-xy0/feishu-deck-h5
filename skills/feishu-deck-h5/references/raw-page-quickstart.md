@@ -5,6 +5,9 @@
 > 永不变,别再 grep CSS / 派 Explore / 逐个 `--help` 重新发现。recon 应从 ~9min → ~3min
 > (2026-06-20 齐鲁「那一跃」页复盘:一张 bespoke 页烧了 35min,其中 ~6min 是重新
 > 考古这些固定事实,~6min 是焦点元素试探性返工——两者都该被本文消灭)。
+> (2026-06-21 齐鲁 CAPA demo 页 21min 复盘再补两条:**deck.json slide 对象形状**钉进
+> 「固定常量」省掉手猜字段名的空跑、**隔离 / worktree session 写 runs/ 产物**的 tmp+cp 配方
+> 省掉 worktree 摩擦——见下对应小节。)
 
 ## 固定常量(背下来,别再查)
 
@@ -17,6 +20,14 @@
   其它可用:`--fs-blue:#3C7FFF`、`--fs-accent`、`--fs-ease-out:cubic-bezier(.16,1,.3,1)`、
   `--fs-dur-enter:.6s`、`--fs-stagger:90ms`。
 - content 页深色底约定:`#050a17 url("assets/lark-content-bg.jpg") center/cover no-repeat`。
+- **deck.json slide 对象形状(读一页前先背,别手写 extractor)**:`slides[]` 每项 =
+  `{key, layout, screen_label, data:{html, title?}, custom_css, accent?, decor?, lifted?, allow?}`。
+  **html 在 `data.html`、bespoke CSS 在 `custom_css`、可见标题在 html 的 `.title-zh` 里**
+  (`data.title` 只是元数据、raw 页常空)。要看某页真内容 →
+  `deck-cli.py <deck.json> get-page <key|#N> [--html|--css|--title]`(按 key 或 1-based 页码寻址;
+  `--html` 吐**原始未转义**片段、可 `> frag.html`;无 flag 给摘要+全文)。**别再 `json.load` 手猜
+  字段名**——那是「别用临时脚本碰 deck.json」反模式的读侧孪生(`show` 吐的是 JSON-escaped 整对象,
+  读 html 用 `get-page --html`)。
 
 ## raw 页 5 条铁律
 
@@ -78,6 +89,16 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
   **别为"确认插入点"反复跑 deck-map**;热 deck 防并发位移最多查 1 次。
 - set-page / render 自带乐观锁 + `.bak-pre-*` 备份;并发 session 改了同一 deck.json 它会拒写,
   按提示重读即可,不要 `--force` 绕过。
+- **要照着某页改 / 学它约定**:先 `get-page <key|#N>` 看它的 html+css(别开 ad-hoc extractor),
+  再 set-page 写回。
+- **对话 / agent demo 页别手搓聊天 UI**:`cp deck-json/templates/prototypes/feishu-chat-demo.html`
+  到 `runs/<deck>/prototypes/<名>/index.html` 填内容,再按 iframe + screen-frame 嵌进 raw 页
+  (多段对话 = 一个 iframe 内 N 列 `.thread`;契约见脚手架头注 + `prototype-embed.md`)。
+- **隔离 / worktree session 里编辑 `runs/` 产物**:`runs/` 是 gitignore 的用户产物、只活在主
+  checkout——被隔离进 worktree 时,**Write/Edit 工具会拒写共享 checkout 路径**。对策:**原型 /
+  资产 / 片段文件**写到 job tmp(`$CLAUDE_JOB_DIR/tmp` 或 `$TMPDIR`)再 `cp` 进 `runs/.../`;
+  **deck.json 改动**走 deck-cli(set-page / insert / render)——它们经 Bash 子进程落盘,不受隔离
+  影响。别去研究 worktree、别 ExitWorktree(编辑 deck 产物本就不是「代码改动」,无需隔离)。
 
 ## 速度纪律(别再犯——全是 35min/页 复盘里挤出来的)
 
