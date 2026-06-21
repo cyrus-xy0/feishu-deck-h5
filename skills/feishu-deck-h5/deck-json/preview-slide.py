@@ -3,20 +3,61 @@
 
 Reads ONE slide from a deck.json, drops it into the framework shell
 (`.deck > .slide-frame.is-current > .slide`), forces 1920x1080 static
-(no present-mode scaling / no JS), and screenshots it 1:1 — skipping the
-whole render-deck pipeline (no deck.json write, no validation, no making-of).
+(no present-mode scaling / no JS), screenshots it 1:1, and — by default —
+runs the unified audit engine (audits.js) on the rendered slide so you get
+the per-slide GATE findings (geometry / typescale / overflow / drop-shadow /
+soft-white-text / focal …) in the SAME ~2s pass — no 12s render-deck
+round-trip just to discover a layout-rule violation.
 
-Use it for fast VISUAL iteration (layout / text / wrapping / color); then run
-`render-deck.py <deck.json> . --scope N` once at the end to commit + validate.
+Use it for fast VISUAL + GATE iteration (layout / text / wrapping / color +
+the rules that would otherwise only surface in render-deck). Then run
+`render-deck.py <deck.json> . --scope <key> --final` once at the end to
+commit + run the FULL deck-wide gate (palette / title drift, present-mode
+chrome, cross-slide rules) + the making-of snapshot.
+
 Caveat: JS-driven motion, iframe-embed content, and fitText won't run here —
-those need the real render.
+those need the real render. The gate here is SINGLE-SLIDE + STATIC, so it
+deliberately SUPPRESSES framework / present-mode / whole-deck rules that
+cannot be evaluated on one static slide (they run at render-deck --final):
+present-mode chrome (R29-32 / R36), every-layout centering (R48), wordmark
+default (L1), CSS-var source scan over a linked sheet (R-CSSVAR), and
+deck-wide drift (R-DECK-*). Pass --no-gate for screenshot only.
 
 Usage:
   preview-slide.py <deck.json> <page>            # 1-based page number
   preview-slide.py <deck.json> --key <slide_key>
   preview-slide.py <deck.json> 21 --out /tmp/p21.png
+  preview-slide.py <deck.json> --key foo --no-gate   # screenshot only
 """
 import sys, os, json, argparse, time, pathlib
+
+HERE = pathlib.Path(__file__).resolve().parent
+AUDITS_JS = HERE.parent / "assets" / "audits.js"
+
+# Rules that structurally CANNOT be judged on a single static slide preview —
+# they validate the framework shell / present-mode chrome / whole-deck
+# consistency, none of which exists in the one-slide harness. Suppressed in the
+# preview gate (informational); they still run at render-deck --final.
+GATE_SUPPRESS_IDS = {
+    "R29-32",   # present-mode chrome (progress bar / controls / fullscreen JS)
+    "R36",      # present-mode slide centering (absolute + negative margin)
+    "R48",      # every framework layout needs a vertical-centering rule
+    "R07",      # framework structure: raw slide "missing .wordmark" (logo is
+                # framework chrome, not authored on the slide)
+    "R-AUTOBALANCE-PRESENT",  # deck must inline feishu-deck.js runtime — a build
+                # concern; the one-slide harness has no present-mode JS
+    "L1",       # wordmark default → var(--fs-asset-logo)
+    "R-CSSVAR", # CSS-var source scan: a linked sheet's cssRules are unreadable
+                # here (link, not inlined) → false "var never defined"
+}
+
+
+def _suppressed(rule: str) -> bool:
+    if rule in GATE_SUPPRESS_IDS:
+        return True
+    if rule.startswith("R-DECK-"):   # deck-wide drift (palette/radius/title) — needs all slides
+        return True
+    return False
 
 
 def main():
@@ -29,6 +70,8 @@ def main():
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--scale", type=int, default=1, help="device_scale_factor (2 for retina detail)")
     ap.add_argument("--wait", type=int, default=500, help="ms settle before shot")
+    ap.add_argument("--no-gate", action="store_true",
+                    help="skip the in-preview audit gate (screenshot only)")
     args = ap.parse_args()
 
     deck_path = os.path.abspath(args.deck)
@@ -66,6 +109,10 @@ def main():
         attrs += f' data-accent="{accent}"'
     if label:
         attrs += f' data-screen-label="{label}"'
+    # slide-level visual-audit opt-outs → data-allow-<tok> on .slide (parity with
+    # render-deck _build_data_attrs) so the preview gate respects them.
+    for tok in (s.get("allow") or []):
+        attrs += f' data-allow-{tok}'
 
     harness = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <link rel="stylesheet" href="assets/feishu-deck.css">
@@ -99,6 +146,8 @@ def main():
     except ImportError:
         sys.exit("preview-slide: python playwright not installed")
     url = pathlib.Path(prev).as_uri()
+    gate = None
+    gate_err = None
     with sync_playwright() as p:
         b = p.chromium.launch(headless=True)
         pg = b.new_page(viewport={"width": args.width, "height": args.height},
@@ -106,12 +155,49 @@ def main():
         pg.goto(url)
         pg.wait_for_timeout(args.wait)
         pg.screenshot(path=out)
+        if not args.no_gate and AUDITS_JS.exists():
+            # contract: set window.__AUDIT_SCOPE__ (null = every .slide in DOM =
+            # the one preview slide), then evaluate audits.js source; the IIFE
+            # returns { engine, version, findings:[{rule, severity, message,...}] }
+            try:
+                pg.evaluate("window.__AUDIT_SCOPE__ = null")
+                gate = pg.evaluate(AUDITS_JS.read_text(encoding="utf-8"))
+            except Exception as e:  # a rule throwing must NOT kill the preview
+                gate_err = str(e)
         b.close()
     try:
         os.remove(prev)
     except OSError:
         pass
     print(f"preview p{idx+1} ({key}) -> {out}  [{time.time()-t0:.1f}s]")
+
+    # ---- in-preview gate report (single-slide, static; framework/deck rules suppressed) ----
+    if args.no_gate:
+        return
+    if gate_err:
+        print(f"  gate: skipped (audit error: {gate_err[:90]})")
+        return
+    if gate is None:
+        print(f"  gate: skipped (audits.js not found at {AUDITS_JS})")
+        return
+    findings = gate.get("findings", []) or []
+    shown, suppressed = [], 0
+    for f in findings:
+        if _suppressed(f.get("rule", "")):
+            suppressed += 1
+        else:
+            shown.append(f)
+    errs = [f for f in shown if f.get("severity") == "error"]
+    warns = [f for f in shown if f.get("severity") != "error"]
+    tail = f"  (suppressed {suppressed} framework/preview-only)" if suppressed else ""
+    if not shown:
+        print(f"  gate: ✓ clean{tail}")
+        return
+    print(f"  gate: {len(errs)} error · {len(warns)} warn{tail}")
+    for f in errs + warns:
+        sev = "✗" if f.get("severity") == "error" else "!"
+        msg = " ".join(str(f.get("message", "")).split())
+        print(f"   {sev} [{f.get('rule')}] {msg[:120]}")
 
 
 if __name__ == "__main__":

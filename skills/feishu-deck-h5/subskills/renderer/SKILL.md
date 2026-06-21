@@ -75,12 +75,20 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
    output to `<output_dir>/last-render.log` and ends with an errors-only
    digest — on a BLOCK, read the log instead of re-running.
 
-   For fast VISUAL iteration on one raw page (layout / text / wrapping / color),
-   `deck-json/preview-slide.py <deck.json> <page>` (or `--key <slide_key>`) drops
-   that single slide into the framework shell and screenshots it 1:1 at 1920×1080
-   in ~1s — no deck.json write, no validation, no autosnapshot. Iterate with it,
-   then commit + validate once via `render-deck.py --scope N`. Caveat: it does NOT
-   run JS motion / iframe-embed content / fitText — those still need the real render.
+   For fast iteration on one raw page, `deck-json/preview-slide.py <deck.json>
+   --key <slide_key>` drops that single slide into the framework shell, screenshots
+   it 1:1 at 1920×1080 AND runs the per-slide gate (audits.js: geometry / typescale /
+   overflow / drop-shadow / soft-white / focal) — all in ~2s, no deck.json write, no
+   autosnapshot. So you catch layout-rule violations in the SAME pass instead of a
+   12s `render-deck` round-trip. ALWAYS pass `--key` (drift-proof: page numbers shift
+   the moment a concurrent edit inserts a slide). The gate is single-slide + static,
+   so it SUPPRESSES framework / present-mode / whole-deck rules (wordmark, present
+   chrome, every-layout centering, CSS-var source scan, deck-wide drift) — those run
+   only at the real render; preview shows NATIVE severity (no baseline demotion).
+   `--no-gate` = screenshot only. Loop: iterate with preview `--key`, then commit +
+   run the FULL gate once via `render-deck.py --scope <key> --final`. Caveat: JS
+   motion / iframe-embed content / fitText do NOT run here — an iframe demo page
+   (e.g. a feishu-prototype) still needs the real render.
 
 6. Confirm the render actually updated `index.html` by checking renderer output,
    mtime, or expected slide key/content.
