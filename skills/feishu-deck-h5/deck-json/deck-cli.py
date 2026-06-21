@@ -912,7 +912,15 @@ def _slide_asset_text(slide: dict) -> str:
                 walk(x)
 
     walk(slide.get("data", {}))
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    # Collapse inline `data:` URIs (base64 blobs) before returning. They are
+    # NEVER copyable local assets (paste skips them anyway), and a long unbroken
+    # base64 run makes the media-ref scan in _copy_slide_assets (`_ref_re`)
+    # backtrack catastrophically — a single 370KB inline image hung `paste` for
+    # ~3.5 min at 100% CPU. The collapse is linear (anchored literal + greedy run
+    # to the next delimiter, no failing follow-on to backtrack into).
+    text = re.sub(r'''data:[^\s"'<>()]+''', "data:", text)
+    return text
 
 
 def _canvas_element_srcs(slide: dict) -> list[str]:
@@ -1032,7 +1040,11 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     # relative path, else flag missing.
     _MEDIA = r'(?:png|jpe?g|gif|webp|svg|avif|mp4|webm|mov|m4v)'
     already = set(copied["input"]) | {f"prototypes/{s}" for s in copied["prototypes"]}
-    _ref_re = r'''([^\s"'<>()\\?#]+\.''' + _MEDIA + r''')(?=[\s"'<>()?#]|$)'''
+    # Quantifier is bounded ({1,512}, generous for any real media path) as a
+    # backstop: an unbounded `+` over a pathological long run (e.g. a base64 blob
+    # the data:-collapse above somehow missed) backtracks O(n²); the bound caps
+    # each attempt at 512 chars → O(n·k). No real asset path approaches 512.
+    _ref_re = r'''([^\s"'<>()\\?#]{1,512}\.''' + _MEDIA + r''')(?=[\s"'<>()?#]|$)'''
     for m in re.finditer(_ref_re, text, re.I):
         ref = m.group(1)
         low = ref.lower()
