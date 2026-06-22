@@ -3903,6 +3903,14 @@
             if (n.dataset && n.dataset.allowDimText != null) { allowOut = true; break; }
           }
           if (allowOut) return;
+          // Gradient-clipped text (`background-clip:text` + `color:transparent`): the
+          // glyphs are painted by the background gradient, not `color`, so a transparent /
+          // low-alpha `color` is BY DESIGN — reading brightness off it yields a meaningless
+          // ~0% and a false "发灰看不清". The gradient's own legibility is the author's call
+          // (cinematic accent idiom). Skip. Check prefixed + unprefixed (Chrome aliases them).
+          const _bgClip = cs.getPropertyValue('-webkit-background-clip') + ' '
+            + cs.getPropertyValue('background-clip');
+          if (_bgClip.indexOf('text') !== -1) return;
           const m = (cs.color || '').match(/rgba?\(([^)]+)\)/);
           if (!m) return;
           const p = m[1].split(',').map((s) => parseFloat(s));

@@ -53,7 +53,8 @@
 3. **焦点闸 R-FOCAL**:≥3 个元素并列共享**全页最大字号**才告警。把 48px 只给该给的
    (如左右双标题 = 2 个,安全),其余 ≤28。真要 3+,该页 slide JSON 加
    `"allow":["no-focal"]`——**真实字段,deck 里实证可用**;无配图同理 `"allow":["no-imagery"]`。
-4. **SVG `<text>` 也有字号 floor**(R-VIS-SVG-TEXT-FLOOR)→ 节点/标签宁可用 HTML
+4. **SVG `<text>` 也有字号 floor = 18px**(8+ 字 R-VIS-SVG-TEXT-FLOOR / 1–7 字短标签
+   R-VIS-SHORT-LABEL-FLOOR,都按【实效渲染】px 量、都是 **18**)→ 节点/标签宁可用 HTML
    `<span>` 绝对定位**覆在** SVG 上,字号好控、渲染更清晰。
 5. **动效只写 `slide.custom_css`**。deck.json 无 JS 槽,re-render 会抹掉任何
    `<script>` / head `<style>`;GSAP 等只在 deck 级 `motion_engine:"gsap"` opt-in 时才有
@@ -165,6 +166,11 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
     custom_css 即可——**`scope_selectors` 会把 `[data-page=NN]` 自动重锚到当前 slide-key**
     (无需手改选择器),再 `set-accent <K> blue` / `set-decor <K> blue-glow` 补回、拷 head CSS
     里 `url()` 引的资产(含 `assets/shared/...` 共享池,新 deck 常缺、必拷)。
+- **拎来的页要翻译成目标 deck 的语言**(英文母版拎进中文 deck):别再手搓 paste→get-page→翻→set,
+  用两段式驱动 `lift-translate-page.py`——`emit-pairs <目标deck.json> <源> <页> [位置]` 落页 + 吐出
+  只含该页的翻译骨架 → 填每个 `replace`(套术语表、压缩 EN 别撑爆 CJK 宽)→ `apply <pairs>`(闸 +
+  结构安全 text-swap + scoped render)。模型只填 {find,replace},机械链不必每 session 重发现;整本译后
+  QA(residual-CJK / 溢出)仍是交付步(`translation-qa.py`)。
 
 ## 速度纪律(别再犯——全是 35min/页 复盘里挤出来的)
 
@@ -202,6 +208,9 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
   → 渲染器自动 `zoom = 1800 / fit_width`（fit_width 越小越放大、白边消失）。详见
   `prototype-embed.md` F-314。设计宽 = 原型 `max-width`/容器宽（grep 一下）；别设到 < 其
   `min-width` 否则塌版。
+- **删掉绝对定位页里的一整块**（撤一个底部条 / 一列 / 一段）：剩余内容的视觉重心会随之上移或下移，
+  `R-VIS-CANVAS-CENTER` 会报「偏上 / 偏下」。**删完同一遍就把保留内容补回画布中心**——按删掉区域的
+  几何平移（≈ 删掉块高度的一半），或一次读 canvas band 中线 px 补到位；别等渲一轮看报告再补、白渲一遍。
 - **改完一遍过验收**：`render-deck.py <deck.json> <out-dir> --scope <N> --shoot`
   （渲 + 只校验第 N 页 + 截 `.shoot-pN.png`；既有 deck-wide 基线问题在 scoped 下自动降级、
   不阻塞本页；别为一页改动跑 `--final` / 全 deck 渲）。

@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-372**
+> **下一可用号 = F-373**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -214,3 +214,9 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 修:① `import-html-slide.py` 新增 `_harvest_head_css(html)`(复用 migrate 的 `collect()`:按渲染 DOM 把 `[data-page=N]`→slide-key、带上被引用的 `@keyframes`),`main()` 对每个 source 跑一次、按**原始 slide-key** 对齐到各 frag,`insert_into_json(...,head_css_list=)` 在 build slide 时把 head CSS **verbatim** 注入 `custom_css`;render 时 `_css_utils.scope_selectors()` 重写 `[data-page=N]`、`render-deck` 从 `_orig_layout` 回吐 `data-layout`,故 `.slide[data-page="07"][data-layout="content-2col"]` 这类规则在 raw 包装上仍生效(**无需手动 rescope / 剥 data-layout**)。由 `consolidate_css`(`--no-consolidate-css` 退出)统一门控。② `deck-cli paste` 加 **legacy-CSS-drop 告警**:pasted 页 `custom_css` 空时 peek 源 sibling index.html,若 `collect()` 在其 head 找到该页 scoped CSS = 确凿丢样式 → 打印 ⚠ + 精确 import 补救命令(不再静默)。
 
 安全:新测 `test_import_head_css.py`(8 项:harvest 按原始 key 返回 / 带 `[data-layout]` 限定规则 / 拉 keyframes / 跳 framework 块 / 注入 `custom_css` + `_orig_layout` 保留 / `--no-consolidate-css` 不注入 / `None` 不崩)。端到端:把复盘那两页从 everbright index.html 经新路径 import,`custom_css` 自动填好(6455 / 4452 bytes)、render PASS、与源逐像素一致(不再需要手写脚本)。import/lift/paste/css 全族零回归(92 测试)。立项 = 用户「复盘」→「修复,然后提交到 main」。DONE 2026-06-23 | `deck-json/import-html-slide.py` / `deck-json/deck-cli.py` / `deck-json/tests/test_import_head_css.py`
+
+### F-372 — R-VIS-DIM-TEXT 跳过梯度裁切文字(`background-clip:text` 假阳性)(2026-06-23)
+
+cinematic 渐变 accent 写法(`color:transparent` + `-webkit-background-clip:text` + 渐变 `background` → 字形由渐变上色、非 `color`)被 R-VIS-DIM-TEXT 读 `color`(computed→`rgba(0,0,0,0)`)算成 0% 有效亮度、误报「发灰看不清」,逼人给明明可见的文字加 `data-allow-dim-text` 压假警报(2026-06-22 ai-into-org 第 6 页实证)。修:R-VIS-DIM-TEXT 在读 color 前加 `background-clip:text` 守卫(查 prefixed + unprefixed,Chrome 两者别名),命中即跳过——字形由渐变上色,亮度启发式对它无意义。同步把该豁免登进 `validator-rules.md` 的 DIM-TEXT 条目。新回归测试 `test_vis_dim_text.py`(4 例:wired / 真·软白正文仍报 / 梯度文字静默 / opt-out 静默),**经反证锁死**:撤掉守卫后梯度用例 FAIL、精确复现 0% 误报。无 rule-set 变更(R-VIS-DIM-TEXT 早在 `business-rules.yaml` 注册,仅精修豁免)。
+
+顺带补 `references/raw-page-quickstart.md` 三处文档缺口:① 铁律#4 SVG `<text>` floor 补数字 **18px**(8+ 字 R-VIS-SVG-TEXT-FLOOR / 1–7 字 R-VIS-SHORT-LABEL-FLOOR);② EDIT 配方加「删绝对定位页整块 → 同一遍补回画布中心」(否则 R-VIS-CANVAS-CENTER 报偏移、白渲一轮);③ LIFT 配方跨语言拎页指向同日新增的 `lift-translate-page.py` 驱动。立项 = 用户「技能本身有优化空间么」→「1,2,3,4」全做。DONE 2026-06-23 | `assets/audits.js` / `references/validator-rules.md` / `references/raw-page-quickstart.md` / `deck-json/tests/test_vis_dim_text.py`
