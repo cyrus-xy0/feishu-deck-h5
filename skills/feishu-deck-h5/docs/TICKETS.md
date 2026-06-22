@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-365**
+> **下一可用号 = F-366**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -144,6 +144,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-362 | **deck-cli `inspect-text <key\|#N>`:吐有效文字 + 字号图,且跟进 iframe 进原型文件**:改 iframe demo 里的字此前要手翻 page→custom_css→iframe src→原型 CSS(「字大一点」真正的耗时)。新只读命令列页内字号 + **跟随 `<iframe src>` 读原型文件**列其字号 + 文字;`audits.js` UI1 提示指向本命令。是 F-357 `get-page`(只吐本页)的 iframe 延伸。新测 2(helper + 跟进原型)。 | `deck-json/deck-cli.py` / `assets/audits.js` / `deck-json/tests/test_skill_fixes_f360.py` |
 | F-363 | **deck-cli 备份自动剪枝**:每次写盘留一个 `.bak-pre-*`,实测一个 deck 目录攒到 ~100。写后只保留最近 15 个(`prune_backups`,best-effort;刚写的 bak 最新→必留可回滚)。新测 2(剪到 15 / 不足不动)。 | `deck-json/deck-cli.py` / `deck-json/tests/test_skill_fixes_f360.py` |
 | F-364 | **letterbox 黑边根治(slide 根背景 → frame hoist)**:full-bleed 布局(raw/iframe-embed/canvas)的 custom_css 若把 `background` 画在 **slide 根**(`.slide{...}`),渲染器 scope 后特异度 (0,4,0) 与 F-318 `.slide-frame>.slide` 归零规则打平、且内联 `<style>` 源序在框架表之后 → **F-318 被击穿**:slide 自画 bg(16:9 裁切)+ frame 画 content-bg(视口裁切)在 slide↔letterbox 边界错位 = 顶部黑条;运行时 seam-fix `markBleedPanels` 只扫后代(`querySelectorAll('*')`)不含根、亦漏。修 = 渲染期 `promote_root_bg_to_frame`(`_inject_custom_css` 仅对 full-bleed 布局调用):把 slide 根 `background*` **hoist 到 `.slide-frame`(present 单层铺满 letterbox+slide 无缝)+ 保留在 slide(scroll)**——正是 `feishu-deck.css ~L238` 钦定「bespoke full-bleed bg 设在 .slide-frame」写法的自动化;非 bg 声明留在 slide、后代/`.slide-frame`/reset-bg(none/transparent)不动、幂等(产物选择器带 `[data-slide-key=]` 故 scope 原样放行且不再命中根)。作者继续写直觉的 `.slide{background}` 即正确。立项 = 齐鲁 #8/#9「8 和 9 上面还是有黑边」复盘。新测 12(`test_css_utils.py`)+ golden/render/scope 全族零回归;合成 raw 页 16:10 顶边量化统一无缝。DONE 2026-06-22 | `deck-json/_css_utils.py` / `deck-json/render-deck.py` / `deck-json/tests/test_css_utils.py` |
+| F-365 | **render-deck `--shoot`:audit + 截图并发**:`--shoot` 单页核验过去**顺序**冷启两次 Chromium(`validate --visual` 审计 → `shoot-page` 截图),两者互不依赖(都只读渲染后 HTML,审计不写、截图只写 PNG)→ 改成两个 `Popen` 同时起、再各自 `communicate` 收集,墙钟从 audit+shot 降到 ≈max(audit,shot)。实测一次 scoped `--shoot` ~20s→~8s,砍掉每次 edit→看图循环的一半。`timeout=180`+`kill` 兜底防挂。立项=用户连续多轮「太慢」复盘(承 F-360/F-361)。 | `deck-json/render-deck.py` |
 
 ## 已裁决(WONTFIX / DONE)
 
