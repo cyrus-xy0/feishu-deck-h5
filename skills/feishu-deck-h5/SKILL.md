@@ -148,13 +148,21 @@ supports spawning subagents:
 2. If tool discovery is available, search for `spawn subagent multi-agent`.
 3. Treat the environment as multi-agent capable only when a concrete spawn tool
    is callable. Do not assume support from prose, model name, or prior runs.
-4. Announce the result once per task: either `multi-agent: available` or
-   `multi-agent: unavailable, running inline`.
+4. Announce the result once per SESSION (not per task) and cache it: either
+   `multi-agent: available` or `multi-agent: unavailable, running inline`. Reuse
+   that result for later tasks in the same session; only re-probe if a spawn call
+   later fails. Do not re-run this 4-step probe on every request.
 
-When multi-agent support is available, each routed subskill step defaults to a
-fresh worker subagent. The controller remains responsible for the router lock,
-scope boundaries, sequencing, conflict avoidance, final integration, and user
-communication. The worker owns the actual subskill execution.
+When multi-agent support is available, a routed subskill step MAY run in a fresh
+worker subagent — **except when the «Run inline when» rule below fires, which
+always wins, regardless of mode.** Spawning earns its coordination cost only for
+genuinely parallel work: **≥3 independently-authored pages, or independent
+parse/validate/review bundles.** A locked Scope of {one slide, ≤2 named slides,
+one run folder}, OR a chain immediately blocked on the result, runs INLINE — the
+per-mode "Spawn an X worker" lines in the Canonical Workflow do NOT override this.
+The controller remains responsible for the router lock, scope boundaries,
+sequencing, conflict avoidance, final integration, and user communication. The
+worker owns the actual subskill execution.
 
 For every spawned worker:
 
@@ -201,7 +209,8 @@ time, in user order. Workers hand back fragments, never touch `deck.json` /
 block, palette, ladder) come from the controller's one-time sibling extraction,
 passed in the worker prompt — do not make each worker re-archaeologize the deck.
 
-Run a step inline instead of spawning when any of these are true:
+**Run inline when** any of these are true — this overrides the spawn default and
+every per-mode "Spawn an X worker" line below:
 
 - The environment lacks a callable spawn mechanism.
 - The user asked to avoid delegation or wants a single-threaded run.
@@ -266,7 +275,9 @@ For target HTML, bootstrap the existing state before editing:
    run the appropriate gate (scoped `render --iter` for an intermediate edit; the
    whole-deck validator only at a delivery checkpoint — Hard Gate 4).
 
-For a new deck:
+For a new deck (each "Spawn an X worker" below means *spawn only when the work is
+multi-page AND the steps are independent — otherwise run inline*, per «Run inline
+when» in §Multi-Agent Dispatch):
 
 1. **Parser** if the user uploaded files or raw materials. Spawn a Parser worker
    when multi-agent dispatch is available. A `.pptx` import goes Parser →
@@ -301,7 +312,10 @@ For a new deck:
    for Cloudflare viewer sync when requested. Spawn an Importer worker when
    multi-agent dispatch is available.
 
-For an existing deck:
+For an existing deck (same rule: each "Spawn an X worker" below means *spawn only
+when the work is multi-page AND the steps are independent — otherwise run inline*,
+per «Run inline when» in §Multi-Agent Dispatch; a single-page edit/translate/lift
+is INLINE):
 
 1. Use **Validator** for check-only review. Spawn a Validator worker when
    multi-agent dispatch is available.

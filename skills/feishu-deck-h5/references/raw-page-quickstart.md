@@ -175,6 +175,11 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
   只有 deck 明显自定义了**非框架默认的主题色**时,才读 1 张同类页取色。
 - **recon 一把并行抓完**:上面常量已钉死,无需 grep CSS / 派 Explore / 逐个 `--help`。
 - **审稿只看整图**(1920×1080 那张),非歧义不逐块放大裁切。
+- **render-review 单轮封顶**:`--scope N --shoot` 后**读 `last-render.log` 第一行就决策**,
+  别为「确保」投机重渲。`✔ PASS`(或只剩 F-302 baseline 既存项)→瞄一眼整图即完;
+  `❌ BLOCKING` 几何(R-VIS-CARD-OVERFLOW/R-OVERLAP/R-OVERFLOW/band-collide——已替你量好、
+  点名元素)→只修那个元素,**只准 1 次** fix-render,还红就交人,别盲目迭代。
+  deck-wide rollup(R20 字阶/配色/圆角漂移)是别页既存噪声,绝不重渲去「诊断」它。
 - **收尾小改并进主步**:screen_label 之类在 insert/set-page 时一起设,别单开一轮 render。
 
 ## 改单值 / 换个色 / 调 embed 尺寸（EDIT 既有页 — 最高频，比插页更轻）

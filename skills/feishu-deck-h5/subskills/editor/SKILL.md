@@ -167,15 +167,23 @@ Designer + Renderer instead).
     lift+translate):** `deck-cli.py paste --from SRC --key K <pos>` → `locate-slide.py`
     for the landed position → swap/translate the copy in ONE `apply-text-pairs.py <deck>
     pairs.json` pass (`--dry-run` first: every pair must hit exactly once) → ONE
-    `render-deck.py --scope N --shoot`. **Render economy — budget one shoot, not four:**
-    never spend a chromium render to learn what deck.json already states — is the canvas
-    dark (read a sibling slide's `decor`/`accent`, or the deck theme; a globally-dark deck
-    carries the dark bg to a pasted raw page with no decor/accent needed), where the page
-    landed (`locate-slide.py`), or whether it needs `--shake` (`--preview`). The error
-    oracle is `last-render.log` (`errors: N` / PASS), NOT the `--shoot` advisory tail:
-    deck-wide rollups (R20 font-tier, palette / radius drift) are pre-existing deck noise
-    on other lifted pages, not your page — recognize them, never re-render to "diagnose"
-    them.
+    `render-deck.py --scope N --shoot`. **Render economy — ONE shoot, then a bounded
+    decision (not an open review loop):** never spend a chromium render to learn what
+    deck.json already states — is the canvas dark (read a sibling slide's `decor`/`accent`,
+    or the deck theme; a globally-dark deck carries the dark bg to a pasted raw page with
+    no decor/accent needed), where the page landed (`locate-slide.py`), or whether it needs
+    `--shake` (`--preview`). After the single `--scope N --shoot`, read `last-render.log`'s
+    first digest line and DECIDE — do not re-render speculatively "to be sure":
+    - `✔ PASS` (or only pre-existing baseline findings, demoted per F-302) → glance at the
+      PNG once for focus/aesthetics, then done.
+    - `❌ BLOCKING` geometry (R-VIS-CARD-OVERFLOW / R-OVERLAP / R-OVERFLOW / band-collide —
+      already measured for you, element named) → fix the named element, then exactly ONE
+      fix-render. If still red, surface to the user; do not keep iterating blind.
+
+    The error oracle is `last-render.log` (`errors: N` / PASS), NOT the `--shoot` advisory
+    tail: deck-wide rollups (R20 font-tier, palette / radius drift) are pre-existing deck
+    noise on other lifted pages, not your page — recognize them, never re-render to
+    "diagnose" them.
   - **UI mockups are sandboxed — mark the root, don't sprinkle flags:** when a page
     embeds a simulated product UI (phone / chat / dashboard mock), put `data-mockup`
     (or `role="img"`) on the mock ROOT once. F-358 exempts everything inside from the
