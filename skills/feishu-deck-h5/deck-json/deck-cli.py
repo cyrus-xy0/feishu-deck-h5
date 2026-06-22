@@ -1140,10 +1140,18 @@ def _canvas_element_srcs(slide: dict) -> list[str]:
 
 def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     """Copy a pasted slide's referenced LOCAL assets from the source deck dir to
-    the destination deck dir, preserving deck-relative paths (`input/<file>`,
-    `prototypes/<slug>/`). Skill-relative (`../../../skills/...`) and shared-pool
-    refs resolve identically in both decks, so they need no copy. Returns a
-    report dict {input, prototypes, missing}.
+    the destination deck dir, preserving deck-relative paths: `input/<file>`,
+    `prototypes/<slug>/`, `assets/shared/<pool>/<file>`, and bare/relative
+    deck-local media. Shared-pool refs ARE copied — from the source deck's local
+    copy, or (when the source never localized it: linked-mode / hand-assembled
+    source) from the framework shared pool `<skill>/assets/shared/`. Only
+    skill-relative (`../../../skills/...`), framework `assets/lark-*`, http(s) and
+    `data:` refs need no copy (they resolve identically or are external). Returns
+    a report dict {input, prototypes, shared, local, missing}.
+
+    NOTE: this scans the slide's OWN fields (custom_css + data). A ref stranded
+    in the rendered index.html <head> (drifted deck — empty custom_css) is NOT
+    seen here; repair the source first (see lift-to-new-deck's drift guard).
 
     CANVAS slides store image paths in `data.elements[].src` (NOT in data.html —
     there is none). The `input/` text scan below already catches the common
@@ -1200,8 +1208,18 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
             copied["prototypes"].append(seg)
         else:
             copied["missing"].append(f"prototypes/{seg}")
+    framework_shared = HERE.parent / "assets" / "shared"
     for ref in sorted(set(re.findall(r"assets/shared/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "assets" / "shared" / ref
+        # Framework shared-pool fallback (postmortem 2026-06-22): when the SOURCE
+        # deck never localized this ref (linked-mode / hand-assembled source), pull
+        # the canonical copy from the framework pool `<skill>/assets/shared/` instead
+        # of flagging a real asset `missing` → broken image (the target rarely pre-
+        # populates the pool). The dst containment guard below still bounds the write.
+        if not s.is_file():
+            fb = framework_shared / ref
+            if fb.is_file():
+                s = fb
         # mutation-2: containment guard — skip + flag any ref that escapes the
         # destination assets/shared/ dir via ../.
         d = contained_dest(dst_dir / "assets" / "shared", ref)
