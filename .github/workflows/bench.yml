@@ -1,0 +1,77 @@
+name: bench
+
+# PERF regression canary (PERF-0 / AUDIT-2026-06-17). Wires the existing
+# assets/bench-render.py harness into CI so a silent perf regression — e.g.
+# re-adding a Chromium launch that F-370 removed, or breaking the PERF-A
+# font-probe cache — is caught over time instead of only on a manual bench.
+#
+# WHY SCHEDULED, NOT PER-PR: the bench times wall-clock on a shared GitHub
+# runner. Per-PR wall-clock gating flakes, and a flaky gate trains people to
+# ignore CI. So this runs weekly + on-demand, uploads the numbers as an
+# artifact (trend history), and only HARD-FAILS on a gross (>40%) regression
+# against a CI-captured baseline.
+#
+# SEEDING THE GATE (one-time, by a human): the gate is dormant until a baseline
+# exists, because a darwin/local baseline does not transfer to an ubuntu runner.
+#   1. Run this workflow (Actions → bench → Run workflow).
+#   2. Download the `bench-result` artifact (bench-result.json).
+#   3. Commit it as skills/feishu-deck-h5/assets/bench-baseline.ci.json.
+# From then on every run compares against it and fails the job on >40%
+# regression. Refresh the baseline after an intentional perf change. Tune the
+# threshold / add larger corpora (drop more deck.json under the bench step) once
+# a trend is visible.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'      # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  perf-bench:
+    name: perf regression canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: skills/feishu-deck-h5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps + Chromium
+        # Unlike validate.yml (deliberately browser-less), the bench MUST have a
+        # real Chromium — the whole point is to time the cold-start tax. Without
+        # it, render_advisory would time the 0-browser fast path (~0.5s) and the
+        # numbers would be meaningless.
+        run: |
+          pip install playwright pyyaml jsonschema beautifulsoup4
+          python3 -m playwright install --with-deps chromium
+
+      - name: Bench the corpus (gate dormant until baseline committed)
+        # golden-gate (3p) is the fixed-cost canary: it captures the dominant
+        # per-launch cold-start + launch-count + font-probe-cache cost (the AUDIT
+        # finding) regardless of page count. --compare is a no-op + exit 0 until
+        # assets/bench-baseline.ci.json exists, so the first run just seeds it.
+        run: |
+          python3 assets/bench-render.py \
+            deck-json/tests/fixtures/golden-gate/deck.json \
+            --runs 5 \
+            --out bench-result.json \
+            --compare assets/bench-baseline.ci.json \
+            --fail-on-regress 40 \
+            --noise-floor 50
+
+      - name: Upload bench result (trend history)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-result
+          path: skills/feishu-deck-h5/bench-result.json
+          if-no-files-found: warn

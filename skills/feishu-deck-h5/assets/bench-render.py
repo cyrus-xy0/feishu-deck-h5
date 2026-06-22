@@ -22,9 +22,17 @@ dir and times read-only validators. stdlib-only.
 Usage:
   python3 assets/bench-render.py <deck.json> [--runs N] [--out bench.json]
                                  [--compare baseline.json] [--keep]
+                                 [--fail-on-regress PCT] [--noise-floor MS]
 
   --compare prints a delta table (this run vs a saved baseline JSON) so you can
   show, e.g., "validate_visual_json 4217ms -> 3760ms after PERF-A".
+
+  --fail-on-regress PCT turns --compare into a GATE: exit 3 if any comparable
+  segment's median is >PCT% slower than the baseline (segments below
+  --noise-floor ms, default 50, are ignored as timing noise). Compare only
+  same-environment numbers — a darwin baseline does not transfer to a CI ubuntu
+  runner, so the CI gate (.github/workflows/bench.yml) compares against a
+  baseline captured ON CI. See PERF-OPT-PLAN-2026-06-16.md / AUDIT-2026-06-17.
 """
 from __future__ import annotations
 
@@ -98,6 +106,30 @@ def _stats(samples):
     }
 
 
+def _regressions(segments, baseline_segments, pct, noise_floor):
+    """Pure: the segments that regressed by more than `pct`% vs the baseline.
+
+    Ignores any segment that (a) lacks a median in EITHER run or (b) has a
+    baseline median below `noise_floor` ms (sub-noise-floor segments like
+    deck_cli_set are timing noise and would flap a CI gate). Side-effect-free so
+    --fail-on-regress can be unit-tested without launching a browser. Returns a
+    list of {name, base_ms, now_ms, delta_pct}."""
+    out = []
+    for name, s in (segments or {}).items():
+        b = (baseline_segments or {}).get(name)
+        if not s or not b:
+            continue
+        base = b.get("median_ms")
+        now = s.get("median_ms")
+        if base is None or now is None or base < noise_floor:
+            continue
+        delta_pct = (now - base) / base * 100.0 if base else 0.0
+        if delta_pct > pct:
+            out.append({"name": name, "base_ms": base, "now_ms": now,
+                        "delta_pct": round(delta_pct, 1)})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("deck", type=Path, help="deck.json to benchmark")
@@ -105,6 +137,12 @@ def main():
     ap.add_argument("--out", type=Path, help="write results JSON here")
     ap.add_argument("--compare", type=Path, help="baseline JSON to diff against")
     ap.add_argument("--keep", action="store_true", help="keep the temp render dir")
+    ap.add_argument("--fail-on-regress", type=float, metavar="PCT",
+                    help="exit 3 if any comparable segment's median is >PCT%% "
+                         "slower than the --compare baseline (needs --compare)")
+    ap.add_argument("--noise-floor", type=float, default=50.0, metavar="MS",
+                    help="ignore segments whose baseline median is below this "
+                         "many ms when checking --fail-on-regress (default 50)")
     args = ap.parse_args()
 
     deck = args.deck.resolve()
@@ -216,7 +254,15 @@ def main():
                             encoding="utf-8")
         print(f"\n  → wrote {args.out}")
 
-    if args.compare and args.compare.is_file():
+    exit_code = 0
+    if args.compare and not args.compare.is_file():
+        # A missing baseline is NOT a failure — the first CI run seeds it from
+        # this run's --out. Only say so loudly when a gate was requested.
+        print(f"\n  ! --compare baseline not found: {args.compare}"
+              + ("  (no regression gate this run — seed it from --out)"
+                 if args.fail_on_regress is not None else ""),
+              file=sys.stderr)
+    elif args.compare:
         base = json.loads(args.compare.read_text(encoding="utf-8"))
         bseg = base.get("segments", {})
         print(f"\n  Δ vs {args.compare.name} (baseline → now):")
@@ -229,12 +275,28 @@ def main():
             pct = (d / b * 100) if b else 0.0
             arrow = "▼" if d < 0 else ("▲" if d > 0 else "=")
             print(f"    {name:<26} {b:>7.0f} → {now:>7.0f}  {arrow}{abs(d):>6.0f}ms ({pct:+.0f}%)")
+        if args.fail_on_regress is not None:
+            regs = _regressions(segments, bseg, args.fail_on_regress, args.noise_floor)
+            if regs:
+                exit_code = 3
+                print(f"\n  ✗ REGRESSION (> {args.fail_on_regress:.0f}% slower than "
+                      f"baseline, ignoring <{args.noise_floor:.0f}ms segments):",
+                      file=sys.stderr)
+                for r in regs:
+                    print(f"      {r['name']:<26} {r['base_ms']:>7.0f} → "
+                          f"{r['now_ms']:>7.0f}ms (+{r['delta_pct']:.0f}%)",
+                          file=sys.stderr)
+            else:
+                print(f"\n  ✔ no segment regressed > {args.fail_on_regress:.0f}% vs baseline.")
+    elif args.fail_on_regress is not None:
+        print("\n  ! --fail-on-regress needs --compare <baseline.json>; no gate applied.",
+              file=sys.stderr)
 
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)
     else:
         print(f"\n  (kept {work})")
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

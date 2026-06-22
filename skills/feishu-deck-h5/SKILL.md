@@ -116,6 +116,19 @@ These gates apply before dispatching to any subskill:
   `check-only` over all pages / `render --final`) on an intermediate one-page
   edit — that is the #1 cause of "改一页却渲染 / 校验 / 截图很多页". Reserve the
   whole-deck pass for a delivery checkpoint, a structural change, or `--final`.
+- **Fastest inner loop for a raw-page visual nudge = `preview-slide.py`, not a
+  render round-trip.** For pure layout / text / wrapping / color iteration on ONE
+  slide, `deck-json/preview-slide.py <deck.json> --key <slide_key>` drops that
+  slide into the framework shell and returns a 1:1 screenshot PLUS the per-slide
+  GATE findings (geometry / typescale / overflow / drop-shadow / focal) in the
+  SAME ~2s pass — no ~12s `render-deck.py` round-trip just to discover a
+  layout-rule violation. It is an **iteration accelerator, not a delivery gate**:
+  it is single-slide + static, so it deliberately suppresses present-mode /
+  whole-deck / cross-slide rules (R29-32 / R36 / R48 / L1 / R-CSSVAR / R-DECK-*),
+  and JS-motion / iframe-embed / fitText do not run. So iterate with
+  `preview-slide.py --key`, then commit + run the REAL gate once at the end with
+  `render-deck.py <deck.json> . --scope <key> --final` (deck-wide drift,
+  present-mode chrome, making-of snapshot). See its `--help` for the caveats.
 
 ## Controller Communication Contract
 
