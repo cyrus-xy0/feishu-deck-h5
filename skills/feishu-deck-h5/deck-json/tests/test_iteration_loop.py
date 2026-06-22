@@ -339,6 +339,52 @@ def test_gate_fail_render_persists_sidecar_and_next_edit_auto_scopes(tmp_path):
     assert "AUTO-SCOPE: off" not in r2.stderr, "must not fall back to a full render"
 
 
+def test_no_change_rerender_skips_visual_reaudit(tmp_path):
+    # F-369 · a re-render byte-identical to the last CLEAN render skips the
+    # expensive 6b/6c browser passes (the cheap static gate still runs). Safe
+    # because F-368 poisons any erroring page → an empty diff PROVES clean.
+    import pytest
+    if not _playwright_ok():
+        pytest.skip("Playwright/Chromium unavailable — visual gate cannot run")
+
+    deck = tmp_path / "deck.json"
+    boot = subprocess.run([sys.executable, str(CLI), str(deck), "new-deck",
+                           "--title", "F369", "--author", "A", "--date", "2026-06-23"],
+                          capture_output=True, text=True)
+    assert boot.returncode == 0, boot.stdout + boot.stderr
+    d = json.loads(deck.read_text(encoding="utf-8"))
+    d["slides"].append(_raw_page("cleanx", "97 Clean", "Alpha"))
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    out = tmp_path / "runs" / "20260101-f369" / "output"
+    out.mkdir(parents=True)
+
+    r1 = _render(deck, out)                       # first render → full audit
+    assert r1.returncode == 0, r1.stdout + r1.stderr
+    assert "visual=ran" in r1.stderr
+
+    r2 = _render(deck, out)                       # no change → skip 6b/6c
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert "skipping visual/geometry re-audit" in r2.stderr
+    assert "visual=skipped(unchanged" in r2.stderr
+
+    r3 = _render(deck, out, "--final")            # --final forces the full pass
+    assert "visual=ran" in r3.stderr and "skipped(unchanged" not in r3.stderr
+
+    # introduce a blocking error → the next render must NOT skip (F-368 poisons
+    # the offender → dirty → re-audited → caught): the skip can't hide a defect.
+    d = json.loads(deck.read_text(encoding="utf-8"))
+    d["slides"].append(_floor_page("badpg", "98 Floor"))
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r4 = _render(deck, out)
+    assert r4.returncode == 4, "the new floor page must be audited + blocked\n" + r4.stderr
+    assert "skipping visual/geometry re-audit" not in r4.stderr
+
+    # a no-change re-render while the error is OPEN still must not skip.
+    r5 = _render(deck, out)
+    assert r5.returncode == 4, "open error must keep re-auditing\n" + r5.stderr
+    assert "skipping visual/geometry re-audit" not in r5.stderr
+
+
 # ------------------------------------------------------------ W8 · asset ----
 def test_add_asset_places_and_compresses(tmp_path):
     try:

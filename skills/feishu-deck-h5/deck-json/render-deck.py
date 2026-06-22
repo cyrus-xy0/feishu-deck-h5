@@ -2847,6 +2847,12 @@ def main(argv=None) -> int:
     visual_full = True
     snapshot_pages = None
     engine_dirty = False
+    # F-369: set when a re-render's content is byte-identical to the last CLEAN
+    # render (auto-scope diff empty + no framework/engine change). Because F-368
+    # poisons any erroring page, an empty diff PROVES the deck is clean, so the
+    # expensive 6b/6c browser re-audit can be skipped (the cheap static gate still
+    # runs). --final / --visual force the full pass and never set this.
+    _skip_clean_reaudit = False
     if args.scope:
         for tok in str(args.scope).split(","):
             tok = tok.strip()
@@ -3036,22 +3042,37 @@ def main(argv=None) -> int:
                           f"(F-302 baseline demotion; pass --final for the "
                           f"whole-deck pass)", file=sys.stderr)
             else:
-                # too many changed pages, OR nothing content-changed (a pure
-                # framework / rule-engine bust, or a no-op). Full gate; the
-                # snapshot still reshoots only content-changed pages (often none →
-                # skipped), so a CSS tweak never reshoots the whole making-of.
-                visual_full = True
-                if _scope:
-                    print(f"AUTO-SCOPE: off ({len(_scope)} changed pages > "
-                          f"{AUTO_SCOPE_MAX_PAGES}) — full render", file=sys.stderr)
-                elif _iter_auto:
-                    print(f"render-deck --iter: {_dec['reason']}; making-of "
-                          f"snapshot → {snapshot_pages or 'skipped'}.")
+                # NOT engaged: too many changed pages, a framework/engine-only
+                # change, or a genuine no-op.
+                _noop = (not _scope and not _dec["visual_full"]
+                         and not engine_dirty)
+                if _noop and not args.final and not args.visual:
+                    # F-369: genuine no-op. An empty content_dirty PROVES the last
+                    # render was visual/geom CLEAN — F-368 poisons any erroring
+                    # page, so it would show dirty here. The deck is byte-identical
+                    # to a passing render, so skip the expensive 6b/6c browser
+                    # re-audit; the cheap static gate below still runs and owns the
+                    # exit code. --final / --visual force the full pass.
+                    _skip_clean_reaudit = True
+                    _msg = (f"no change since last clean render ({_dec['reason']})"
+                            f" — skipping visual/geometry re-audit (--final to "
+                            f"force the whole-deck pass)")
                 else:
-                    print(f"AUTO-SCOPE: no content changed ({_dec['reason']}) — "
-                          f"full visual re-audit; making-of snapshot "
-                          f"{'scoped' if snapshot_pages else 'skipped'}",
-                          file=sys.stderr)
+                    # too many pages, OR a framework/engine change with no content
+                    # edit, OR --final/--visual forcing it → full re-audit. The
+                    # snapshot still reshoots only content-changed pages (often none
+                    # → skipped), so a CSS tweak never reshoots the whole making-of.
+                    visual_full = True
+                    if _scope:
+                        _msg = (f"off ({len(_scope)} changed pages > "
+                                f"{AUTO_SCOPE_MAX_PAGES}) — full render")
+                    else:
+                        _msg = (f"{_dec['reason']} — full re-audit; making-of "
+                                f"snapshot {'scoped' if snapshot_pages else 'skipped'}")
+                if _iter_auto:
+                    print(f"render-deck --iter: {_msg}")
+                else:
+                    print(f"AUTO-SCOPE: {_msg}", file=sys.stderr)
 
     # 2.45 Deck identity — stamp a per-deck id (data-deck-id on <div class="deck">)
     # so the in-browser edit mode can refuse to overwrite a DIFFERENT deck's file.
@@ -3450,6 +3471,8 @@ def main(argv=None) -> int:
         _gc_visual = "ran" if args.visual else "skipped"
         _gc_geometry = "ran" if args.visual else "skipped"
         _gc_distribution = "skipped"
+        if _skip_clean_reaudit:   # F-369: honest coverage for a provably-clean no-op
+            _gc_visual = _gc_geometry = _gc_distribution = "skipped(unchanged·F-369)"
         # F-310: an auto-scoped render records scope=auto:N,… (vs the bare page
         # list of an explicit --scope) so coverage forensics can tell the two
         # apart without re-parsing the AUTO-SCOPE announcement line.
@@ -3594,7 +3617,8 @@ def main(argv=None) -> int:
             except Exception:
                 return None      # no/invalid baseline → no demotion
 
-        if ((not args.visual or scope_pages) and _is_runs and not args.quick):
+        if ((not args.visual or scope_pages) and _is_runs and not args.quick
+                and not _skip_clean_reaudit):   # F-369: provably-clean no-op skips it
             # F-293 · for a single-page `--scope` render, feed the scope INTO the
             # engine (--scope-frames) so audits.js only evaluates the changed
             # frame(s) instead of all N slides (华泰: 50 pages ~7s → just the
@@ -3834,7 +3858,8 @@ def main(argv=None) -> int:
         # whole-deck distribution audit — geometry may have shifted on any page;
         # a content-only scoped edit still skips it (expensive whole-deck pass).
         if (CHECK_DIST.exists() and _is_runs
-                and (visual_full or not scope_pages) and not args.quick):
+                and (visual_full or not scope_pages) and not args.quick
+                and not _skip_clean_reaudit):   # F-369: skip on a provably-clean no-op
             dist = subprocess.run(
                 [sys.executable, str(CHECK_DIST), str(out_html), "--json"],
                 capture_output=True, text=True,

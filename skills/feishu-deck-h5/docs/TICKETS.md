@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-369**
+> **下一可用号 = F-370**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-368 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-369 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -183,3 +183,13 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 - 净效果:带少量 blocking 错的 deck,编辑别的页现在 auto-scope 到 {改动页 ∪ 仍错页},不再全量。实测 near-clean deck:render2 从 full → `scope=auto:2,4`(visual scoped + distribution skipped);43 页全坏的 stress deck 仍正确全量(>4 dirty 不 scope)。
 
 测试:`test_auto_scope.py::SidecarPoisonTest`(5,纯 helper:哨兵存储 / 重审 / 自清 / 改+错并存)+ `test_iteration_loop.py::test_gate_fail_render_persists_sidecar_and_next_edit_auto_scopes`(集成,Playwright-gated:rc=4 仍落 sidecar + 下次 auto-scope)。auto-scope / iteration / atomic / baseline 全族零回归。立项 = 用户「还是慢了很多,帮我做性能优化建议」→「优化吧」。**注:这是 F-290(6b/6c Playwright 会话合并,DEFERRED)的正交前置** —— 本工单不动浏览器会话数,只让 F-310 对 WIP deck 真正生效;`--final` 仍是全量交付闸。DONE 2026-06-23 | `deck-json/render-deck.py` / `deck-json/tests/test_auto_scope.py` / `deck-json/tests/test_iteration_loop.py`
+
+### F-369 — 无改动重渲短路:跳过 6b/6c 浏览器复审(2026-06-23)
+
+承 F-368。即便有了增量,一次**内容零改动的重渲**(渲了看一眼又渲、脚本防御性重渲、改了不进内容哈希的东西)仍走全量 ~5.4s:`_auto_scope_decision` 的 `content_dirty==[]` 落在「no content changed → full visual re-audit」分支。但这次**有 F-368 兜底**:任何带 blocking 错的页都被毒化 → 必进 `content_dirty`,所以 **`content_dirty` 为空 = 上一次渲染 visual/geom 全干净 + 此后零改动 = deck 与一次通过的渲染逐字节相同**。于是可安全跳过昂贵的 6b 视觉 + 6c 分布两个浏览器 pass。
+
+修(`render-deck.py`):auto-scope 决策的「未 engage」分支拆出真·no-op(`not _scope and not visual_full and not engine_dirty`),当且仅当 `not --final and not --visual` 时置 `_skip_clean_reaudit=True`;6b/6c 两个 block 各加 `and not _skip_clean_reaudit` 跳过;便宜的静态闸照跑、仍掌管 exit code;`GATE-COVERAGE` 诚实记 `skipped(unchanged·F-369)`。`--final`/`--visual` 永远强制全量。
+
+安全(实测四关):① 跳过后编辑某页 → 正常 re-audit(scope 到该页,不跳)② 引入 body-floor 错 → 照样 rc=4 拦截(内容变=不跳)③ 错未修时无改动重渲 → **仍不跳**(错页被 F-368 毒化→dirty→必重审 rc=4),证明短路绝不藏错 ④ `--final` 强制全量。实测 clean deck:render2 **2.77s→0.41s(6.7×)**;67 页 deck 同理 ~5.4s→~0.4s。
+
+测试:`test_iteration_loop.py::test_no_change_rerender_skips_visual_reaudit`(集成,Playwright-gated:no-op 跳过 + `--final` 强制 + 编辑重审 + 开放错不跳)。auto-scope/iteration/atomic/baseline/scope/golden/hidden 全族零回归(97 测试)。立项 = 用户「优化吧」三杠杆之一(无改动重渲短路)。DONE 2026-06-23 | `deck-json/render-deck.py` / `deck-json/tests/test_iteration_loop.py`
