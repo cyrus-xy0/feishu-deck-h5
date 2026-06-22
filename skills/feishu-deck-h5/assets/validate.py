@@ -116,6 +116,25 @@ def _engine():
     return _ENGINE
 
 
+_CHECK_DIST_PATH = Path(__file__).resolve().parent / 'check-distribution.py'
+_DISTRIBUTION = None  # lazily-loaded module handle (check-distribution.py has a hyphen)
+
+
+def _distribution():
+    """Lazily import check-distribution.py (hyphenated → importlib). Cached.
+    Exposes MEASURE_JS + signals_for so --with-distribution can fold the
+    layout-distribution geometry audit into the visual engine's SINGLE browser
+    pass (F-290) instead of paying a second Chromium launch + full reload."""
+    global _DISTRIBUTION
+    if _DISTRIBUTION is None:
+        spec = _importlib_util.spec_from_file_location(
+            'check_distribution', _CHECK_DIST_PATH)
+        mod = _importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _DISTRIBUTION = mod
+    return _DISTRIBUTION
+
+
 # Map the engine's severity vocabulary → the Issues buckets. The engine emits
 # 'error' / 'warn' / 'warn_soft' (1:1 with iss.err / iss.warn / iss.warn_soft).
 _SEV_TO_BUCKET = {
@@ -138,7 +157,7 @@ def engine_findings_to_issues(findings, iss):
 
 
 def run_unified_audits(path, iss, *, dom_rules=True, scope=None,
-                       want_screenshots=False):
+                       want_screenshots=False, with_distribution=False):
     """Run the unified engine against the rendered deck and fold its findings
     into `iss`. This REPLACES the old run_static_audits + run_visual_audits.
 
@@ -158,9 +177,18 @@ def run_unified_audits(path, iss, *, dom_rules=True, scope=None,
     than blocking a good deck under --strict. A real rule VIOLATION found by the
     engine still errs/warns normally."""
     eng = _engine()
+    # F-290: fold the layout-distribution geometry audit into THIS single browser
+    # pass — pass its MEASURE_JS as an extra eval the engine runs on the same
+    # settled present-mode page (saves a second Chromium launch + full reload).
+    _extra = None
+    if with_distribution and dom_rules:
+        try:
+            _extra = {'distribution': _distribution().MEASURE_JS}
+        except Exception:
+            _extra = None    # distribution module unavailable → just skip the fold
     try:
         result = eng.run_unified_engine(
-            path, scope, dom_rules=dom_rules)
+            path, scope, dom_rules=dom_rules, extra_evals=_extra)
     except eng.EngineUnavailable as e:
         if not dom_rules:
             # byte-only path should never raise for env reasons (no browser),
@@ -186,6 +214,17 @@ def run_unified_audits(path, iss, *, dom_rules=True, scope=None,
     engine_findings_to_issues(result.get('findings', []), iss)
     if want_screenshots and dom_rules:
         _archive_screenshots(path)
+    # F-290: enrich the raw distribution measurement with signals_for — the SAME
+    # shape the standalone check-distribution.py --json emits — and hand it back so
+    # the caller can surface it under a top-level "distribution" key.
+    _dist_raw = (result.get('extra') or {}).get('distribution')
+    if _dist_raw:
+        try:
+            cd = _distribution()
+            return [{**s, 'signals': cd.signals_for(s)} for s in _dist_raw]
+        except Exception:
+            return None
+    return None
 
 
 def _archive_screenshots(html_path):
@@ -661,6 +700,12 @@ def main():
                         'edit (the "改一页却校验很多页" trap). This is the delivery '
                         '/ render-pipeline path; for a confined edit use --slide '
                         'or --scope-frames instead.')
+    p.add_argument('--with-distribution', action='store_true',
+                   help='F-290 · ALSO run the layout-distribution geometry audit '
+                        '(check-distribution) in the SAME visual browser pass and '
+                        'include it under a top-level "distribution" key in --json '
+                        'output — saves a second Chromium launch + full reload. '
+                        'Only meaningful with --visual --json.')
     args = p.parse_args()
     # F-293 · parse --scope-frames into the engine scope list (1-based ordinals).
     # Distinct from --slide (post-run report filter); this is the REAL scope fed
@@ -750,10 +795,12 @@ def main():
     #     a documented PARTIAL check: the geometry / pure DOM-text rules (R-VIS-*,
     #     R06/R20/R10/R-OVERFLOW and the audits.js R-DOM nesting invariants) do
     #     NOT run. Use where Chromium is unavailable.
+    _dist_data = None
     try:
-        run_unified_audits(path, iss, dom_rules=args.visual,
+        _dist_data = run_unified_audits(path, iss, dom_rules=args.visual,
                            scope=scope_frames,
-                           want_screenshots=args.screenshots)
+                           want_screenshots=args.screenshots,
+                           with_distribution=args.with_distribution)
     except Exception as e:
         # The engine adapter should self-degrade; a leak here must still never
         # crash the whole validate — emit a soft advisory and continue so any
@@ -814,6 +861,10 @@ def main():
             ),
             'pass': not iss.errors,
         }
+        if _dist_data is not None:
+            # F-290 · same enriched shape as check-distribution.py --json, folded
+            # into THIS pass so render-deck needn't spawn a second Chromium.
+            payload['distribution'] = _dist_data
         import json as _json
         print(_json.dumps(payload, ensure_ascii=False, indent=2))
         return 0 if not iss.errors else 1

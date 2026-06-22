@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-370**
+> **下一可用号 = F-371**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-369 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-370 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -154,7 +154,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | **F-36 / R-01** HTML→PPTX 导出 | 把 HTML deck 导出成 `.pptx` 文件 | **WONTFIX** · 2026-06-10 用户明确:北极星 = HTML deck,**不再需要 PPT,pptx 导出以后也不立项**;别再提此方向。 |
 | **F-37 / R-02** 托管创作面 / 硬挂载门 | 非工程师托管创作入口 | **WONTFIX** · 同上,「PPT 替代」产品方向整体关闭。 |
 | **F-292** F-256 视觉闸门调优 | 死代码降 advisory + 存量/imported 豁免 | DONE · commit `8a54484` |
-| **F-290** render 提速(6b/6c Playwright 会话合并) | 真提速需重构 F-256/292/272 闸门数据源,风险>收益(性能间接 + F-255 的 --scope 已稀释慢只剩不常跑的全量) | **DEFERRED** · 2026-06-10 用户裁决跳过 |
+| **F-290** render 提速(6b/6c Playwright 会话合并) | 真提速需重构 F-256/292/272 闸门数据源,风险>收益(性能间接 + F-255 的 --scope 已稀释慢只剩不常跑的全量) | ~~DEFERRED · 2026-06-10~~ → **用户 2026-06-23 解禁,作 F-370 实现**(加法式合并 + parity 闸,见下) |
 
 ## 2026-06-10 审计批量补强总账(commit `c4facb6` → `177d932`,6 个 commit)
 
@@ -193,3 +193,14 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 安全(实测四关):① 跳过后编辑某页 → 正常 re-audit(scope 到该页,不跳)② 引入 body-floor 错 → 照样 rc=4 拦截(内容变=不跳)③ 错未修时无改动重渲 → **仍不跳**(错页被 F-368 毒化→dirty→必重审 rc=4),证明短路绝不藏错 ④ `--final` 强制全量。实测 clean deck:render2 **2.77s→0.41s(6.7×)**;67 页 deck 同理 ~5.4s→~0.4s。
 
 测试:`test_iteration_loop.py::test_no_change_rerender_skips_visual_reaudit`(集成,Playwright-gated:no-op 跳过 + `--final` 强制 + 编辑重审 + 开放错不跳)。auto-scope/iteration/atomic/baseline/scope/golden/hidden 全族零回归(97 测试)。立项 = 用户「优化吧」三杠杆之一(无改动重渲短路)。DONE 2026-06-23 | `deck-json/render-deck.py` / `deck-json/tests/test_iteration_loop.py`
+
+### F-370 — PERF-B / 原 F-290 解禁:把 6c 分布审计折进 6b 视觉浏览器 pass(2026-06-23)
+
+用户解禁了 2026-06-10 DEFER 的 **F-290**(「render 提速:6b/6c Playwright 会话合并」)。`AUDIT-2026-06-17-PERF` 早定位:一次**全量**渲染对同一 `index.html` 反复付 Chromium 冷启——6b 视觉引擎(`validate.py --visual` → `run-audits.py`)和 6c 分布审计(`check-distribution.py`)是**两个独立子进程**,各自 `launch()` + `goto()` 同一页、同样 1920×1080、同样那段「Bounded settle」,只在最后一句 `page.evaluate()` 分道。页面加载+settle(贵的部分)白付两遍。
+
+修(加法式,默认零行为变化——只 render-deck 全量路径 opt-in):
+- `run-audits.py`:`run_unified_engine(extra_evals=None)`。在 present 模式 settle 后、**audits.js 之前**(只读审计不会扰动几何 → parity 安全)对同一 page 跑调用方给的额外 `page.evaluate`,结果挂 `result["extra"]`。
+- `validate.py`:`--with-distribution`。懒加载 `check-distribution.py` 的 `MEASURE_JS`+`signals_for`,作 extra eval 喂进引擎,再用 `signals_for` 富集成**与 `check-distribution.py --json` 逐字段同形**的 `distribution` 列表,挂进 `--json` payload(独立 key,不混进 errors/warnings,不动 exit code)。
+- `render-deck.py`:6b 在**整 deck 视觉 pass**(`visual_full or not scope_pages`)时加 `--with-distribution` 并捕 `_merged_dist`;6c 有 `_merged_dist` 就**直接用**(不再 spawn 第二个 Chromium),`--visual` 等 6b 不跑的路径**回退**老的独立 spawn。
+
+**parity 闸**(用户要求):合并输出 vs 独立 `check-distribution.py` 在 67 页 deck 上 **66/66 signals 逐页全等**;新回归测试 `test_iteration_loop.py::test_f290_merged_distribution_matches_standalone` 锁死。实测全量渲染 **~5.9s → 4.48s(−24%,3 次 Chromium → 2)**;只帮全量路径(首渲 / framework 改 / `--final` / >4 页),scoped/no-op 路径不触发故不变。**120 测试全族零回归**(check_distribution/render_gate/golden/byte_rule/no_browser/audits/font_fingerprint/iteration/auto_scope/baseline/scope)。承 F-368/F-369,是「优化吧」三杠杆之二。④常驻 Chromium(跨渲染复用浏览器,省每 pass 372ms 冷启)是其自然延伸,排在其后。DONE 2026-06-23 | `assets/run-audits.py` / `assets/validate.py` / `deck-json/render-deck.py` / `deck-json/tests/test_iteration_loop.py`

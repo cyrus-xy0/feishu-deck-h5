@@ -1024,7 +1024,7 @@ class EngineUnavailable(Exception):
 
 
 def run_unified_engine(html_path, scope=None, *, settle_ms=350,
-                       dom_rules=True):
+                       dom_rules=True, extra_evals=None):
     """Run the unified engine against ONE rendered deck and return the merged
     result dict {engine, version, rules:[...], scope, slides_total, findings:[...]}.
 
@@ -1109,6 +1109,7 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
 
     audits_src = AUDITS_JS.read_text(encoding="utf-8")
     url = html_path.resolve().as_uri()
+    _extra_results = {}    # F-290 · results of any caller-supplied extra page evals
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
@@ -1169,6 +1170,20 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
                 }
             """)
             page.wait_for_timeout(200)  # 让 present 布局再稳定一次
+            # ── F-290 · optional extra evals on the SAME settled present-mode page.
+            #    Lets a caller (validate.py --with-distribution) fold the geometry/
+            #    distribution audit into THIS browser pass instead of paying a
+            #    second Chromium launch + full reload. Run BEFORE audits.js + the
+            #    __DECK_JSON__/scope injections so the page is in the same pristine
+            #    present-mode state the standalone auditor measures (audits.js is
+            #    read-only, but ordering it after keeps geometry provably identical).
+            #    Best-effort: a failing extra eval records None, never breaks the gate.
+            if extra_evals:
+                for _xname, _xjs in extra_evals.items():
+                    try:
+                        _extra_results[_xname] = page.evaluate(_xjs)
+                    except Exception:
+                        _extra_results[_xname] = None
             # ── 把旁边的 deck.json(若存在)注入 window.__DECK_JSON__ ──
             # R-LAYOUT-DEPRECATED 的 SOURCE-OF-TRUTH 是 deck.json 的真 authored layout
             # (渲染后 data-layout 会伪装借框架 CSS,不可信)。纯文件读,不含规则逻辑。
@@ -1193,6 +1208,8 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             rules.append(r)
     result["rules"] = rules
     result["dom_rules"] = True
+    if _extra_results:
+        result["extra"] = _extra_results    # F-290 · folded-in extra evals
     return result
 
 

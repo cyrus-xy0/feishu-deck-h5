@@ -3426,6 +3426,10 @@ def main(argv=None) -> int:
         # know NO page's true state, so a landed gate-fail must NOT write a sidecar
         # (it would falsely hash every page "clean"). Set by the advisory below.
         _engine_down = False
+        # F-290: the layout-distribution audit folded into the 6b visual pass
+        # (validate.py --with-distribution), so 6c can use it instead of spawning a
+        # second Chromium. None ⇒ 6b didn't carry it → 6c spawns standalone.
+        _merged_dist = None
         _baseline_ready = False    # F-302: did the visual advisory produce a
         _baseline_now = []         # findings snapshot we can persist on success?
         # F-255: the delivery gate must be a PATH/FLAG INVARIANT, not something
@@ -3632,6 +3636,16 @@ def main(argv=None) -> int:
             # otherwise scope the visual engine to just the changed page(s).
             if scope_pages and not visual_full:
                 _adv_cmd += ["--scope-frames", ",".join(map(str, scope_pages))]
+            # F-290: on a DECK-WIDE visual pass (full / framework change) fold the
+            # layout-distribution audit (6c) into THIS one browser pass instead of
+            # spawning check-distribution separately below — saves a Chromium launch
+            # + full reload of the same index.html. A content-SCOPED pass doesn't run
+            # distribution at all (6c's `visual_full or not scope_pages` is false),
+            # so only request it when that condition holds.
+            _want_dist = (CHECK_DIST.exists()
+                          and (visual_full or not scope_pages))
+            if _want_dist:
+                _adv_cmd.append("--with-distribution")
             adv = subprocess.run(
                 _adv_cmd,
                 capture_output=True, text=True,
@@ -3648,6 +3662,9 @@ def main(argv=None) -> int:
                 _data = _json.loads(adv.stdout or "{}")
             except Exception:
                 _data = {}
+            # F-290: distribution audit folded into this pass (if requested) — 6c
+            # below uses it instead of spawning a second Chromium.
+            _merged_dist = _data.get("distribution")
             _engine_down = any(
                 str(f.get("code", "")) == "R-VISUAL"
                 for f in _data.get("warnings", []))
@@ -3860,13 +3877,18 @@ def main(argv=None) -> int:
         if (CHECK_DIST.exists() and _is_runs
                 and (visual_full or not scope_pages) and not args.quick
                 and not _skip_clean_reaudit):   # F-369: skip on a provably-clean no-op
-            dist = subprocess.run(
-                [sys.executable, str(CHECK_DIST), str(out_html), "--json"],
-                capture_output=True, text=True,
-            )
             try:
                 import json as _json
-                _slides = _json.loads(dist.stdout or "[]")
+                if _merged_dist is not None:
+                    # F-290: reuse the distribution measured in the 6b browser pass
+                    # (parity-verified identical to standalone) — no 2nd Chromium.
+                    _slides = _merged_dist
+                else:
+                    dist = subprocess.run(
+                        [sys.executable, str(CHECK_DIST), str(out_html), "--json"],
+                        capture_output=True, text=True,
+                    )
+                    _slides = _json.loads(dist.stdout or "[]")
                 _gc_distribution = "ran"
                 _findings = []
                 for _s in _slides:

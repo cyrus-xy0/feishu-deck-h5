@@ -385,6 +385,46 @@ def test_no_change_rerender_skips_visual_reaudit(tmp_path):
     assert "skipping visual/geometry re-audit" not in r5.stderr
 
 
+def test_f290_merged_distribution_matches_standalone(tmp_path):
+    # F-290 · validate.py --with-distribution folds the layout-distribution audit
+    # into the visual browser pass; its signals MUST equal standalone
+    # check-distribution.py (parity), else render-deck would gate on different
+    # geometry after dropping the 2nd Chromium launch.
+    import pytest
+    if not _playwright_ok():
+        pytest.skip("Playwright/Chromium unavailable — visual gate cannot run")
+    assets = DECK_JSON.parent / "assets"
+    deck = tmp_path / "deck.json"
+    boot = subprocess.run([sys.executable, str(CLI), str(deck), "new-deck",
+                           "--title", "F290", "--author", "A", "--date", "2026-06-23"],
+                          capture_output=True, text=True)
+    assert boot.returncode == 0, boot.stdout + boot.stderr
+    d = json.loads(deck.read_text(encoding="utf-8"))
+    d["slides"].append(_raw_page("a", "97 A", "Alpha"))
+    d["slides"].append(_raw_page("b", "98 B", "Beta"))
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    out = tmp_path / "runs" / "20260101-f290" / "output"
+    out.mkdir(parents=True)
+    r = _render(deck, out)
+    assert r.returncode in (0, 4), r.stdout + r.stderr
+    html = str(out / "index.html")
+
+    merged = subprocess.run(
+        [sys.executable, str(assets / "validate.py"), html,
+         "--visual", "--json", "--with-distribution", "--full"],
+        capture_output=True, text=True)
+    standalone = subprocess.run(
+        [sys.executable, str(assets / "check-distribution.py"), html, "--json"],
+        capture_output=True, text=True)
+    md = json.loads(merged.stdout).get("distribution")
+    sd = json.loads(standalone.stdout)
+    assert md is not None, "validate --with-distribution must emit a 'distribution' key"
+
+    def sigs(arr):
+        return {s["idx"]: sorted(x[0] for x in s.get("signals", [])) for s in arr}
+    assert sigs(md) == sigs(sd), "merged distribution signals must match standalone"
+
+
 # ------------------------------------------------------------ W8 · asset ----
 def test_add_asset_places_and_compresses(tmp_path):
     try:
