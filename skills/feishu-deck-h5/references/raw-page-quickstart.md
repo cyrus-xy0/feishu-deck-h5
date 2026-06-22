@@ -142,6 +142,30 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
   **deck.json 改动**走 deck-cli(set-page / insert / render)——它们经 Bash 子进程落盘,不受隔离
   影响。别去研究 worktree、别 ExitWorktree(编辑 deck 产物本就不是「代码改动」,无需隔离)。
 
+## 跨 deck 拎一页(LIFT+SWAP · 含「漂移源」陷阱 — 2026-06-22 复盘钉死)
+
+- **工具路径钉死**:repo 根只有 `runs/` + `skills/`;所有 deck-json 工具在
+  **`skills/feishu-deck-h5/deck-json/`**(`.claude/skills/feishu-deck-h5` 是指向它的
+  symlink)。在 repo 根 / runs 下操作时前缀这个路径,**别 find / ls 重新找**。
+- **从另一个原生 deck.json 拎一页进现有 deck**(两边都有 deck.json)=
+  `deck-cli.py <目标deck.json> --yes paste --from <源deck.json> --key <K> <插入位>`
+  (1-based 位置;`--new-key` 改名;自动 rekey 内嵌 scoped CSS + 拷资产 + 盖 `lifted` 溯源)。
+  起一个**全新** deck 复用某页 → `lift-to-new-deck.py <源> <页> <新dir>`。
+- **⚠️ 漂移源陷阱(最贵的坑)**:老 deck 的某页 `custom_css` 可能为空,其 CSS 全留在
+  **rendered index.html 的 `<head>`**(老锚点 `.slide[data-page="NN"]`),`data-accent` /
+  `data-decor` 也只在渲染出的 `<div class="slide">` 上。此时 paste/lift **只搬空的
+  custom_css → 静默出无样式 + 缺图 + 丢 accent/decor 的坏页**。
+  - **先验**:`deck-cli.py <源deck.json> get-page <K> --css` 看 custom_css 空不空;
+    空、且 `grep '\[data-page=' <源>/index.html` 有该页规则 = **漂移**。
+  - **正解(别手搓恢复)**:先修源 → `python3 deck-json/repair-lifted.py <源output目录> --apply`
+    (路由 `migrate-head-css-to-custom-css` → 把 head CSS 迁回各页 custom_css → 重渲),
+    **再** paste/lift,即保真。`lift-to-new-deck.py` 现已内置漂移守卫,命中会直接 halt
+    并打印这条 `repair-lifted` 命令(确要手动恢复才加 `--allow-drift`)。
+  - 若坚持手动恢复:从 index.html `<head>` 抓该页 `.slide[data-page="NN"] …` 整段塞进
+    custom_css 即可——**`scope_selectors` 会把 `[data-page=NN]` 自动重锚到当前 slide-key**
+    (无需手改选择器),再 `set-accent <K> blue` / `set-decor <K> blue-glow` 补回、拷 head CSS
+    里 `url()` 引的资产(含 `assets/shared/...` 共享池,新 deck 常缺、必拷)。
+
 ## 速度纪律(别再犯——全是 35min/页 复盘里挤出来的)
 
 - **焦点 / hero 元素第一版就做足**:粗、亮、实心、明确。别从胆怯版试探着加码。

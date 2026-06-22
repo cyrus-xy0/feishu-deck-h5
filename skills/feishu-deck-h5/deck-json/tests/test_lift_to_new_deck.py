@@ -117,5 +117,84 @@ class LiftToNewDeckTest(unittest.TestCase):
         self.assertEqual([s["key"] for s in deck["slides"]], [OLD_KEY, "src-day-2"])
 
 
+DRIFT_KEY = "digital-employee-onboard"
+# A DRIFTED source (postmortem 2026-06-22, everbright #7 → ai-into-org): the
+# slide's per-slide CSS lives only in a HEAD <style> (legacy data-page scheme),
+# and its deck.json custom_css is EMPTY. A naive lift/paste copies that empty
+# field → styleless, image-less page, with data-accent/data-decor lost too.
+DRIFT_INDEX_HTML = (
+    "<html><head>\n"
+    '<style data-source="framework">.slide{position:absolute}</style>\n'
+    '<style>.slide[data-page="06"] .agent-grid{display:grid}'
+    ".slide[data-page=\"06\"] .avatar{background-image:url('input/a.png')}</style>\n"
+    "</head><body>\n"
+    '<div class="slide-frame"><div class="slide" data-page="06" data-accent="blue" '
+    f'data-decor="blue-glow" data-slide-key="{DRIFT_KEY}">\n'
+    '<div class="agent-grid"><div class="avatar"></div></div>\n'
+    "</div></div>\n</body></html>"
+)
+
+
+class LiftDriftGuardTest(unittest.TestCase):
+    """Lifting a page whose styling is stranded in the source's rendered <head>
+    (empty deck.json custom_css) must HALT with the repair-lifted remedy, not
+    silently emit a styleless deck. Postmortem 2026-06-22 (everbright #7)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lift-drift-"))
+        self.src_dir = self.tmp / "src"
+        self.src_dir.mkdir(parents=True)
+        src_deck = {
+            "version": "1.0",
+            "deck": {"title": "drifted source"},
+            "slides": [
+                {"key": DRIFT_KEY, "layout": "raw", "screen_label": "06 数字员工",
+                 "custom_css": "",  # the smoking gun: CSS only lives in the head
+                 "data": {"html": '<div class="agent-grid"><div class="avatar"></div></div>'}},
+            ],
+        }
+        (self.src_dir / "deck.json").write_text(
+            json.dumps(src_deck, ensure_ascii=False), encoding="utf-8")
+        (self.src_dir / "index.html").write_text(DRIFT_INDEX_HTML, encoding="utf-8")
+        self.dest = self.tmp / "out"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, src, *args):
+        return subprocess.run(
+            [sys.executable, str(TOOL), str(src), DRIFT_KEY, str(self.dest), *args],
+            capture_output=True, text=True)
+
+    def test_halts_on_drift_when_src_is_index_html(self):
+        proc = self._run(self.src_dir / "index.html")
+        self.assertEqual(proc.returncode, 1, f"expected drift halt:\n{proc.stdout}\n{proc.stderr}")
+        self.assertIn("repair-lifted", proc.stderr)
+        self.assertIn(DRIFT_KEY, proc.stderr)
+        self.assertFalse((self.dest / "deck.json").exists(),
+                         "must NOT write a styleless deck when drift is detected")
+
+    def test_halts_on_drift_when_src_is_deck_dir(self):
+        proc = self._run(self.src_dir)  # sibling index.html is discovered
+        self.assertEqual(proc.returncode, 1, f"expected drift halt:\n{proc.stdout}\n{proc.stderr}")
+        self.assertIn("repair-lifted", proc.stderr)
+
+    def test_allow_drift_bypasses_guard(self):
+        proc = self._run(self.src_dir / "index.html", "--allow-drift", "--title", "T")
+        self.assertEqual(proc.returncode, 0, f"--allow-drift should proceed:\n{proc.stderr}\n{proc.stdout}")
+        self.assertTrue((self.dest / "deck.json").exists())
+
+    def test_no_false_alarm_when_custom_css_present(self):
+        # Heal the source (CSS now in custom_css). The head still has stale rules,
+        # but the empty-custom_css gate is no longer tripped → guard must stay silent.
+        deck_path = self.src_dir / "deck.json"
+        deck = json.loads(deck_path.read_text(encoding="utf-8"))
+        deck["slides"][0]["custom_css"] = ".agent-grid{display:grid}"
+        deck_path.write_text(json.dumps(deck, ensure_ascii=False), encoding="utf-8")
+        proc = self._run(self.src_dir / "index.html", "--title", "T")
+        self.assertEqual(proc.returncode, 0, f"healthy deck must lift cleanly:\n{proc.stderr}\n{proc.stdout}")
+        self.assertTrue((self.dest / "deck.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

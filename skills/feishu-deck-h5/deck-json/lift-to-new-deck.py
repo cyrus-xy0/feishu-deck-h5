@@ -119,6 +119,74 @@ def derive_title(hits: list[dict]) -> str:
     return label or "〔标题 TODO〕"
 
 
+# --- drift guard --------------------------------------------------------------
+# Postmortem 2026-06-22 (everbright #7 → ai-into-org): lifting a page from an
+# OLD deck whose per-slide CSS was never migrated out of the rendered index.html
+# <head> (legacy `.slide[data-page="NN"]` scheme) silently produced a styleless,
+# image-less page. resolve_source_deck() reads only the sibling deck.json, where
+# that slide's custom_css is EMPTY — so paste/lift copy nothing and the head CSS
+# + data-accent/data-decor (carried only on the rendered <div class="slide">) are
+# lost with no error. The operator then reverse-engineers the recovery by hand
+# (the ~15-call archaeology this guard exists to delete). We detect the drift up
+# front and route to the blessed repair (repair-lifted → migrate-head-css).
+
+_STYLE_BLOCK_RE = re.compile(r'<style\b([^>]*)>(.*?)</style>', re.S | re.I)
+
+
+def _source_index_html(src: Path, src_deck: Path) -> Path | None:
+    """The rendered index.html that may still hold drifted (head-scoped) per-slide
+    CSS for the source deck — `src` itself when an index.html was passed, else the
+    deck.json's sibling. None when there is no rendered HTML to inspect."""
+    if src.suffix.lower() in (".html", ".htm"):
+        return src if src.exists() else None
+    cand = src_deck.parent / "index.html"
+    return cand if cand.exists() else None
+
+
+def _styling_lives_in_head(index_text: str, slide_key: str) -> bool:
+    """True iff this slide's per-slide CSS lives in a HEAD <style> (legacy
+    data-page / un-migrated scheme) rather than its deck.json custom_css — the
+    'drifted deck.json' signature that makes a naive lift drop all styling.
+
+    A correctly-homed slide keeps its deviation CSS in the co-located
+    `<style data-fs-custom-css>` block INSIDE `.slide` (round-trips through
+    deck.json custom_css); those are skipped. Any OTHER <style> carrying a
+    selector keyed to this slide (`[data-slide-key="K"]` or the slide's legacy
+    `[data-page="NN"]`) means the styling is stranded in the head."""
+    keys = [f'[data-slide-key="{slide_key}"]']
+    tag = re.search(
+        r'<div\s+class="slide(?:\s[^"]*)?"[^>]*?\bdata-slide-key="'
+        + re.escape(slide_key) + r'"[^>]*>', index_text)
+    if tag:
+        pm = re.search(r'\bdata-page="([^"]+)"', tag.group(0))
+        if pm:
+            keys.append(f'[data-page="{pm.group(1)}"]')
+    for attrs, body in _STYLE_BLOCK_RE.findall(index_text):
+        if 'data-fs-custom-css' in attrs:
+            continue  # the CORRECT per-slide home (inside .slide) — not a leak
+        if any(k in body for k in keys):
+            return True
+    return False
+
+
+def detect_drifted(src: Path, src_deck: Path, hits: list[dict]) -> list[str]:
+    """Return the keys of to-be-lifted slides whose styling is stranded in the
+    source's rendered index.html <head> (empty deck.json custom_css). Empty when
+    there is nothing to inspect or every page carries its own custom_css."""
+    idx_html = _source_index_html(src, src_deck)
+    if idx_html is None:
+        return []
+    try:
+        slides = {s.get("key"): s for s in
+                  json.loads(src_deck.read_text(encoding="utf-8")).get("slides", [])}
+        idx_text = idx_html.read_text(encoding="utf-8")
+    except Exception:
+        return []
+    return [h["key"] for h in hits
+            if not (slides.get(h["key"], {}).get("custom_css") or "").strip()
+            and _styling_lives_in_head(idx_text, h["key"])]
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         prog="lift-to-new-deck.py",
@@ -136,6 +204,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--language", choices=["zh-only", "zh-en"], default="zh-only")
     ap.add_argument("--render", action="store_true",
                     help="render to HTML after building (render-deck.py --final --renumber)")
+    ap.add_argument("--allow-drift", action="store_true",
+                    help="bypass the drift guard (source per-slide CSS stranded in "
+                         "the rendered <head>); only when you will recover the CSS "
+                         "yourself after the lift")
     args = ap.parse_args(argv)
 
     src_deck = resolve_source_deck(args.src)
@@ -149,6 +221,20 @@ def main(argv: list[str]) -> int:
     if args.new_key and len(hits) != 1:
         _err(f"--new-key is only valid when lifting exactly one page "
              f"(matched {len(hits)}: {', '.join(h['key'] for h in hits)})")
+        return 1
+
+    drifted = detect_drifted(args.src, src_deck, hits)
+    if drifted and not args.allow_drift:
+        _err(
+            "源 deck.json 漂移:下列待拎页的 custom_css 为空,但样式留在 rendered "
+            "index.html 的 <head>(legacy data-page 作用域)——\n"
+            f"    {', '.join(drifted)}\n"
+            "  裸 lift/paste 会静默丢掉它们的 CSS + accent/decor + 背景图(出无样式坏页)。\n"
+            "  先修源 deck(把 head CSS 迁回各页 custom_css),再重跑本 lift:\n"
+            f"    python3 {(HERE / 'repair-lifted.py').name} {src_deck.parent} --apply\n"
+            "  repair-lifted 会路由 migrate-head-css-to-custom-css → 重渲;之后源页\n"
+            "  custom_css 自带样式,lift/paste 即保真。\n"
+            "  （确要手动恢复 CSS,可加 --allow-drift 跳过本检查。)")
         return 1
 
     dest_dir: Path = args.dest
