@@ -4152,30 +4152,45 @@ def main(argv=None) -> int:
             for _n in scope_pages:
                 print(f"\n──── SHOOT · page {_n} (one-pass verify · focused on "
                       f"this page) ────", file=sys.stderr)
+                _png = out_html.parent / f".shoot-p{_n}.png"
+                # F-365: launch the visual audit and the screenshot CONCURRENTLY.
+                # They are independent (both only READ the rendered HTML; the audit
+                # writes nothing, the shoot writes a PNG), so two parallel Chromium
+                # cold-starts collapse the wall-clock to ≈ the slower of the two
+                # instead of their sum — ~halving the edit→verify loop hit on every
+                # scoped edit. `--slide _n` (F-361) keeps findings focused to THIS
+                # page so the verdict isn't buried in pre-existing deck-wide noise.
                 try:
-                    # F-361: add `--slide _n` so findings are FOCUSED to this page
-                    # (F-254 filter). Without it the per-page verdict FAILs on a
-                    # PRE-EXISTING deck-wide finding on a page this edit never
-                    # touched, burying "is MY edited page clean?" in noise. The
-                    # whole-deck gate is still `--final`.
-                    _vr = subprocess.run(
+                    _audit = subprocess.Popen(
                         [sys.executable, str(VALIDATE_HTML), str(out_html),
                          "--visual", "--scope-frames", str(_n), "--slide", str(_n)],
-                        capture_output=True, text=True)
-                    print(_vr.stdout, file=sys.stderr)
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 except Exception as _e:
+                    _audit = None
                     print(f"  visual gate skipped: {_e}", file=sys.stderr)
-                _png = out_html.parent / f".shoot-p{_n}.png"
                 try:
-                    subprocess.run(
+                    _shot = subprocess.Popen(
                         [sys.executable, str(_shoot_page), str(out_html),
                          str(_n), "--out", str(_png)],
-                        capture_output=True, text=True)
-                    print(f"  SHOT: {_png}" if _png.exists()
-                          else "  SHOT: (screenshot failed — Chromium unavailable?)",
-                          file=sys.stderr)
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 except Exception as _e:
+                    _shot = None
                     print(f"  SHOT skipped: {_e}", file=sys.stderr)
+                if _audit is not None:
+                    try:
+                        print(_audit.communicate(timeout=180)[0], file=sys.stderr)
+                    except Exception as _e:
+                        _audit.kill()
+                        print(f"  visual gate skipped: {_e}", file=sys.stderr)
+                if _shot is not None:
+                    try:
+                        _shot.communicate(timeout=180)
+                        print(f"  SHOT: {_png}" if _png.exists()
+                              else "  SHOT: (screenshot failed — Chromium unavailable?)",
+                              file=sys.stderr)
+                    except Exception as _e:
+                        _shot.kill()
+                        print(f"  SHOT skipped: {_e}", file=sys.stderr)
     return 0
 
 
