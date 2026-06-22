@@ -264,3 +264,25 @@ error → `exit 4`）。所以系统库该装齐还得装齐。
 
 装好后，任何手写且过不了 `validate.py` 的 `runs/<…>/output/index.html` 在模型宣布
 「完成」之前就会被 block。
+
+### 8.3 Claude-Code 专属加速 hook —— `feishu-deck-cheatsheet.py`（**仅 CC 环境**）
+
+`assets/hooks/feishu-deck-cheatsheet.py` 是一颗 **UserPromptSubmit hook**：用户提交的
+prompt 一旦提到某个 feishu-deck deck，它就从 `references/raw-page-quickstart.md` 切出高价值
+速记段（固定常量 / 速度纪律 / 改单值；命中 lift/翻译意图时再加「跨 deck 拎一页 LIFT+SWAP」
+配方）直接注入上下文——省掉模型每个冷 session 重新逐个 `--help`、手 `json.load` 猜 deck.json
+形状、现场考古 CLI 的开销（端到端延迟审计点名的墙钟 + 方差大头）。它**只增不拦**，任何异常
+都 fail-open（exit 0）。
+
+> ⚠️ 同样**仅 Claude Code**（UserPromptSubmit）。它是便利加速器、不是模型无关的 floor——
+> 真正的快路径活在它切的文档（`raw-page-quickstart.md`）与它指向的工具
+> （`deck-cli.py` / `lift-translate-page.py` / `render-deck.py --scope --shoot`）里。
+
+**在 Claude Code 环境安装该 hook：**
+
+1. 把 `assets/hooks/feishu-deck-cheatsheet.py` 复制到 `~/.claude/hooks/`，并 `chmod +x`。
+2. 在 `~/.claude/settings.json` 注册为 UserPromptSubmit hook
+   （`command: "python3 ~/.claude/hooks/feishu-deck-cheatsheet.py"`）。文件头 docstring 有
+   完整片段示例。
+3. 它默认从 `~/.claude/skills/feishu-deck-h5/references/raw-page-quickstart.md`（标准 skill
+   装机路径）读切片；skill 装在别处就改文件里的 `QS` 常量。路径不对时 hook 安全 no-op。
