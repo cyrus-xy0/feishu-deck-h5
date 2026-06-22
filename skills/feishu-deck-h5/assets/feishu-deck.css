@@ -235,9 +235,13 @@ body {
    one layer (frame paints, slide transparent) removes the seam for EVERY layout,
    every viewport — no per-deck patch. Scroll/browse mode is unaffected (the
    slide keeps its own card bg there — this rule is data-mode="present" only).
-   A slide that genuinely needs a bespoke present-mode full-bleed background sets
-   it on `.slide-frame` via custom_css (rare); setting it on `.slide` no longer
-   shows in present mode by design. */
+   A slide that needs a bespoke present-mode full-bleed background just sets it on
+   `.slide` the obvious way: F-364's render-time _css_utils.promote_root_bg_to_frame
+   hoists a slide-root `background` onto THIS frame for present mode (fills the
+   letterbox seamlessly) and keeps it on the slide for scroll. BEFORE F-364 a
+   slide-root bg silently TIED this rule's specificity (0,4,0) and — emitted after
+   the framework sheet — won the cascade, regrowing the very seam below; authors
+   had to hand-target `.slide-frame`. No longer. */
 .deck[data-mode="present"] .slide-frame > .slide {
   background-image: none !important;
   background-color: transparent !important;

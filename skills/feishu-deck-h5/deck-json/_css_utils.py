@@ -239,3 +239,201 @@ def scope_selectors(css: str, slide_key: str) -> str:
         return ""
     scope = f'.slide[data-slide-key="{slide_key}"]'
     return _scope_block(css, scope)
+
+
+# ---------------------------------------------------------------------------
+# F-364 · slide-root background -> frame promotion (letterbox 黑边 root cure)
+# ---------------------------------------------------------------------------
+#
+# THE BUG. A full-bleed layout (raw / iframe-embed / canvas) whose custom_css
+# paints a background on the SLIDE ROOT -- `.slide { background: <gradient> }`
+# -- silently regrows the letterbox seam F-318 was built to remove.
+# render-deck scopes that selector to `.slide[data-slide-key="K"]...`
+# (specificity 0,4,0), which TIES F-318's `.slide-frame > .slide` zeroing rule
+# (also 0,4,0); the co-located <style> is emitted AFTER the framework sheet, so
+# source-order breaks the tie in the author's favour -> F-318 is defeated. The
+# slide then paints its bg at the 16:9 crop while the frame paints content-bg at
+# the VIEWPORT crop, and the two disagree at the slide<->letterbox boundary
+# ("标题上方有黑条"). markBleedPanels (the runtime seam-fix) can't catch it
+# either -- it scans slide DESCENDANTS (querySelectorAll('*')), never the root.
+#
+# THE CURE. Do at RENDER time exactly what feishu-deck.css's own guidance
+# (~L238: "a bespoke full-bleed background sets it on `.slide-frame` via
+# custom_css") says: hoist the slide-root background onto the FRAME for present
+# mode (one layer fills letterbox + slide -> no seam) and keep it on the slide
+# for scroll mode (no letterbox there; present forces the slide transparent via
+# F-318). The author keeps writing the obvious `.slide { background: ... }`; the
+# renderer makes it correct. Both emitted selectors carry `[data-slide-key=]`
+# so the later scope_selectors() pass leaves them verbatim, and neither targets
+# the slide root, so the transform is idempotent (safe to re-run every render).
+
+_BG_PROP_RE = re.compile(r'^background(-[a-z-]+)?$')
+_BG_RESET_VALUES = {"none", "transparent", "initial", "inherit", "unset",
+                    "revert", ""}
+
+
+def _targets_slide_root(part: str) -> bool:
+    """True iff this single selector's SUBJECT (rightmost compound) is the slide
+    root -- `.slide`, `.slide[...]`, `.slide:has(...)`, `&[...]` -- i.e. a
+    background here paints the whole slide. False for `.slide-frame`,
+    `.slide .card` (descendant subject), `.slideshow`, bare descendants."""
+    p = part.strip()
+    if not p:
+        return False
+    if p.startswith("&"):
+        rest = p[1:]
+    elif re.match(r'\.slide(?![\w-])', p):
+        rest = p[len(".slide"):]
+    else:
+        return False
+    # rest may carry attribute/pseudo qualifiers on the SAME compound; a
+    # top-level combinator (space / > / + / ~) means the subject is a
+    # descendant, not the root. Parens (:has(...)/:is(...)) are transparent.
+    depth = 0
+    for ch in rest:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(0, depth - 1)
+        elif depth == 0 and ch in " \t\r\n>+~":
+            return False
+    return True
+
+
+def _split_decls(body: str) -> list[str]:
+    """Split a declaration block on top-level `;` (paren- and comment-aware)."""
+    decls, depth, buf = [], 0, []
+    i, n = 0, len(body)
+    while i < n:
+        if body[i:i + 2] == "/*":
+            end = body.find("*/", i + 2)
+            end = (end + 2) if end != -1 else n
+            buf.append(body[i:end])
+            i = end
+            continue
+        c = body[i]
+        if c in "([":
+            depth += 1
+        elif c in ")]":
+            depth = max(0, depth - 1)
+        if c == ";" and depth == 0:
+            decls.append("".join(buf))
+            buf = []
+        else:
+            buf.append(c)
+        i += 1
+    tail = "".join(buf)
+    if tail.strip():
+        decls.append(tail)
+    return decls
+
+
+def _decl_prop(decl: str) -> str:
+    d = re.sub(r'/\*[\s\S]*?\*/', "", decl).strip()
+    if ":" not in d:
+        return ""
+    return d.split(":", 1)[0].strip().lower()
+
+
+def _is_bg_decl(decl: str) -> bool:
+    return bool(_BG_PROP_RE.match(_decl_prop(decl)))
+
+
+def _bg_all_reset(bg_decls: list[str]) -> bool:
+    """True if every background declaration is a no-op reset (none/transparent/
+    ...) -- nothing worth hoisting to the frame."""
+    for d in bg_decls:
+        d2 = re.sub(r'/\*[\s\S]*?\*/', "", d)
+        val = d2.split(":", 1)[1] if ":" in d2 else ""
+        val = val.replace("!important", "").strip().rstrip(";").strip().lower()
+        if val not in _BG_RESET_VALUES:
+            return False
+    return True
+
+
+def _join_decls(decls: list[str]) -> str:
+    out = []
+    for d in decls:
+        t = d.strip()
+        if t:
+            out.append(t if t.endswith((";", "*/")) else t + ";")
+    return ("\n  " + "\n  ".join(out) + "\n") if out else ""
+
+
+def promote_root_bg_to_frame(css: str, slide_key: str) -> str:
+    """Hoist any slide-root `background*` declaration onto the .slide-frame for
+    present mode (+ keep it on the slide for scroll). See the block comment
+    above. Call BEFORE scope_selectors(), and ONLY for full-bleed layouts
+    (raw / iframe-embed / canvas) -- other layouts have no letterbox seam.
+    Top-level rules only; @media/@keyframes bodies pass through verbatim."""
+    if not css or not css.strip():
+        return css
+    frame_sel = (f'.deck[data-mode="present"] .slide-frame'
+                 f':has(> .slide[data-slide-key="{slide_key}"])')
+    scroll_sel = f'.deck[data-mode="scroll"] .slide[data-slide-key="{slide_key}"]'
+    out: list[str] = []
+    i, n = 0, len(css)
+    while i < n:
+        # passthrough leading whitespace
+        j = i
+        while j < n and css[j] in " \t\r\n":
+            j += 1
+        if j > i:
+            out.append(css[i:j])
+            i = j
+        if i >= n:
+            break
+        # comment -> verbatim
+        if css[i:i + 2] == "/*":
+            k = css.find("*/", i + 2)
+            k = (k + 2) if k != -1 else n
+            out.append(css[i:k])
+            i = k
+            continue
+        # @-rule (statement or block) -> verbatim
+        if css[i] == "@":
+            brace = css.find("{", i)
+            semi = css.find(";", i)
+            if brace == -1 or (semi != -1 and semi < brace):
+                end = (semi + 1) if semi != -1 else n
+                out.append(css[i:end])
+                i = end
+                continue
+            k = _match_brace(css, brace)
+            out.append(css[i:k])
+            i = k
+            continue
+        # regular rule: selector { body }
+        brace = css.find("{", i)
+        if brace == -1:
+            out.append(css[i:])
+            break
+        rule_start = i
+        selector = css[i:brace]
+        k = _match_brace(css, brace)
+        body = css[brace + 1:k - 1]
+        i = k
+        parts = _split_top_level_commas(selector)
+        root_parts = [p for p in parts if _targets_slide_root(p)]
+        if not root_parts:
+            out.append(css[rule_start:k])          # byte-identical passthrough
+            continue
+        decls = _split_decls(body)
+        bg_decls = [d for d in decls if _is_bg_decl(d)]
+        if not bg_decls or _bg_all_reset(bg_decls):
+            out.append(css[rule_start:k])
+            continue
+        other_parts = [p for p in parts if not _targets_slide_root(p)]
+        other_decls = [d for d in decls if not _is_bg_decl(d)]
+        bg_body = _join_decls(bg_decls)
+        repl: list[str] = []
+        if other_parts:
+            # descendant subjects paint a child, never the letterbox -> full rule kept
+            repl.append(f"{', '.join(other_parts)} {{{body}}}")
+        if other_decls:
+            repl.append(f"{', '.join(p.strip() for p in root_parts)} "
+                        f"{{{_join_decls(other_decls)}}}")
+        repl.append(f"{frame_sel} {{{bg_body}}}")
+        repl.append(f"{scroll_sel} {{{bg_body}}}")
+        out.append("\n".join(repl))
+    return "".join(out)

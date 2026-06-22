@@ -59,7 +59,7 @@ from _story_case_fit import (  # noqa: E402
 )
 # scope_selectors co-locates per-slide custom_css scoped to its slide-key
 # (LIFT-ARCHITECTURE step 2) so the CSS travels with the slide on lift/clone.
-from _css_utils import scope_selectors  # noqa: E402
+from _css_utils import scope_selectors, promote_root_bg_to_frame  # noqa: E402
 from _index_sig import (  # noqa: E402  F-315 · un-synced-edit clobber guard
     resolve_clobber as _index_resolve_clobber,
     auto_sync as _index_auto_sync,
@@ -2131,19 +2131,27 @@ def render_slide(slide: dict, slide_index: int, asset_path: str, deck_dir: Path 
     # paste/clone carries its styling with no CSS hunting.
     custom_css = slide.get("custom_css")
     if isinstance(custom_css, str) and custom_css.strip():
-        rendered = _inject_custom_css(rendered, slide["key"], custom_css)
+        rendered = _inject_custom_css(
+            rendered, slide["key"], custom_css, slide.get("layout"))
 
     return rendered
 
 
-def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str) -> str:
+def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str,
+                       layout: str = None) -> str:
     """Insert a `<style data-slide-key=K data-fs-custom-css>` block (selectors
     scoped to the slide-key) as the first child of `.slide`. A `<style>` is
     display:none in the UA sheet so it adds no layout, and no framework rule
     targets a direct child of `.slide` positionally, so first-child is safe.
     The `data-fs-custom-css` marker lets sync-index-to-deck.py skip it on
     round-trip (it lives in the deck.json `custom_css` field, not data.html)."""
-    scoped = scope_selectors(custom_css, slide_key)
+    css = custom_css
+    # F-364 · full-bleed layouts: hoist a slide-root background onto the frame
+    # so the obvious `.slide { background: … }` can't regrow the letterbox seam
+    # (see _css_utils.promote_root_bg_to_frame). Other layouts have no letterbox.
+    if layout in ("raw", "iframe-embed", "canvas"):
+        css = promote_root_bg_to_frame(css, slide_key)
+    scoped = scope_selectors(css, slide_key)
     if not scoped.strip():
         return slide_html
     block = (f'<style data-slide-key="{slide_key}" data-fs-custom-css>\n'

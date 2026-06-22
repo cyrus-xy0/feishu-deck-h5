@@ -126,6 +126,115 @@ def test_iter_css_rules_skips_at_rules():
     assert ".a" not in sels
 
 
+# ---------------------------------------------------------------------------
+# F-364 · promote_root_bg_to_frame — letterbox 黑边 root cure
+# ---------------------------------------------------------------------------
+promote = _css_utils.promote_root_bg_to_frame
+FRAME_SEL = f'.deck[data-mode="present"] .slide-frame:has(> .slide[data-slide-key="{KEY}"])'
+SCROLL_SEL = f'.deck[data-mode="scroll"] .slide[data-slide-key="{KEY}"]'
+
+
+def _bg_rules_only_on_frame_or_scroll(css):
+    """The seam-killing invariant: NO present-mode rule whose SUBJECT is the
+    slide root may set a background (that is what ties + defeats F-318). A
+    descendant rule (`.slide .card`) paints a child, not the letterbox, so it is
+    fine — and a full-bleed descendant is markBleedPanels' job, not ours. A
+    scroll-mode slide-root bg is fine too (scroll has no letterbox)."""
+    for sel, body in _css_utils.iter_css_rules(css):
+        if "background" not in body or 'data-mode="scroll"' in sel:
+            continue
+        for part in _css_utils._split_top_level_commas(sel):
+            assert not _css_utils._targets_slide_root(part), \
+                f"present-mode slide-root background can defeat F-318: {part!r}"
+
+
+def test_promote_basic_root_bg():
+    out = promote(".slide { background: red; }", KEY)
+    assert FRAME_SEL in out
+    assert SCROLL_SEL in out
+    assert out.count("background: red") == 2          # frame (present) + slide (scroll)
+    _bg_rules_only_on_frame_or_scroll(out)
+
+
+def test_promote_attr_qualified_root_like_real_decks():
+    # the real #8/#9 authored form
+    css = ('.slide[data-layout="raw"][data-slide-key] {\n'
+           '  background: linear-gradient(135deg, #07142b, #050509) !important;\n}')
+    out = promote(css, KEY)
+    assert FRAME_SEL in out and SCROLL_SEL in out
+    assert "!important" in out
+    _bg_rules_only_on_frame_or_scroll(out)
+
+
+def test_promote_keeps_non_bg_decls_on_slide_both_modes():
+    out = promote(".slide { background: red; color: white; }", KEY)
+    # color stays on the slide root (F-318 only zeroes bg, not color)
+    rules = {sel.strip(): body for sel, body in _css_utils.iter_css_rules(out)}
+    slide_rules = [b for s, b in rules.items()
+                   if s == ".slide" or s.startswith(".slide ")]
+    assert any("color: white" in b for b in slide_rules)
+    assert all("background" not in b for b in slide_rules)   # bg hoisted away
+    _bg_rules_only_on_frame_or_scroll(out)
+
+
+def test_promote_descendant_subject_untouched():
+    src = ".slide .card { background: red; }"
+    assert promote(src, KEY) == src          # byte-identical passthrough
+
+
+def test_promote_slide_frame_untouched():
+    src = ".slide-frame { background: red; }"
+    assert promote(src, KEY) == src
+
+
+def test_promote_slideshow_untouched():
+    src = ".slideshow { background: red; }"
+    assert promote(src, KEY) == src
+
+
+def test_promote_reset_bg_skipped():
+    for v in ("transparent", "none", "inherit"):
+        src = ".slide { background: %s; }" % v
+        assert promote(src, KEY) == src      # nothing worth hoisting
+
+
+def test_promote_idempotent():
+    once = promote(".slide { background: red; }", KEY)
+    twice = promote(once, KEY)
+    assert once == twice                     # emitted rules are not re-promoted
+
+
+def test_promote_comma_mixed_root_and_descendant():
+    out = promote(".slide, .slide .card { background: red; }", KEY)
+    assert ".slide .card" in out             # descendant part keeps its full rule
+    assert FRAME_SEL in out                  # root part is hoisted
+    _bg_rules_only_on_frame_or_scroll(out)
+
+
+def test_promote_background_longhands():
+    css = ".slide { background-color: #07142b; background-image: url(x.png); }"
+    out = promote(css, KEY)
+    assert FRAME_SEL in out
+    assert "background-color: #07142b" in out
+    assert "background-image: url(x.png)" in out
+    _bg_rules_only_on_frame_or_scroll(out)
+
+
+def test_promote_then_scope_no_root_bg_survives():
+    # END-TO-END: the renderer runs promote() THEN scope_selectors(). After both,
+    # there must be NO present-mode slide-root background rule left to tie F-318.
+    css = '.slide[data-layout="raw"] { background: linear-gradient(135deg, #07142b, #050509); }'
+    out = scope(promote(css, KEY), KEY)
+    assert FRAME_SEL in out                  # frame selector survives scoping verbatim
+    assert SCROLL_SEL in out
+    _bg_rules_only_on_frame_or_scroll(out)
+
+
+def test_promote_non_bg_root_rule_untouched():
+    src = ".slide { color: white; font-family: serif; }"
+    assert promote(src, KEY) == src          # no background -> nothing to do
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
