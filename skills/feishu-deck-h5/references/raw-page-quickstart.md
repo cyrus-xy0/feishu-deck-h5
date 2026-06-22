@@ -28,6 +28,14 @@
   `--html` 吐**原始未转义**片段、可 `> frag.html`;无 flag 给摘要+全文)。**别再 `json.load` 手猜
   字段名**——那是「别用临时脚本碰 deck.json」反模式的读侧孪生(`show` 吐的是 JSON-escaped 整对象,
   读 html 用 `get-page --html`)。
+- **起一个新 deck 别手搓骨架**:`deck-cli.py <新>/deck.json new-deck --title T --author A --date D
+  [--cover-title "一行<br>二行"]` → 吐合法 deck.json(meta + cover)。**别读 1200 行 schema、别拼骨架 + cp**;
+  封面标题里字面 `<br>` 会自动转成换行(封面是转义字段,字面 `<br>` 触发 R-ESC-HTML)。仪式页 data 字段速查见下文同名段。
+- **raw 页 `.header` 有隐藏契约(别撞)**:框架给它 master 定位(`top:61 left:73`),并把**首个 `<div>` 子节点**
+  设成 `flex-direction:column-reverse`(eyebrow-wrapper)、自带 `.eyebrow` 类。**要 kicker / eyebrow 在标题上方:
+  别自创类当首子节点**(会继承 column-reverse → 内容被水平居中,真踩过)——用框架结构
+  `<div><span class="eyebrow">…</span><h2 class="title-zh">…</h2></div>`,或显式覆盖
+  `.slide[data-slide-key=K] .header>div:first-child{flex-direction:row}`。
 
 ## raw 页 5 条铁律
 
