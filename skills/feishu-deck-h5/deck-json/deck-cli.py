@@ -1499,6 +1499,36 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
         print(f"    ⚠ assets MISSING in source (broken refs after paste): {report['missing']}")
     if extracted:
         print(f"    inline base64 → asset file(s): {extracted}")
+
+    # F-371: detect the legacy-head-CSS lift trap. A deck.json→deck.json paste can
+    # only carry custom_css; if the SOURCE kept this page's CSS in its index.html
+    # <head> (legacy, pre-custom_css co-location), the pasted slide arrives with the
+    # HTML but NONE of the styling → renders unstyled / overflows. Peek at the
+    # source's sibling index.html: if it actually has head <style> rules scoped to
+    # this slide while the pasted custom_css is empty, the CSS was just dropped —
+    # point at the import path that recovers it instead of silently shipping broken.
+    if not (slide.get("custom_css") or "").strip():
+        src_index = src_path.parent / "index.html"
+        if src_index.exists():
+            try:
+                import importlib.util as _ilu
+                _mp = Path(__file__).resolve().parent / "migrate-head-css-to-custom-css.py"
+                _spec = _ilu.spec_from_file_location("_mig_paste_f370", _mp)
+                _mig = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mig)
+                _chunks, _o, _a = _mig.collect(src_index.read_text(encoding="utf-8"))
+                _sk = matches[0].get("key")
+                if (_chunks.get(_sk) or "").strip():
+                    print(
+                        f"  ⚠ legacy-CSS drop: source page '{_sk}' keeps its CSS in "
+                        f"{src_index.name}'s <head>, not in custom_css — this paste "
+                        f"brought the HTML but NOT the styling (the page will render "
+                        f"unstyled / overflow).\n"
+                        f"    → recover it via the import path (harvests head CSS, F-371):\n"
+                        f"        python3 {Path(__file__).parent.name}/import-html-slide.py "
+                        f"--key {_sk} {args.deck} {src_index}", file=sys.stderr)
+            except Exception:
+                pass                                # advisory only; never block paste
     return 0, deck
 
 

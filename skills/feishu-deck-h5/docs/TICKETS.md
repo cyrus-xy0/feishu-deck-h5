@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-371**
+> **下一可用号 = F-372**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-370 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-371 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -204,3 +204,13 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 - `render-deck.py`:6b 在**整 deck 视觉 pass**(`visual_full or not scope_pages`)时加 `--with-distribution` 并捕 `_merged_dist`;6c 有 `_merged_dist` 就**直接用**(不再 spawn 第二个 Chromium),`--visual` 等 6b 不跑的路径**回退**老的独立 spawn。
 
 **parity 闸**(用户要求):合并输出 vs 独立 `check-distribution.py` 在 67 页 deck 上 **66/66 signals 逐页全等**;新回归测试 `test_iteration_loop.py::test_f290_merged_distribution_matches_standalone` 锁死。实测全量渲染 **~5.9s → 4.48s(−24%,3 次 Chromium → 2)**;只帮全量路径(首渲 / framework 改 / `--final` / >4 页),scoped/no-op 路径不触发故不变。**120 测试全族零回归**(check_distribution/render_gate/golden/byte_rule/no_browser/audits/font_fingerprint/iteration/auto_scope/baseline/scope)。承 F-368/F-369,是「优化吧」三杠杆之二。④常驻 Chromium(跨渲染复用浏览器,省每 pass 372ms 冷启)是其自然延伸,排在其后。DONE 2026-06-23 | `assets/run-audits.py` / `assets/validate.py` / `deck-json/render-deck.py` / `deck-json/tests/test_iteration_loop.py`
+
+### F-371 — import-html-slide 回收 legacy 源的 head/合并 CSS(lift 不再丢样式)(2026-06-23)
+
+> 领号注:本工单原以 F-370 落地,推送时撞上并发 session 已占 F-370(PERF-B),改号 F-371。
+
+从一个 **legacy deck**（页面 CSS 放在 index.html 的 head/合并 `<style>`、按 `[data-page="N"]` 或 `[data-slide-key]` 编址，**不在 `custom_css`**）lift 一页时，`deck-cli paste`（只拷 deck.json 的 `custom_css`）和 `import-html-slide`（`extract_slide_frames` 只抓 `.slide-frame`、`_consolidate_slide_css` 只折叠 frame 内嵌 `<style>`）**都静默丢掉 head CSS** → 页面裸 HTML 渲染、版式塌、溢出画布。复盘实证:2026-06-22 ai-into-org 从 60 页 legacy deck lift 两页,各溢出 +696/+666px,被迫手写 extract+rescope 脚本绕了半小时。对症工具 `migrate-head-css-to-custom-css.py` 早已存在,只是没接进 lift 入口。
+
+修:① `import-html-slide.py` 新增 `_harvest_head_css(html)`(复用 migrate 的 `collect()`:按渲染 DOM 把 `[data-page=N]`→slide-key、带上被引用的 `@keyframes`),`main()` 对每个 source 跑一次、按**原始 slide-key** 对齐到各 frag,`insert_into_json(...,head_css_list=)` 在 build slide 时把 head CSS **verbatim** 注入 `custom_css`;render 时 `_css_utils.scope_selectors()` 重写 `[data-page=N]`、`render-deck` 从 `_orig_layout` 回吐 `data-layout`,故 `.slide[data-page="07"][data-layout="content-2col"]` 这类规则在 raw 包装上仍生效(**无需手动 rescope / 剥 data-layout**)。由 `consolidate_css`(`--no-consolidate-css` 退出)统一门控。② `deck-cli paste` 加 **legacy-CSS-drop 告警**:pasted 页 `custom_css` 空时 peek 源 sibling index.html,若 `collect()` 在其 head 找到该页 scoped CSS = 确凿丢样式 → 打印 ⚠ + 精确 import 补救命令(不再静默)。
+
+安全:新测 `test_import_head_css.py`(8 项:harvest 按原始 key 返回 / 带 `[data-layout]` 限定规则 / 拉 keyframes / 跳 framework 块 / 注入 `custom_css` + `_orig_layout` 保留 / `--no-consolidate-css` 不注入 / `None` 不崩)。端到端:把复盘那两页从 everbright index.html 经新路径 import,`custom_css` 自动填好(6455 / 4452 bytes)、render PASS、与源逐像素一致(不再需要手写脚本)。import/lift/paste/css 全族零回归(92 测试)。立项 = 用户「复盘」→「修复,然后提交到 main」。DONE 2026-06-23 | `deck-json/import-html-slide.py` / `deck-json/deck-cli.py` / `deck-json/tests/test_import_head_css.py`

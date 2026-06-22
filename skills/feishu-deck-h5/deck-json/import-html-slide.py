@@ -582,6 +582,47 @@ def _renumber_text_ids(html: str, new_slide_no: int) -> str:
     return out
 
 
+def _load_migrate_module():
+    """Load the migrate-head-css codemod (hyphenated filename → not importable by
+    name) so the import path can reuse its head-CSS harvester `collect()` and its
+    raw-inline `migrate_raw_inline()`. Cached on the function object."""
+    cached = getattr(_load_migrate_module, "_mod", None)
+    if cached is not None:
+        return cached
+    import importlib.util
+    mp = HERE / "migrate-head-css-to-custom-css.py"
+    spec = importlib.util.spec_from_file_location("_mig_css_imp", mp)
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+    _load_migrate_module._mod = mig
+    return mig
+
+
+def _harvest_head_css(html: str) -> dict:
+    """F-371: harvest per-slide CSS that lives in the SOURCE's head/consolidated
+    `<style>` (scoped by `[data-slide-key="K"]` or legacy `[data-page="N"]`) into a
+    `{original-slide-key: css}` map.
+
+    A page lifted from a LEGACY deck — one that kept its page CSS in index.html's
+    head instead of co-located in `custom_css` — otherwise arrives as bare HTML
+    (its classes unstyled) and renders collapsed / overflowing: `extract_slide_frames`
+    only pulls the `.slide-frame`, and `_consolidate_slide_css` only folds a `<style>`
+    EMBEDDED in that frame, so head-scoped CSS is silently dropped. This recovers it.
+
+    The CSS is returned VERBATIM (selectors unchanged). At insert it is seeded into
+    the new slide's `custom_css`; render-time `_css_utils.scope_selectors()` then
+    rewrites `[data-page=N]` → the slide-key scope, and `render-deck` re-emits
+    `data-layout` from the slide's `_orig_layout`, so a rule anchored on
+    `.slide[data-page="07"][data-layout="content-2col"]` still engages on the raw
+    wrapper. Reuses the migrate codemod's `collect()`; never raises into import."""
+    try:
+        chunks, _orphans, _skipped_at = _load_migrate_module().collect(html)
+        return chunks
+    except Exception as e:                       # best-effort recovery; never block
+        _warn(f"head-CSS harvest skipped: {e}")
+        return {}
+
+
 def _consolidate_slide_css(slide: dict) -> None:
     """F-347: fold a freshly-imported raw slide's embedded <style> into its
     custom_css (the single-source home that round-trips + wins the cascade
@@ -589,11 +630,7 @@ def _consolidate_slide_css(slide: dict) -> None:
     a stray embedded block. Reuses the migrate codemod's per-slide core; no-op if
     the fragment has no <style>. Never raises into the import path."""
     try:
-        import importlib.util
-        mp = HERE / "migrate-head-css-to-custom-css.py"
-        spec = importlib.util.spec_from_file_location("_mig_css_imp", mp)
-        mig = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mig)
+        mig = _load_migrate_module()
         for key, n, _b in mig.migrate_raw_inline({"slides": [slide]}, dry_run=False):
             _info(f"folded {n} embedded <style> → custom_css (single-source home)")
     except Exception as e:                       # never block an import on this
@@ -602,7 +639,8 @@ def _consolidate_slide_css(slide: dict) -> None:
 
 def insert_into_json(deck_path: Path, fragments: list[str], position: int,
                      lifted: bool = True, allow_unsynced: bool = False,
-                     force: bool = False, consolidate_css: bool = True) -> tuple[Path | None, str | None]:
+                     force: bool = False, consolidate_css: bool = True,
+                     head_css_list: list | None = None) -> tuple[Path | None, str | None]:
     """Splice imported slides into deck.json with the validated-write contract.
 
     Returns (bak, orig_text) so the caller can `restore_deck` the SSOT if a LATER
@@ -684,6 +722,18 @@ def insert_into_json(deck_path: Path, fragments: list[str], position: int,
         # out when the user wants the slide treated as native + fully re-gated.
         if lifted:
             new_slide["lifted"] = True
+        # F-371: a page lifted from a LEGACY deck keeps its CSS in the SOURCE's
+        # head/consolidated <style> (not co-located in custom_css), so the frag
+        # alone is unstyled → collapses / overflows. main() harvested that head
+        # CSS aligned to each frag; seed it into custom_css here (VERBATIM —
+        # render-time scope_selectors rescopes [data-page=N] and _orig_layout
+        # re-emits data-layout so a [data-page][data-layout] rule still engages).
+        head_css = head_css_list[offset] if (head_css_list and offset < len(head_css_list)) else None
+        if consolidate_css and head_css and head_css.strip():
+            existing = new_slide.get("custom_css", "") or ""
+            new_slide["custom_css"] = (existing + "\n" + head_css) if existing.strip() else head_css
+            _info(f"recovered {len(head_css)} chars of head/consolidated CSS → "
+                  f"custom_css ({new_key})")
         # F-347: converge per-page CSS to its single home AT IMPORT (prevention),
         # so a lifted page never arrives with an embedded <style> that later
         # silently overrides custom_css edits. --no-consolidate-css opts out.
@@ -818,10 +868,12 @@ def main(argv=None) -> int:
                     help="Do NOT copy + rewrite the slide's local assets into the "
                          "target deck (leave refs as-authored).")
     ap.add_argument("--no-consolidate-css", action="store_true",
-                    help="F-347: do NOT fold the imported fragment's embedded "
-                         "<style> into custom_css (leave it embedded). By default "
-                         "it IS folded so the page arrives with one CSS home and "
-                         "can't silently override later custom_css edits.")
+                    help="do NOT bring the imported page's CSS home into custom_css "
+                         "— opts out of BOTH F-347 (fold the frag's embedded <style>) "
+                         "AND F-371 (recover head/consolidated <style> CSS scoped by "
+                         "[data-page]/[data-slide-key] from a legacy source). By "
+                         "default both run so a lifted page arrives styled with one "
+                         "CSS home; with this flag a legacy page may render unstyled.")
     ap.add_argument("--force", action="store_true",
                     help="F-315: import even if the target's index.html carries "
                          "un-synced browser/hand edits (the clobber guard would "
@@ -907,6 +959,20 @@ def main(argv=None) -> int:
 
     accepted_frags = [f for f, _ in accepted]
 
+    # F-371: harvest each source's head/consolidated <style> CSS, aligned to each
+    # accepted frag by its ORIGINAL slide-key, so a page whose styling lives in a
+    # legacy head block (CSS not co-located in custom_css) arrives styled instead
+    # of unstyled + overflowing. Gated with the embedded-<style> consolidation
+    # (--no-consolidate-css opts out of both). Cached per source file.
+    head_css_list: list = []
+    if not args.no_consolidate_css:
+        _harvest_cache: dict = {}
+        for frag, src in accepted:
+            if src not in _harvest_cache:
+                _harvest_cache[src] = _harvest_head_css(src.read_text(encoding="utf-8"))
+            ok = slide_key_in(frag)
+            head_css_list.append(_harvest_cache[src].get(ok) if ok else None)
+
     # Pick position
     if mode == "A":
         deck = json.loads(target.read_text(encoding="utf-8"))
@@ -928,7 +994,7 @@ def main(argv=None) -> int:
         bak, orig_text = insert_into_json(
             target, accepted_frags, position,
             lifted=not args.no_lifted, allow_unsynced=args.force, force=args.force,
-            consolidate_css=not args.no_consolidate_css)
+            consolidate_css=not args.no_consolidate_css, head_css_list=head_css_list)
         rc = re_render(target)
         if rc != 0:
             # mutation-1: the spliced deck.json passed schema validation but the
