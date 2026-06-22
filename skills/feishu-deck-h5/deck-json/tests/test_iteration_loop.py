@@ -266,6 +266,79 @@ def test_iter_auto_scope_and_text_echo(tmp_path):
     assert r5.returncode == 0 and "--iter:" not in r5.stdout
 
 
+# ------------------------------------------------ F-368 · gate-fail sidecar ----
+def _playwright_ok():
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _floor_page(key, label):
+    # 16px real CJK sentence in a non-'body' class → passes the static ladder
+    # (16 is on the {16,24,28,48} tier) but fails the runtime R-VIS-BODY-FLOOR
+    # readability audit → a visual-only error that routes through _vis_block.
+    return {"key": key, "layout": "raw", "screen_label": label,
+            "data": {"html": '<div class="header"><h2 class="title-zh">Floor</h2>'
+                             '</div><div class="stage"><div class="readout">这是一'
+                             '段足够长的真正正文内容用于触发可读性地板审计它既不是'
+                             '标签也不是页眉</div></div>'},
+            "custom_css": f'.slide[data-slide-key="{key}"] .readout{{font-size:16px}}'}
+
+
+def _raw_page(key, label, text):
+    return {"key": key, "layout": "raw", "screen_label": label,
+            "data": {"html": f'<div class="header"><h2 class="title-zh">{text}</h2>'
+                             f'</div><div class="stage"><p class="body">正文内容'
+                             f' {text} 这里写得足够长以正常渲染</p></div>'}}
+
+
+def test_gate_fail_render_persists_sidecar_and_next_edit_auto_scopes(tmp_path):
+    # F-368 · a deck that FAILS the visual gate (rc=4 — the normal work-in-progress
+    # state) must STILL persist the auto-scope sidecar, with the erroring page
+    # poisoned. Before F-368 the sidecar was written only past every gate return,
+    # so such decks never got one → every render was a full whole-deck pass.
+    import pytest
+    if not _playwright_ok():
+        pytest.skip("Playwright/Chromium unavailable — visual gate cannot run")
+
+    # bootstrap a valid deck, then append 2 clean pages + 1 floor offender.
+    deck = tmp_path / "deck.json"
+    boot = subprocess.run([sys.executable, str(CLI), str(deck), "new-deck",
+                           "--title", "F368", "--author", "A", "--date", "2026-06-23"],
+                          capture_output=True, text=True)
+    assert boot.returncode == 0, boot.stdout + boot.stderr
+    d = json.loads(deck.read_text(encoding="utf-8"))
+    d["slides"].append(_raw_page("cleanx", "97 Clean", "Alpha"))
+    d["slides"].append(_floor_page("floorpg", "98 Floor"))
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    # runs/<ts>/output/ so the real delivery visual gate fires (not a smoke test).
+    out = tmp_path / "runs" / "20260101-f368" / "output"
+    out.mkdir(parents=True)
+
+    r1 = _render(deck, out)
+    assert r1.returncode == 4, "the floor page must block the visual gate\n" + r1.stderr
+    sidecar = out / ".slide-hashes.json"
+    assert sidecar.exists(), "F-368: a gate-fail render must still persist the sidecar"
+    cells = dict(json.loads(sidecar.read_text(encoding="utf-8"))["slides"])
+    assert cells["floorpg"] == "!unresolved-error", "the offender must be poisoned"
+    assert cells["cleanx"] != "!unresolved-error", "a clean page keeps its real hash"
+
+    # edit the CLEAN page → the next render must AUTO-SCOPE (not a full pass) and
+    # the still-erroring floor page must stay in scope (keeps re-auditing).
+    d = json.loads(deck.read_text(encoding="utf-8"))
+    for s in d["slides"]:
+        if s["key"] == "cleanx":
+            s["data"]["html"] = s["data"]["html"].replace("Alpha", "Alpha-EDIT")
+    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    r2 = _render(deck, out)
+    assert "scope=auto:" in r2.stderr, "auto-scope must engage now there is a sidecar\n" + r2.stderr
+    assert "AUTO-SCOPE: off" not in r2.stderr, "must not fall back to a full render"
+
+
 # ------------------------------------------------------------ W8 · asset ----
 def test_add_asset_places_and_compresses(tmp_path):
     try:

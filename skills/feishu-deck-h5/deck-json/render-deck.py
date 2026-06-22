@@ -2556,7 +2556,7 @@ def _static_engine_fingerprint() -> str:
     return _hash_files(list(_STATIC_ENGINE_ASSETS))
 
 
-def _sidecar_state(deck: dict) -> dict:
+def _sidecar_state(deck: dict, error_keys=frozenset()) -> dict:
     # ACTIVE slides only (`_disabled` skipped): list position i ↔ frame_index
     # i+1 — the SAME 1-based numbering --scope / URL #N / `deck-log snapshot
     # --slide N` use (main()'s render loop applies the same skip). The diff is
@@ -2567,20 +2567,31 @@ def _sidecar_state(deck: dict) -> dict:
     # mis-numbered any deck with a _disabled slide.)
     active = [s for s in deck.get("slides", []) if not s.get("_disabled")]
     _chrome, _structural = _meta_split(deck)
+    # F-368: a page carrying an UNRESOLVED error-level finding (its key in
+    # error_keys) is stored with a never-matching sentinel instead of its real
+    # hash, so the NEXT render always re-counts it dirty and RE-AUDITS it until
+    # it renders clean. This lets the sidecar be persisted on a gate-FAIL render
+    # whose output lands (so auto-scope engages for work-in-progress decks that
+    # return rc=4) WITHOUT ever letting an erroring page go quiet on a later
+    # scoped edit. `!` is not a hex digit → the sentinel can't equal a sha1.
+    def _cell(i, s):
+        k = s.get("key", f"#{i}")
+        return [k, "!unresolved-error" if k in error_keys else _slide_hash(s)]
     return {
         "schema": _SIDECAR_SCHEMA,
         "note": "iteration-loop auto-scope sidecar — per-slide content hashes "
-                "of the last successfully rendered deck.json, plus split "
-                "visual / static-engine fingerprints and field-level deck-meta "
-                "(F-335). --iter and the default-on auto-scope diff against this "
-                "to scope the gate / snapshot to changed pages. Auto-written by "
+                "of the last rendered deck.json (a page with an unresolved "
+                "error-level finding is stored as '!unresolved-error' so it "
+                "re-audits until clean — F-368), plus split visual / "
+                "static-engine fingerprints and field-level deck-meta (F-335). "
+                "--iter and the default-on auto-scope diff against this to scope "
+                "the gate / snapshot to changed pages. Auto-written by "
                 "render-deck.py; do not hand-edit.",
         "meta_chrome": _chrome,
         "meta_structural": _structural,
         "visual_fp": _visual_fingerprint(deck),
         "engine_fp": _static_engine_fingerprint(),
-        "slides": [[s.get("key", f"#{i}"), _slide_hash(s)]
-                   for i, s in enumerate(active)],
+        "slides": [_cell(i, s) for i, s in enumerate(active)],
     }
 
 
@@ -3311,11 +3322,40 @@ def main(argv=None) -> int:
         render never leaves a worse file on disk than the validated one that was
         there before. A FRESH render (no prior good file) leaves its output in
         place unchanged — matching the long-standing behaviour, and nothing is
-        lost since there was no validated version to clobber."""
+        lost since there was no validated version to clobber.
+
+        Returns True if a prior version was restored (on-disk index.html now
+        reflects the PRIOR deck), False if this was a fresh render whose output
+        stays in place (on-disk index.html reflects the CURRENT deck) — the caller
+        uses this to decide whether the auto-scope sidecar may record THIS deck."""
         if _index_bak is not None and _index_bak.exists():
             os.replace(_index_bak, out_html)   # atomic restore
             print("\n已回滚到上一版 index.html(本次 render 未通过闸门)。",
                   file=sys.stderr)
+            return True
+        return False
+
+    def _write_sidecar(error_keys=frozenset()):
+        """F-368 · auto-scope sidecar — written whenever THIS render's index.html
+        LANDS on disk: a clean gate pass, OR a gate-FAIL whose fresh output stays
+        (no prior to roll back to). Before F-368 the sidecar was written ONLY past
+        every gate `return 4`, so any deck returning rc=4 (any unresolved finding —
+        the normal work-in-progress state) never persisted one; with no sidecar the
+        next render is treated as a first render → full whole-deck pass, so F-310
+        auto-scope never engaged for exactly the decks edited most. Pages still
+        carrying an error (error_keys) are recorded poisoned so they keep being
+        re-audited until clean (see _sidecar_state). Hash the deck AS RE-READ FROM
+        DISK — the in-memory object is normalized / enriched during render, so
+        hashing it would mismatch the next load and silently force --iter to full.
+        Same never-break policy as the baseline."""
+        try:
+            _disk_deck = json.loads(args.deck.read_text(encoding="utf-8"))
+            (args.output_dir / _SIDECAR_NAME).write_text(
+                json.dumps(_sidecar_state(_disk_deck, error_keys),
+                           ensure_ascii=False, indent=1) + "\n",
+                encoding="utf-8")
+        except Exception:
+            pass
 
     atomic_write_text(out_html, final, encoding="utf-8")
 
@@ -3357,6 +3397,14 @@ def main(argv=None) -> int:
         _geom_block = False
         _dist_block = False
         _vis_block = False
+        # F-368: 1-based page numbers carrying a BLOCKING finding this render
+        # (collected by the advisory below) → recorded poisoned in the sidecar so
+        # they re-audit until clean, even if the gate-fail sidecar lands.
+        _unresolved_pages: set = set()
+        # F-368: when the visual engine couldn't run at all (Playwright down) we
+        # know NO page's true state, so a landed gate-fail must NOT write a sidecar
+        # (it would falsely hash every page "clean"). Set by the advisory below.
+        _engine_down = False
         _baseline_ready = False    # F-302: did the visual advisory produce a
         _baseline_now = []         # findings snapshot we can persist on success?
         # F-255: the delivery gate must be a PATH/FLAG INVARIANT, not something
@@ -3743,6 +3791,13 @@ def main(argv=None) -> int:
                 # rolls back index.html, so its findings never become baseline.
                 _baseline_now = [_finding_fp(f) for f in _vis_errors + _geom]
                 _baseline_ready = True
+                # F-368: poison ONLY pages with a BLOCKING finding (_vis_errors +
+                # _geom). The F-292-exempt dead-code hygiene rules (R-VIS-DEAD-*)
+                # are deliberately NOT included — they don't gate delivery, so a
+                # deck full of advisory dead rules can still auto-scope. A poisoned
+                # page re-audits every render until it renders clean.
+                _unresolved_pages |= {f.get("slide") for f in (_vis_errors + _geom)
+                                      if isinstance(f.get("slide"), int)}
                 if _geom and not os.environ.get("DECK_ALLOW_GEOM_OVERFLOW"):
                     print("\n❌ BLOCKING · geometry breakage (content clipped / "
                           "spilled past its box / overlapping a sibling — real "
@@ -3863,6 +3918,11 @@ def main(argv=None) -> int:
                 f"geometry={_gc_geometry} distribution={_gc_distribution} "
                 f"scope={_gc_scope}", file=sys.stderr)
 
+        # F-368: pages with an unresolved error this render, as KEYS — passed to
+        # _write_sidecar() on a landed gate-fail so they re-audit until clean.
+        _err_keys = frozenset(
+            k for k in (_fi2key.get(p) for p in _unresolved_pages) if k)
+
         if _static_rc != 0:    # F-319: scope-demoted on --scope (see above)
             print(file=sys.stderr)
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)
@@ -3883,7 +3943,13 @@ def main(argv=None) -> int:
                   "DECK_ALLOW_NO_VISUAL=1 (ship without the visual gate).",
                   file=sys.stderr)
             _print_gate_coverage()
-            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
+            # F-368: a FRESH render that stays on disk records its sidecar (the
+            # erroring pages poisoned) so the next edit can auto-scope; a rollback
+            # leaves the PRIOR deck on disk, whose own sidecar already stands.
+            # Skip when the engine was DOWN — with no findings we can't tell which
+            # pages are clean, so hashing them would silently mark them audited.
+            if not _rollback_index_html() and not _engine_down:
+                _write_sidecar(_err_keys)
             return 4
 
         if _geom_block:
@@ -3894,7 +3960,8 @@ def main(argv=None) -> int:
                   "spilling/overlapping element, or set DECK_ALLOW_GEOM_OVERFLOW=1 if "
                   "it is genuinely intentional.", file=sys.stderr)
             _print_gate_coverage()
-            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
+            if not _rollback_index_html():   # F-368: fresh stay → record sidecar
+                _write_sidecar(_err_keys)
             return 4
 
         if _dist_block:
@@ -3943,20 +4010,10 @@ def main(argv=None) -> int:
             except Exception:
                 pass   # baseline bookkeeping must never break a render
 
-        # W3 · auto-scope sidecar — written on EVERY successful render (we're
-        # past every gate `return 4`), so the next --iter has fresh hashes even
-        # after a full/--final render. Hash the deck AS RE-READ FROM DISK — the
-        # in-memory object is normalized/enriched during render (deck_id stamp,
-        # injected defaults), so hashing it would mismatch the next load and
-        # silently force --iter back to full every time. Same never-break
-        # policy as the baseline.
-        try:
-            _disk_deck = json.loads(args.deck.read_text(encoding="utf-8"))
-            (args.output_dir / _SIDECAR_NAME).write_text(
-                json.dumps(_sidecar_state(_disk_deck), ensure_ascii=False,
-                           indent=1) + "\n", encoding="utf-8")
-        except Exception:
-            pass
+        # W3 · auto-scope sidecar — gate passed, so this index.html lands clean
+        # (no poisoned pages). A gate-FAIL whose fresh output stays records its own
+        # sidecar at each `return 4` above (F-368). See _write_sidecar().
+        _write_sidecar()
 
     # F-269: gate passed (or was skipped via --skip-validate-html) — the new
     # index.html is the one we keep, so drop the pre-render backup. We're past

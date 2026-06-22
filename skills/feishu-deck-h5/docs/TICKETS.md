@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-368**
+> **下一可用号 = F-369**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-366 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-368 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -172,3 +172,14 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 - `deck-cli.py` 加 `new-deck --title/--author/--date [--cover-title/--customer-slug/--presentation-date/--language]`:吐一个合法 deck.json(deck meta + 一张 cover),`mkdir -p` 父目录,存在则拒覆盖(`--force` 绕过),并把封面标题里的字面 `<br>` 归一成 `\n`。测试 `test_deck_cli_smoke.py::DeckCliNewDeckTest`(4 例,全绿)。
 - `deck-schema.json` `data_cover.title` + `references/layout-recipes.md`:把「`<br>` is allowed」改为「换行用 `\n`、字面 `<br>` 是转义字段会触发 R-ESC-HTML」。
 - `references/raw-page-quickstart.md`:钉死 raw `.header` eyebrow 契约(首子节点 `column-reverse` / 现成 `.eyebrow` 类 / 要 kicker 在标题上方的两种正解)+ 新增「起一个新 deck」命令配方 + 「schema 布局 data 字段速查」表(免整读 schema)。
+
+### F-368 — auto-scope sidecar 在 gate-fail 渲染也落盘(work-in-progress deck 终于能增量)(2026-06-23)
+
+复盘用户「这技能还是慢了很多」。root cause **不是**「视觉每渲必跑」(F-255/256 那条已被 F-310 默认 auto-scope 补救),而是 **auto-scope sidecar (`.slide-hashes.json`) 只在「过了所有 gate `return 4`」之后才写**(render-deck.py 旧注释自陈「written on EVERY *successful* render」)。于是**任何 rc=4 的 deck**(带任一未修 finding = 正在做的 deck 的常态)永远不落 sidecar → 下次渲染被当「首渲(no sidecar)」→ `visual_full=True` 全量 ~5.4s whole-deck pass。F-310 的增量对**编辑最频繁的那批 deck 从未生效**。实测 67 页 deck:首渲 / 无改动重渲 / 任意编辑全是 ~5.4s(3 次 Chromium 冷启重载同一 HTML)。
+
+修(`deck-json/render-deck.py`):
+- 抽出 `_write_sidecar(error_keys)`,在 index.html **落盘**时即写 sidecar(gate pass,**或** gate-fail 但 fresh 输出留在盘上=无可回滚),不再只在全过 gate 后写。`_rollback_index_html()` 改为返回是否真回滚(回滚=盘上已是上一版、其 sidecar 已成立 → 不覆盖)。
+- 安全(不让真错消音):带未修 **blocking** finding(`_vis_errors + _geom`;F-292 豁免的死代码 advisory **不计入**)的页在 sidecar 里记成哨兵 `!unresolved-error`(`!` 非 hex,永不等于真 sha1)→ 下次必判 dirty、必重审,直至真渲干净。所以「gate-fail 也落 sidecar」绝不让某页真错在后续 scoped 编辑里**消音**。engine-down(Playwright 挂)不写(无 findings = 不知哪页干净);static-gate fail 仍不写(静态错不在 blocking 集)。
+- 净效果:带少量 blocking 错的 deck,编辑别的页现在 auto-scope 到 {改动页 ∪ 仍错页},不再全量。实测 near-clean deck:render2 从 full → `scope=auto:2,4`(visual scoped + distribution skipped);43 页全坏的 stress deck 仍正确全量(>4 dirty 不 scope)。
+
+测试:`test_auto_scope.py::SidecarPoisonTest`(5,纯 helper:哨兵存储 / 重审 / 自清 / 改+错并存)+ `test_iteration_loop.py::test_gate_fail_render_persists_sidecar_and_next_edit_auto_scopes`(集成,Playwright-gated:rc=4 仍落 sidecar + 下次 auto-scope)。auto-scope / iteration / atomic / baseline 全族零回归。立项 = 用户「还是慢了很多,帮我做性能优化建议」→「优化吧」。**注:这是 F-290(6b/6c Playwright 会话合并,DEFERRED)的正交前置** —— 本工单不动浏览器会话数,只让 F-310 对 WIP deck 真正生效;`--final` 仍是全量交付闸。DONE 2026-06-23 | `deck-json/render-deck.py` / `deck-json/tests/test_auto_scope.py` / `deck-json/tests/test_iteration_loop.py`

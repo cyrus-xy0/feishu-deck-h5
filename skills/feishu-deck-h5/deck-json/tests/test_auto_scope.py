@@ -277,5 +277,64 @@ class AutoScopeDecisionTest(unittest.TestCase):
         self.assertEqual(len(dec["content_dirty"]), rd.AUTO_SCOPE_MAX_PAGES + 3)
 
 
+class SidecarPoisonTest(unittest.TestCase):
+    """F-368 · a page with an unresolved BLOCKING finding is recorded with a
+    never-matching sentinel ("poisoned") so it re-audits every render until it
+    renders clean. This is what lets the sidecar be persisted on a gate-FAIL
+    render (so work-in-progress decks auto-scope) WITHOUT an erroring page going
+    quiet on a later scoped edit."""
+
+    def setUp(self):
+        import tempfile
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_error_keys_stored_poisoned_clean_pages_real(self):
+        st = rd._sidecar_state(_deck(3), error_keys={"p2"})
+        cells = dict(st["slides"])
+        self.assertEqual(cells["p2"], "!unresolved-error")
+        self.assertNotEqual(cells["p1"], "!unresolved-error")
+        self.assertNotEqual(cells["p3"], "!unresolved-error")
+        # the sentinel can never collide with a real sha1 hex digest
+        self.assertFalse(all(c in "0123456789abcdef" for c in cells["p2"]))
+
+    def test_no_error_keys_is_the_plain_state(self):
+        self.assertEqual(rd._sidecar_state(_deck(3)),
+                         rd._sidecar_state(_deck(3), error_keys=frozenset()))
+
+    def test_poisoned_page_re_audits_even_when_unchanged(self):
+        # sidecar written by a gate-FAIL render where p2 had a blocking error;
+        # the NEXT render changes NOTHING yet p2 must still re-audit (dirty),
+        # while the clean pages p1/p3 stay out of scope.
+        deck = _deck(3)
+        sp = self.tmp / rd._SIDECAR_NAME
+        sp.write_text(json.dumps(rd._sidecar_state(deck, error_keys={"p2"})),
+                      encoding="utf-8")
+        dec = rd._auto_scope_decision(deck, sp)
+        self.assertEqual(dec["content_dirty"], [2], dec["reason"])
+
+    def test_poison_clears_once_the_page_renders_clean(self):
+        # once p2 renders clean it is recorded with its real hash → no re-audit.
+        deck = _deck(3)
+        sp = self.tmp / rd._SIDECAR_NAME
+        sp.write_text(json.dumps(rd._sidecar_state(deck, error_keys=frozenset())),
+                      encoding="utf-8")
+        self.assertEqual(rd._auto_scope_decision(deck, sp)["content_dirty"], [])
+
+    def test_poisoned_plus_edited_page_both_scoped(self):
+        # the real iteration case: p2 still erroring (poisoned) AND p3 edited →
+        # both land in scope so the fix never drops the open error.
+        deck = _deck(3)
+        sp = self.tmp / rd._SIDECAR_NAME
+        sp.write_text(json.dumps(rd._sidecar_state(deck, error_keys={"p2"})),
+                      encoding="utf-8")
+        deck2 = copy.deepcopy(deck)
+        deck2["slides"][2]["data"]["html"] = "<p>edited</p>"   # p3
+        self.assertEqual(rd._auto_scope_decision(deck2, sp)["content_dirty"], [2, 3])
+
+
 if __name__ == "__main__":
     unittest.main()
