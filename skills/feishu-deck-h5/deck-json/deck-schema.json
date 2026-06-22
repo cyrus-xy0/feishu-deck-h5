@@ -660,7 +660,7 @@
       "required": ["title", "author", "date"],
       "additionalProperties": false,
       "properties": {
-        "title":    { "type": "string", "minLength": 1, "description": "Can contain \\n for hard line break. <br> is allowed (cover is HERO_TITLE)." },
+        "title":    { "type": "string", "minLength": 1, "description": "Can contain \\n for hard line break. Do NOT put a literal <br> here — the cover title is an ESCAPED field, so a literal <br> renders escaped and trips R-ESC-HTML at render time. The renderer converts a newline escape into <br>; deck-cli new-deck auto-normalises a literal <br> for you." },
         "author":   { "type": "string", "minLength": 1, "description": "Initiator's personal name (NOT team/department)." },
         "date":     { "type": "string", "minLength": 1, "description": "Display date, e.g. '2026.05.20' or '客户提案 · 2026 Q2'." },
         "subtitle": { "type": "string", "description": "OPT-IN bilingual EN subtitle. Default is OMIT." }

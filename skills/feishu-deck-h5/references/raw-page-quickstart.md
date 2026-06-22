@@ -31,9 +31,15 @@
 
 ## raw 页 5 条铁律
 
-1. **框架不给 raw 页渲 `.header`** → 自己写标题元素(约定起点:绝对定位 `top:61 left:73`,
-   `#fff`,`600 48px/1.1 var(--fs-font-cjk)`)。自绘标题后 R-VIS-TITLE-POSITION(只看
-   `.header` 的 bbox)自动跳过,不必隐藏什么。
+1. **raw 页标题:用框架 `.header` 即得 master 定位,但首子节点有隐藏契约——别撞它。**
+   `<div class="header">` 自动拿到 master 坐标(`top:61 left:73 right:320`);其内 `.title-zh`/`h2`
+   自动 `48px #fff 600`、`.page-sub` 自动 `28px #fff`(都不必自己写)。**坑:框架把 `.header` 的
+   **首个 `<div>` 子节点**设成 `flex-direction:column-reverse`(eyebrow-wrapper:DOM 里 eyebrow 在前、
+   视觉落到标题下),且有现成 `.eyebrow` 类(`--fs-accent` 橙、letter-spacing)。** 想要 kicker/eyebrow
+   在标题**上方**:**别自创类当首子节点**(会继承 column-reverse → 内容被水平居中,这是真踩过的坑)——
+   要么用框架结构 `<div><span class="eyebrow">…</span><h2 class="title-zh">…</h2></div>`(eyebrow 落标题下),
+   要么显式覆盖 `.slide[data-slide-key=K] .header>div:first-child{flex-direction:row}` 再自定 kicker 类。
+   自绘标题后 R-VIS-TITLE-POSITION(只看 `.header` bbox)自动跳过。
 2. **一切 CSS scope 到 `.slide[data-slide-key="K"] …`**,别裸选择器(keyframe 是全局的,
    选择器不是——裸选择器会跨页泄漏)。
 3. **焦点闸 R-FOCAL**:≥3 个元素并列共享**全页最大字号**才告警。把 48px 只给该给的
@@ -66,6 +72,34 @@
 - **进入自动重播,别手写**:翻进某页时框架自动重启该页的有限 CSS 动画(排除框架 `fs-*` 与 infinite 循环)、
   `<video>` 与内嵌 `<iframe>`(整体重载)——is-current 包裹仍推荐(隐藏页不空跑),但"重播"不依赖它。
   首屏落地页不重播。可交互 / 重型 embed 用 `data-no-restart` 关掉。详见 `motion-system.md` §2b。
+
+## 起一个新 deck(别读 schema、别手搓骨架)
+
+```bash
+python3 deck-json/deck-cli.py <new-dir>/deck.json new-deck \
+  --title "标题" --author "杰森" --date "2026.06.23" \
+  [--cover-title "第一行<br>第二行"] [--customer-slug slug] [--presentation-date 2026-06-23]
+```
+
+吐一个**合法 deck.json**(deck meta + 一张 cover)。**别再读 1200 行 schema、别手搓骨架 + cp。**
+封面标题里写 `<br>` 会被自动转成换行(封面是转义字段,字面 `<br>` 会触发 R-ESC-HTML)。
+之后用 `insert <pos> raw <key>` + `set-page` 加正文页。
+
+### schema 布局 data 字段速查(免读 schema)
+
+**raw-unless-ceremonial(F-305):正文页一律 `layout:"raw"`,只有仪式页用 schema 布局。** 仪式页字段:
+
+| layout | data 必备字段 |
+|---|---|
+| `cover` | `title` · `author` · `date`(`title` 多行用换行,别字面 `<br>`) |
+| `section` | `chapter_num`(如 `"02."` 带句点) · `title`(+ `lede?` / `pills?` / `parent_label?`) |
+| `agenda` | `items[]`(每项 `title_zh`;+ `title?` / `active?`) |
+| `quote` | `quote{lead,accent,tail}` · `attribution`(+ `title?`) |
+| `end` | 无必备(`data` 可省) |
+| `raw` | `html`(≥10 字符;bespoke CSS 放 `custom_css`,**不在** `data` 里) |
+
+要更细的字段去 `deck-json/deck-schema.json` 的 `data_<layout>` 段——**grep 取单段,别整读**
+(`grep -n '"data_cover"' deck-schema.json` 再定向读那 ~12 行)。
 
 ## 插一页 / 改一页 · 三命令配方
 

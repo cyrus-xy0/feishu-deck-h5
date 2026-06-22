@@ -1589,6 +1589,54 @@ def cmd_render(deck_path: Path, args) -> int:
     return 5 if rc.returncode != 0 else 0
 
 
+def cmd_new_deck(args) -> int:
+    """Scaffold a NEW valid deck.json (deck meta + a cover slide) so a deck can be
+    started without hand-writing JSON or reading the 1200-line schema. The <deck>
+    path must not exist (unless --force). Defensive: a literal <br> in the cover
+    title is normalised to \\n — the cover title is an ESCAPED field, so a literal
+    <br> would render escaped and trip R-ESC-HTML at render time; \\n is the hard
+    line break the renderer turns into <br>."""
+    deck_path: Path = args.deck
+    if deck_path.exists() and not getattr(args, "force", False):
+        print(f"deck-cli: REFUSING new-deck — {deck_path} already exists "
+              f"(pass --force to overwrite).", file=sys.stderr)
+        return 1
+
+    cover_title = args.cover_title or args.title
+    for _br in ("<br>", "<br/>", "<br />"):
+        cover_title = cover_title.replace(_br, "\n")
+
+    deck_meta: dict = {"title": args.title, "author": args.author,
+                       "date": args.date, "language": args.language,
+                       "mode": "rewrite"}
+    if args.customer_slug:
+        deck_meta["customer_slug"] = args.customer_slug
+    if args.presentation_date:
+        deck_meta["presentation_date"] = args.presentation_date
+
+    deck = {
+        "version": "1.0",
+        "deck": deck_meta,
+        "slides": [
+            {"key": "cover", "layout": "cover", "screen_label": "01",
+             "data": {"title": cover_title, "author": args.author,
+                      "date": args.date}},
+        ],
+    }
+
+    deck_path.parent.mkdir(parents=True, exist_ok=True)
+    ok = write_deck_with_validation(deck_path, deck, "new-deck", True,
+                                    expected_mtime=None, force=True)
+    if not ok:
+        return 3
+    print(f"deck-cli: ✓ scaffolded new deck → {deck_path}")
+    print(f"  deck:   {args.title}")
+    print(f"  slides: 1 (cover · {args.author} · {args.date})")
+    print("  next:   add raw body pages — `insert <pos> raw '' <key>` then "
+          "`set-page <key> --html f.html --css f.css`")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # CLI dispatch
 # ---------------------------------------------------------------------------
@@ -1720,7 +1768,32 @@ def main(argv=None) -> int:
                     help="output filename (default: source name; extension "
                          "follows the chosen format)")
 
+    sp = sub.add_parser("new-deck",
+                        help="scaffold a NEW valid deck.json (deck meta + cover "
+                             "slide) — bootstrap a deck without hand-writing JSON "
+                             "or reading the schema. <deck> path must not exist.")
+    sp.add_argument("--title", required=True,
+                    help="deck title (also the default cover title)")
+    sp.add_argument("--author", required=True,
+                    help="cover 发起人 personal name (NOT team / department)")
+    sp.add_argument("--date", required=True,
+                    help="cover display date, e.g. '2026.06.23'")
+    sp.add_argument("--language", default="zh-only", choices=["zh-only", "zh-en"],
+                    help="deck language (default zh-only)")
+    sp.add_argument("--customer-slug", dest="customer_slug", default=None,
+                    help="lowercase-kebab slug for delivery filename / library id")
+    sp.add_argument("--presentation-date", dest="presentation_date", default=None,
+                    help="ISO YYYY-MM-DD for delivery filename")
+    sp.add_argument("--cover-title", dest="cover_title", default=None,
+                    help="override cover slide title (use \\n for a line break); "
+                         "defaults to --title. A literal <br> is auto-converted to \\n.")
+
     args = ap.parse_args(argv)
+
+    # new-deck scaffolds a fresh file → handle BEFORE the load step (there is no
+    # existing deck.json to read; cmd_new_deck builds + writes + validates one).
+    if args.cmd == "new-deck":
+        return cmd_new_deck(args)
 
     # 无感自动 backfill (spec §10 decision 3): paste into a LEGACY HTML-only deck
     # (no deck.json, but a sibling index.html) → reverse-build the deck.json 中间层

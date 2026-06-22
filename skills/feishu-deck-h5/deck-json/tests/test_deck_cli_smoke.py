@@ -411,5 +411,74 @@ class DeckCliGetPageTest(unittest.TestCase):
         self.assertIn("\n第二行", proc.stdout)
 
 
+class DeckCliNewDeckTest(unittest.TestCase):
+    """`new-deck` scaffolds a fresh, schema-valid deck.json (deck meta + a cover
+    slide) so a deck can be started without hand-writing JSON or reading the
+    1200-line schema. Also normalises a literal <br> in the cover title to a
+    newline — the cover title is an ESCAPED field, so a literal <br> would render
+    escaped and trip R-ESC-HTML at render time. F-367."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="deck-cli-newdeck-"))
+        # parent dir intentionally absent — new-deck must mkdir -p it
+        self.deck = self.tmp / "out" / "deck.json"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _new(self, *args) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(CLI), str(self.deck), "new-deck", *args],
+            capture_output=True, text=True,
+        )
+
+    def test_scaffolds_valid_deck_with_cover(self):
+        p = self._new("--title", "标题 X", "--author", "杰森", "--date", "2026.06.23")
+        self.assertEqual(p.returncode, 0, f"new-deck failed: {p.stderr}\n{p.stdout}")
+        self.assertTrue(self.deck.is_file(), "deck.json not created (parent auto-made?)")
+        deck = json.loads(self.deck.read_text(encoding="utf-8"))
+        self.assertEqual(deck["version"], "1.0")
+        self.assertEqual(deck["deck"]["title"], "标题 X")
+        self.assertEqual(len(deck["slides"]), 1)
+        cover = deck["slides"][0]
+        self.assertEqual(cover["layout"], "cover")
+        self.assertEqual(cover["data"],
+                         {"title": "标题 X", "author": "杰森", "date": "2026.06.23"})
+        lint = subprocess.run([sys.executable, str(CLI), str(self.deck), "lint"],
+                              capture_output=True, text=True)
+        self.assertEqual(lint.returncode, 0,
+                         f"scaffolded deck failed schema lint:\n{lint.stdout}")
+
+    def test_cover_title_literal_br_normalised_to_newline(self):
+        p = self._new("--title", "Deck", "--author", "A", "--date", "2026.06.23",
+                      "--cover-title", "第一行<br>第二行")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        title = json.loads(self.deck.read_text(encoding="utf-8"))["slides"][0]["data"]["title"]
+        self.assertEqual(title, "第一行\n第二行",
+                         "literal <br> in cover title should normalise to a newline "
+                         "(escaped field → a literal <br> trips R-ESC-HTML).")
+        self.assertNotIn("<br>", title)
+
+    def test_refuses_to_overwrite_without_force(self):
+        self.assertEqual(
+            self._new("--title", "A", "--author", "B", "--date", "2026.06.23").returncode,
+            0)
+        again = self._new("--title", "C", "--author", "D", "--date", "2026.06.23")
+        self.assertNotEqual(again.returncode, 0, "should refuse to overwrite existing deck")
+        self.assertEqual(
+            json.loads(self.deck.read_text(encoding="utf-8"))["deck"]["title"], "A",
+            "refused overwrite must leave the original deck intact")
+
+    def test_force_overwrites(self):
+        self._new("--title", "A", "--author", "B", "--date", "2026.06.23")
+        forced = subprocess.run(
+            [sys.executable, str(CLI), "--force", str(self.deck), "new-deck",
+             "--title", "C", "--author", "D", "--date", "2026.06.23"],
+            capture_output=True, text=True)
+        self.assertEqual(forced.returncode, 0, forced.stderr)
+        self.assertEqual(
+            json.loads(self.deck.read_text(encoding="utf-8"))["deck"]["title"], "C")
+
+
 if __name__ == "__main__":
     unittest.main()

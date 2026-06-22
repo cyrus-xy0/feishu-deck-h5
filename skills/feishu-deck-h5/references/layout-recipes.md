@@ -42,8 +42,12 @@ The cover is intentionally minimal: **title + initiator's personal name + date, 
 </div>
 ```
 
-Note: cover (and `image-text`, `end`) are HERO_TITLE_LAYOUTS — `<br>` is allowed
-inside their titles. The validator (R13) skips `<br>` checking on these three.
+Note: cover (and `image-text`, `end`) are HERO_TITLE_LAYOUTS — multi-line titles are
+allowed (R13 skips the single-line check on these three). The HTML above is the
+*rendered* output, where `<br>` is correct. But in **deck.json** `data.title` (a
+schema layout's escaped text field) use a newline escape for the break — the renderer
+emits `<br>`. A *literal* `<br>` in the JSON field renders escaped and trips
+**R-ESC-HTML**. (`deck-cli new-deck` auto-normalises a literal `<br>` to a newline.)
 
 Master pixel grid (1920×1080 design canvas):
 - Logo top-left: `120, 113` size `235×74` (color logo with petals + 飞书 wordmark — `lark-logo.png`)

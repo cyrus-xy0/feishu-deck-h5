@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-367**
+> **下一可用号 = F-368**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -164,3 +164,11 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 - **WONTFIX**:F-36/F-37(pptx 导出 / 托管创作面,见上表)
 - **DEFERRED**:F-290(见上行)· F-283 完整字体子集化(B 版,需用户先拍「换开源字体」授权决策)
 - **被证伪/已修正**:见报告 §4(16px 非全盲 / balanceSlide R-11 已重写 / 73vs96 混排不存在 等)
+
+### F-367 — `deck-cli new-deck` bootstrap + 封面 `<br>`/`\n` 文档矛盾修正(2026-06-22)
+
+复盘「封面 + lift 翻译一页」太慢的三个根因并修在技能里:① 起一个 deck.json 无一等命令 → 逼读 1200 行 schema + 读 fixture + 手搓骨架 + cp;② `layout-recipes.md` / `deck-schema.json` 写「cover 标题 `<br>` is allowed」,但 render 期 R-ESC-HTML 拦字面 `<br>`(只认 `\n`)→ 文档与校验自相矛盾、白渲一轮;③ raw 页 `.header` 首子节点被框架设 `flex-direction:column-reverse`(eyebrow-wrapper)的契约未文档化 → 自创 kicker 类作首子节点被居中、烧两轮。修:
+
+- `deck-cli.py` 加 `new-deck --title/--author/--date [--cover-title/--customer-slug/--presentation-date/--language]`:吐一个合法 deck.json(deck meta + 一张 cover),`mkdir -p` 父目录,存在则拒覆盖(`--force` 绕过),并把封面标题里的字面 `<br>` 归一成 `\n`。测试 `test_deck_cli_smoke.py::DeckCliNewDeckTest`(4 例,全绿)。
+- `deck-schema.json` `data_cover.title` + `references/layout-recipes.md`:把「`<br>` is allowed」改为「换行用 `\n`、字面 `<br>` 是转义字段会触发 R-ESC-HTML」。
+- `references/raw-page-quickstart.md`:钉死 raw `.header` eyebrow 契约(首子节点 `column-reverse` / 现成 `.eyebrow` 类 / 要 kicker 在标题上方的两种正解)+ 新增「起一个新 deck」命令配方 + 「schema 布局 data 字段速查」表(免整读 schema)。
