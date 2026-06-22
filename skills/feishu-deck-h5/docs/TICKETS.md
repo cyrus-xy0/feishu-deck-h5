@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-366**
+> **下一可用号 = F-367**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-364 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-366 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -145,6 +145,7 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 | F-363 | **deck-cli 备份自动剪枝**:每次写盘留一个 `.bak-pre-*`,实测一个 deck 目录攒到 ~100。写后只保留最近 15 个(`prune_backups`,best-effort;刚写的 bak 最新→必留可回滚)。新测 2(剪到 15 / 不足不动)。 | `deck-json/deck-cli.py` / `deck-json/tests/test_skill_fixes_f360.py` |
 | F-364 | **letterbox 黑边根治(slide 根背景 → frame hoist)**:full-bleed 布局(raw/iframe-embed/canvas)的 custom_css 若把 `background` 画在 **slide 根**(`.slide{...}`),渲染器 scope 后特异度 (0,4,0) 与 F-318 `.slide-frame>.slide` 归零规则打平、且内联 `<style>` 源序在框架表之后 → **F-318 被击穿**:slide 自画 bg(16:9 裁切)+ frame 画 content-bg(视口裁切)在 slide↔letterbox 边界错位 = 顶部黑条;运行时 seam-fix `markBleedPanels` 只扫后代(`querySelectorAll('*')`)不含根、亦漏。修 = 渲染期 `promote_root_bg_to_frame`(`_inject_custom_css` 仅对 full-bleed 布局调用):把 slide 根 `background*` **hoist 到 `.slide-frame`(present 单层铺满 letterbox+slide 无缝)+ 保留在 slide(scroll)**——正是 `feishu-deck.css ~L238` 钦定「bespoke full-bleed bg 设在 .slide-frame」写法的自动化;非 bg 声明留在 slide、后代/`.slide-frame`/reset-bg(none/transparent)不动、幂等(产物选择器带 `[data-slide-key=]` 故 scope 原样放行且不再命中根)。作者继续写直觉的 `.slide{background}` 即正确。立项 = 齐鲁 #8/#9「8 和 9 上面还是有黑边」复盘。新测 12(`test_css_utils.py`)+ golden/render/scope 全族零回归;合成 raw 页 16:10 顶边量化统一无缝。DONE 2026-06-22 | `deck-json/_css_utils.py` / `deck-json/render-deck.py` / `deck-json/tests/test_css_utils.py` |
 | F-365 | **render-deck `--shoot`:audit + 截图并发**:`--shoot` 单页核验过去**顺序**冷启两次 Chromium(`validate --visual` 审计 → `shoot-page` 截图),两者互不依赖(都只读渲染后 HTML,审计不写、截图只写 PNG)→ 改成两个 `Popen` 同时起、再各自 `communicate` 收集,墙钟从 audit+shot 降到 ≈max(audit,shot)。实测一次 scoped `--shoot` ~20s→~8s,砍掉每次 edit→看图循环的一半。`timeout=180`+`kill` 兜底防挂。立项=用户连续多轮「太慢」复盘(承 F-360/F-361)。 | `deck-json/render-deck.py` |
+| F-366 | **资产臃肿交付闸 `check-asset-weight.py`(advisory)**:复盘「deck 发布 314MB、没视频却这么大」——root cause = ① 3 页用 `<iframe>` 嵌入**整个源 deck**(qilu/weichuan 各 56-58MB,只为显示一两页)② 单页超大未压缩原图(qilu-src-slide-065 一页 44.6MB = 三张 12MB PNG)③ 36MB 字体 + 27MB 没用上的视频等孤儿。新增纯 stdlib 工具(`os/re`、无浏览器、快),审计渲染后 deck 的**实际引用资产 + 文件夹真实体积**:`OVERSIZED`(引用的图/视频 >2MB → 压到 ≤1920px/JPG 或降码率)/ `EMBED`(iframe 指向文件夹 >5MB 的本地子 deck → 该页静态化成截图)/ `ORPHAN`(资产目录里 >1MB 无人引用 → 删)/ `HEAVY`(交付文件夹去 dev/meta 后 >120MB)。`render-deck` digest 末尾非阻塞打一行 compact advisory(`[asset-weight]`,不影响 exit code,模型自检用);`check-asset-weight.py <out> [--strict]` 出全报告 + 逐项修法,`--strict` 硬闸(exit 11)。立项 = 用户「300MB 太不合理,应作为检查项从技能层面避免」。新测 9(`test_check_asset_weight.py`)。DONE 2026-06-22 | `deck-json/check-asset-weight.py` / `deck-json/render-deck.py` / `deck-json/tests/test_check_asset_weight.py` |
 
 ## 已裁决(WONTFIX / DONE)
 

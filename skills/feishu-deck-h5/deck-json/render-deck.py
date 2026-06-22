@@ -4079,6 +4079,20 @@ def main(argv=None) -> int:
               f"(单一真源,随 deck.json round-trip;避免跨页 selector 泄漏 / 膨胀无预算)。",
               file=sys.stderr)
 
+    # F-366 · asset-bloat advisory (NON-BLOCKING — never affects exit code). The
+    # "deck published at 300MB with no video" trap: raw uncompressed images, a whole
+    # source sub-deck embedded via <iframe>, orphan media. One-line digest here;
+    # `deck-json/check-asset-weight.py <out>` prints the full report + per-item fix.
+    try:
+        import importlib.util as _ilu
+        _aw_spec = _ilu.spec_from_file_location("_caw", HERE / "check-asset-weight.py")
+        _aw_mod = _ilu.module_from_spec(_aw_spec); _aw_spec.loader.exec_module(_aw_mod)
+        _aw_line = _aw_mod.format_report(_aw_mod.audit(str(args.output_dir)), compact=True)
+        if _aw_line:
+            print("\n" + _aw_line, file=sys.stderr)
+    except Exception:
+        pass
+
     # Accent review — for any content/story-case slide, print the highlighted
     # word so the author can eyeball that the right pivot is emphasized.
     sc_slides = [s for s in deck.get("slides", [])
