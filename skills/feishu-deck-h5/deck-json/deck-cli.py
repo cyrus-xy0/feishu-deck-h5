@@ -643,6 +643,15 @@ def cmd_set(deck: dict, args) -> tuple[int, dict | None]:
     _ostr, _nstr = repr(old), repr(value)
     print(f"    old: {_ostr if len(_ostr) <= 200 else _ostr[:200] + '…'}")
     print(f"    new: {_nstr if len(_nstr) <= 200 else _nstr[:200] + '…'}")
+    # L2 self-doc: surface the scoped verify next-step at point-of-use so a
+    # single-field edit isn't re-discovered or whole-deck-rendered.
+    _m = re.match(r"slides\.(\d+)\.", str(getattr(args, "path", "")))
+    if _m:
+        _pg = int(_m.group(1)) + 1
+        _deck = str(args.deck)
+        _out = _deck.rsplit("/", 1)[0] if "/" in _deck else "."
+        print(f"  → 验收(改一页别跑全 deck): python3 render-deck.py {_deck} {_out} "
+              f"--scope {_pg} --shoot", file=sys.stderr)
     return 0, deck
 
 
@@ -738,6 +747,12 @@ def cmd_set_page(deck: dict, args) -> tuple[int, dict | None]:
               f"`deck-cli.py <deck> consolidate-css --key {args.key}` (fold them "
               f"into custom_css → one home, predictable last-wins), or `!important`.",
               file=sys.stderr)
+    # L2 self-doc: scoped verify next-step at point-of-use.
+    _pg = idx + 1
+    _deck = str(args.deck)
+    _out = _deck.rsplit("/", 1)[0] if "/" in _deck else "."
+    print(f"  → 验收(改一页别跑全 deck): python3 render-deck.py {_deck} {_out} "
+          f"--scope {_pg} --shoot", file=sys.stderr)
     return 0, deck
 
 

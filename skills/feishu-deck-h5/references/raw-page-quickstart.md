@@ -110,3 +110,29 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
 - **recon 一把并行抓完**:上面常量已钉死,无需 grep CSS / 派 Explore / 逐个 `--help`。
 - **审稿只看整图**(1920×1080 那张),非歧义不逐块放大裁切。
 - **收尾小改并进主步**:screen_label 之类在 insert/set-page 时一起设,别单开一轮 render。
+
+## 改单值 / 换个色 / 调 embed 尺寸（EDIT 既有页 — 最高频，比插页更轻）
+
+> 改既有页的「一个字段」时别走 generation 级 recon：别 `json.load` 手猜形状（读用
+> `get-page <key|#N> --html/--css`）、别逐个 `--help`、别整页 `set-page`。下面是外科配方。
+> （2026-06-22 齐鲁 字号/颜色/demo 三连复盘补：三次都是改既有页单字段，却重新发现了一遍
+> CLI ——这些是固定常量，钉这里。）
+
+- **改一个标量值**（`fit_width` / 某颜色变量 / `accent` / 任一值）:
+  `deck-cli.py <deck.json> --yes set slides.<N-1>.<点路径> <值>`
+  —— 路径 **0-based**（页70 = `slides.69`）；值默认 JSON 化（`1500`→int）；强制字符串加 `--str`。
+- **只换某页整段 `custom_css` / `data.html`，且原样保住 `lifted` 溯源串 / `title` 等其它字段**:
+  `deck-cli.py <deck.json> --yes set slides.<N-1>.custom_css --from-file f.css`
+  —— `--from-file` = verbatim 读文件、不 JSON 化，专为大段 css/html，**只动这一个字段**。
+  `set-page` 是「整页 payload」入口（重写 html+css+title、按 `--lifted` 设 lifted 标记）——
+  单字段编辑别用它，会顺手动到你没想改的字段。
+- **iframe-embed demo「字太小 / 两侧留白」= 不要碰 `custom_css`，调 `data.fit_width`**:
+  `deck-cli.py <deck.json> --yes set slides.<N-1>.data.fit_width <原型设计宽>`
+  → 渲染器自动 `zoom = 1800 / fit_width`（fit_width 越小越放大、白边消失）。详见
+  `prototype-embed.md` F-314。设计宽 = 原型 `max-width`/容器宽（grep 一下）；别设到 < 其
+  `min-width` 否则塌版。
+- **改完一遍过验收**：`render-deck.py <deck.json> <out-dir> --scope <N> --shoot`
+  （渲 + 只校验第 N 页 + 截 `.shoot-pN.png`；既有 deck-wide 基线问题在 scoped 下自动降级、
+  不阻塞本页；别为一页改动跑 `--final` / 全 deck 渲）。
+- **嵌入的本地原型改完**：它是 iframe `src` 直接按相对路径加载的——改原型 `.html` 文件即生效，
+  **deck.json 没动就不必 re-render**；直接 shoot deck 页或刷新浏览器即可验。
