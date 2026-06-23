@@ -286,3 +286,25 @@ prompt 一旦提到某个 feishu-deck deck，它就从 `references/raw-page-quic
    完整片段示例。
 3. 它默认从 `~/.claude/skills/feishu-deck-h5/references/raw-page-quickstart.md`（标准 skill
    装机路径）读切片；skill 装在别处就改文件里的 `QS` 常量。路径不对时 hook 安全 no-op。
+
+### 8.4 Claude-Code 专属拦截 hook —— `feishu-deck-deny-extract.py`（**仅 CC 环境**）
+
+`assets/hooks/feishu-deck-deny-extract.py` 是一颗 **PreToolUse hook**（matcher `Bash`）：
+模型一旦想用临时 `json.load(...)` / `jq` **直接扒 deck.json**（反模式——猜 schema 形状、脆、
+也是再考古变慢的根因之一），它就 `deny` 并把 deck-cli 外科配方（`get-page` / `set` /
+`set --from-file`）塞回去。它**只拦 deck.json 是 json.load/jq 操作对象**的情况，不拦「命令串里
+别处提到 deck.json、而 json.load/jq 读的是另一个文件（如 pairs.json）」的 compound 命令；
+sanctioned 工具（`deck-cli` / `render-deck` / `deck-map` / `locate-slide` / `import-html-slide` /
+`extract-text-pairs` / `lift-to-new-deck` / `lift-translate-page`）一律放行（含其 JSON 输出管到 jq）。
+任何解析错误 → 安全放行（exit 0）。
+
+> ⚠️ 同样**仅 Claude Code**（PreToolUse 没有跨平台对应）。它是「写错路当下就拦」的即时纠偏，
+> 不是模型无关 floor——真正的 floor 是 deck.json schema 校验（render-deck/validate）。
+
+**在 Claude Code 环境安装该 hook：**
+
+1. 把 `assets/hooks/feishu-deck-deny-extract.py` 复制到 `~/.claude/hooks/`，并 `chmod +x`。
+2. 在 `~/.claude/settings.json` 注册为 PreToolUse hook（`matcher: "Bash"`，
+   `command: "python3 ~/.claude/hooks/feishu-deck-deny-extract.py"`）。文件头 docstring 有
+   完整片段示例。
+3. 确需跑 deck-cli 覆盖不了的跨页批量分析时，临时在 settings.json 关掉本 hook 再跑。
