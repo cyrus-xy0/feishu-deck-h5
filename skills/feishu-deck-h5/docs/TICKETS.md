@@ -1,6 +1,6 @@
 # 工单编号登记处 (TICKETS)
 
-> **下一可用号 = F-373**
+> **下一可用号 = F-374**
 >
 > ⚠️ **F-322 由一个并发 session 占用**(card-overflow 滚动 opt-out,其代码在 pending 线、未随本分支落地)。
 > F-323..F-333 = 2026-06-14 全量 code review 修复批次(已在 origin/main),明细见 `docs/CODE-REVIEW-2026-06-14.md`(每条 finding id 可追溯)。
@@ -9,7 +9,7 @@
 > **F-342 = 新 deck 复用某页一等命令 `lift-to-new-deck.py`**(已在 origin/main)。
 > **F-343 = delivery 打包快路径**(原在 scope 分支登记为 F-338,因与 perf 批次 F-338 撞号,合并时改号为 F-343;见「登记流水」末行)。
 
-这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-371 已分配
+这是 `feishu-deck-h5` skill **唯一**的工单编号登记处。F-255..F-373 已分配
 (F-295~F-299 为跳号空洞,作废勿用,见「登记流水」)。
 F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审计文档里
 (`docs/archive/` 下各 `AUDIT-*.md` / `*-GAP-*.md`),早期没有集中登记,因此存在
@@ -220,3 +220,13 @@ F-292 = F-256 视觉闸门调优(本轮用掉)。F-001..F-254 散落在历史审
 cinematic 渐变 accent 写法(`color:transparent` + `-webkit-background-clip:text` + 渐变 `background` → 字形由渐变上色、非 `color`)被 R-VIS-DIM-TEXT 读 `color`(computed→`rgba(0,0,0,0)`)算成 0% 有效亮度、误报「发灰看不清」,逼人给明明可见的文字加 `data-allow-dim-text` 压假警报(2026-06-22 ai-into-org 第 6 页实证)。修:R-VIS-DIM-TEXT 在读 color 前加 `background-clip:text` 守卫(查 prefixed + unprefixed,Chrome 两者别名),命中即跳过——字形由渐变上色,亮度启发式对它无意义。同步把该豁免登进 `validator-rules.md` 的 DIM-TEXT 条目。新回归测试 `test_vis_dim_text.py`(4 例:wired / 真·软白正文仍报 / 梯度文字静默 / opt-out 静默),**经反证锁死**:撤掉守卫后梯度用例 FAIL、精确复现 0% 误报。无 rule-set 变更(R-VIS-DIM-TEXT 早在 `business-rules.yaml` 注册,仅精修豁免)。
 
 顺带补 `references/raw-page-quickstart.md` 三处文档缺口:① 铁律#4 SVG `<text>` floor 补数字 **18px**(8+ 字 R-VIS-SVG-TEXT-FLOOR / 1–7 字 R-VIS-SHORT-LABEL-FLOOR);② EDIT 配方加「删绝对定位页整块 → 同一遍补回画布中心」(否则 R-VIS-CANVAS-CENTER 报偏移、白渲一轮);③ LIFT 配方跨语言拎页指向同日新增的 `lift-translate-page.py` 驱动。立项 = 用户「技能本身有优化空间么」→「1,2,3,4」全做。DONE 2026-06-23 | `assets/audits.js` / `references/validator-rules.md` / `references/raw-page-quickstart.md` / `deck-json/tests/test_vis_dim_text.py`
+
+### F-373 — deck-cli paste 告警「raw 化 schema 页」漂移(框架 [data-layout] CSS 随 lift 丢失)(2026-06-23)
+
+> 领号注:F-371 的姊妹篇。F-371 逮「CSS 留在源 `<head>`」的丢样式;本工单逮「CSS 随 `data-layout` 丢」的丢样式 —— 两者都让 lift 页静默塌版,F-371 测不到本例(CSS 在 data.html inline、不在 head)。
+
+`deck-cli paste` 把源 deck.json 的 slide 原样拷过来。但有一类页:**deck.json 写 `layout:raw`,而源 index.html 实际渲染成 schema 版式**(`data-layout=content-2col/3up/stats/…`)。这类页靠框架 `[data-layout=X]` 的 CSS(如 `.grid{display:grid}`)上版式 —— raw slide 不带 data-layout、那段框架 CSS 不生效,inline/custom_css 只带了页面自己的规则、没带框架的 → 新鲜渲染静默塌版/溢出。复盘实证:2026-06-23 ai-into-org 从 everbright(全 60 页是「全 raw 有损 backfill」)paste `feiling-product`,渲染溢出 +508px;调查发现 everbright 部署的 index.html 还停在老版 `data-layout=content-2col`(schema CSS 生效、看着好),deck.json 早被改 raw,paste 读 deck.json 拿到的是有损 raw 版。同类风险页 everbright 共 5 个(feiling / taste-shifts-3pains / everbright-retail-collab-6scenes / km-three-layers-story / four-extraction-measures-2)。
+
+修(`deck-cli.py::cmd_paste`,紧接 F-371 块):pasted 页 `layout==raw` 且其 data.html/custom_css **不含 `AUTO-INLINED` 标记**(即没被 `--shake` 内联过、非自包含)时,peek 源 sibling index.html 的该页 `data-layout`;若是 schema 版式 → 打印 ⚠ + 建议改用 `lift-slides --shake`(读渲染帧、内联框架 CSS),或手补 display 规则。advisory 永不阻塞;渲染期闸门仍是兜底(与 `63d3487`「drift = render-time diagnostic」lean 哲学一致 —— 这是零成本自动 advisory,不是用户 pre-paste 考古门)。
+
+安全:新测 `test_paste_schema_drift.py`(4 例:schema 渲染+未内联→WARN / raw 渲染→静默 / `--shake` 已内联→静默 / 无源 index.html→静默)。paste/lift/css 全族零回归。立项 = 用户「一起排查吧」→「小改动也执行吧」。DONE 2026-06-23 | `deck-json/deck-cli.py` / `deck-json/tests/test_paste_schema_drift.py`

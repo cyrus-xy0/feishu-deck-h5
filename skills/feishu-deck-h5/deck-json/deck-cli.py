@@ -1529,6 +1529,49 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
                         f"--key {_sk} {args.deck} {src_index}", file=sys.stderr)
             except Exception:
                 pass                                # advisory only; never block paste
+
+    # F-373: detect the raw-ified-schema drift trap (sibling of F-371). `paste`
+    # copies the source slide's deck.json layout verbatim — but a page the SOURCE
+    # RENDERS as a schema layout (data-layout=content-2col / 3up / stats / …) while
+    # its deck.json says `raw` relies on the framework `[data-layout=X]` CSS (e.g.
+    # `.grid{display:grid}`) that does NOT apply to a raw slide. The pasted inline /
+    # custom_css carries the page's OWN rules but not the framework's, so the layout
+    # silently collapses / overflows on render. (F-371 catches CSS dropped from the
+    # source <head>; THIS catches CSS dropped WITH the data-layout.) A page already
+    # `--shake`-inlined carries an `AUTO-INLINED from framework` marker → self-
+    # contained, skip it. Advisory only — never blocks; the render gate is the net.
+    _SCHEMA_LAYOUTS = {
+        "content-2col", "content-3up", "stats", "flow", "chart", "table",
+        "arch-stack", "image-text", "logo-wall", "timeline", "process",
+        "agenda", "big-stat", "section", "iframe-embed",
+    }
+    if slide.get("layout") == "raw":
+        _blob = (slide.get("data", {}).get("html", "") or "") + (slide.get("custom_css") or "")
+        if "AUTO-INLINED" not in _blob:
+            _si = src_path.parent / "index.html"
+            if _si.exists():
+                try:
+                    _sk = matches[0].get("key")
+                    _html = _si.read_text(encoding="utf-8")
+                    _tag = re.search(
+                        r'<div [^>]*data-slide-key="' + re.escape(_sk) + r'"[^>]*>', _html)
+                    _dl = re.search(r'data-layout="([^"]+)"', _tag.group(0)) if _tag else None
+                    _srcl = _dl.group(1) if _dl else None
+                    if _srcl in _SCHEMA_LAYOUTS:
+                        print(
+                            f"  ⚠ raw-ified-schema drift: source page '{_sk}' renders as "
+                            f"[data-layout={_srcl}] in {_si.name} but its deck.json layout is "
+                            f"'raw' — this paste brought the HTML but NOT the framework "
+                            f"[data-layout={_srcl}] CSS (e.g. .grid{{display:grid}}), so the "
+                            f"layout may collapse / overflow on render.\n"
+                            f"    → prefer a --shake lift (reads the rendered frame + inlines "
+                            f"that framework CSS):\n"
+                            f"        python3 assets/lift-slides.py {_si} --key {_sk} "
+                            f"{args.deck} --shake\n"
+                            f"    (or add the dropped display/layout rule to the slide's custom_css.)",
+                            file=sys.stderr)
+                except Exception:
+                    pass                            # advisory only; never block paste
     return 0, deck
 
 
