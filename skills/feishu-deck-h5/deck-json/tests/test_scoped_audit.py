@@ -60,7 +60,7 @@ def _run_main_capture_scope(monkeypatch, tmp_path, argv_extra):
     captured = {}
 
     def _fake_run_unified_audits(path, iss, *, dom_rules=True, scope=None,
-                                 want_screenshots=False):
+                                 want_screenshots=False, with_distribution=False):
         captured["scope"] = scope
         captured["dom_rules"] = dom_rules
         # emit nothing → clean PASS, exit 0
@@ -144,7 +144,8 @@ def test_scope_frames_is_independent_of_slide_filter(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr(
         v, "run_unified_audits",
-        lambda path, iss, *, dom_rules=True, scope=None, want_screenshots=False:
+        lambda path, iss, *, dom_rules=True, scope=None, want_screenshots=False,
+        with_distribution=False:
             captured.__setitem__("scope", scope))
     monkeypatch.setattr(v, "probe_effective_cjk_font", lambda p: "stub")
     html = tmp_path / "index.html"
