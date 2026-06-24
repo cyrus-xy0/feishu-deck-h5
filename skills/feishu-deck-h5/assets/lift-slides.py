@@ -877,24 +877,30 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
     #    silently fail to carry (broken images on lift) while the report still
     #    claims them "carried". (F-76)
     _input_seen = set()
-    for _pat in _ASSET_REF_PATTERNS:
-        for _m in _pat.finditer(inner):
-            _url = _m.group(1).strip()
-            if _classify_asset_ref(_url) != "input" or _url in _input_seen:
-                continue
-            _input_seen.add(_url)
-            fname = _url.split("?", 1)[0].split("#", 1)[0].lstrip("./")[len("input/"):]
-            if not fname:
-                continue
-            src = src_input_dir / fname
-            dst = dst_input_dir / fname
-            if src.is_file():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
-                    shutil.copy2(src, dst)
-                report.setdefault("input_copied", []).append(fname)
-            else:
-                report.setdefault("input_missing", []).append(fname)
+
+    def _carry_input_refs(_html):
+        # Copy every `input/<file>` ref in _html (any asset syntax) into the
+        # target input/, de-duped via _input_seen. Factored out so it can run
+        # AGAIN after the CSS-injection steps below introduce more refs (F-376).
+        for _pat in _ASSET_REF_PATTERNS:
+            for _m in _pat.finditer(_html):
+                _url = _m.group(1).strip()
+                if _classify_asset_ref(_url) != "input" or _url in _input_seen:
+                    continue
+                _input_seen.add(_url)
+                fname = _url.split("?", 1)[0].split("#", 1)[0].lstrip("./")[len("input/"):]
+                if not fname:
+                    continue
+                src = src_input_dir / fname
+                dst = dst_input_dir / fname
+                if src.is_file():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
+                        shutil.copy2(src, dst)
+                    report.setdefault("input_copied", []).append(fname)
+                else:
+                    report.setdefault("input_missing", []).append(fname)
+    _carry_input_refs(inner)
 
     # 5b) F-84: self-contain `../input/<file>` refs. A source slide may point a
     #     content asset (product photo etc.) at `../input/foo.png`, which in the
@@ -1010,6 +1016,30 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
             report.setdefault("keyframes_pulled", []).extend(
                 n for n in sorted(referenced) if n not in have and n in src_kf)
 
+    # 5.62) F-376: re-carry input/ assets introduced by the CSS-recovery steps
+    #    above. Step 5's carry ran on the RAW inner — but 5.5 (inline framework)
+    #    and especially 5.55 (recover source-head per-slide rules) INJECT CSS that
+    #    can reference NEW `url('input/…')` files step 5 never saw. The classic
+    #    miss: a page-anim `[data-page=N] .photo{background:url(input/x.jpg)}` head
+    #    rule recovers its CSS but its image file is left behind → broken background
+    #    on lift (the user must hand-copy it). Re-scan the assembled inner now,
+    #    BEFORE 5.7 (base64-externalize synthesizes input/ refs that resolve to dst,
+    #    not src, and would log false "missing"). Idempotent via _input_seen. (F-76 class)
+    _carry_input_refs(inner)
+
+    # 5.63) F-377: prune DEAD rules from the 5.5 AUTO-INLINED framework block.
+    #    `--shake` is over-inclusive by design — it inlines the slide's WHOLE
+    #    `[data-layout=X]` ruleset, but a slide using a bespoke body (e.g. a
+    #    photo-grid under content-2col) uses none of `.grid/.col-text/.col-visual`
+    #    → those rescoped rules match zero elements → R-VIS-DEAD-RULE noise + dead
+    #    weight in the inline <style>. Drop a rule ONLY when every DESCENDANT class
+    #    it names is absent from this slide's markup (a sufficient proof of
+    #    deadness); rules naming any present/wrapper class, or pure scope/element
+    #    rules, are kept. Touches only the AUTO-INLINED block, never the slide's
+    #    own recovered/author CSS.
+    if shake and slide_key:
+        inner = _prune_dead_inlined_layout_css(inner, slide_key)
+
     # 5.65) Protect the present-mode fit-scale (F-332). 5.55/5.6 can recover a
     # source page-entrance animation onto the `.slide` ROOT whose keyframes set
     # `transform` (the framework's fit-scale carrier). With fill-mode `both` the
@@ -1097,7 +1127,7 @@ def transform(inner, src_input_dir, src_proto_dir, dst_input_dir, dst_proto_dir,
 
 
 def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=False,
-         force=False):
+         force=False, replace_index=None, keep_title=False):
     src_html_path = Path(src_html_path).resolve()
     dst_deck_json = Path(dst_deck_json).resolve()
     output_dir = Path(output_dir).resolve() if output_dir else dst_deck_json.parent
@@ -1157,6 +1187,11 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
 
     appended = 0
     existing_keys = {s.get("key") for s in deck["slides"] if s.get("key")}
+    # F-378 --replace: must point at an existing slot (1-based, = the deck page #).
+    if replace_index is not None and not (1 <= replace_index <= len(deck["slides"])):
+        print(f"\n✗ --replace {replace_index} out of range — target deck has "
+              f"{len(deck['slides'])} slide(s)", file=sys.stderr)
+        sys.exit(6)
     for one_indexed in frame_indices:
         if one_indexed < 1 or one_indexed > len(starts):
             print(f"✗ frame {one_indexed} out of range (source has {len(starts)})")
@@ -1183,29 +1218,55 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         if '<div class="slide"' in inner:
             print(f"  ⚠ frame {one_indexed} ({info['key']}): nested .slide remains in inner — "
                   f"check frame boundary")
-        # De-collide the lifted key against the destination deck AND other frames
-        # lifted in this same run. The source key was previously used verbatim →
-        # a collision produced a deck.json that render --strict rejects (R-KEY)
-        # with no rollback. render-deck sets data-slide-key from this entry key on
-        # the wrapper and `inner` carries no .slide of its own (checked above), so
-        # renaming the entry key suffices. Provenance below keeps the SOURCE key.
-        key = info["key"]
-        if key in existing_keys:
-            base, j = key, 2
-            while f"{base}-{j}" in existing_keys:
-                j += 1
-            key = f"{base}-{j}"
-            print(f"    key collision: '{info['key']}' already in target → renamed '{key}'")
-        existing_keys.add(key)
-        # F-255: a de-collided key must follow into the slide's inlined per-slide
-        # CSS (`data.html` carries a <style> block transform() scoped to the
-        # ORIGINAL key); without this the entry's key is `-2` while its embedded
-        # selectors still point at the bare key → unstyled slide, dead @keyframes.
-        inner = _rekey_inner_css(inner, info["key"], key)
+        # Placement key/label: REPLACE an existing slot in place (F-378) vs the
+        # default APPEND. Replace keeps the TARGET slot's identity (key +
+        # screen_label) and, with --keep-title, its visible title — only the body
+        # is swapped in from the source frame.
+        if replace_index is not None:
+            tgt = deck["slides"][replace_index - 1]
+            key = tgt.get("key") or info["key"]
+            label = tgt.get("screen_label", info["label"])
+            # Rescope the lifted body's per-slide CSS from the SOURCE key to the
+            # TARGET slot's key so it matches the unchanged wrapper (F-255 path).
+            inner = _rekey_inner_css(inner, info["key"], key)
+            if keep_title:
+                tgt_title = _slide_visible_title(tgt.get("data", {}).get("html", ""))
+                if not tgt_title:
+                    print(f"    ⚠ --keep-title: target slot #{replace_index} has no "
+                          f"visible title — source title kept")
+                else:
+                    inner, _swapped = _swap_slide_title(inner, tgt_title)
+                    if _swapped:
+                        print(f"    ↻ kept target title: {tgt_title!r}")
+                    else:
+                        print(f"    ⚠ --keep-title: no title element in lifted body — "
+                              f"source title kept (target wanted {tgt_title!r})")
+        else:
+            # De-collide the lifted key against the destination deck AND other
+            # frames lifted in this same run. The source key was previously used
+            # verbatim → a collision produced a deck.json that render --strict
+            # rejects (R-KEY) with no rollback. render-deck sets data-slide-key from
+            # this entry key on the wrapper and `inner` carries no .slide of its own
+            # (checked above), so renaming the entry key suffices. Provenance below
+            # keeps the SOURCE key.
+            key = info["key"]
+            if key in existing_keys:
+                base, j = key, 2
+                while f"{base}-{j}" in existing_keys:
+                    j += 1
+                key = f"{base}-{j}"
+                print(f"    key collision: '{info['key']}' already in target → renamed '{key}'")
+            existing_keys.add(key)
+            label = info["label"]
+            # F-255: a de-collided key must follow into the slide's inlined per-slide
+            # CSS (`data.html` carries a <style> block transform() scoped to the
+            # ORIGINAL key); without this the entry's key is `-2` while its embedded
+            # selectors still point at the bare key → unstyled slide, dead @keyframes.
+            inner = _rekey_inner_css(inner, info["key"], key)
         entry = {
             "key": key,
             "layout": "raw",
-            "screen_label": info["label"],
+            "screen_label": label,
             "lifted": f"{src_stem}#{info['key']}",
             # F-70: structured provenance so heal/re-lift can return to the exact
             # source slide DETERMINISTICALLY (no class-signature reverse-guessing
@@ -1239,7 +1300,10 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             # that fails validate-deck.py --strict and rolls the whole lift back.
             # Split on whitespace so each token is its own array element.
             entry["decor"] = info["decor"].split()
-        deck["slides"].append(entry)
+        if replace_index is not None:
+            deck["slides"][replace_index - 1] = entry
+        else:
+            deck["slides"].append(entry)
         appended += 1
         cp = report.get("input_copied", [])
         miss = report.get("input_missing", [])
@@ -1391,8 +1455,12 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             print(vr.stderr, file=sys.stderr)
         sys.exit(5)
 
-    print(f"\n✓ {appended} slides appended to {dst_deck_json.name} "
-          f"(total {len(deck['slides'])})")
+    if replace_index is not None:
+        print(f"\n✓ {appended} slide(s) replaced into slot #{replace_index} of "
+              f"{dst_deck_json.name} (total {len(deck['slides'])})")
+    else:
+        print(f"\n✓ {appended} slides appended to {dst_deck_json.name} "
+              f"(total {len(deck['slides'])})")
     print(f"✓ post-lift validation passed ({validate_deck.name} --strict)")
     print(f"Now run: python3 deck-json/render-deck.py {dst_deck_json} {output_dir}/ --visual")
 
@@ -1492,6 +1560,106 @@ def _rekey_inner_css(inner, old_key, new_key):
         return inner
     return inner.replace(f'data-slide-key="{old_key}"',
                          f'data-slide-key="{new_key}"')
+
+
+# ── lift --replace --keep-title helpers (F-378) ────────────────────────────
+# A slide's visible title lives in the MARKUP (.title-zh / .title-en / .title /
+# h1-h2), never in <style>. _slide_visible_title reads it from the target slot;
+# _swap_slide_title writes it into the grafted source body — so a body-swap that
+# replaces an existing slot KEEPS that page's own title.
+_TITLE_RXS = (
+    re.compile(r'(<[^<>]*\bclass="[^"]*\btitle-zh\b[^"]*"[^<>]*>)(.*?)(</[a-zA-Z][\w]*>)', re.S),
+    re.compile(r'(<[^<>]*\bclass="[^"]*\btitle-en\b[^"]*"[^<>]*>)(.*?)(</[a-zA-Z][\w]*>)', re.S),
+    re.compile(r'(<[^<>]*\bclass="[^"]*\btitle\b[^"]*"[^<>]*>)(.*?)(</[a-zA-Z][\w]*>)', re.S),
+    re.compile(r'(<h[12]\b[^<>]*>)(.*?)(</h[12]>)', re.S),
+)
+
+
+def _strip_tags(s):
+    return re.sub(r'<[^>]+>', '', s).strip()
+
+
+def _in_style(text, pos):
+    """True if offset `pos` falls inside a <style>…</style> block."""
+    return text.rfind('<style', 0, pos) > text.rfind('</style>', 0, pos)
+
+
+def _slide_visible_title(html):
+    """First visible title TEXT in a slide's data.html (markup only, not CSS)."""
+    if not html:
+        return ""
+    for rx in _TITLE_RXS:
+        for m in rx.finditer(html):
+            if _in_style(html, m.start()):
+                continue
+            txt = _strip_tags(m.group(2))
+            if txt:
+                return txt
+    return ""
+
+
+def _swap_slide_title(inner, new_text):
+    """Replace the FIRST visible title element's text with new_text (markup
+    only). Returns (new_inner, swapped?)."""
+    for rx in _TITLE_RXS:
+        for m in rx.finditer(inner):
+            if _in_style(inner, m.start()):
+                continue
+            return (inner[:m.start()] + m.group(1) + new_text + m.group(3)
+                    + inner[m.end():], True)
+    return inner, False
+
+
+# ── lift --shake dead-rule prune helper (F-377) ────────────────────────────
+# Renderer-injected ancestor classes exist at render time but never appear in a
+# slide's data.html — a rule targeting them is NOT dead just because the markup
+# lacks the class. Treat them as always-present so the page-bg / wrapper rules
+# the AUTO-INLINED block carries are never pruned.
+_RENDER_WRAPPER_CLASSES = frozenset(
+    {"deck", "slide-frame", "slide", "is-current", "wordmark"})
+
+
+def _prune_dead_inlined_layout_css(inner, slide_key):
+    """Drop rules in the `--shake` AUTO-INLINED framework <style> block whose
+    descendant selector targets only classes this slide's markup never uses.
+    Conservative: a rule is dropped ONLY if it names >=1 descendant class and
+    EVERY such class is absent from the markup (+ wrapper allowlist) — a
+    sufficient proof of deadness. Pure scope/element rules and any rule naming a
+    present class are kept. Only the AUTO-INLINED block is rewritten; the slide's
+    own recovered/author CSS is never touched."""
+    if "AUTO-INLINED from framework" not in inner:
+        return inner
+    markup = re.sub(r'<style\b.*?</style>', '', inner, flags=re.S | re.I)
+    present = set(_RENDER_WRAPPER_CLASSES)
+    for c in re.findall(r'class="([^"]*)"', markup):
+        present.update(c.split())
+    # Per-slide scope prefix → stripped so only DESCENDANT classes are weighed.
+    scope_re = re.compile(
+        r'\.slide(?:\.[\w-]+)*\[data-slide-key="' + re.escape(slide_key)
+        + r'"\](?:\[[^\]]*\]|:[\w-]+(?:\([^()]*\))?)*')
+
+    def _sel_dead(sel):
+        rest = scope_re.sub(' ', sel)
+        classes = re.findall(r'\.([\w-]+)', rest)
+        return bool(classes) and all(c not in present for c in classes)
+
+    def _prune(mb):
+        css = mb.group(1)
+        if "AUTO-INLINED from framework" not in css:
+            return mb.group(0)
+        out, i = [], 0
+        for rm in re.finditer(r'([^{}]+)\{([^{}]*)\}', css):
+            out.append(css[i:rm.start()])            # comments / whitespace
+            sel_text = re.sub(r'/\*.*?\*/', ' ', rm.group(1), flags=re.S)
+            sels = [s.strip() for s in sel_text.split(',') if s.strip()]
+            # a grouped rule is dead only if EVERY comma-selector is dead
+            if not (sels and all(_sel_dead(s) for s in sels)):
+                out.append(rm.group(0))              # keep
+            i = rm.end()
+        out.append(css[i:])
+        return "<style>" + "".join(out) + "</style>"
+
+    return re.sub(r'<style>(.*?)</style>', _prune, inner, flags=re.S)
 
 
 def _wrap_frame(inner, info, label, key):
@@ -1959,6 +2127,14 @@ def main():
                     help="--preview only: a target index.html to check key-collision/assets against")
     ap.add_argument("--no-validate", action="store_true",
                     help="--to-html only: skip the post-lift validate.py gate (not recommended)")
+    ap.add_argument("--replace", type=int, default=None, metavar="N",
+                    help="F-378 (deck.json only): instead of APPENDING, overwrite the body "
+                         "of the target deck's existing slide #N (1-based = the deck page "
+                         "number) with the single lifted source frame, KEEPING that slot's "
+                         "key + screen_label. Requires exactly one frame/key.")
+    ap.add_argument("--keep-title", action="store_true",
+                    help="F-378 (with --replace): also keep the TARGET slot's visible title "
+                         "— only the body content is swapped in from the source frame.")
     # `--key K DEST.json --shake` is the documented/native-lift form. Plain
     # argparse stops collecting the `rest` positional after an optional when
     # `nargs="*"` is involved, so DEST.json can be reported as "unrecognized".
@@ -2009,13 +2185,28 @@ def main():
         dst = rest[1]
         out = rest[2] if len(rest) > 2 else None
 
+    # F-378 --replace / --keep-title validation (deck.json native path only).
+    if args.replace is not None or args.keep_title:
+        if str(dst).endswith(".html"):
+            print("✗ --replace/--keep-title are for the deck.json path, not --to-html",
+                  file=sys.stderr)
+            return 1
+        if args.keep_title and args.replace is None:
+            print("✗ --keep-title only applies together with --replace <N>", file=sys.stderr)
+            return 1
+        if args.replace is not None and len(frames) != 1:
+            print(f"✗ --replace overwrites ONE slot — select exactly one frame/key "
+                  f"(got {len(frames)})", file=sys.stderr)
+            return 1
+
     # Route by destination type: *.html → splice into a legacy index.html (F-80,
     # no deck.json needed); *.json → the native deck.json path (lift()).
     if str(dst).endswith(".html"):
         lift_to_html(args.src_html, frames, dst, shake=args.shake,
                      position=args.pos, run_validate=not args.no_validate)
     else:
-        lift(args.src_html, frames, dst, out, shake=args.shake, force=args.force)
+        lift(args.src_html, frames, dst, out, shake=args.shake, force=args.force,
+             replace_index=args.replace, keep_title=args.keep_title)
     return 0
 
 

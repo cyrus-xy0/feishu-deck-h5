@@ -1053,5 +1053,225 @@ class LiftSlidesScanTest(unittest.TestCase):
         self.assertIn("1 frame(s) lift cleanly", self.out)
 
 
+# ── F-376 / F-377 / F-378 (lift-slides body-swap + asset/prune fixes) ────────
+
+# Background image referenced ONLY by a [data-page] HEAD rule's url('input/…') —
+# never in the slide markup. Step 5's asset scan ran BEFORE head-recovery injects
+# this rule, so pre-F-376 the CSS came over but the file did NOT (broken bg; the
+# user had to hand-copy it). Distinct from BUG3, which is an inline <img src>.
+SRC_HTML_HEADBG = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+[data-page="2"] .slide .hero-bg { background-image: url('input/headbg.png'); background-size: cover; }
+</style>
+</head><body><div class="deck">
+<div class="slide-frame" data-page="2">
+<div class="slide" data-layout="content-2col" data-slide-key="hero" data-screen-label="02 Hero" data-accent="blue">
+<div class="header"><h2 class="title-zh">Hero</h2></div>
+<div class="stage"><div class="hero-bg"></div></div>
+</div>
+</div>
+<div class="slide-frame" data-page="1">
+<div class="slide" data-layout="cover" data-slide-key="tail" data-screen-label="01">
+<div class="stage"><h1>tail</h1></div>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+class LiftSlidesHeadBgAssetTest(unittest.TestCase):
+    """F-376 · an image referenced ONLY by a recovered [data-page] head rule
+    (url('input/…')) must be CARRIED. Step 5's input-copy ran before head-recovery
+    injected the rule, so the file was left behind (CSS landed, image 404'd).
+    GUARD: the file lands in dest input/ and the recovered rule references it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-slides-headbg-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML_HEADBG, encoding="utf-8")
+        (src_dir / "input" / "headbg.png").write_bytes(b"\x89PNG\r\n\x1a\n fake")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), str(cls.dst_dir), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _hero_html(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"]
+        self.assertEqual(len(hero), 1, "lift did not append exactly one hero slide")
+        return hero[0]["data"]["html"]
+
+    def test_head_css_background_file_carried(self):
+        html = self._hero_html()
+        self.assertIn("input/headbg.png", html,
+                      "recovered head-CSS background rule did not come over")
+        carried = self.dst_dir / "input" / "headbg.png"
+        self.assertTrue(carried.is_file(),
+                        "head-CSS url('input/headbg.png') background was NOT carried "
+                        "to dest input/ (F-376 regressed) — broken background on lift.")
+
+
+class LiftSlidesPruneDeadTest(unittest.TestCase):
+    """F-377 · --shake is over-inclusive: it inlines the slide's WHOLE
+    [data-layout=content-2col] ruleset, but a bespoke-body slide (here a .matrix
+    grid) uses none of content-2col's .col-text/.col-visual → those rescoped rules
+    are DEAD (R-VIS-DEAD-RULE noise + dead inline weight). GUARD: rules whose every
+    descendant class is absent from the markup are pruned, while a live framework
+    rule (.header — the slide HAS one) and the slide's own recovered author rule
+    (.matrix) are kept."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-slides-prune-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML, encoding="utf-8")
+        (src_dir / "input" / "icon.svg").write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg"></svg>', encoding="utf-8")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), str(cls.dst_dir), "--shake"],
+            capture_output=True, text=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _hero_html(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        return [s for s in deck["slides"] if s.get("key") == "hero"][0]["data"]["html"]
+
+    def test_dead_framework_rules_pruned(self):
+        html = self._hero_html()
+        self.assertNotIn(".col-text", html,
+                         "dead content-2col .col-text rule was not pruned (F-377).")
+        self.assertNotIn(".col-visual", html,
+                         "dead content-2col .col-visual rule was not pruned (F-377).")
+
+    def test_live_framework_rule_kept(self):
+        # the slide HAS a .header → its inlined framework rule must survive (proves
+        # the inline happened AND the prune was not over-aggressive).
+        self.assertIn("] .header", self._hero_html(),
+                      "live framework .header rule was wrongly pruned (F-377).")
+
+    def test_recovered_author_rule_kept(self):
+        # prune touches only the AUTO-INLINED block, never recovered author CSS.
+        self.assertRegex(self._hero_html(),
+                         r'\.slide\[data-slide-key="hero"\]\s+\.matrix',
+                         "recovered .matrix rule was wrongly pruned (F-377 hit the "
+                         "wrong block).")
+
+
+# Replace-in-place target: slot 2 carries a sentinel key/screen_label/title that
+# `--replace --keep-title` MUST preserve while swapping in the source body.
+DST_DECK_REPLACE = json.dumps({
+    "version": "1.0",
+    "deck": {"title": "t", "author": "a", "date": "2026-06"},
+    "slides": [
+        {"key": "c", "layout": "cover", "accent": "blue",
+         "data": {"title": "t", "author": "a", "date": "2026-06"}},
+        {"key": "tgt2", "layout": "raw", "screen_label": "99 KEEP",
+         "data": {"html": '<div class="header">'
+                          '<h2 class="title-zh">原始标题保留我</h2></div>'
+                          '<div class="stage">old body</div>'}},
+        {"key": "filler3", "layout": "raw", "screen_label": "98 FILL",
+         "data": {"html": '<div class="header">'
+                          '<h2 class="title-zh">第三页不动</h2></div>'
+                          '<div class="stage">keep me</div>'}},
+    ],
+}, ensure_ascii=False)
+
+
+class LiftSlidesReplaceTest(unittest.TestCase):
+    """F-378 · `--replace N --keep-title` overwrites slot N's BODY with the lifted
+    source frame while KEEPING the slot's key + screen_label + visible title.
+    GUARD: identity + title preserved, body swapped, lifted CSS rescoped to the
+    target key, sibling slots untouched, slide count steady."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="lift-slides-replace-test-")
+        tmp = Path(cls.tmp)
+        src_dir = tmp / "src"
+        (src_dir / "input").mkdir(parents=True)
+        (src_dir / "index.html").write_text(SRC_HTML, encoding="utf-8")
+        (src_dir / "input" / "icon.svg").write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg"></svg>', encoding="utf-8")
+        cls.dst_dir = tmp / "dst"
+        cls.dst_dir.mkdir()
+        cls.dst_deck = cls.dst_dir / "deck.json"
+        cls.dst_deck.write_text(DST_DECK_REPLACE, encoding="utf-8")
+        cls.proc = subprocess.run(
+            [sys.executable, str(LIFT), str(src_dir / "index.html"),
+             "--key", "hero", str(cls.dst_deck), str(cls.dst_dir),
+             "--shake", "--replace", "2", "--keep-title"],
+            capture_output=True, text=True,
+        )
+        cls.deck = json.loads(cls.dst_deck.read_text(encoding="utf-8"))
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_lift_succeeded(self):
+        self.assertEqual(self.proc.returncode, 0,
+                         f"replace lift exited {self.proc.returncode}\n{self.proc.stderr}")
+
+    def test_slide_count_unchanged(self):
+        self.assertEqual(len(self.deck["slides"]), 3,
+                         "--replace must overwrite in place, not append.")
+
+    def test_target_identity_preserved(self):
+        slot = self.deck["slides"][1]
+        self.assertEqual(slot["key"], "tgt2", "target slot key not preserved.")
+        self.assertEqual(slot["screen_label"], "99 KEEP",
+                         "target slot screen_label not preserved.")
+
+    def test_title_kept_body_swapped(self):
+        html = self.deck["slides"][1]["data"]["html"]
+        self.assertIn("原始标题保留我", html, "--keep-title dropped the target title.")
+        self.assertNotIn(">Hero<", html,
+                         "source frame title leaked in (keep-title failed).")
+        self.assertIn("matrix", html, "source body was not swapped into the slot.")
+
+    def test_css_rescoped_to_target_key(self):
+        html = self.deck["slides"][1]["data"]["html"]
+        self.assertIn('data-slide-key="tgt2"', html,
+                      "lifted CSS not rescoped to the target slot key.")
+        self.assertNotIn('data-slide-key="hero"', html,
+                         "source key leaked into the replaced slot — its selectors "
+                         "would match nothing under the tgt2 wrapper.")
+
+    def test_sibling_slots_untouched(self):
+        self.assertEqual(self.deck["slides"][0]["key"], "c")
+        self.assertIn("第三页不动", self.deck["slides"][2]["data"]["html"],
+                      "a sibling slot was clobbered by --replace.")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -161,6 +161,15 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
   4. `render-deck.py <目标deck.json> . --scope <新页码> --shoot` → 读 `last-render.log` 首行。
   5. 瞄那张 `.shoot-pN.png`(交付前看图是硬底线,**这步不省**)。
   起一个**全新** deck 复用某页 → `lift-to-new-deck.py <源> <页> <新dir>`(已内置漂移守卫)。
+- **换掉某页 body 但保留它标题(「把源#X lift 到目标#Y,保持 Y 标题换内容」)= 一条命令,别手搓
+  paste→get-page→换标题→set 六步(F-378)**:
+  `lift-slides.py <源 index.html> --key <K> <目标deck.json> <目标out> --shake --replace <Y> --keep-title`
+  —— **就地覆盖目标第 Y 页**(1-based = 页码 #Y)的 body,**保留该页 key + screen_label + 可见标题**;
+  自动把源页 CSS rescope 到目标页 key、拷资产(含 `[data-page=N]` 形态的背景图,F-376)、剥 data-text-id、
+  剪掉 `--shake` 多带的死框架规则(F-377)。源是**已发布的 rendered index.html**(feishusolution 包等)时
+  也走这条——`lift-slides` 专治 head-CSS 漂移。只能 lift **一页**(--replace 覆盖一个槽);
+  完了 `render-deck.py <目标deck.json> <out> --scope Y --shoot` 看图即可。
+  源帧号(#Y)= `lift-slides.py <源> --index` 列表里的 1-based 行号。
 - **⚠️ 漂移源陷阱 = 失败诊断,不是先验 gate(别因为怕它就预先三连考古)**:老 deck 某页
   `custom_css` 为空、CSS 全留在 **rendered index.html 的 `<head>`**(老锚点 `.slide[data-page="NN"]`)、
   `data-accent`/`data-decor` 只在渲染出的 `<div class="slide">` 上时,paste/lift 只搬空 custom_css →
