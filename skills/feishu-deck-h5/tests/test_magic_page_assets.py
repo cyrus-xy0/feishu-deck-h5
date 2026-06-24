@@ -310,6 +310,45 @@ console.log("https://tos.example.test/" + key.replace(/[^A-Za-z0-9._/-]+/g, "-")
             self.assertIn("https://tos.example.test/deck/test/poster.jpg", published_html)
             self.assertIn("https://tos.example.test/deck/test/external/", published_html)
 
+    def test_keep_inline_code_still_externalizes_data_uri_in_inline_css(self) -> None:
+        # delivery-9 regression: the publisher now passes --keep-inline-code by
+        # default so the framework runtime stays recognizable. That MUST NOT leave
+        # the framework's inline `url("data:image/svg+xml;utf8,<svg…>")` grain
+        # textures inline — rewrite_refs runs regardless of --keep-inline-code, so
+        # every data: payload is still hosted. If this regresses, the broadened
+        # residual_data_payloads check would red-card EVERY publish.
+        if not shutil.which("node"):
+            self.skipTest("node not available")
+        with tempfile.TemporaryDirectory(prefix="magic-keepinline-") as td:
+            tmp_path = Path(td)
+            uploader = tmp_path / "upload-asset.js"
+            uploader.write_text(
+                'const p=process.argv[2];const i=process.argv.indexOf("--key");'
+                'const k=i>=0?process.argv[i+1]:p;'
+                'console.log("https://tos.example.test/"+k.replace(/[^A-Za-z0-9._/-]+/g,"-"));',
+                encoding="utf-8",
+            )
+            svg = ("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' "
+                   "width='200' height='200'><rect filter='url(%23n)'/></svg>")
+            html = tmp_path / "index.html"
+            out = tmp_path / "ready.html"
+            html.write_text(
+                f'<html><head><style>.g{{background-image:url("{svg}")}}</style></head>'
+                f'<body><script>window.__deck=1;const u="url("+x+")";</script>'
+                f'<div class="g"></div></body></html>',
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [sys.executable, str(MAGIC_PAGE_ASSETS), str(html), "--out", str(out),
+                 "--uploader", str(uploader), "--base-url", "https://magic.example.test",
+                 "--key-prefix", "deck/test", "--keep-inline-code"],
+                check=True, text=True, capture_output=True,
+            )
+            published = out.read_text(encoding="utf-8")
+            self.assertNotIn("data:image", published)                  # data: hosted
+            self.assertIn("https://tos.example.test/deck/test/data-uri/", published)
+            self.assertIn("window.__deck=1", published)                # runtime kept inline
+
 
 if __name__ == "__main__":
     unittest.main()

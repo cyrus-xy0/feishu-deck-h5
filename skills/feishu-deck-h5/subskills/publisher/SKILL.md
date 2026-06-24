@@ -23,10 +23,23 @@ validator pass evidence, or publish metadata.
   访问 URL 必须是 `https://magic.solutionsuite.cn/html-box/<id>` 形态,输出
   `magic-page-publish.json`、`cloud-publish.json`、`MAGIC_PAGE_PUBLISH.md` 和
   `publish-manifest.json`。
-- **妙笔资产准备**:默认先把 CSS/JS 内联为一个临时 HTML,但保留资源引用为 URL;
-  然后把所有本地资源、`data:...` 资源、第三方远程资源上传到妙笔 TOS 并重写为
-  托管 URL,最后调用 Magic Page 发布 API。最终发布物不得依赖本地路径、第三方
-  外链或 base64 payload;发布到 Magic Page 后必须只靠发布链接就能完整使用。
+- **妙笔资产准备**:发布前(调上传 API 之前)先跑**资源体积体检**
+  `assets/magic-page-preflight.py`(delivery-8):一次性扫描所有本地 / `data:` /
+  远程资源,把**超过妙笔单资源上限(64 MB)的资源一次全部报出来**,不再像过去那样
+  在上传 API 处一个一个反应式踩限制(本地视频拦一次→压一次→重校验→重发→远程视频又拦…
+  把一次发布拖成 ~40 分钟的串行循环)。默认对**超限视频自动压成可发布画质**
+  (降到 1920×1080 以内、30fps、去音轨、H.264;小窗口播放视觉无损);压不下去的、
+  非视频的超限资源、或本机没有 ffmpeg 时,**发布直接失败并给出 `MAGIC_PAGE_PREFLIGHT.md`
+  报告 + 精确修复命令**,一轮修齐。`--no-compress-oversized` 关掉自动压缩(改为只体检+给命令),
+  `--magic-max-resource-bytes` 调上限。
+  体检后再把 CSS/JS 内联为临时 HTML,把本地 / `data:` / 远程资源传妙笔 TOS 改托管 URL,
+  最后调发布 API。**框架运行时 + 每页 CSS 默认保持内联**(delivery-9 / `--keep-inline-code`,
+  publisher 默认开):外置成哈希命名的托管 JS 会让发布字节的「运行时存在」检查认不出
+  (误判 runtime 缺失,过去每次发布都要手动绕一轮);代码 <0.5 MB,留内联不会触碰请求体上限,
+  只有重资源被外置。需要外置代码时用 `--externalize-inline-code`。
+  **未托管依赖扫描跳过 `<script>` 块与注释**:JS / 注释里出现的 `url()` / `URL()` /
+  `location.href` / `createObjectURL` 不再被误判为「未托管资源」(过去也是每次发布手动改写绕过)。
+  最终发布物不得依赖本地路径、第三方外链或 `data:` payload;只靠发布链接即可完整使用。
 - **单一发布目标**:publisher 只发布到 Feishu/Miaobi Magic Page;不得提供
   `--publish-target`、Miaoda fallback 或 slide-library 入库分支。
 - **不入库**:不得调用 `feishu-slide-library` 的

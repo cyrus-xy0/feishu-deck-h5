@@ -28,6 +28,7 @@ SELF_CHECK = Path(__file__).resolve().parent / "self_check.py"
 RUNS = REPO / "runs"
 CHECK_ONLY = REPO / "assets/check-only.py"
 MAGIC_PAGE_ASSETS = REPO / "assets/magic-page-assets.py"
+MAGIC_PAGE_PREFLIGHT = REPO / "assets/magic-page-preflight.py"
 INLINE_ASSETS = REPO / "assets/inline-assets.py"
 DEFAULT_MAGIC_PAGE_PUBLISHER = REPO / "assets/magic-page-publish.js"
 DEFAULT_MAGIC_ASSET_UPLOADER = REPO / "assets/magic-upload.js"
@@ -125,26 +126,30 @@ def audit_passed(output_dir: Path) -> bool:
     return False
 
 
-def run_publish_gate(html_path: Path, output_dir: Path, *, label: str = "publish-gate") -> dict[str, Any]:
+def run_publish_gate(html_path: Path, output_dir: Path, *, label: str = "publish-gate", visual: bool = True) -> dict[str, Any]:
     """Validate the EXACT HTML bytes about to be published.
 
-    Fail-closed: runs assets/check-only.py --gate ingest against html_path (auto
-    enables strict + visual + the byte-path rules, notably R-BAKED-DOM) rather
-    than reusing a stale render-time audit verdict. Used both as the pre-publish
-    gate (regardless of whether a deck.json sits in output_dir) and to re-check
-    the FINAL working_html after asset prep, since those bytes differ from the
-    bytes any prior render-time audit ran on.
+    Fail-closed: runs assets/check-only.py against html_path rather than reusing a
+    stale render-time audit verdict.
+
+    visual=True (pre-publish gate on the ORIGINAL bytes): `--gate ingest`, which
+    auto-enables strict + the headless Chromium visual scan + the byte-path rules
+    (notably R-BAKED-DOM).
+
+    visual=False (re-check of the FINAL working_html AFTER asset prep): `--strict
+    --no-visual` — strict + all byte/source rules (R-BAKED-DOM is a byte-level rule
+    that runs on both paths) but NO browser scan. Asset prep only swaps resource
+    encodings (data:/local → TOS URLs) and never moves a pixel, so a second
+    whole-deck visual scan of the rewritten bytes is redundant with the pre-publish
+    gate (and the F-285 post-publish self-check opens the real URL). Skipping it
+    avoids re-running headless Chromium over a large publish artifact — the single
+    biggest chunk of a slow publish — and also sidesteps the --gate PyYAML
+    requirement on this second pass.
     """
     report_path = output_dir / f"PUBLISH_QUALITY_REPORT-{label}.md"
-    cmd = [
-        sys.executable,
-        str(CHECK_ONLY),
-        str(html_path),
-        "--gate",
-        "ingest",
-        "--report",
-        str(report_path),
-    ]
+    cmd = [sys.executable, str(CHECK_ONLY), str(html_path)]
+    cmd += ["--gate", "ingest"] if visual else ["--strict", "--no-visual"]
+    cmd += ["--report", str(report_path)]
     step = subprocess_record(cmd, cwd=REPO, log_path=output_dir / f"publisher-{label}.log")
     return {
         "ok": step["ok"],
@@ -278,12 +283,53 @@ def parse_magic_stdout(stdout: str) -> dict[str, Any]:
     return {"app_url": app_url, "app_id": "", "urls": urls}
 
 
-def contains_data_image(html_path: Path) -> bool:
+# Any data: payload left inline after asset prep is a bug: asset prep is supposed
+# to upload every data: resource to TOS (the contract is "no data: in the published
+# bytes"). A residual one both bloats the request body past Magic Page's limit and
+# defeats CDN delivery. (Was image-only; broadened to ANY data: kind after a
+# published deck repeatedly stalled on a `data:video` the old image-only check let
+# through.) The mime is surfaced in the failure message.
+RESIDUAL_DATA_RE = re.compile(r"data:([A-Za-z0-9.+-]+/[A-Za-z0-9.+-]*)", re.I)
+# Regions whose contents must NOT feed the CSS url()/@import dependency scan:
+# <script> blocks (JS strings/comments like url(), URL(), location.href,
+# createObjectURL were false-flagged as unhosted resources) and CSS comments. HTML
+# comments are stripped for BOTH the url() scan and the attribute scan (a
+# commented-out <img>/<link> does not load). Real <script src="..."> /
+# <link href="..."> deps survive the attribute scan because only the url() scan
+# strips <script> blocks; the attribute scan runs on comment-stripped-but-otherwise
+# intact html.
+_SCRIPT_BLOCK_RE = re.compile(r"<script\b[^>]*>.*?</script>", re.I | re.S)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+
+
+def residual_data_payloads(html_path: Path) -> list[str]:
     try:
         html = html_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return False
-    return bool(re.search(r"data:image/[A-Za-z0-9.+-]+", html, re.I))
+        return []
+    kinds: list[str] = []
+    seen: set[str] = set()
+    for m in RESIDUAL_DATA_RE.finditer(html):
+        kind = m.group(0).split(",", 1)[0][:40].lower()
+        if kind not in seen:
+            seen.add(kind)
+            kinds.append(kind)
+    return kinds
+
+
+def _strip_html_comments(html: str) -> str:
+    """Blank out HTML comments — a commented-out <img>/<link>/<script> never loads,
+    so it must not be flagged as an unhosted dependency. Used as the base for BOTH
+    the attribute scan and the url() scan."""
+    return _HTML_COMMENT_RE.sub(" ", html)
+
+
+def _strip_script_and_css_comments(html: str) -> str:
+    """On top of comment-stripping, blank out <script> blocks and CSS comments so
+    the url()/@import scan only sees real stylesheet references — not JS that merely
+    mentions url(), URL(), location.href, createObjectURL, etc."""
+    return _CSS_COMMENT_RE.sub(" ", _SCRIPT_BLOCK_RE.sub(" ", html))
 
 
 def is_dependency_ref(ref: str) -> bool:
@@ -291,7 +337,12 @@ def is_dependency_ref(ref: str) -> bool:
     if not raw or raw.startswith("#"):
         return False
     lowered = raw.lower()
-    return not lowered.startswith(("javascript:", "mailto:", "tel:", "about:", "blob:"))
+    # data: is self-contained (no external fetch), so it is NOT an "unhosted
+    # dependency" — its inline-payload problem is owned by residual_data_payloads,
+    # which reports it with an accurate message. Excluding it here keeps the two
+    # checks non-overlapping (a data: ref was previously double-flagged as a
+    # missing runtime dependency).
+    return not lowered.startswith(("javascript:", "mailto:", "tel:", "about:", "blob:", "data:"))
 
 
 def is_unhosted_dependency(ref: str) -> bool:
@@ -307,12 +358,14 @@ def is_unhosted_dependency(ref: str) -> bool:
 def remaining_unhosted_dependencies(html_path: Path) -> list[str]:
     html = html_path.read_text(encoding="utf-8", errors="ignore")
     refs: list[str] = []
+    attr_scan = _strip_html_comments(html)            # keeps <script src>/<link href>
+    css_scan = _strip_script_and_css_comments(attr_scan)  # also drops JS + CSS comments
     for regex in (URL_RE, IMPORT_RE):
-        for match in regex.finditer(html):
+        for match in regex.finditer(css_scan):
             ref = next((group for group in match.groups() if group), "").strip()
             if is_unhosted_dependency(ref):
                 refs.append(ref)
-    for match in RESOURCE_ATTR_RE.finditer(html):
+    for match in RESOURCE_ATTR_RE.finditer(attr_scan):
         tag = match.group("tag").lower()
         attr = match.group("attr").lower()
         ref = match.group(4).strip()
@@ -320,7 +373,7 @@ def remaining_unhosted_dependencies(html_path: Path) -> list[str]:
             continue
         if is_unhosted_dependency(ref):
             refs.append(ref)
-    for match in SRCSET_ATTR_RE.finditer(html):
+    for match in SRCSET_ATTR_RE.finditer(attr_scan):
         for item in match.group(2).split(","):
             ref = item.strip().split()[0] if item.strip() else ""
             if is_unhosted_dependency(ref):
@@ -367,9 +420,42 @@ def publish_magic_page(
     working_html = html_path
     if not args.skip_magic_asset_prepare:
         uploader = args.magic_asset_uploader or optional_path(os.environ.get("FEISHU_DECK_H5_MAGIC_ASSET_UPLOADER", "")) or DEFAULT_MAGIC_ASSET_UPLOADER
+
+        # delivery-8: size pre-flight BEFORE upload. Magic Page hard-rejects any
+        # single resource over the per-resource limit, and historically that was
+        # discovered one resource at a time at the upload API — turning a single
+        # publish into a serial fail/compress/re-validate/re-publish loop. Run the
+        # audit once, up front: every oversized resource is reported together, and
+        # (unless --no-compress-oversized) oversized videos are auto-compressed to
+        # a publish-safe profile here so they never reach the API oversized.
+        source_html = html_path
+        preflighted = output_dir / "magic-page-preflight.html"
+        pf_cmd = [
+            sys.executable, str(MAGIC_PAGE_PREFLIGHT), str(html_path),
+            "--report", str(output_dir / "MAGIC_PAGE_PREFLIGHT.md"),
+            "--max-bytes", str(args.magic_max_resource_bytes),
+            "--check-remote", "--json",
+        ]
+        if not args.no_compress_oversized:
+            pf_cmd += ["--compress", "--out", str(preflighted)]
+        preflight = subprocess_record(pf_cmd, cwd=REPO, log_path=output_dir / "publisher-magic-preflight.log")
+        if not preflight["ok"]:
+            blocking = ((preflight.get("json") or {}).get("oversized")) or []
+            sample = "; ".join(f"{o.get('ref')} ({o.get('bytes', 0) // (1024*1024)}MB)" for o in blocking[:4])
+            payload = magic_failure(
+                "oversized resources block Magic Page publish (over per-resource limit). "
+                "See MAGIC_PAGE_PREFLIGHT.md and compress/host them, then re-publish"
+                + (f": {sample}" if sample else ""),
+                html_path, base_url, preflight,
+            )
+            write_publish_reports(output_dir, payload)
+            return payload
+        if not args.no_compress_oversized and ((preflight.get("json") or {}).get("compressed")) and preflighted.exists():
+            source_html = preflighted  # compressed-video refs replaced the oversized originals
+
         prepared = output_dir / "magic-page-inline.html"
         inline = subprocess_record(
-            [sys.executable, str(INLINE_ASSETS), str(html_path), "--out", str(prepared), "--no-image-inline"],
+            [sys.executable, str(INLINE_ASSETS), str(source_html), "--out", str(prepared), "--no-image-inline"],
             cwd=REPO,
             log_path=output_dir / "publisher-magic-inline-assets.log",
         )
@@ -378,20 +464,30 @@ def publish_magic_page(
             write_publish_reports(output_dir, payload)
             return payload
         packaged = output_dir / "magic-page-ready.html"
+        package_cmd = [
+            sys.executable,
+            str(MAGIC_PAGE_ASSETS),
+            str(prepared),
+            "--out",
+            str(packaged),
+            "--uploader",
+            str(uploader),
+            "--base-url",
+            base_url,
+            "--key-prefix",
+            f"feishu-deck-h5/{task_id}",
+        ]
+        # delivery-9 / P1#4: keep the framework runtime + per-slide CSS INLINE by
+        # default. Externalizing them turns feishu-deck.js into a hash-named hosted
+        # script that the publish-bytes runtime-presence check no longer recognizes
+        # ("runtime missing" false negative — it cost a manual round-trip on every
+        # publish). Code is <0.5 MB, so keeping it inline never threatens the body
+        # limit; only heavy media is externalized. Opt out with
+        # --externalize-inline-code if a deck genuinely needs it.
+        if not args.externalize_inline_code:
+            package_cmd.append("--keep-inline-code")
         package = subprocess_record(
-            [
-                sys.executable,
-                str(MAGIC_PAGE_ASSETS),
-                str(prepared),
-                "--out",
-                str(packaged),
-                "--uploader",
-                str(uploader),
-                "--base-url",
-                base_url,
-                "--key-prefix",
-                f"feishu-deck-h5/{task_id}",
-            ],
+            package_cmd,
             cwd=REPO,
             log_path=output_dir / "publisher-magic-assets.log",
         )
@@ -401,9 +497,11 @@ def publish_magic_page(
             return payload
         working_html = packaged
 
-    if contains_data_image(working_html):
+    residual = residual_data_payloads(working_html)
+    if residual:
         payload = magic_failure(
-            "Magic Page HTML still contains data:image payloads; upload images to TOS before publishing",
+            f"Magic Page HTML still contains inline data: payloads ({', '.join(residual)}); "
+            "these must be uploaded to TOS before publishing",
             working_html,
             base_url,
             None,
@@ -428,7 +526,7 @@ def publish_magic_page(
     # that no prior render-time audit ran on; re-run the gate on working_html so
     # R-BAKED-DOM and friends are caught on the publish-bound bytes. Fail-closed.
     if not args.allow_unaudited:
-        final_gate = run_publish_gate(working_html, output_dir, label="finalbytes")
+        final_gate = run_publish_gate(working_html, output_dir, label="finalbytes", visual=False)
         if not final_gate["ok"]:
             payload = magic_failure(
                 "publish-bytes validator gate failed (re-check of the final published HTML)"
@@ -583,6 +681,18 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--magic-page-dry-run", action="store_true")
     ap.add_argument("--magic-page-open-source", action="store_true")
     ap.add_argument("--skip-magic-asset-prepare", action="store_true")
+    # delivery-8: oversized-resource pre-flight (run before the upload API).
+    ap.add_argument("--no-compress-oversized", action="store_true",
+                    help="do NOT auto-compress oversized videos; instead fail the publish with a "
+                         "report listing every oversized resource + the exact fix command")
+    ap.add_argument("--magic-max-resource-bytes", type=int, default=64 * 1024 * 1024,
+                    help="per-resource size limit enforced by the pre-flight (default 64 MiB, Magic Page's limit)")
+    # delivery-9 / P1#4: framework runtime + CSS stay inline by default so the
+    # publish-bytes runtime check still recognizes the player. Opt out only if a
+    # deck genuinely needs its code externalized.
+    ap.add_argument("--externalize-inline-code", action="store_true",
+                    help="externalize inline <style>/<script> to TOS (default: keep inline so the "
+                         "runtime stays recognizable to the publish-bytes check)")
 
     # F-285 post-publish self-check (verify the final URL the audience opens).
     ap.add_argument("--skip-self-check", action="store_true",

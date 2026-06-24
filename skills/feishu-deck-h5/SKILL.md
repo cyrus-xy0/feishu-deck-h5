@@ -59,6 +59,14 @@ These gates apply before dispatching to any subskill:
 1. **Deck output must go through DeckJSON and `render-deck.py`.** Do not hand-write
    or patch a final `index.html` for generation. Full HTML fallback is rare; if
    accepted, state the fallback reason and still run validator before handoff.
+   This explicitly covers **merging / combining several uploaded HTML files into
+   one deck**: route that through the importer/lift path (`deck-cli.py paste` /
+   `deck-json/import-html-slide.py` / `lift-slides.py`) so every page round-trips
+   through `deck.json` — do NOT hand-roll a `build_deck.py` that string-assembles
+   or patches a merged `index.html`. Hand-assembly silently drops the structural
+   guarantees the renderer gives for free (deck close tags, no runtime-only
+   `data-idx`, the wordmark, `custom_css` discipline) and forces a full-file
+   regenerate + whole-deck re-validate on every edit instead of a scoped one.
 2. **Generation must run design first.** Do not jump directly from brief/materials
    to `deck.json`. Designer output (`DESIGN-PLAN.md` + `outline.json`) is the
    contract the renderer follows.
