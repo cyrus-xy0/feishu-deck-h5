@@ -143,6 +143,26 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
   **deck.json 改动**走 deck-cli(set-page / insert / render)——它们经 Bash 子进程落盘,不受隔离
   影响。别去研究 worktree、别 ExitWorktree(编辑 deck 产物本就不是「代码改动」,无需隔离)。
 
+## 纯结构改动(move-key / reorder / hide / unhide / delete)= 一次 `--quick` 渲染,别套 `--scope … --shoot`
+
+移动 / 隐藏 / 删一页 = **帧序变,没有任何一页的版式变** → 别套上面「改一页」的 scoped 配方
+(2026-06-25 移一页复盘:纯 reorder 却跑了全量渲染、又多补一轮 scoped 截图,白慢一倍)。
+
+```bash
+# 1) 改结构:move-key 自带 .bak + range-check(reorder <旧位> <新位> 同理)
+python3 deck-json/deck-cli.py --yes <deck.json> move-key <KEY> <目标位>
+# 2) 验落点:读 deck.json,不渲(别为"确认顺序"反复渲)
+python3 deck-json/deck-map.py <deck.json>
+# 3) 一次过:帧序变→必须重渲 index.html,但用 --quick(~15s,别全量 ~2-3min)
+python3 deck-json/render-deck.py <deck.json> . --renumber --quick
+```
+
+- **`--quick`** = 跳过 deck-log 整 deck 截图快照 + content-fit 拒绝,**保留** JSON schema + HTML 静态闸。
+  纯结构改动无版式变化、快照无新信息 → 跳;把 ~2-3min 砍到 ~15s。
+- **`--renumber`** = 把每页 `screen_label` 前导数字重写成真实帧序(reorder 后标签必漂;纯语义标签的 deck 才省)。
+- **别 `--scope N --shoot`**:reorder 后 N 之后的帧全漂,`--scope`(一次只动一帧的语义)不成立;且内容没变,
+  截图纯属多跑一轮。结构改动的正确验证 = `deck-map` 读落点 +(想看图就)瞄移动页那 1 张,**不单开渲染轮**。
+
 ## 跨 deck 拎一页(LIFT+SWAP — 默认乐观:paste 先做,render 验,坏了再诊断)
 
 - **工具路径钉死**:repo 根只有 `runs/` + `skills/`;所有 deck-json 工具在
