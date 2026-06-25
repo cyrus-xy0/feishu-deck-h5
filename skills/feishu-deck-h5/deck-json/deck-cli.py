@@ -9,12 +9,15 @@ USAGE
 
 Read commands (no backup needed):
   list                        list slides as numbered table
-  get PATH                    print value at dotted path (e.g. slides.3.data.title)
+  get PATH                    print value at dotted path; a slides segment may be
+                              an index OR a slide key (slides.<key>.data.title)
   lint                        validate against schema (wrap validate-deck.py)
   show KEY                    pretty-print one slide's JSON
 
 Write commands (auto-backup + revalidate + rollback on schema fail):
-  set PATH VALUE              dotted-path set (VALUE auto-typed: int/bool/str/json)
+  set PATH VALUE              dotted-path set (VALUE auto-typed: int/bool/str/json);
+                              address a slide by key to avoid index off-by-one:
+                              set slides.<key>.data.html --from-file f
   set-accent KEY COLOR        slide.accent = COLOR
   set-decor KEY TOKENS        slide.decor = TOKENS (comma-sep, e.g. "blue-glow,grain")
   set-variant KEY VARIANT     for content/stats/flow only — also wipes data fields
@@ -118,14 +121,35 @@ def parse_value(s: str):
     return s
 
 
+def _list_index(cur: list, seg: str) -> int:
+    """Resolve one dotted-path segment against a list. A pure integer is a 0-based
+    array index (back-compat: `slides.5`). A NON-integer is matched against each
+    element's "key" field, so `slides.<slide-key>` addresses a slide BY KEY —
+    stable across reorders and immune to the present-page-vs-array-index
+    off-by-one that _disabled / hidden slides introduce. (Hand-converting a page
+    number to an array index is the #1 way an edit silently clobbers the WRONG
+    slide; addressing by key removes the conversion entirely.)"""
+    s = seg.strip().strip("[]")
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    for i, el in enumerate(cur):
+        if isinstance(el, dict) and el.get("key") == s:
+            return i
+    raise KeyError(
+        f"path segment '{seg}': not an integer index, and no list element "
+        f"has key '{s}'")
+
+
 def get_path(d, dotted: str):
-    """Walk a dotted path. Numeric segments index arrays.
+    """Walk a dotted path. Integer segments index arrays; a non-integer segment
+    on a list resolves by element "key" (e.g. `slides.<slide-key>.data.title`).
     Raises KeyError / IndexError on miss."""
     cur = d
     for seg in dotted.split("."):
         if isinstance(cur, list):
-            idx = int(seg)
-            cur = cur[idx]
+            cur = cur[_list_index(cur, seg)]
         elif isinstance(cur, dict):
             cur = cur[seg]
         else:
@@ -134,13 +158,14 @@ def get_path(d, dotted: str):
 
 
 def set_path(d, dotted: str, value):
-    """Set a dotted path. Creates intermediate dicts (NOT lists) as needed."""
+    """Set a dotted path. Integer segments index arrays; a non-integer segment on
+    a list resolves by element "key" (e.g. `slides.<slide-key>.data.html`).
+    Creates intermediate dicts (NOT lists) as needed."""
     segs = dotted.split(".")
     cur = d
     for seg in segs[:-1]:
         if isinstance(cur, list):
-            idx = int(seg)
-            cur = cur[idx]
+            cur = cur[_list_index(cur, seg)]
         elif isinstance(cur, dict):
             if seg not in cur or not isinstance(cur[seg], (dict, list)):
                 cur[seg] = {}
@@ -149,7 +174,7 @@ def set_path(d, dotted: str, value):
             raise KeyError(f"can't descend into {type(cur).__name__} at '{seg}'")
     last = segs[-1]
     if isinstance(cur, list):
-        cur[int(last)] = value
+        cur[_list_index(cur, last)] = value
     else:
         cur[last] = value
 
@@ -239,13 +264,19 @@ def _edit_scope_keys(args, updated: dict):
         path = getattr(args, "path", "") or ""
         if not path.startswith("slides"):
             return set()                        # deck-level scalar (deck.title, magic_move …)
-        # `set` indexes arrays with DOTS (slides.5.accent); also tolerate brackets.
-        m = re.match(r"slides[.\[](\d+)", path)
+        # `set` addresses a slide by DOT segment: an index (slides.5.accent) or a
+        # key (slides.<slide-key>.accent); also tolerate brackets. Resolve either
+        # form to the touched slide key so the gate stays scoped.
+        m = re.match(r"slides[.\[]([^.\]\[]+)", path)
         if m:
-            i = int(m.group(1))
+            seg = m.group(1)
             slides = updated.get("slides") or []
-            if 0 <= i < len(slides) and slides[i].get("key"):
-                return {slides[i]["key"]}
+            if seg.isdigit():
+                i = int(seg)
+                if 0 <= i < len(slides) and slides[i].get("key"):
+                    return {slides[i]["key"]}
+            elif any(s.get("key") == seg for s in slides):
+                return {seg}                    # key-addressed: slides.<key>.field
         return None                             # touches slides, unattributable → whole-deck gate
     return None
 

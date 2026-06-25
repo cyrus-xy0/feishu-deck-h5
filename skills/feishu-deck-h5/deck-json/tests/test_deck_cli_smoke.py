@@ -49,6 +49,34 @@ class DeckCliSmokeTest(unittest.TestCase):
         self.assertEqual(rc, 0, f"set failed: {err}")
         self.assertEqual(self._load()["slides"][0]["data"]["title"], "NEW TITLE")
 
+    def test_set_by_slide_key_lands_on_right_slide(self):
+        # Address a slide by KEY, not array index. Must hit that exact slide
+        # wherever it sits — no page#->index hand-conversion, so the off-by-one
+        # that _disabled/hidden slides cause can't clobber the wrong page.
+        slides = self._load()["slides"]
+        key = slides[3]["key"]                       # a mid-deck slide
+        rc, out, err = self._run("set", f"slides.{key}.data.title", "BY-KEY-OK")
+        self.assertEqual(rc, 0, f"set by key failed: {err}")
+        after = self._load()["slides"]
+        self.assertEqual(after[3]["data"]["title"], "BY-KEY-OK")
+        self.assertNotEqual(after[2].get("data", {}).get("title"), "BY-KEY-OK")
+        self.assertNotEqual(after[4].get("data", {}).get("title"), "BY-KEY-OK")
+
+    def test_set_by_unknown_key_errors_not_silent(self):
+        rc, out, err = self._run("set", "slides.no-such-key.data.title", "X")
+        self.assertNotEqual(rc, 0, "unknown slide key should error, not no-op")
+
+    def test_get_by_slide_key_path(self):
+        key = self._load()["slides"][2]["key"]
+        self._run("set", "slides.2.data.title", "ROUNDTRIP")
+        proc = subprocess.run(
+            [sys.executable, str(CLI), str(self.deck),
+             "get", f"slides.{key}.data.title"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("ROUNDTRIP", proc.stdout)
+
     def test_set_invalid_enum_rolls_back(self):
         # accent enum doesn't include "cyan" (R49 encoded in schema) — set
         # should fail + rollback to .bak

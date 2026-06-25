@@ -151,10 +151,18 @@ def map_deckjson(deck: dict) -> list[dict]:
             continue
         fi += 1
         data = s.get("data") or {}
-        title = data.get("title")
-        if not title and isinstance(data.get("html"), str):
-            t = _text_of(data["html"], "title-zh", "title")
-            title = t
+        # Prefer the REAL visible heading (.title-zh in the authored html) over the
+        # data.title metadata. After a retarget/edit the metadata routinely goes
+        # stale (keeps the OLD heading), so trusting it first makes deck-map
+        # mislabel pages — forcing a render-just-to-identify-which-page-is-which.
+        # Fall back to the metadata only when the html carries no heading. (Aligns
+        # the deck.json path with map_html, which already reads the rendered
+        # .title-zh.)
+        title = None
+        if isinstance(data.get("html"), str):
+            title = _text_of(data["html"], "title-zh", "title")
+        if not title:
+            title = data.get("title")
         rows.append({
             "index": fi,
             "key": s.get("key"),
