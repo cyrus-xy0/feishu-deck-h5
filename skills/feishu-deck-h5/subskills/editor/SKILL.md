@@ -66,7 +66,7 @@ Designer + Renderer instead).
   2. deck-cli.py <deck.json> set-page <key> --html f.html --css f.css [--lifted]
        ↳ runs the W4 static pre-write lint (off-ladder font-size, dual-anchor,
          P50 base64-in-style …) and REFUSES known gate failures before they
-         reach deck.json; optimistic lock + auto-backup included.
+         reach deck.json; single-writer file lock + optimistic lock + auto-backup included.
   3. For raw/bespoke visual iteration, run
      deck-json/preview-slide.py <deck.json> --key <key>
        ↳ creates a 1:1 screenshot plus the single-slide static gate in ~2s; use
@@ -88,9 +88,9 @@ Designer + Renderer instead).
   the whole transcript.
 
   **Anti-pattern**: ad-hoc python/heredoc scripts that write deck.json directly.
-  They bypass the optimistic lock (concurrent-session clobbering), the auto
-  backup, schema-fail rollback, and the pre-write lint — every one of which
-  exists because a real session paid for its absence. `set-page` /
+  They bypass the single-writer file lock, optimistic lock (concurrent-session
+  clobbering), the auto backup, schema-fail rollback, and the pre-write lint —
+  every one of which exists because a real session paid for its absence. `set-page` /
   `set --from-file` is the sanctioned write path for fragment payloads.
 
   **Un-synced browser edits — the clobber guard (F-315, Option A)**: if someone

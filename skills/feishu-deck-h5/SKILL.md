@@ -378,9 +378,9 @@ is INLINE):
   from its real DOM before it is operated on. Editing is uniform across canvas /
   raw / schema slides: render → edit → sync back to `deck.json` → re-render.
 - Slide-level edits go through `deck-json/deck-cli.py` (`set-page` /
-  `set --from-file` for fragment payloads) — it carries the optimistic lock,
-  auto-backup, schema-fail rollback, and the pre-write lint. Ad-hoc scripts
-  that write deck.json directly are an anti-pattern (see editor subskill,
+  `set --from-file` for fragment payloads) — it carries the single-writer file
+  lock, optimistic mtime_ns guard, auto-backup, schema-fail rollback, and the
+  pre-write lint. Ad-hoc scripts that write deck.json directly are an anti-pattern (see editor subskill,
   "canonical loop"). Iterate with `render-deck.py --iter`; deliver with
   `--final`. The full deck.json / deck-cli / exit-code state + error contract is
   in `references/deck-state-contract.md`; the full anti-pattern table is in

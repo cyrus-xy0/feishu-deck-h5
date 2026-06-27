@@ -18,7 +18,7 @@ write `deck.json`** (see §2: no ad-hoc heredoc).
 
 | Tool | Writes | Write guarantee |
 |---|---|---|
-| `deck-json/deck-cli.py` (`set-page` / `set --from-file` / `paste` / `insert` / `delete` / `move-key` / `reorder` / `clone` / `hide`/`unhide` / `set-*`) | `deck.json` only | **The sanctioned write path.** Optimistic lock (concurrent-session clobber) + `*.bak-pre-<cmd>-<ts>` auto-backup + post-op strict schema re-validate **with rollback** + W4 pre-write lint (`set-page`/`set --from-file`). Destructive `delete` needs `--yes`/interactive confirm. |
+| `deck-json/deck-cli.py` (`set-page` / `set --from-file` / `paste` / `insert` / `add-section` / `delete` / `move-key` / `reorder` / `clone` / `hide`/`unhide` / `set-*`) | `deck.json` only | **The sanctioned write path.** POSIX file lock around read→mutate→write + optimistic mtime_ns guard (concurrent-session clobber) + `*.bak-pre-<cmd>-<ts>` auto-backup + post-op strict schema re-validate **with rollback** + W4 pre-write lint (`set-page`/`set --from-file`). Destructive `delete` needs `--yes`/interactive confirm. |
 | `deck-json/fast-text.py` | `deck.json` AND `index.html` (dual-write) | Pure-copy swap only. `count==1` asserted on **both** sides, JSON-escape handled, refuses `<`/`>`. **No render, no validation** — the sanctioned exception to "rerender after edits" (round-trip holds because the same literal string changed in both representations). JSON corruption is refused-and-restored. |
 | `deck-json/import-html-slide.py` | `deck.json` (Mode A) | Wraps an authored html+css fragment as a `raw` slide, validates each candidate, inserts at index / `end` / after-key, auto re-renders. The sanctioned path for "add one new page". |
 | `deck-json/render-deck.py` | `index.html` (+ `slide-index.json`, snapshots, copied `assets/`) | Re-derives `index.html` from `deck.json`. Stamps the `fs-render-sig` integrity meta. Runs the static + visual + geometry gates; rolls back `index.html` on gate refusal. Never writes `deck.json` (except an **auto-sync** fold of lossless browser edits, F-315). |
@@ -38,8 +38,9 @@ Read-only helpers (no write, no backup): `deck-cli list`/`get`/`show`/`lint`,
   destroyed by the next render/fork/downstream read. (Full rationale +
   postmortems: `round-trip-integrity.md`.)
 - **Every write goes through `deck-cli`** (or the dual-write `fast-text` /
-  insert-`import-html-slide`). That path is what carries the optimistic lock,
-  auto-backup, schema-fail rollback, and W4 pre-write lint. **Ad-hoc
+  insert-`import-html-slide`). That path is what carries the single-writer file
+  lock, optimistic lock, auto-backup, schema-fail rollback, and W4 pre-write lint.
+  **Ad-hoc
   python/heredoc that opens and rewrites `deck.json` directly is an anti-pattern**
   — it bypasses every one of those guards, and every guard exists because a real
   session paid for its absence (concurrent-session clobbering, an invalid deck
@@ -186,7 +187,7 @@ the pre-write checklist.
   fit-check REJECTS on render** (exit 4, especially `content/story-case`'s 4-beat
   arc). *Fix:* fill the required fields with `set` before you render.
 - **〔反直觉〕 ad-hoc heredoc that writes `deck.json` bypasses every guard.** No
-  lock, no backup, no rollback, no lint. *Fix:* always go through `deck-cli`
+  file lock, no optimistic guard, no backup, no rollback, no lint. *Fix:* always go through `deck-cli`
   `set-page` / `set --from-file`.
 - **〔天花板〕 `repair-lifted` does NOT grow too-small text** — it only snaps
   OFF-LADDER font sizes onto the tier. *Fix:* use `assets/grow-box-fit.py` after

@@ -129,9 +129,22 @@ python3 deck-json/deck-cli.py <new-dir>/deck.json new-deck \
 - Q3 视觉骨架:轴 / 阶梯 / 矩阵 / 对比 / 路径,选一个。
 - Q4 第一版焦点:最大的字、最亮的线、最实的形第一版就做足。
 
+### 密集业务页默认骨架
+
+- **默认固定几何,少动画**:账单、对比、组织流程、三栏观点这类高密度业务页,第一版优先用
+  `position:absolute` 的固定区域 / 固定列宽 / 固定字号,不要一上来写复杂 grid + 延迟动效。
+  动效只在页面静态成立后再加;用户没明确要高级动效时,宁可无 bespoke animation。
+- **一页一个焦点**:金额页焦点=合计数字;对比页焦点=中轴 / 箭头 / 天平;章节页焦点=章节号 +
+  标题。第一版把焦点做足,其余信息压成短句。
+- **preview 看静态终态**:若写了 CSS animation,resting state 必须可见;密集页的验证截图应能在
+  无动画 / 动画未跑完时也读完正文。
+
 ## 插一页 / 改一页 · 预览优先配方
 
 ```bash
+# 0) 插章节页时用原子快路径:一次写完 chapter/title/label,别 insert section 后再 set 三轮
+python3 deck-json/deck-cli.py --yes <deck.json> add-section <N> <KEY> --chapter 01 --title "AI 的能力如何了？" --label 03
+
 # 1) 插脚手架。insert 自己 range-check 位置 + 拒撞名 key → 不必另跑 deck-map "确认插入点"
 python3 deck-json/deck-cli.py --yes <deck.json> insert <N> raw <KEY>      # 新页成第 N 页;raw 不需 variant
 # 2) 灌 html/css/title。W4 pre-write lint 会提醒某 16px 选择器上是否压了 ≥8 字正文
@@ -152,7 +165,8 @@ python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
 - `#N`(URL hash)= frame index = `slides[N-1]`。用户指 `#10` 之后加一页 → `insert 11`。
   **别为"确认插入点"反复跑 deck-map**;热 deck 防并发位移最多查 1 次。
 - set-page / render 自带乐观锁 + `.bak-pre-*` 备份;并发 session 改了同一 deck.json 它会拒写,
-  按提示重读即可,不要 `--force` 绕过。
+  按提示重读即可,不要 `--force` 绕过。`deck-cli` 写命令还会先拿 `.deck.json.lock`,
+  覆盖 read→mutate→write 全事务;别用临时脚本绕过这个单写者通道。
 - **要照着某页改 / 学它约定**:先 `get-page <key|#N>` 看它的 html+css(别开 ad-hoc extractor),
   再 set-page 写回。
 - **对话 / agent demo 页别手搓聊天 UI**:`cp deck-json/templates/prototypes/feishu-chat-demo.html`
