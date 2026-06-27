@@ -88,6 +88,12 @@ def is_probable_resource_attr(tag: str, attr: str, ref: str) -> bool:
         return False
     tag = tag.lower()
     attr = attr.lower()
+    # A REMOTE <iframe src> is a LIVE EMBED (e.g. a Feishu Docx / Base), not a
+    # re-hostable file. Fetching it would chase the embed origin's login 302
+    # and 404 the deck; leave external iframe srcs untouched so the embed loads
+    # at runtime. (Local prototype iframes still re-host normally.)
+    if tag == "iframe" and is_http_ref(ref):
+        return False
     if attr in {"src", "poster"}:
         return True
     if tag != "link":

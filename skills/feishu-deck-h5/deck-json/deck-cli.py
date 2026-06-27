@@ -224,11 +224,13 @@ def backup_path(deck_path: Path, command: str) -> Path:
     return cand
 
 
-def prune_backups(deck_path: Path, keep: int = 15) -> int:
+def prune_backups(deck_path: Path, keep: int = 3) -> int:
     """Keep only the most-recent `keep` `<deck>.bak-pre-*` backups (by mtime),
     delete the rest. One backup is written per mutation, so an actively-edited
     deck otherwise accumulates them into the hundreds (a real deck dir held ~100).
-    Best-effort: never raises, returns the count deleted. (F-363)"""
+    Default retention is 3 (a TATA-deck retarget session left 17 behind at the
+    old default of 15 — user asked for a tighter window). Best-effort: never
+    raises, returns the count deleted. (F-363)"""
     try:
         baks = sorted(deck_path.parent.glob(deck_path.name + ".bak-pre-*"),
                       key=lambda p: p.stat().st_mtime, reverse=True)
