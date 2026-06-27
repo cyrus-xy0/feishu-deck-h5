@@ -409,6 +409,12 @@ is INLINE):
   new generation, create a run with `assets/new-run.sh <slug>` and announce the
   absolute run path. Use a short ASCII slug derived from the topic/customer; do
   not use a bare timestamp unless there is no usable topic.
+- If the request is only a standard cover starter deck (title + speaker + date,
+  no body outline/source files/custom design), use
+  `assets/new-cover-deck.py` as the narrow fast path. It creates the run,
+  minimal design artifacts, `deck.json`, one `render-deck.py --final` gate, and
+  a named inline HTML deliverable; do not add a second `finalize.sh local`
+  validation pass unless the user asked for a zip or library ingest.
 - Inputs live in `runs/<...>/input/`; parser output lives in
   `input/runtime-library/`, with `source-dossier.json`, `assets/`,
   `source-library/raw/`, and `source-library/fetched/`.

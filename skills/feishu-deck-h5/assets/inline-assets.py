@@ -40,10 +40,15 @@ _MISSING_LOCAL_REFS: list[str] = []
 
 def is_external_ref(ref: str) -> bool:
     ref = ref.strip()
+    low = ref.lower()
     return (
         not ref
-        or ref.startswith(("#", "data:", "blob:", "http://", "https://", "//"))
-        or ref.lower().startswith("javascript:")
+        or ref.startswith("#")
+        or low.startswith(("%23", "data:", "blob:", "http://", "https://", "//", "javascript:"))
+        # url(...) tokens inside inline SVG data URIs and CSS documentation
+        # placeholders are not local files. Do not turn them into missing-asset
+        # warnings.
+        or set(ref) <= {"."}
     )
 
 

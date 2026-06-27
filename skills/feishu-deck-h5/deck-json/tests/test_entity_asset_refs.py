@@ -116,6 +116,18 @@ class StripRefEntityTest(unittest.TestCase):
         # entity is NOT decoded (gate only fires on a quote-entity wrapper).
         self.assertEqual(ia.strip_ref("input/a&copy;b.png"), "input/a&copy;b.png")
 
+    def test_inline_assets_ignores_svg_fragments_and_doc_placeholders(self):
+        ia = _load("assets/inline-assets.py", "_ia_f333b")
+        d = Path(tempfile.mkdtemp())
+        html = d / "index.html"
+        html.write_text("x", encoding="utf-8")
+        ia._MISSING_LOCAL_REFS.clear()
+        self.assertIsNone(ia.resolve_asset(html, "%23n"))
+        self.assertIsNone(ia.resolve_asset(html, "..."))
+        self.assertEqual(ia._MISSING_LOCAL_REFS, [])
+        self.assertIsNone(ia.resolve_asset(html, "missing.png"))
+        self.assertEqual(ia._MISSING_LOCAL_REFS, ["missing.png"])
+
     def test_magic_page_strip_ref(self):
         mp = _load("assets/magic-page-assets.py", "_mp_f333")
         self.assertEqual(mp.strip_ref("&#34;input/x.png&#34;"), "input/x.png")

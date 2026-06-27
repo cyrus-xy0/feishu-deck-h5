@@ -376,6 +376,12 @@ fully self-contained single file from **the user's run**. Do NOT use
 (The inline single file still carries the in-browser editor unless you
 strip the edit-mode lines; for a strictly read-only handout, remove them.)
 
+For a **cover-only starter deck** created by
+`assets/new-cover-deck.py`, the helper already runs the final render gate and
+emits the named inline HTML. Do not follow it with `finalize.sh local` solely for
+another validation pass; only run `finalize.sh remote` when the user specifically
+needs the editable zip, or `finalize.sh ... library` for slide-library ingest.
+
 ### Choosing between Mode 2 and Mode 3
 
 Default to **Mode 2 (zip with edit kit)** unless the user explicitly

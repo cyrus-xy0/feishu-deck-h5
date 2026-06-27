@@ -286,6 +286,30 @@ EDIT family and route to Editor without a new run (see **Edit vs Generation
 boundary** above). The dividing line is whether you are creating a new run
 artifact or modifying one that already exists, not how large the change is.
 
+#### Cover-only starter deck fast path
+
+When the user only asks to open a new deck with a title, speaker, and date, and
+does not provide body content, source files, or a custom visual direction, lock
+`Mode=GENERATION`, `Scope=single-slide cover`, and use the one-command fast path:
+
+```bash
+python3 skills/feishu-deck-h5/assets/new-cover-deck.py \
+  --title "让 AI 进入组织：从工具到同事" \
+  --author "杰森" \
+  --date "2026.6.28" \
+  --slug ai-into-org \
+  --review-shot
+```
+
+This script is intentionally narrow: it writes the minimal `PROMPTS.md`,
+`DESIGN-PLAN.md`, and `outline.json`, scaffolds `deck.json` with
+`deck-cli.py new-deck`, runs one delivery `render-deck.py --final`, and emits a
+named inline HTML file. Do **not** additionally run `finalize.sh local` just to
+validate the same artifact; that duplicates the visual gate. For handoff, glance
+at the single `--review-shot` image once. If the user asks for body pages,
+bespoke/raw design, imported materials, library ingest, or editable zip delivery,
+leave this fast path and use the normal Designer → Renderer → Validator flow.
+
 ### EDIT
 
 Edit copy / layout of an existing deck inside its own run directory; `deck.json` /
