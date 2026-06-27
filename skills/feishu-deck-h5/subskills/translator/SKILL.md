@@ -1,3 +1,13 @@
+---
+name: feishu-deck-h5-translator
+description: |
+  Subskill for the feishu-deck-h5 pipeline. Use to translate or localize an
+  existing deck or page range into another language through the source-of-truth
+  flow: backfill, parity branch decision, verbatim text pairs, apply, render or
+  in-place update, embedded iframe coverage, brand/lang asset swaps, and
+  translation QA.
+---
+
 # translator — feishu-deck-h5 subskill
 
 Localize / translate an existing deck into another language through the
