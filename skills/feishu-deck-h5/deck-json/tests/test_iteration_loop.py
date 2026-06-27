@@ -98,6 +98,30 @@ def test_lint_mockup_silences_typescale():
         f["code"] for f in lint_fragment(html=html, css=css) if f["sev"] == "err"]
 
 
+def test_lint_reserved_raw_class_blocks_authored_stage():
+    html = '<div class="header"><h2 class="title-zh">T</h2></div><div class="stage"></div>'
+    css = '.slide[data-slide-key="k"] .stage{top:258px}'
+
+    auth = lint_fragment(html=html, css=css, lifted=False)
+    lift = lint_fragment(html=html, css=css, lifted=True)
+    opt = lint_fragment(
+        html=html + '<div data-allow-reserved-class></div>',
+        css=css,
+        lifted=False,
+    )
+
+    assert "L-RAW-RESERVED-CLASS" in {f["code"] for f in auth if f["sev"] == "err"}
+    assert "L-RAW-RESERVED-CLASS" not in {f["code"] for f in lift if f["sev"] == "err"}
+    assert "L-RAW-RESERVED-CLASS" in {f["code"] for f in lift if f["sev"] == "warn"}
+    assert "L-RAW-RESERVED-CLASS" not in {f["code"] for f in opt}
+
+
+def test_lint_allows_prefixed_raw_stage_hooks():
+    html = '<div class="ai-leaps-stage"></div>'
+    css = '.slide[data-slide-key="k"] .ai-leaps-stage{top:258px}'
+    assert "L-RAW-RESERVED-CLASS" not in {f["code"] for f in lint_fragment(html=html, css=css)}
+
+
 def test_lint_p50_base64_in_style():
     blob = base64.b64encode(b"x" * 300 * 1024).decode()
     css = f'.x{{background:url("data:image/png;base64,{blob}")}}'

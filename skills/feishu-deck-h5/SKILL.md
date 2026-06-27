@@ -115,15 +115,17 @@ These gates apply before dispatching to any subskill:
   requested page-level action.
 - For page references, `page N`, URL `#N`, and frame index N are canonical. Old
   `screen_label` numeric prefixes are labels, not source-of-truth page numbers.
-- **Single-page edit = scoped loop, not a whole-deck pass.** The canonical
-  intermediate edit is: `deck-cli.py set-page` (or `set --from-file`) →
-  `render-deck.py --iter` → glance at the ONE changed page. Auto-scope already
-  scopes the static gate AND the making-of snapshot to the changed page(s); a
-  framework / CSS change only re-runs the VISUAL audit deck-wide (content +
-  snapshot stay scoped). Do NOT run a whole-deck validate (`finalize.sh` /
-  `check-only` over all pages / `render --final`) on an intermediate one-page
-  edit — that is the #1 cause of "改一页却渲染 / 校验 / 截图很多页". Reserve the
-  whole-deck pass for a delivery checkpoint, a structural change, or `--final`.
+- **Single-page edit = preview-first scoped loop, not a whole-deck pass.** The
+  canonical raw/bespoke visual loop is: `deck-cli.py set-page` (or
+  `set --from-file`) → `preview-slide.py --key <K>` for fast layout/rule
+  feedback → one real `render-deck.py --scope <K> --shoot` (or `--iter`) only
+  when the page is visually ready. Auto-scope already scopes the static gate AND
+  the making-of snapshot to the changed page(s); a framework / CSS change only
+  re-runs the VISUAL audit deck-wide (content + snapshot stay scoped). Do NOT run
+  a whole-deck validate (`finalize.sh` / `check-only` over all pages /
+  `render --final`) on an intermediate one-page edit — that is the #1 cause of
+  "改一页却渲染 / 校验 / 截图很多页". Reserve the whole-deck pass for a delivery
+  checkpoint, a structural change, or `--final`.
 - **Fastest inner loop for a raw-page visual nudge = `preview-slide.py`, not a
   render round-trip.** For pure layout / text / wrapping / color iteration on ONE
   slide, `deck-json/preview-slide.py <deck.json> --key <slide_key>` drops that
@@ -135,8 +137,12 @@ These gates apply before dispatching to any subskill:
   whole-deck / cross-slide rules (R29-32 / R36 / R48 / L1 / R-CSSVAR / R-DECK-*),
   and JS-motion / iframe-embed / fitText do not run. So iterate with
   `preview-slide.py --key`, then commit + run the REAL gate once at the end with
-  `render-deck.py <deck.json> . --scope <key> --final` (deck-wide drift,
-  present-mode chrome, making-of snapshot). See its `--help` for the caveats.
+  `render-deck.py <deck.json> . --scope <key> --shoot` (or `--final` at delivery
+  when deck-wide drift / present-mode chrome / making-of snapshot must run). See
+  its `--help` for the caveats. If that real gate prints a distribution advisory,
+  fix one obvious imbalance round; otherwise mark intentional with slide
+  `allow:["imbalance"]` / a delivery note instead of silently ignoring it or
+  entering an open-ended render loop.
 
 ## Controller Communication Contract
 

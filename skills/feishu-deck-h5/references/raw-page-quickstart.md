@@ -36,8 +36,13 @@
   别自创类当首子节点**(会继承 column-reverse → 内容被水平居中,真踩过)——用框架结构
   `<div><span class="eyebrow">…</span><h2 class="title-zh">…</h2></div>`,或显式覆盖
   `.slide[data-slide-key=K] .header>div:first-child{flex-direction:row}`。
+- **新手写 raw 主容器别叫 `.stage`**:`.slide[data-layout="raw"] > .stage` 继承框架 body-zone
+  定位(`top:band+56; left/right:96; bottom:56; flex-column center`)。只有想要这套定位时才用
+  `.stage` 并加 `data-allow-reserved-class`;否则用带语义前缀的类名,如 `.ai-leaps-stage` /
+  `.risk-map-canvas`。`deck-cli set-page` 会对 `.stage` 等 body-zone 保留类名报
+  `L-RAW-RESERVED-CLASS`(lifted 页降级为 warn)。
 
-## raw 页 5 条铁律
+## raw 页 6 条铁律
 
 1. **raw 页标题:用框架 `.header` 即得 master 定位,但首子节点有隐藏契约——别撞它。**
    `<div class="header">` 自动拿到 master 坐标(`top:61 left:73 right:320`);其内 `.title-zh`/`h2`
@@ -50,13 +55,17 @@
    自绘标题后 R-VIS-TITLE-POSITION(只看 `.header` bbox)自动跳过。
 2. **一切 CSS scope 到 `.slide[data-slide-key="K"] …`**,别裸选择器(keyframe 是全局的,
    选择器不是——裸选择器会跨页泄漏)。
-3. **焦点闸 R-FOCAL**:≥3 个元素并列共享**全页最大字号**才告警。把 48px 只给该给的
+3. **自定义 raw 容器用语义前缀,别借框架 body-zone 类名当 hook**。坏:`<div class="stage">` +
+   `.stage{top:258px}`(会撞 raw body-zone 定位 / 审计语义);好:`<div class="ai-leaps-stage">` +
+   `.slide[data-slide-key="K"] .ai-leaps-stage{…}`。若你确实要框架 `.stage` 语义,在片段里加
+   `data-allow-reserved-class` 留痕。
+4. **焦点闸 R-FOCAL**:≥3 个元素并列共享**全页最大字号**才告警。把 48px 只给该给的
    (如左右双标题 = 2 个,安全),其余 ≤28。真要 3+,该页 slide JSON 加
    `"allow":["no-focal"]`——**真实字段,deck 里实证可用**;无配图同理 `"allow":["no-imagery"]`。
-4. **SVG `<text>` 也有字号 floor = 18px**(8+ 字 R-VIS-SVG-TEXT-FLOOR / 1–7 字短标签
+5. **SVG `<text>` 也有字号 floor = 18px**(8+ 字 R-VIS-SVG-TEXT-FLOOR / 1–7 字短标签
    R-VIS-SHORT-LABEL-FLOOR,都按【实效渲染】px 量、都是 **18**)→ 节点/标签宁可用 HTML
    `<span>` 绝对定位**覆在** SVG 上,字号好控、渲染更清晰。
-5. **动效只写 `slide.custom_css`**。deck.json 无 JS 槽,re-render 会抹掉任何
+6. **动效只写 `slide.custom_css`**。deck.json 无 JS 槽,re-render 会抹掉任何
    `<script>` / head `<style>`;GSAP 等只在 deck 级 `motion_engine:"gsap"` opt-in 时才有
    (见 `motion-system.md` §8),per-page 一律 CSS-only。
 
@@ -110,16 +119,28 @@ python3 deck-json/deck-cli.py <new-dir>/deck.json new-deck \
 要更细的字段去 `deck-json/deck-schema.json` 的 `data_<layout>` 段——**grep 取单段,别整读**
 (`grep -n '"data_cover"' deck-schema.json` 再定向读那 ~12 行)。
 
-## 插一页 / 改一页 · 三命令配方
+## 手写 raw 页前 · 5 行设计压缩
+
+动手写 HTML 前先在脑内或回复里钉 5 行,别边 render 边找主线:
+
+- Q0 角色:这页是结论页 / 结构总览 / 证据页 / 转场页?
+- Q1 记忆点:观众只记住哪一句?
+- Q2 信息块:最多 3-4 块;每块一句短文案。
+- Q3 视觉骨架:轴 / 阶梯 / 矩阵 / 对比 / 路径,选一个。
+- Q4 第一版焦点:最大的字、最亮的线、最实的形第一版就做足。
+
+## 插一页 / 改一页 · 预览优先配方
 
 ```bash
 # 1) 插脚手架。insert 自己 range-check 位置 + 拒撞名 key → 不必另跑 deck-map "确认插入点"
 python3 deck-json/deck-cli.py --yes <deck.json> insert <N> raw <KEY>      # 新页成第 N 页;raw 不需 variant
 # 2) 灌 html/css/title。W4 pre-write lint 会提醒某 16px 选择器上是否压了 ≥8 字正文
 python3 deck-json/deck-cli.py --yes <deck.json> set-page <KEY> --html f.html --css f.css --title "…"
-# 3) scoped 渲染:只校验 + making-of 只刷这一页(改一页别全 deck 渲)
+# 3) 视觉内循环:单页 1:1 快照 + 静态 gate,先用它修布局 / 换行 / 间距
+python3 deck-json/preview-slide.py <deck.json> --key <KEY>
+# 4) scoped 真闸:只校验 + making-of 只刷这一页(改一页别全 deck 渲)
 python3 deck-json/render-deck.py <deck.json> <out-dir> --scope <N>
-# 4) 自己审稿截图(present 模式 1920×1080 design clip)
+# 5) 自己审稿截图(present 模式 1920×1080 design clip)
 python3 deck-json/shoot.py <index.html> --pages <N> --out <dir>
 ```
 
@@ -216,11 +237,17 @@ python3 deck-json/render-deck.py <deck.json> . --renumber --quick
   只有 deck 明显自定义了**非框架默认的主题色**时,才读 1 张同类页取色。
 - **recon 一把并行抓完**:上面常量已钉死,无需 grep CSS / 派 Explore / 逐个 `--help`。
 - **审稿只看整图**(1920×1080 那张),非歧义不逐块放大裁切。
+- **raw 视觉微调先 preview,后真闸**:`preview-slide.py --key K` 用来发现换行 / 间距 /
+  焦点 / off-ladder 等单页问题;只有页面视觉基本成立后才跑 `render-deck.py --scope N --shoot`
+  或 `--iter`。别为每次 20px 位移都付正式 render 成本。
 - **render-review 单轮封顶**:`--scope N --shoot` 后**读 `last-render.log` 第一行就决策**,
   别为「确保」投机重渲。`✔ PASS`(或只剩 F-302 baseline 既存项)→瞄一眼整图即完;
   `❌ BLOCKING` 几何(R-VIS-CARD-OVERFLOW/R-OVERLAP/R-OVERFLOW/band-collide——已替你量好、
   点名元素)→只修那个元素,**只准 1 次** fix-render,还红就交人,别盲目迭代。
   deck-wide rollup(R20 字阶/配色/圆角漂移)是别页既存噪声,绝不重渲去「诊断」它。
+- **distribution advisory 有三分法**:`PASS` 但有非阻塞布局提示时,若明显可修(左右中线 /
+  卡片下内距)就修 1 轮;若是有意构图,在 slide `allow:["imbalance"]` 或交付说明中留痕;
+  不要无声忽略,也不要绿灯后无限追 advisory。
 - **收尾小改并进主步**:screen_label 之类在 insert/set-page 时一起设,别单开一轮 render。
 
 ## 改单值 / 换个色 / 调 embed 尺寸（EDIT 既有页 — 最高频，比插页更轻）
@@ -246,7 +273,8 @@ python3 deck-json/render-deck.py <deck.json> . --renumber --quick
 - **删掉绝对定位页里的一整块**（撤一个底部条 / 一列 / 一段）：剩余内容的视觉重心会随之上移或下移，
   `R-VIS-CANVAS-CENTER` 会报「偏上 / 偏下」。**删完同一遍就把保留内容补回画布中心**——按删掉区域的
   几何平移（≈ 删掉块高度的一半），或一次读 canvas band 中线 px 补到位；别等渲一轮看报告再补、白渲一遍。
-- **改完一遍过验收**：`render-deck.py <deck.json> <out-dir> --scope <N> --shoot`
+- **改完一遍过验收**：raw 视觉微调用 `preview-slide.py --key K` 先收敛;收口再跑
+  `render-deck.py <deck.json> <out-dir> --scope <N> --shoot`
   （渲 + 只校验第 N 页 + 截 `.shoot-pN.png`；既有 deck-wide 基线问题在 scoped 下自动降级、
   不阻塞本页；别为一页改动跑 `--final` / 全 deck 渲）。
 - **嵌入的本地原型改完**：它是 iframe `src` 直接按相对路径加载的——改原型 `.html` 文件即生效，

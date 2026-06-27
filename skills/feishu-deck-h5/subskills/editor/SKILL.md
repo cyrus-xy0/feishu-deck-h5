@@ -67,16 +67,25 @@ Designer + Renderer instead).
        ↳ runs the W4 static pre-write lint (off-ladder font-size, dual-anchor,
          P50 base64-in-style …) and REFUSES known gate failures before they
          reach deck.json; optimistic lock + auto-backup included.
-  3. render-deck.py <deck.json> <out>/ --iter
-       ↳ auto-scopes to the pages whose content changed (sidecar diff — no page
-         numbers to compute), skips the autosnapshot, prints a text echo of the
-         changed slides + an errors-only digest; full output in
-         <out>/last-render.log.
-  4. Verify cheap-first: text echo for copy · sNN.thumb.png for layout · full
-     sNN.png only when the thumb is ambiguous.
+  3. For raw/bespoke visual iteration, run
+     deck-json/preview-slide.py <deck.json> --key <key>
+       ↳ creates a 1:1 screenshot plus the single-slide static gate in ~2s; use
+         it for layout / wrapping / color / obvious rule failures. It is NOT a
+         delivery gate and does not run present-mode, iframe, fitText, motion, or
+         deck-wide drift checks.
+  4. When the page is visually ready, run ONE real gate:
+     render-deck.py <deck.json> <out>/ --scope <page-or-key> --shoot
+       ↳ refreshes the derived index.html, captures the changed page, and prints
+         the digest in <out>/last-render.log. Use --iter instead when you do not
+         know the changed page numbers.
   5. Before any handoff/publish: render-deck.py … --final  (full audits +
-     autosnapshot; --iter renders intentionally defer whole-deck checks).
+     autosnapshot; preview/scoped renders intentionally defer whole-deck checks).
   ```
+
+  Close out substantial page edits with a tiny process digest: `set-page` count,
+  `preview-slide` count, real `render-deck` count, and whether any non-blocking
+  advisory remained. This keeps future slowdowns diagnosable without replaying
+  the whole transcript.
 
   **Anti-pattern**: ad-hoc python/heredoc scripts that write deck.json directly.
   They bypass the optimistic lock (concurrent-session clobbering), the auto
@@ -119,6 +128,9 @@ Designer + Renderer instead).
   Use `--quick` instead when you don't need the making-of updated this run (skips the
   snapshot entirely, ~12-18s). Full render (no flag) only for a new deck or a
   whole-deck change. See `references/editing-discipline.md` → "Re-render speed".
+  For raw/bespoke single-page visual nudges, prefer `preview-slide.py --key`
+  before this real scoped render; do not pay the render-deck round trip just to
+  discover a text wrap, focal, or spacing violation.
 - **`EDIT` multi-page / clone-to-N** (restyle a divider series, or replicate one
   page's treatment to several pages): read `references/editing-discipline.md` E0
   "Multi-page" FIRST — inspect the model + all targets in ONE parallel batch

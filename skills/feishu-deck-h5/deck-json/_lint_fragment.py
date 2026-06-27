@@ -11,6 +11,8 @@ FWD-deck session: ~10 first-render blocks, ≥7 of them in these categories):
   L-P50-INLINE  base64 images inside <style>/custom_css approaching the 250KB cap
   L-CHROME-16   16px body text on a non-chrome class
   L-BIG-URL     local url() raster reference that should go through add-asset
+  L-RAW-RESERVED-CLASS  authored raw fragment uses framework body-zone class
+                names (.stage/...) as its own custom hooks
 
 This is a SUBSET of the render gate, not a replacement — geometry still needs
 the browser. Constants are PARSED from assets/audits.js (single source); the
@@ -35,6 +37,10 @@ _FALLBACK_CHROME = ["pageno", "footnote", "source", "attrib", "copyright",
 P50_CAP = 250 * 1024          # hard cap (validate.py P50)
 P50_WARN = 100 * 1024
 BIG_URL = 500 * 1024
+RESERVED_RAW_CLASSES = {
+    "stage",        # raw direct-child body-zone gets framework positioning
+    "canvas",       # common author alias that collides with layout terminology
+}
 
 
 def _load_from_audits():
@@ -95,6 +101,24 @@ def _style_blocks(html: str):
     return inline, embedded
 
 
+def _reserved_class_hits(html: str, css: str) -> list[str]:
+    """Return sorted reserved class tokens used by authored HTML/CSS hooks.
+
+    This deliberately looks only at exact class tokens / class selectors, not
+    substrings, so `.ai-stage` and `.sales-canvas` remain valid prefixed hooks.
+    """
+    hits: set[str] = set()
+    for m in re.finditer(r"""class\s*=\s*["']([^"']+)["']""", html or "", re.I):
+        for cls in re.split(r"\s+", m.group(1).strip()):
+            if cls in RESERVED_RAW_CLASSES:
+                hits.add(cls)
+    for m in re.finditer(r"\.([_a-zA-Z][\w-]*)", css or ""):
+        cls = m.group(1)
+        if cls in RESERVED_RAW_CLASSES:
+            hits.add(cls)
+    return sorted(hits)
+
+
 def lint_fragment(html: str = "", css: str = "", lifted: bool = False) -> list[dict]:
     """Return findings: [{sev:'err'|'warn', code, msg}].
 
@@ -110,6 +134,27 @@ def lint_fragment(html: str = "", css: str = "", lifted: bool = False) -> list[d
     frag_all = (html or "") + "\n" + (css or "")
     has_ts_optout = "data-allow-typescale" in frag_all or "data-mockup" in frag_all
     has_da_optout = "data-allow-dual-anchor" in frag_all
+    has_reserved_optout = "data-allow-reserved-class" in frag_all
+
+    # L-RAW-RESERVED-CLASS ----------------------------------------------------
+    # Framework shell/body-zone class names carry behavior. The real footgun is
+    # a freshly-authored raw page using `.stage` as a custom layout hook, then
+    # inheriting the framework raw body-zone position (`top: band+56; left/right:
+    # 96; bottom: 56; flex-column center`). Lifted pages are source recovery, so
+    # warn only; authored pages hard-fail unless the fragment explicitly opts
+    # into the framework semantics.
+    if not has_reserved_optout:
+        hits = _reserved_class_hits(html or "", css or "")
+        if hits:
+            findings.append(dict(
+                sev=("warn" if lifted else "err"),
+                code="L-RAW-RESERVED-CLASS",
+                msg="reserved framework class token(s) "
+                    + ", ".join(f".{h}" for h in hits)
+                    + " used as authored hooks — prefix custom raw containers "
+                      "(e.g. `.ai-leaps-stage`) or add data-allow-reserved-class "
+                      "when intentionally inheriting framework .stage "
+                      "semantics."))
 
     for sel, body in all_rules:
         # L-TYPESCALE ---------------------------------------------------------
