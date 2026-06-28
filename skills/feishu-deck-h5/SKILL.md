@@ -126,6 +126,11 @@ These gates apply before dispatching to any subskill:
   `render --final`) on an intermediate one-page edit — that is the #1 cause of
   "改一页却渲染 / 校验 / 截图很多页". Reserve the whole-deck pass for a delivery
   checkpoint, a structural change, or `--final`.
+- **Pure asset swaps use fast paths before the raw-page loop.** If the user only
+  asks to replace text or swap an existing slide image, use the Editor fast tools
+  (`fast-text.py` / `fast-image.py`) and skip `set-page`, preview, and render
+  unless the page also needs layout/crop/CSS changes. Prefer the stable slide key
+  over `#N` when the deck may contain hidden slides or drifted labels.
 - **Fastest inner loop for a raw-page visual nudge = `preview-slide.py`, not a
   render round-trip.** For pure layout / text / wrapping / color iteration on ONE
   slide, `deck-json/preview-slide.py <deck.json> --key <slide_key>` drops that

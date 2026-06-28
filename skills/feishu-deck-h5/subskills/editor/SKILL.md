@@ -59,6 +59,25 @@ Designer + Renderer instead).
   Counter-intuitive: this exit code is NOT a 0/1 binary, and `exit 3` here
   (partial write, needs re-render) is a DIFFERENT meaning than `exit 3` in
   deck-cli (schema rollback) — see `references/deck-state-contract.md`.
+- **`EDIT` fast-image (pure existing image swap)**: when the request is ONLY
+  "把这张图换上去 / replace the picture" and the target slide already has an
+  `<img>`, use **`deck-json/fast-image.py <deck-dir|deck.json> <slide-key> <image>
+  [--old-src FRAGMENT|--img-index N] [--name STEM] [--alt TEXT]`**. It copies the
+  image into `input/`, updates exactly one `<img src>` in `deck.json`, and updates
+  `index.html` too when the old src is unique, so there is no render/validation
+  round-trip. Prefer the stable slide key over URL `#N` if hidden slides or stale
+  labels may shift physical order. If aspect ratio, crop, container size, or CSS
+  must change, do ONE fragment edit instead; do not first run fast-image and then
+  a separate layout rewrite.
+
+  ```text
+  ✓ pure swap:
+      python3 deck-json/fast-image.py <deck-dir> ai-result-incentive new.png --old-src old-name --name concise-name
+      # optional quick look only: assets/shoot-page.py <deck-dir>/index.html --pages <N> --out <tmp>
+  ✗ pure swap:
+      add-asset → get-page → write html/css temp files → set-page → preview → render
+      (that is the heavy path for layout changes, not for replacing a src).
+  ```
 - **`EDIT` (fragment edit) — the canonical loop (W1/W3, iteration-loop)**:
 
   ```
@@ -403,6 +422,10 @@ Designer + Renderer instead).
 - `../../deck-json/fast-text.py` — F-303 sub-second pure-copy edit: dual-write
   deck.json + index.html, no render/validation; hard guardrails (count==1 both
   sides, refuses DOM chars, JSON-corruption refused-and-restored).
+- `../../deck-json/fast-image.py` — existing-`<img>` src replacement: copies the
+  new asset into `input/`, updates one slide's `data.html`, and dual-writes
+  `index.html` when unambiguous. Use before the fragment edit loop for pure image
+  swaps.
 - `../../deck-json/conform-to-deck.py` — F-300 family-drift detector + conformer
   for a page ADOPTED into an existing deck. Read-only drift table by default
   (D1 page-bg / D2 title placement / D3 pre-title chrome / D4 font ladder / D5
