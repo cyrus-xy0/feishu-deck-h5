@@ -194,7 +194,27 @@ Designer + Renderer instead).
   `R-FAMILY-DRIFT` advisory in `validate-deck.py` is the render-time backstop.
 - **LIFT+SWAP**: user wants source deck layout preserved and only copy/client
   swapped.
-  - **Fast path — one DeckJSON page into an existing deck (the common case, incl.
+  - **Fast path — single page replacing an existing page (the common case):**
+    use **`deck-json/lift-swap.py SRC#index DST#index`**. It accepts the same
+    `file://.../index.html#10` URLs users paste, resolves the target `deck.json`
+    automatically, wraps `assets/lift-slides.py --replace`, keeps the target
+    slot's key + `screen_label`, writes one backup, and rolls back if page count
+    or slide-key order changes. It does NOT run a whole-deck pass or renumber.
+
+    ```bash
+    python3 deck-json/lift-swap.py \
+      file:///abs/source/output/index.html#10 \
+      file:///abs/target/output/index.html#10
+    python3 deck-json/render-deck.py /abs/target/output/deck.json /abs/target/output --scope 10 --shoot
+    ```
+
+    Use `--render` only when you want the wrapper to run that one scoped render
+    immediately. Use `--shake/--no-shake` only to override the wrapper's default
+    (`layout != raw` → shake; raw → no shake). For this single-page replace path,
+    do **not** delete + paste, and do **not** run `render-deck.py --renumber`
+    just to refresh labels; if one label is stale, set that `screen_label`
+    directly by key/index after the swap.
+  - **Fast path — one DeckJSON page into an existing deck (copy/insert, incl.
     lift+translate):** `deck-cli.py paste --from SRC --key K <pos>` → `locate-slide.py`
     for the landed position → swap/translate the copy in ONE `apply-text-pairs.py <deck>
     pairs.json` pass (`--dry-run` first: every pair must hit exactly once) → ONE
@@ -231,10 +251,11 @@ Designer + Renderer instead).
   - **Into an EXISTING deck.json**: `deck-cli.py paste` for DeckJSON-native
     sources; `assets/lift-slides.py --shake` for foreign or older HTML sources.
   - Then swap copy with `deck-json/apply-text-pairs.py` (deterministic text
-    replacement). Resolve source/target pages with `deck-json/locate-slide.py`;
-    after lift/insert/reorder, run `render-deck.py --renumber` on the target
-    DeckJSON when stale `screen_label` prefixes need to match true page/hash
-    order (`lift-to-new-deck.py --render` already passes `--renumber`).
+    replacement). Resolve source/target pages with `deck-json/locate-slide.py`.
+    For insert/reorder operations, refresh stale `screen_label` prefixes only at
+    an explicit cleanup checkpoint; for a single-slot `lift-swap.py` replace,
+    page count and key order must remain unchanged, so renumbering is unnecessary
+    and should be avoided.
 - **Scan the source FIRST: `assets/lift-slides.py SRC/index.html --scan`.** It
   sweeps the whole deck in one read and flags every frame a deck.json lift CANNOT
   carry — iframe demos (`iframe-embed` / `src=about:blank`, populated by the

@@ -467,6 +467,12 @@ is INLINE):
   `deck-json/locate-slide.py` for source/target lookup and
   `render-deck.py --renumber` on target DeckJSON when labels need to match true
   frame order.
+- Single-page LIFT+SWAP into an existing slot uses
+  `deck-json/lift-swap.py SRC#index DST#index`, not a manual delete+paste
+  sequence. The wrapper understands pasted `file://...#N` URLs, keeps the target
+  slot key/label, backs up, and rolls back if page count or key order changes.
+  Follow it with one scoped `render-deck.py --scope N --shoot` only; do not
+  renumber as part of a same-slot replacement.
 - To see a deck's REAL page map (never `grep` a rendered HTML for `data-slide-key`
   — it counts CSS-rule + JS-template hits, not slides), run
   `deck-json/deck-map.py <index.html | deck.json>`: it reads only the
