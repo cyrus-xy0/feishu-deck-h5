@@ -2,8 +2,10 @@
 name: publisher
 description: |
   Publish a user-confirmed feishu-deck-h5 HTML deck to Feishu/Miaobi Magic Page.
-  Use only after validator pass and explicit user confirmation. Do not validate,
-  fix, render, rehearse, or ingest decks into feishu-slide-library.
+  Use after explicit user confirmation. Runs only publish artifact integrity checks
+  (asset availability/hosting, residual local/data refs, post-publish delivery
+  self-check), not deck-validator visual/design gates. Do not fix, render,
+  rehearse, or ingest decks into feishu-slide-library.
 ---
 
 # publisher
@@ -14,8 +16,8 @@ publisher 只负责“发布”,不负责入库。将成品 HTML 推到
 
 Inline freshness rule: when this subskill is not running as a separate
 multi-agent worker, reread the current upstream files before publishing. Do not
-rely on cached chat summaries or earlier reads of the confirmed HTML artifact,
-validator pass evidence, or publish metadata.
+rely on cached chat summaries or earlier reads of the confirmed HTML artifact or
+publish metadata.
 
 ## 职责边界
 
@@ -40,6 +42,24 @@ validator pass evidence, or publish metadata.
   **未托管依赖扫描跳过 `<script>` 块与注释**:JS / 注释里出现的 `url()` / `URL()` /
   `location.href` / `createObjectURL` 不再被误判为「未托管资源」(过去也是每次发布手动改写绕过)。
   最终发布物不得依赖本地路径、第三方外链或 `data:` payload;只靠发布链接即可完整使用。
+- **iframe / 原型发布策略**:不要默认把 iframe 替换成截图。按三档处理并在最终回复说明采用了哪档:
+  1. **保留 iframe**:若 `src` 是可嵌入 HTTPS 页面,且无 `X-Frame-Options` / CSP frame 限制,
+     直接保留;发布前用 `curl -I -L` 快速看 `Content-Disposition`、`X-Frame-Options`、CSP。
+  2. **子页面先发 Magic,主 deck iframe Magic URL**:若 iframe 指向本地 prototype 或 TOS HTML
+     带 `Content-Disposition: attachment`,先把 prototype 单独发成
+     `https://magic.solutionsuite.cn/html-box/<id>`,再回填主 deck 的 iframe。单文件 bundler
+     超过 Magic 字符上限时,把大 vendor 上传 TOS、业务脚本展开/内联,避免 `Blob` /
+     `createObjectURL` / `data:image` / 上传组件残留。
+  3. **静态 srcdoc / 截图兜底**:只有当 Magic 页面套 Magic 页面黑屏、iframe 内脚本在 Magic
+     srcdoc 环境不执行、或目标禁止嵌入时才降级。优先导出无脚本静态 DOM 放入 `srcdoc`
+     (仍是 iframe 内容);最后才用截图。降级必须说明原因,不要说成“完整保留交互”。
+     用 `subskills/publisher/freeze_srcdoc.py --html <prototype.html> --out <static.html>
+     --viewport 480x1000 --screenshot <png>` 生成无脚本兜底 HTML,确认 `banned_found`、
+     `failed_requests`、`bad_responses` 为空后再嵌入。
+- **发布完整性检查**:publisher 不跑 `deck-validator` / `check-only` 的视觉、设计、
+  字号、复用质量门禁。发布门禁只检查即将发布的字节是否完整可访问:资源体积不超限、资源能被
+  inline / 上传 / 托管、最终 HTML 不残留本地相对路径或 `data:` payload。这个口径对齐
+  `feishu-slide-library` 当前入库准入:硬拦只拦资源可用性,样式 / 结构 / 视觉问题不阻断发布。
 - **单一发布目标**:publisher 只发布到 Feishu/Miaobi Magic Page;不得提供
   `--publish-target`、Miaoda fallback 或 slide-library 入库分支。
 - **不入库**:不得调用 `feishu-slide-library` 的
@@ -49,12 +69,10 @@ validator pass evidence, or publish metadata.
 ## 前置条件
 
 - 必须有用户明确确认“这就是最终发布物”。
-- 必须有 `deck-validator` 通过结论。只有本地调试/夹具可用 `--allow-unaudited`。
-- 校验必须跑在**即将发布的那一份 HTML 字节**上,不能复用旧的“渲染时已过”结论。重点拦
-  `R-BAKED-DOM`:若发布物含 `data-idx=` / 烤进 body 的 `class="deck-ui"` /
-  `.deck` 带 `data-js-ready`,说明它是“运行后被另存的活 DOM”(非 `render-deck.py` 产物),
-  发布后会二次 init 导致页码定格在 1 / UI 重复 —— 必须从 `deck.json` 重渲出干净版再发,
-  别发烤死版。
+- 不要求 `deck-validator` 通过结论。若用户显式要求“发布前质检/全量检查”,另走
+  validator/check-only;不要把它混进默认发布链路。
+- 默认发布前必须跑资源体积体检、Magic Page 资产准备、最终 HTML 引用完整性检查。
+  `--allow-unaudited` 是历史兼容参数,不再绕过或启用任何发布质量门禁。
 - 妙笔发布默认读取 `MAGIC_TOKEN` 或 `~/.magic-token`;域名默认
   `https://magic.solutionsuite.cn`,可用 `MAGIC_BASE_URL` / `--magic-base-url` 指定。
   如果本地没有 token,必须先要求用户提供 token,不得等到发布 API 阶段才失败。
@@ -104,6 +122,10 @@ python3 skills/feishu-deck-h5/subskills/publisher/publish.py \
      generic / 系统兜底字体(PingFang / YaHei / Arial 等)即红牌。
   3. **关键页视觉差异** —— 逐页按感知哈希(aHash+dHash)+ 下采样像素差(取大)算差异比例,
      某页超阈值(默认 6%)即红牌。算法与 `log-tool/deck-log.py diff` 同源。
+- iframe-heavy deck 的自检会先让当前页 iframe settle 再截图,并对 Magic shell 探针、
+  iframe `document net::ERR_ABORTED`、script `net::ERR_FAILED` 做可达性复测;复测 2xx/3xx
+  的项进入 `verdict.ignored_requests`,不算断链。真实 4xx/5xx、DNS 失败、字体回落和视觉走样
+  仍是红牌。
 - 任一红牌 → `publish-manifest.json` 的 `self_check.ok=false`,**整个发布判非零**(不把断掉的
   交付说成"已发布")。处理:照红牌列出的断链 / 回落页 / 走样页修源,**重新 render → 重新发布 →
   自检复跑**;别手改发布物。确属设计差异可 `--self-check-soft` 把红牌降级为告警,或
@@ -150,7 +172,7 @@ publisher-*.log
 
 ## 硬规则
 
-- 不绕过 validator 发布失败 HTML。
+- 不把 `deck-validator` / `check-only` 作为 Magic Page 默认发布门禁;发布只拦资源完整性。
 - 默认发布到 `magic.solutionsuite.cn/html-box/...`;不要把最终交付链接发布成妙搭链接。
 - 发布前必须执行 Magic Page 资产准备和依赖审计;除 Magic/TOS 托管 URL 外,不得残留
   `data:`、`file:`、绝对/相对本地资源路径或第三方运行时依赖。

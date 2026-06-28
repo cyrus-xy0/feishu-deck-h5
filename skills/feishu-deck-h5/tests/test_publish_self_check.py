@@ -107,6 +107,43 @@ def test_asset_failure_ignores_aborted_beacon_noise():
     assert SC._is_asset_failure({"resource_type": "other", "failure": "net::ERR_ABORTED"}) is False
 
 
+def test_asset_failure_ignores_magic_shell_probes():
+    assert SC._is_asset_failure({
+        "url": "https://magic.solutionsuite.cn/api/me",
+        "resource_type": "fetch",
+        "failure": "HTTP 401",
+        "status": 401,
+    }) is False
+    assert SC._is_asset_failure({
+        "url": "https://magic.solutionsuite.cn/app/.image-slots.state.json",
+        "resource_type": "fetch",
+        "failure": "HTTP 403",
+        "status": 403,
+    }) is False
+
+
+def test_classify_transient_document_abort_reprobe_ok_is_ignored(monkeypatch):
+    monkeypatch.setattr(SC, "_reprobe_url_ok", lambda url: True)
+    broken, ignored = SC._classify_failed_requests([{
+        "url": "https://magic.solutionsuite.cn/html-box/demo",
+        "resource_type": "document",
+        "failure": "net::ERR_ABORTED",
+    }])
+    assert broken == []
+    assert ignored and ignored[0]["ignored_reason"] == "transient-browser-failure-reprobe-ok"
+
+
+def test_classify_transient_script_reprobe_failed_stays_broken(monkeypatch):
+    monkeypatch.setattr(SC, "_reprobe_url_ok", lambda url: False)
+    broken, ignored = SC._classify_failed_requests([{
+        "url": "https://cdn.example.test/app.js",
+        "resource_type": "script",
+        "failure": "net::ERR_FAILED",
+    }])
+    assert ignored == []
+    assert broken and broken[0]["url"] == "https://cdn.example.test/app.js"
+
+
 # --------------------------------------------------------- image diff (algorithm)
 def test_image_diff_byte_fallback_identical(tmp_path, monkeypatch):
     monkeypatch.setattr(SC, "have_pillow", lambda: False)

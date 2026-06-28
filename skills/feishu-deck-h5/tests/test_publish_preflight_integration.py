@@ -1,10 +1,12 @@
 """delivery-8/9 · end-to-end publish wiring through the new pre-flight.
 
 Drives publish.py on the real (non-dry) Magic Page path with mocked node
-uploader + publisher and --allow-unaudited (so no PyYAML/visual gate is needed),
+uploader + publisher on the default path without the old PyYAML/visual gate,
 proving that a normal small deck still publishes through the new wiring:
   - the resource-size pre-flight actually runs (writes MAGIC_PAGE_PREFLIGHT.md),
+  - the publish integrity report runs (writes PUBLISH_INTEGRITY_REPORT.md),
   - --keep-inline-code is passed by default (runtime stays inline in the artifact),
+  - the old check-only quality reports are not produced,
   - the publish succeeds and returns the mocked app_url.
 """
 
@@ -65,7 +67,7 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
                 proc = subprocess.run(
                     [sys.executable, str(PUBLISH),
                      "--html", str(html), "--title", "Integration",
-                     "--allow-unaudited", "--skip-self-check",
+                     "--skip-self-check",
                      "--magic-asset-uploader", str(uploader),
                      "--magic-page-script", str(publisher)],
                     text=True, capture_output=True, env=env,
@@ -83,6 +85,12 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
 
                 self.assertTrue((out_dir / "MAGIC_PAGE_PREFLIGHT.md").exists(),
                                 "pre-flight report MAGIC_PAGE_PREFLIGHT.md was not written")
+                self.assertTrue((out_dir / "PUBLISH_INTEGRITY_REPORT.md").exists(),
+                                "publish integrity report PUBLISH_INTEGRITY_REPORT.md was not written")
+                self.assertFalse((out_dir / "PUBLISH_QUALITY_REPORT-prepublish.md").exists(),
+                                 "old check-only prepublish gate should not run")
+                self.assertFalse((out_dir / "PUBLISH_QUALITY_REPORT-finalbytes.md").exists(),
+                                 "old check-only finalbytes gate should not run")
                 packaged = (out_dir / "magic-page-ready.html").read_text(encoding="utf-8")
                 # --keep-inline-code default: runtime stays inline (not a hashed .js)
                 self.assertIn("window.__feishuDeck=1", packaged)

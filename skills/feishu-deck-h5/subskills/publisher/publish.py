@@ -26,7 +26,6 @@ from typing import Any
 REPO = Path(__file__).resolve().parents[2]
 SELF_CHECK = Path(__file__).resolve().parent / "self_check.py"
 RUNS = REPO / "runs"
-CHECK_ONLY = REPO / "assets/check-only.py"
 MAGIC_PAGE_ASSETS = REPO / "assets/magic-page-assets.py"
 MAGIC_PAGE_PREFLIGHT = REPO / "assets/magic-page-preflight.py"
 INLINE_ASSETS = REPO / "assets/inline-assets.py"
@@ -105,58 +104,6 @@ def normalize_list(values: list[str] | None, default: list[str]) -> list[str]:
             if part:
                 out.append(part)
     return out or default
-
-
-def audit_passed(output_dir: Path) -> bool:
-    report = output_dir / "audit-report.json"
-    if report.exists():
-        try:
-            payload = read_json(report)
-        except Exception:
-            payload = {}
-        verdict = str(payload.get("verdict") or payload.get("feishu_deck_h5_verdict") or "").lower()
-        status = str(payload.get("status") or "").lower()
-        if verdict == "pass" or status == "pass":
-            return True
-    md = output_dir / "AUDIT_REPORT.md"
-    if md.exists():
-        first = md.read_text(encoding="utf-8", errors="ignore").splitlines()[:5]
-        joined = " ".join(first).lower()
-        return "feishu-deck-h5 verdict: pass" in joined or "verdict: pass" in joined
-    return False
-
-
-def run_publish_gate(html_path: Path, output_dir: Path, *, label: str = "publish-gate", visual: bool = True) -> dict[str, Any]:
-    """Validate the EXACT HTML bytes about to be published.
-
-    Fail-closed: runs assets/check-only.py against html_path rather than reusing a
-    stale render-time audit verdict.
-
-    visual=True (pre-publish gate on the ORIGINAL bytes): `--gate ingest`, which
-    auto-enables strict + the headless Chromium visual scan + the byte-path rules
-    (notably R-BAKED-DOM).
-
-    visual=False (re-check of the FINAL working_html AFTER asset prep): `--strict
-    --no-visual` — strict + all byte/source rules (R-BAKED-DOM is a byte-level rule
-    that runs on both paths) but NO browser scan. Asset prep only swaps resource
-    encodings (data:/local → TOS URLs) and never moves a pixel, so a second
-    whole-deck visual scan of the rewritten bytes is redundant with the pre-publish
-    gate (and the F-285 post-publish self-check opens the real URL). Skipping it
-    avoids re-running headless Chromium over a large publish artifact — the single
-    biggest chunk of a slow publish — and also sidesteps the --gate PyYAML
-    requirement on this second pass.
-    """
-    report_path = output_dir / f"PUBLISH_QUALITY_REPORT-{label}.md"
-    cmd = [sys.executable, str(CHECK_ONLY), str(html_path)]
-    cmd += ["--gate", "ingest"] if visual else ["--strict", "--no-visual"]
-    cmd += ["--report", str(report_path)]
-    step = subprocess_record(cmd, cwd=REPO, log_path=output_dir / f"publisher-{label}.log")
-    return {
-        "ok": step["ok"],
-        "report": repo_rel(report_path) if report_path.exists() else "",
-        "step": summarize_step(step),
-        "reason": "" if step["ok"] else (step["stderr"] or step["stdout"] or "publish quality gate failed"),
-    }
 
 
 def task_dirs(task_id: str) -> tuple[Path, Path]:
@@ -369,7 +316,7 @@ def remaining_unhosted_dependencies(html_path: Path) -> list[str]:
         tag = match.group("tag").lower()
         attr = match.group("attr").lower()
         ref = match.group(4).strip()
-        if attr == "href" and tag != "link":
+        if attr == "href" and tag not in {"link", "image"}:
             continue
         if is_unhosted_dependency(ref):
             refs.append(ref)
@@ -385,6 +332,57 @@ def remaining_unhosted_dependencies(html_path: Path) -> list[str]:
             seen.add(ref)
             out.append(ref)
     return out
+
+
+def audit_publish_integrity(html_path: Path, output_dir: Path) -> dict[str, Any]:
+    """Lightweight publish gate: only block references that cannot survive Magic Page.
+
+    This intentionally does not run deck-validator/check-only visual or design
+    rules. The publish path follows the slide-library resource-only stance:
+    fail on unresolved runtime dependencies and residual inline payloads, then
+    rely on post-publish self-check for the final hosted URL.
+    """
+    residual = residual_data_payloads(html_path)
+    unhosted = remaining_unhosted_dependencies(html_path)
+    reasons: list[str] = []
+    if residual:
+        reasons.append(
+            "inline data: payloads remain after asset preparation: " + ", ".join(residual)
+        )
+    if unhosted:
+        sample = ", ".join(unhosted[:8])
+        more = f" (+{len(unhosted) - 8} more)" if len(unhosted) > 8 else ""
+        reasons.append(f"unhosted runtime dependencies remain: {sample}{more}")
+    ok = not reasons
+    report_path = output_dir / "PUBLISH_INTEGRITY_REPORT.md"
+    lines = [
+        "# Publish Integrity Report",
+        "",
+        f"- ok: {ok}",
+        f"- html: {repo_rel(html_path)}",
+        f"- residual_data_payloads: {len(residual)}",
+        f"- unhosted_dependencies: {len(unhosted)}",
+        "",
+    ]
+    if residual:
+        lines.extend(["## Residual data payloads", ""])
+        lines.extend(f"- `{item}`" for item in residual)
+        lines.append("")
+    if unhosted:
+        lines.extend(["## Unhosted dependencies", ""])
+        lines.extend(f"- `{item}`" for item in unhosted)
+        lines.append("")
+    if not residual and not unhosted:
+        lines.append("No unresolved local/data runtime references found in the publish-bound HTML.")
+    report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return {
+        "ok": ok,
+        "html": repo_rel(html_path),
+        "report": repo_rel(report_path),
+        "residual_data_payloads": residual,
+        "unhosted_dependencies": unhosted,
+        "reason": "; ".join(reasons),
+    }
 
 
 def publish_magic_page(
@@ -476,6 +474,8 @@ def publish_magic_page(
             base_url,
             "--key-prefix",
             f"feishu-deck-h5/{task_id}",
+            "--asset-base-dir",
+            str(source_html.parent),
         ]
         # delivery-9 / P1#4: keep the framework runtime + per-slide CSS INLINE by
         # default. Externalizing them turns feishu-deck.js into a hash-named hosted
@@ -497,46 +497,17 @@ def publish_magic_page(
             return payload
         working_html = packaged
 
-    residual = residual_data_payloads(working_html)
-    if residual:
+    integrity = audit_publish_integrity(working_html, output_dir)
+    if not integrity["ok"]:
         payload = magic_failure(
-            f"Magic Page HTML still contains inline data: payloads ({', '.join(residual)}); "
-            "these must be uploaded to TOS before publishing",
+            "publish artifact integrity check failed: " + integrity["reason"],
             working_html,
             base_url,
             None,
         )
+        payload["integrity"] = integrity
         write_publish_reports(output_dir, payload)
         return payload
-    unhosted = remaining_unhosted_dependencies(working_html)
-    if unhosted:
-        sample = ", ".join(unhosted[:8])
-        more = f" (+{len(unhosted) - 8} more)" if len(unhosted) > 8 else ""
-        payload = magic_failure(
-            f"Magic Page HTML still contains unhosted runtime dependencies: {sample}{more}",
-            working_html,
-            base_url,
-            None,
-        )
-        write_publish_reports(output_dir, payload)
-        return payload
-
-    # subskill-2: validate the EXACT bytes about to be published. asset prep
-    # (inline-assets + magic-page-assets URL rewriting) produced a NEW artifact
-    # that no prior render-time audit ran on; re-run the gate on working_html so
-    # R-BAKED-DOM and friends are caught on the publish-bound bytes. Fail-closed.
-    if not args.allow_unaudited:
-        final_gate = run_publish_gate(working_html, output_dir, label="finalbytes", visual=False)
-        if not final_gate["ok"]:
-            payload = magic_failure(
-                "publish-bytes validator gate failed (re-check of the final published HTML)"
-                + (f": {final_gate['reason']}" if final_gate.get("reason") else ""),
-                working_html,
-                base_url,
-                None,
-            )
-            write_publish_reports(output_dir, payload)
-            return payload
 
     script = args.magic_page_script or optional_path(os.environ.get("FEISHU_DECK_H5_MAGIC_PAGE_PUBLISHER", "")) or DEFAULT_MAGIC_PAGE_PUBLISHER
     if not script.exists():
@@ -601,15 +572,6 @@ def write_publish_reports(output_dir: Path, payload: dict[str, Any]) -> None:
     (output_dir / report_name).write_text("\n".join(lines), encoding="utf-8")
 
 
-def summarize_step(step: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "ok": step["ok"],
-        "returncode": step["returncode"],
-        "stderr": step["stderr"][:1200],
-        "stdout": step["stdout"][:1200],
-    }
-
-
 def _load_self_check():
     """Load subskills/publisher/self_check.py by path (sibling module)."""
     spec = importlib.util.spec_from_file_location("publisher_self_check", SELF_CHECK)
@@ -672,7 +634,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--task-id")
     ap.add_argument("--html", type=Path, help="confirmed .html/.htm artifact to publish")
     ap.add_argument("--title")
-    ap.add_argument("--allow-unaudited", action="store_true", help="bypass deck-validator pass requirement for local/debug use")
+    ap.add_argument(
+        "--allow-unaudited",
+        action="store_true",
+        help="deprecated no-op; publisher now runs resource-integrity checks instead of deck-validator",
+    )
     ap.add_argument("--dry-run", action="store_true", help="simulate publishing without external writes")
 
     ap.add_argument("--magic-page-script", type=Path)
@@ -722,23 +688,6 @@ def main(argv: list[str] | None = None) -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     html_path = resolve_html(args, output_dir)
-
-    # Fail-closed validator gate: validate the EXACT artifact bytes about to be
-    # published, regardless of whether a deck.json happens to sit in output_dir.
-    # (subskill-1 / subskill-2: absence of deck.json must NOT silently disable
-    # the gate, and we never reuse a stale render-time audit verdict.)
-    if not args.allow_unaudited:
-        if not html_path:
-            raise SystemExit(
-                "publisher: deck-validator pass verdict is required before publishing "
-                "(no HTML artifact to validate; pass --allow-unaudited only for local/debug)"
-            )
-        gate = run_publish_gate(html_path, output_dir, label="prepublish")
-        if not gate["ok"]:
-            raise SystemExit(
-                "publisher: deck-validator gate failed on the artifact to be published"
-                + (f": {gate['reason']}" if gate.get("reason") else "")
-            )
 
     title = args.title or (read_json(output_dir / "deck.json").get("title") if (output_dir / "deck.json").exists() else "") or (html_path.stem if html_path else task_id)
 

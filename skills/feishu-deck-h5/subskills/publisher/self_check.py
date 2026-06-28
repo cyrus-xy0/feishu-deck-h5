@@ -61,6 +61,7 @@ import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 DESIGN_W, DESIGN_H = 1920, 1080
 
@@ -70,6 +71,8 @@ DIFF_PIXEL_GRID = 32        # down-sample to GRID×GRID grayscale before per-cel
 DIFF_PIXEL_DELTA = 24       # per-cell grayscale delta (0..255) to count a cell as changed
 DEFAULT_DIFF_THRESHOLD = 0.06   # >=6% combined per-slide diff → red card (publish drift)
 DEFAULT_PAGES = 3           # how many leading slides to verify (cheap, catches the worst)
+IFRAME_SETTLE_MS = 1200     # give visible iframe demos time to leave about:blank before screenshot
+REMOTE_REPROBE_TIMEOUT = 8  # seconds; used only to de-noise transient script/document aborts
 
 # Generic CSS font families: if the remote's *effective* font resolves to one of
 # these while the local render used a real named face, the web font / @font-face
@@ -274,6 +277,59 @@ _SHOW_SLIDE_JS = r"""
 """
 
 
+def _deck_scope(page):
+    """Return the Page/Frame that actually contains the deck.
+
+    Magic Page may wrap the published HTML in an internal frame. The audience
+    still sees the deck, but querying only the top document yields zero slides.
+    """
+    try:
+        if page.query_selector(".slide-frame"):
+            return page
+    except Exception:
+        pass
+    for frame in page.frames:
+        try:
+            if frame.query_selector(".slide-frame"):
+                return frame
+        except Exception:
+            continue
+    return page
+
+
+def _slide_iframe_count(scope, slide_idx: int) -> int:
+    try:
+        return int(scope.evaluate(
+            """(i) => {
+              const frames = [...document.querySelectorAll('.slide-frame')];
+              const s = frames[i] && frames[i].querySelector('.slide');
+              return s ? s.querySelectorAll('iframe').length : 0;
+            }""",
+            slide_idx,
+        ) or 0)
+    except Exception:
+        return 0
+
+
+def _wait_for_current_slide_iframes(page, scope, slide_idx: int) -> None:
+    """Let iframe-heavy slides settle before screenshotting.
+
+    Magic Page can wrap iframes through its own router and Playwright may switch
+    slides faster than the child document paints. A short wait only on iframe
+    slides avoids false black-frame diffs without slowing simple decks.
+    """
+    if _slide_iframe_count(scope, slide_idx) <= 0:
+        return
+    try:
+        page.wait_for_timeout(IFRAME_SETTLE_MS)
+    except Exception:
+        pass
+    try:
+        page.wait_for_load_state("networkidle", timeout=2_500)
+    except Exception:
+        pass
+
+
 def capture_side(uri: str, out_dir: Path, *, pages: int, collect_requests: bool) -> dict[str, Any]:
     """Open a deck URL, screenshot the first `pages` slides, return per-slide
     metadata (idx/key/layout/effective face/png path) plus, when requested,
@@ -323,17 +379,27 @@ def capture_side(uri: str, out_dir: Path, *, pages: int, collect_requests: bool)
                 fn()
             except Exception:
                 pass
+        scope = page
+        for _ in range(20):
+            scope = _deck_scope(page)
+            try:
+                if scope.query_selector(".slide-frame"):
+                    break
+            except Exception:
+                pass
+            page.wait_for_timeout(250)
         try:
-            page.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
+            scope.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
         except Exception:
             pass
         page.wait_for_timeout(300)
-        meta = page.evaluate(_SLIDE_META_JS)
+        meta = scope.evaluate(_SLIDE_META_JS)
         meta = meta[: max(0, pages)] if pages is not None else meta
         for m in meta:
             try:
-                page.evaluate(_SHOW_SLIDE_JS, m["idx"] - 1)
+                scope.evaluate(_SHOW_SLIDE_JS, m["idx"] - 1)
                 page.wait_for_timeout(350)
+                _wait_for_current_slide_iframes(page, scope, m["idx"] - 1)
                 fn = out_dir / f"s{m['idx']:02d}.png"
                 page.screenshot(path=str(fn), clip={"x": 0, "y": 0, "width": DESIGN_W, "height": DESIGN_H})
                 m["png"] = str(fn)
@@ -346,14 +412,96 @@ def capture_side(uri: str, out_dir: Path, *, pages: int, collect_requests: bool)
 
 
 # ------------------------------------------------------------------ comparison
+def _is_magic_probe_noise(req: dict[str, Any]) -> bool:
+    """Magic shell probes that do not affect what the audience sees."""
+    parsed = urlparse(req.get("url") or "")
+    if parsed.netloc != "magic.solutionsuite.cn":
+        return False
+    if parsed.path == "/api/me":
+        return True
+    if parsed.path.endswith("/.image-slots.state.json"):
+        return True
+    return False
+
+
+def _reprobe_url_ok(url: str) -> bool:
+    """Best-effort reachability check for transient browser failures.
+
+    Only used to de-noise requestfailed events such as iframe navigation aborts
+    or one-off script ERR_FAILED records. It never turns an HTTP>=400 response
+    green; those have an explicit status and remain red-card evidence.
+    """
+    parsed = urlparse(url or "")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    headers = {"User-Agent": "feishu-deck-h5-publisher-self-check/1.0"}
+    for method in ("HEAD", "GET"):
+        try:
+            req = Request(url, method=method, headers=headers)
+            with urlopen(req, timeout=REMOTE_REPROBE_TIMEOUT) as resp:  # nosec - publisher verifies user-provided URLs
+                if 200 <= int(resp.status) < 400:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def _is_transient_reprobe_candidate(req: dict[str, Any]) -> bool:
+    if "status" in req:
+        return False
+    rt = (req.get("resource_type") or "").lower()
+    failure = (req.get("failure") or "").upper()
+    if "ERR_ABORTED" in failure and rt == "document":
+        return True
+    if "ERR_FAILED" in failure and rt == "script":
+        return True
+    return False
+
+
 def _is_asset_failure(req: dict[str, Any]) -> bool:
     """A failed request that actually breaks the page for the audience. Ignore
     aborted analytics/beacon noise; flag anything that is or 404s a real asset."""
     rt = (req.get("resource_type") or "").lower()
+    if _is_magic_probe_noise(req):
+        return False
     if rt in {"image", "stylesheet", "script", "font", "media", "fetch", "xhr", "document"}:
         return True
     # status-based failures (HTTP>=400) are real regardless of type
     return "status" in req
+
+
+def _classify_failed_requests(
+    failed_requests: list[dict[str, Any]],
+    *,
+    reprobe_transient: bool = True,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (broken, ignored) request rows after Magic/iframe de-noising."""
+    broken_unique: list[dict[str, Any]] = []
+    ignored: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    reprobe_cache: dict[str, bool] = {}
+    for r in failed_requests:
+        if _is_magic_probe_noise(r):
+            row = dict(r)
+            row["ignored_reason"] = "magic-shell-probe"
+            ignored.append(row)
+            continue
+        if not _is_asset_failure(r):
+            continue
+        url = r.get("url") or ""
+        if reprobe_transient and _is_transient_reprobe_candidate(r):
+            if url not in reprobe_cache:
+                reprobe_cache[url] = _reprobe_url_ok(url)
+            ok = reprobe_cache[url]
+            if ok:
+                row = dict(r)
+                row["ignored_reason"] = "transient-browser-failure-reprobe-ok"
+                ignored.append(row)
+                continue
+        if url not in seen:
+            seen.add(url)
+            broken_unique.append(r)
+    return broken_unique, ignored
 
 
 def compare_captures(
@@ -370,14 +518,7 @@ def compare_captures(
     remote_by_key = {s.get("key"): s for s in remote.get("slides", []) if s.get("key")}
 
     # 1. broken links / 404'd assets on the remote (the no-validator dimension)
-    broken = [r for r in remote.get("failed_requests", []) if _is_asset_failure(r)]
-    # de-dup by url
-    seen: set[str] = set()
-    broken_unique: list[dict[str, Any]] = []
-    for r in broken:
-        if r.get("url") not in seen:
-            seen.add(r.get("url"))
-            broken_unique.append(r)
+    broken_unique, ignored_requests = _classify_failed_requests(remote.get("failed_requests", []))
 
     # 2. font fallback per slide
     font_fallbacks: list[dict[str, Any]] = []
@@ -448,6 +589,7 @@ def compare_captures(
         "method": method or ("byte" if not have_pillow() else "phash+pixel"),
         "threshold": threshold,
         "broken_requests": broken_unique,
+        "ignored_requests": ignored_requests,
         "font_fallbacks": font_fallbacks,
         "visual_changed": changed,
         "visual_unchanged": unchanged,
@@ -477,6 +619,12 @@ def write_report(out_dir: Path, payload: dict[str, Any]) -> tuple[Path, Path]:
         lines.append(f"## 🔴 断链 / 404 ({len(broken)})")
         for r in broken[:20]:
             lines.append(f"- `{r.get('failure')}` · {r.get('resource_type')} · {r.get('url')}")
+        lines.append("")
+    ignored = verdict.get("ignored_requests") or []
+    if ignored:
+        lines.append(f"## 降噪请求 ({len(ignored)})")
+        for r in ignored[:20]:
+            lines.append(f"- `{r.get('ignored_reason')}` · `{r.get('failure')}` · {r.get('resource_type')} · {r.get('url')}")
         lines.append("")
     fonts = verdict.get("font_fallbacks") or []
     if fonts:
@@ -533,7 +681,7 @@ def run_self_check(
             "reason": f"self-check could not run a browser ({reason}); "
                       "install playwright + chromium to enable post-publish verification",
             "verdict": {"method": "n/a", "threshold": threshold,
-                        "broken_requests": [], "font_fallbacks": [],
+                        "broken_requests": [], "ignored_requests": [], "font_fallbacks": [],
                         "visual_changed": [], "visual_unchanged": 0, "missing": [], "reasons": []},
         }
         write_report(out_dir, payload)

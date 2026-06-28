@@ -7,6 +7,7 @@ const path = require("path");
 
 const DEFAULT_MAGIC_BASE_URL = "https://magic.solutionsuite.cn";
 const PART_SIZE = 10 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = Number(process.env.MAGIC_UPLOAD_TIMEOUT_MS || 45000);
 const MIME_MAP = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -28,6 +29,34 @@ function normalizeBaseUrl(value) {
   return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url, options, label, retries = 2) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      if (!response.ok && attempt < retries && (response.status === 429 || response.status >= 500)) {
+        lastError = new Error(`${label} failed: HTTP ${response.status}`);
+      } else {
+        return response;
+      }
+    } catch (error) {
+      lastError = error?.name === "AbortError"
+        ? new Error(`${label} timed out after ${FETCH_TIMEOUT_MS}ms`)
+        : error;
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (attempt < retries) await sleep(750 * (attempt + 1));
+  }
+  throw lastError || new Error(`${label} failed`);
+}
+
 function parseArgs(argv) {
   const opts = { quiet: false, baseUrl: "", key: "", contentType: "", filePath: "" };
   for (let i = 0; i < argv.length; i++) {
@@ -44,11 +73,12 @@ function parseArgs(argv) {
 async function sign(filename, contentType, key, apiBase) {
   const body = { filename, contentType };
   if (key) body.key = key;
-  const response = await fetch(`${apiBase}/api/tos/sign`, {
+  const response = await fetchWithRetry(`${apiBase}/api/tos/sign`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }, "Sign");
+  if (!response.ok) throw new Error(`Sign failed: HTTP ${response.status} ${await response.text().catch(() => "")}`);
   const json = await response.json();
   if (json.code !== 0) throw new Error(`Sign failed: ${json.msg}`);
   return json.data;
@@ -56,21 +86,22 @@ async function sign(filename, contentType, key, apiBase) {
 
 async function uploadSingle(filePath, filename, contentType, opts, apiBase) {
   const { signed_url, url } = await sign(filename, contentType, opts.key, apiBase);
-  const response = await fetch(signed_url, {
+  const response = await fetchWithRetry(signed_url, {
     method: "PUT",
     headers: { "Content-Type": contentType },
     body: fs.readFileSync(filePath),
-  });
+  }, "PUT");
   if (!response.ok) throw new Error(`PUT failed: HTTP ${response.status} ${await response.text().catch(() => "")}`);
   return url;
 }
 
 async function uploadMultipart(filePath, filename, contentType, opts, apiBase) {
-  const initResp = await fetch(`${apiBase}/api/tos/multipart/init`, {
+  const initResp = await fetchWithRetry(`${apiBase}/api/tos/multipart/init`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename, contentType }),
-  });
+  }, "Multipart init");
+  if (!initResp.ok) throw new Error(`Init failed: HTTP ${initResp.status} ${await initResp.text().catch(() => "")}`);
   const initJson = await initResp.json();
   if (initJson.code !== 0) throw new Error(`Init failed: ${initJson.msg}`);
   const { uploadId, key, url } = initJson.data;
@@ -87,7 +118,8 @@ async function uploadMultipart(filePath, filename, contentType, opts, apiBase) {
       form.append("uploadId", uploadId);
       form.append("key", key);
       form.append("partNumber", String(i + 1));
-      const partResp = await fetch(`${apiBase}/api/tos/multipart/part`, { method: "POST", body: form });
+      const partResp = await fetchWithRetry(`${apiBase}/api/tos/multipart/part`, { method: "POST", body: form }, `Part ${i + 1}`);
+      if (!partResp.ok) throw new Error(`Part ${i + 1} failed: HTTP ${partResp.status} ${await partResp.text().catch(() => "")}`);
       const partJson = await partResp.json();
       if (partJson.code !== 0) throw new Error(`Part ${i + 1} failed: ${partJson.msg}`);
       parts.push({ partNumber: i + 1, etag: partJson.data.etag });
@@ -95,11 +127,12 @@ async function uploadMultipart(filePath, filename, contentType, opts, apiBase) {
   } finally {
     fs.closeSync(fd);
   }
-  const completeResp = await fetch(`${apiBase}/api/tos/multipart/complete`, {
+  const completeResp = await fetchWithRetry(`${apiBase}/api/tos/multipart/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ uploadId, key, parts }),
-  });
+  }, "Multipart complete");
+  if (!completeResp.ok) throw new Error(`Complete failed: HTTP ${completeResp.status} ${await completeResp.text().catch(() => "")}`);
   const completeJson = await completeResp.json();
   if (completeJson.code !== 0) throw new Error(`Complete failed: ${completeJson.msg}`);
   return completeJson.data.url || url;

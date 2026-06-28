@@ -5,8 +5,9 @@ description: |
   汇报材料, 客户提案, h5 deck, 16:9 网页演示, HTML deck generation/editing/validation,
   source parsing, Magic Page/Miaobi/html-box publishing, and feishu-slide-library
   importing. Routes work to subskills; generation is DeckJSON/render-deck first,
-  normally raw-first, with validation before handoff or publish. For real `.pptx`,
-  use a PowerPoint/keynote workflow instead.
+  normally raw-first, with validation before handoff/import; publishing uses the
+  publisher's lightweight artifact-integrity gate. For real `.pptx`, use a
+  PowerPoint/keynote workflow instead.
 ---
 
 # feishu-deck-h5
@@ -88,9 +89,11 @@ These gates apply before dispatching to any subskill:
    and that is the gate to run after each edit. The whole-deck validator path
    (`render-deck.py --final` / `finalize.sh` / a whole-deck `check-only`) is the
    DELIVERY gate — run it before local handoff to the user, simulator use, or
-   publisher / importer confirmation, NOT after every intermediate edit. Either
-   way the locked HTML must pass its appropriate gate before that step; never
-   hand-write / patch around the gate. (A framework / CSS change re-runs only the
+   importer confirmation, NOT after every intermediate edit. Magic Page publishing
+   is gated separately by the publisher's resource / reference integrity checks,
+   not by whole-deck validator. Either way the locked HTML must pass its
+   appropriate gate before that step; never hand-write / patch around the gate.
+   (A framework / CSS change re-runs only the
    VISUAL audit deck-wide; content + making-of snapshot stay scoped — F-335.)
    - The validator must be EXECUTED, not read. `validate.py` contract:
      exit 0 = pass · 1 = fail (delivery-blocking) · 2 = file-not-found.
@@ -330,8 +333,8 @@ when» in §Multi-Agent Dispatch):
 4. **Validator** before a DELIVERY checkpoint (not every intermediate edit —
    Hard Gate 4). Whether the HTML came from Renderer or a later Editor pass, run
    the whole-deck Validator and fix non-zero findings before local delivery to
-   the user or publish confirmation; intermediate scoped edits gate via
-   `render --iter`. Spawn a Validator worker when multi-agent dispatch is
+   the user or slide-library import confirmation; intermediate scoped edits gate
+   via `render --iter`. Spawn a Validator worker when multi-agent dispatch is
    available.
 5. **Simulator** only if the user asks for pitch rehearsal, customer reaction
    simulation, stakeholder objections, or improvement advice after local HTML
@@ -364,8 +367,10 @@ is INLINE):
    re-rendered. Spawn a Renderer worker when multi-agent dispatch is available.
 5. After Editor, Translator, or Renderer changes, gate appropriately: an
    intermediate scoped edit via `render --iter`; the whole-deck **Validator**
-   before a DELIVERY checkpoint (local delivery to the user or publish
-   confirmation — Hard Gate 4). Fix non-zero findings before that checkpoint.
+   before a DELIVERY checkpoint (local delivery to the user or slide-library
+   import confirmation — Hard Gate 4). Magic Page publishing uses publisher
+   artifact-integrity checks instead of whole-deck validator. Fix non-zero
+   findings before that checkpoint.
 6. Use **Simulator** only after the deck has passed Validator and the local HTML
    artifact has been delivered, when the user asks for rehearsal or improvement
    advice.
@@ -436,8 +441,10 @@ is INLINE):
 - Simulator writes `runs/<...>/output/pitch-rehearsal.json` and
   `PITCH_REHEARSAL.md`; it does not publish, ingest, or automatically modify the
   deck.
-- Publisher must not publish until the user has confirmed the exact HTML artifact,
-  and must not ingest into slide-library.
+- Publisher must not publish until the user has confirmed the exact HTML artifact
+  and the publisher artifact-integrity checks pass. It must not require
+  deck-validator/check-only visual or design gates by default, and must not ingest
+  into slide-library.
 - Importer must not ingest until the user has confirmed the exact finished HTML
   artifact for `FuQiang/feishu-slide-library`. It must run quality gate before
   ingest, then use the slide-library PR/confirm flow to sync the
