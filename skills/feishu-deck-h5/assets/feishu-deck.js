@@ -632,6 +632,14 @@
     setupPresenter(deck, frames, signal);
 
     // ---- Keyboard nav (present mode) + F = fullscreen (any mode) ----
+    // Note (F-374): a focused demo <iframe> swallows keydown — events fire inside
+    // the iframe's document and never bubble here, so keyboard nav goes inert while
+    // the presenter is interacting with a live demo. We deliberately do NOT re-bind
+    // this handler inside demo iframes: that would hijack the demo's own arrow /
+    // space / enter keys (an interactive prototype/game would lose them). The fix
+    // for "can't operate" is the on-screen controls instead — the projector window
+    // control bar (below) and the deck's bottom chrome — which work by mouse no
+    // matter where keyboard focus is. Clicking back onto the deck restores keys.
     document.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTypingTarget(e.target)) return;
@@ -1192,21 +1200,37 @@
     } catch (e) { notes = {}; }
 
     // A projector window is opened by openProjector() with window.name
-    // 'fs-projector'. It FOLLOWS the leader's nav and never leads.
+    // 'fs-projector'. It normally FOLLOWS the leader (speaker view), but its own
+    // on-screen nav buttons (added below) can also DRIVE navigation and sync it
+    // back to the leader — the escape hatch for when a focused demo <iframe> in
+    // the projector window has swallowed the keyboard (F-374).
     const isFollower = (window.name === 'fs-projector');
 
     let chan = null;
     try { chan = new BroadcastChannel('fs-deck-present'); } catch (e) { chan = null; }
     const LS_KEY = 'fs-deck-present-goto';
+    // Only windows that are part of a presenter session sync: the projector
+    // follower, or a leader that has opened a projector. A plain second tab of
+    // the same deck is neither, so it must NOT mirror navigation (that would be a
+    // surprise) — inSession() gates both send and receive on that.
+    function inSession() { return isFollower || projAlive(); }
+    // A nav we apply because a PEER told us to must not be re-broadcast — otherwise
+    // two windows driven to different slides at the same instant would ping-pong
+    // forever (each reacting to the other). `applyingRemote` suppresses the echo at
+    // the source, so a remote-driven goto is silent and the loop cannot start.
+    let applyingRemote = false;
     function broadcast(idx) {
-      if (isFollower) return;
+      if (!inSession() || applyingRemote) return;
       const msg = { type: 'goto', idx: idx, t: Date.now() };
       if (chan) { try { chan.postMessage(msg); } catch (e) {} }
       try { localStorage.setItem(LS_KEY, JSON.stringify(msg)); } catch (e) {}
     }
     function onRemoteGoto(msg) {
-      if (!isFollower || !msg || msg.type !== 'goto' || typeof msg.idx !== 'number') return;
-      if (frames[msg.idx]) goTo(deck, frames, msg.idx, false);
+      if (!inSession() || !msg || msg.type !== 'goto' || typeof msg.idx !== 'number') return;
+      if (msg.idx === currentIdx(frames)) return;        // already there — nothing to do
+      if (!frames[msg.idx]) return;
+      applyingRemote = true;
+      try { goTo(deck, frames, msg.idx, false); } finally { applyingRemote = false; }
     }
     if (chan) chan.onmessage = (e) => onRemoteGoto(e.data);
     window.addEventListener('storage', (e) => {
@@ -1377,24 +1401,55 @@
     // Close the projector if the whole tab/window goes away — never leave an orphan behind.
     window.addEventListener('beforeunload', () => { if (!isFollower) closeProjector(); }, { signal });
 
-    // The projector itself (#proj follower) is a chrome-less kiosk window, so it had
-    // no in-page way to close — give it its own dismiss button. Lives ON body (not
-    // inside .deck-ui), so the `.is-kiosk` chrome-hide does not touch it; it is the
-    // last-resort exit for an orphaned audience window.
+    // The projector (#proj follower) is a chrome-less kiosk (its `.is-kiosk` hides
+    // the deck's own controls). Give it its OWN on-body control bar — prev / next
+    // / close — so the presenter can always drive it BY MOUSE even when a focused
+    // demo <iframe> has eaten the keyboard, and so an orphaned audience window can
+    // always be dismissed. On body (not inside .deck-ui) so `.is-kiosk` never
+    // hides it; very high z-index so a demo can't overlay it (F-374).
     if (isFollower) {
-      const x = document.createElement('button');
-      x.type = 'button';
-      x.textContent = '✕ 关闭放映窗';
-      x.setAttribute('aria-label', '关闭放映窗');
-      x.style.cssText =
-        'position:fixed;top:12px;right:12px;z-index:2147483600;padding:8px 14px;' +
-        'border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(8,12,24,.72);' +
-        'color:#fff;font:600 14px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;' +
-        'cursor:pointer;opacity:.2;transition:opacity .2s;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
-      x.addEventListener('mouseenter', () => { x.style.opacity = '1'; });
-      x.addEventListener('mouseleave', () => { x.style.opacity = '.2'; });
-      x.addEventListener('click', () => { try { window.close(); } catch (e) {} });
-      document.body.appendChild(x);
+      const bar = document.createElement('div');
+      bar.setAttribute('role', 'group');
+      bar.setAttribute('aria-label', '放映窗控制');
+      bar.style.cssText =
+        'position:fixed;bottom:14px;left:50%;transform:translateX(-50%);' +
+        'z-index:2147483646;display:flex;gap:8px;align-items:center;' +
+        'padding:7px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.24);' +
+        'background:rgba(8,12,24,.66);box-shadow:0 8px 30px rgba(0,0,0,.45);' +
+        'opacity:.18;transition:opacity .2s;' +
+        'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);';
+      // Reveal on hover OR keyboard focus — the bar is the projector window's only
+      // navigation, so a Tab-only user must be able to see it when it's focused.
+      const reveal = () => { bar.style.opacity = '1'; };
+      const dim    = () => { if (!bar.contains(document.activeElement)) bar.style.opacity = '.18'; };
+      bar.addEventListener('mouseenter', reveal);
+      bar.addEventListener('mouseleave', dim);
+      bar.addEventListener('focusin', reveal);
+      bar.addEventListener('focusout', dim);
+      const mkBtn = (label, title) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.textContent = label; b.title = title;
+        b.setAttribute('aria-label', title);
+        b.style.cssText =
+          'border:0;border-radius:999px;padding:8px 14px;cursor:pointer;color:#fff;' +
+          'font:600 14px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;' +
+          'background:rgba(255,255,255,.14);outline-offset:2px;';
+        b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,255,255,.26)'; });
+        b.addEventListener('mouseleave', () => { b.style.background = 'rgba(255,255,255,.14)'; });
+        return b;
+      };
+      const prev = mkBtn('‹ 上一页', '上一页');
+      const next = mkBtn('下一页 ›', '下一页');
+      const exit = mkBtn('✕ 关闭', '关闭放映窗');
+      // Navigate the follower locally with updateHash=FALSE — the projector window
+      // must keep its '#proj' hash (a '#N' rewrite would drop kiosk mode on reload).
+      // __fsOnNav still fires from goTo regardless, so the leader-sync broadcast is
+      // unaffected; clicking also moves focus OUT of any demo iframe.
+      prev.addEventListener('click', () => goTo(deck, frames, stepPrev(frames, currentIdx(frames)), false));
+      next.addEventListener('click', () => goTo(deck, frames, stepNext(frames, currentIdx(frames)), false));
+      exit.addEventListener('click', () => { try { window.close(); } catch (e) {} });
+      bar.appendChild(prev); bar.appendChild(next); bar.appendChild(exit);
+      document.body.appendChild(bar);
     }
   }
 

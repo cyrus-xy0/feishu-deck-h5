@@ -3984,7 +3984,9 @@ body {
    ============================================================================ */
 .fs-presenter {
   position: fixed; inset: 0;
-  z-index: 2147483000;
+  z-index: 2147483646;          /* F-374: above any in-slide demo (incl. a demo
+                                   that sets its own very high z-index) so the
+                                   speaker-view controls stay clickable */
   display: none;                /* JS sets flex */
   flex-direction: column;
   background: #0b0e16;

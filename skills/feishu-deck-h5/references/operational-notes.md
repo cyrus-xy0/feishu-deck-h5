@@ -17,8 +17,13 @@
   `<script type="application/json" id="fs-deck-notes">` JSON 岛(`notes` 本身不渲进
   页面,只演示者视图读)。视图里点 **📺 放映窗** → `window.open(...#proj)` 开一个
   纯净(kiosk)观众窗,经 **BroadcastChannel**(同源,无后端;localStorage 兜底)
-  **自动跟随**主窗翻页;观众窗是 follower(`window.name='fs-projector'`),自身翻页
-  不回弹主窗。`Esc`/再按 `P` 退出。实现在 `feishu-deck.js` `setupPresenter()`。
+  **自动跟随**主窗翻页;观众窗是 follower(`window.name='fs-projector'`)。观众窗
+  自带一条**屏上控制条**(`‹上一页 / 下一页› / ✕关闭`,hover 或键盘聚焦才显),其翻页
+  会**双向同步**回讲者视图(F-374)——这是当观众窗里嵌了**交互 demo `<iframe>`**、
+  点进 demo 后键盘焦点被 iframe 吃掉、快捷键失灵时的操作出路:**用鼠标点这条控制条
+  翻页,与焦点在哪无关**。注意:框架**不会**把键盘劫持进 demo iframe(那会抢走交互
+  demo 自己的方向键/空格);点回 deck 区域键盘即恢复。同一 deck 开两个**普通**标签页
+  不会互相同步。`Esc`/再按 `P` 退出。实现在 `feishu-deck.js` `setupPresenter()`。
   注:跨窗跟随需同源——`file://` 下浏览器可能不桥接 BroadcastChannel,**发布到
   http(s) 后稳定生效**。
 - **`templates/_shell.html` uses `../assets/feishu-deck.css`.** It assumes the

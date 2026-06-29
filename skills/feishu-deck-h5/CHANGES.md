@@ -1,6 +1,43 @@
 # CHANGES — feishu-deck-h5 历史/已固化的修复记录
 > 从 SKILL.md 拆出(F-30)。这些防御的可执行部分已固化进 feishu-deck.css / validate.py;此处仅留叙事供追溯。
 
+## F-374 — 投屏放映窗里有 demo(iframe)时演示者模式「操作不了」(2026-06-29)
+
+同事报告:投屏选演示者模式 → 点 📺 开放映窗(`#proj` 跟随窗)→ 某页内嵌交互 demo,
+**点进 demo 后翻页 / 演示者控制全部失灵**。
+
+根因两条同一根:**(1)** demo `<iframe>` 抢键盘焦点后,iframe 内的 `keydown` 不冒泡到
+父 `document`,而 deck 的全部键盘控制(←/→/Space/`F`/`P`/`Esc`)只挂在父 `document`
+上 → 一点进 demo 全死;**(2)** 放映窗是 kiosk(`.is-kiosk` 藏了 deck 自带控件),
+原来**只有「✕ 关闭放映窗」一个按钮、没有屏上翻页入口** → 键盘一死 = 彻底卡住。
+
+修复固化进 `feishu-deck.js` / `feishu-deck.css`(收敛到「屏上控件 + 双向同步」,**不**碰
+demo 键盘):
+- **放映窗补屏上控制条** `‹上一页 / 下一页› / ✕关闭`(挂 `body`、`z-index 2147483646`、
+  `.is-kiosk` 不藏、`opacity .18`,**hover 或键盘 `focusin` 才显**〔a11y:它是 kiosk 窗
+  里唯一导航,Tab 用户要看得见〕、翻页用 `goTo(...,false)` 保住 `#proj` hash)。鼠标永远
+  能翻页,**与 demo 抢不抢焦点无关**——对同源/跨源 demo 都管用的唯一普适出路。
+- **BroadcastChannel 双向同步**:放映窗用控制条翻页也经 `__fsOnNav`→`broadcast` 同步回
+  讲者视图。三道防护:`inSession()`(=`isFollower||projAlive()`)同时闸**发/收**(**同一
+  deck 两个普通标签页互不同步**)+ `onRemoteGoto` 的 `idx===currentIdx()` 守卫 +
+  **`applyingRemote` 抑制回声**(远端驱动的 goto 不回播,杜绝两窗同时反向导航的无限
+  ping-pong)。
+- `.fs-presenter` z-index 2147483000→2147483646(防主窗超高 z-index 的 demo 盖住讲者控件)。
+
+**关键决策——不做「同源 demo 键盘转发」**:初版曾对同源 demo iframe 的 `contentDocument`
+再挂一份键盘处理器(让点进同源 demo 后还能按 ←/→ 翻页)。**对抗式多视角审查(24 agent /
+4 视角 / 逐条对抗验证,17 条 confirmed)实测复现这是真回归**——转发会对 demo 内按下的
+←/→/Space/Enter `preventDefault()` 并翻页,**抢走交互 demo(键盘游戏 / 聚焦按钮的空格触发 /
+方向键画布)自己的键**。故**整段移除**:键盘留给焦点所在处(demo 要键盘就给 demo,浏览器
+标准行为),「操作不了」由屏上控件解,点回 deck 键盘即恢复。改动因此更小、零回归、对
+同源/跨源一致。
+
+验证:Playwright 端到端(headless,http 源,真 `window.open` 放映窗)**13/13**(含反向
+同步、demo 抢焦点时屏上按钮仍翻页、`#proj` hash 保住、两普通标签页不互扰、无键盘劫持
+回归);反向对照在未修改 main 上证实根因;真实 `examples/sample-deck.html` 冒烟 0 控制台
+错误;`sample-deck-inline.html` 已 `build.sh --inline` 重生成。详见
+`docs/F-374-PRESENTER-DEMO-IFRAME-KEYBOARD-2026-06-29.md`。
+
 ## F-85 — R-DOC-INTEGRITY:整份文档完整性硬闸(`.deck` 闭合 / runtime 存在 / 末尾 `</body></html>`)(2026-06-03)
 
 线上事故:一份 deck `index.html` 的收尾标签丢了 —— 少了 `.deck` 的闭合 `</div>`、
