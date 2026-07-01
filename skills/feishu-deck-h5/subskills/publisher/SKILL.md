@@ -38,18 +38,27 @@ publish metadata.
   最后调发布 API。**框架运行时 + 每页 CSS 默认保持内联**(delivery-9 / `--keep-inline-code`,
   publisher 默认开):外置成哈希命名的托管 JS 会让发布字节的「运行时存在」检查认不出
   (误判 runtime 缺失,过去每次发布都要手动绕一轮);代码 <0.5 MB,留内联不会触碰请求体上限,
-  只有重资源被外置。需要外置代码时用 `--externalize-inline-code`。
+  只有重资源被外置。**但发布前必须本地检查 Magic Page HTML 正文字数上限**
+  (默认 900000 字符,可用 `--magic-max-html-chars` 调整):若默认内联版超限,
+  publisher 在调用 Magic Page API 前自动重跑一次外置代码打包,写出
+  `PUBLISH_SIZE_REPORT.md`,再发布瘦身后的 `magic-page-ready.html`;不得先撞远端
+  413 再手动重发。需要主动外置代码时仍可用 `--externalize-inline-code`。
   **未托管依赖扫描跳过 `<script>` 块与注释**:JS / 注释里出现的 `url()` / `URL()` /
   `location.href` / `createObjectURL` 不再被误判为「未托管资源」(过去也是每次发布手动改写绕过)。
   最终发布物不得依赖本地路径、第三方外链或 `data:` payload;只靠发布链接即可完整使用。
 - **iframe / 原型发布策略**:不要默认把 iframe 替换成截图。按三档处理并在最终回复说明采用了哪档:
   1. **保留 iframe**:若 `src` 是可嵌入 HTTPS 页面,且无 `X-Frame-Options` / CSP frame 限制,
      直接保留;发布前用 `curl -I -L` 快速看 `Content-Disposition`、`X-Frame-Options`、CSP。
-  2. **子页面先发 Magic,主 deck iframe Magic URL**:若 iframe 指向本地 prototype 或 TOS HTML
-     带 `Content-Disposition: attachment`,先把 prototype 单独发成
-     `https://magic.solutionsuite.cn/html-box/<id>`,再回填主 deck 的 iframe。单文件 bundler
-     超过 Magic 字符上限时,把大 vendor 上传 TOS、业务脚本展开/内联,避免 `Blob` /
-     `createObjectURL` / `data:image` / 上传组件残留。
+  2. **本地子页面走 FaaS HTML 代理**:若 iframe 指向本地 prototype / 子 HTML,不要直接把
+     HTML 上传到 TOS 后作为 iframe src,也不要默认把子页发布成另一个 Magic HTML Box 再嵌套。
+     publisher 会先处理子 HTML 内部资源(图片/视频/字体/`data:` 等上传 TOS),再把处理后的
+     子 HTML 上传 TOS,最后发布/更新一个 Magic FaaS 代理用 `text/html; charset=utf-8`
+     返回它,主 deck iframe 改成
+     `https://magic.solutionsuite.cn/api/faas/<record_id>?p=<slug>`。这样避免 TOS
+     `Content-Disposition: attachment` 导致 iframe 空白/下载,也避免 Magic HTML Box 套
+     Magic HTML Box 的二次 sandbox 触发 `localStorage` 等交互报错。
+     单文件 bundler 超过 Magic 字符上限时,把大 vendor 上传 TOS、业务脚本展开/内联,避免
+     `Blob` / `createObjectURL` / `data:image` / 上传组件残留。
   3. **静态 srcdoc / 截图兜底**:只有当 Magic 页面套 Magic 页面黑屏、iframe 内脚本在 Magic
      srcdoc 环境不执行、或目标禁止嵌入时才降级。优先导出无脚本静态 DOM 放入 `srcdoc`
      (仍是 iframe 内容);最后才用截图。降级必须说明原因,不要说成“完整保留交互”。
@@ -60,6 +69,8 @@ publish metadata.
   字号、复用质量门禁。发布门禁只检查即将发布的字节是否完整可访问:资源体积不超限、资源能被
   inline / 上传 / 托管、最终 HTML 不残留本地相对路径或 `data:` payload。这个口径对齐
   `feishu-slide-library` 当前入库准入:硬拦只拦资源可用性,样式 / 结构 / 视觉问题不阻断发布。
+  资源重写只把 CSS 语义中的小写 `url(...)` 当资源引用处理,不得误改 JS 里的 `URL(...)`
+  构造器。
 - **单一发布目标**:publisher 只发布到 Feishu/Miaobi Magic Page;不得提供
   `--publish-target`、Miaoda fallback 或 slide-library 入库分支。
 - **不入库**:不得调用 `feishu-slide-library` 的
@@ -164,9 +175,11 @@ magic-page-publish.json
 cloud-publish.json
 MAGIC_PAGE_PUBLISH.md
 publish-manifest.json
+magic-iframe-faas.json        # 本地 iframe HTML -> TOS HTML -> FaaS 代理映射
 publish-self-check.json      # F-285 发布后自检机读结果 (self_check.ok / verdict)
 PUBLISH_SELF_CHECK.md        # F-285 发布后自检红牌报告
 self-check/local|remote/*.png  # 本地 vs 远程逐页截图
+PUBLISH_SIZE_REPORT.md      # Magic Page 正文字数门禁与自动外置代码记录
 publisher-*.log
 ```
 

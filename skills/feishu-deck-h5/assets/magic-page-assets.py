@@ -63,6 +63,8 @@ STYLE_BLOCK_RE = re.compile(r"<style\b([^>]*)>(.*?)</style>", re.I | re.S)
 SCRIPT_BLOCK_RE = re.compile(r"<script\b((?:(?!\bsrc\s*=)[^>])*)>(.*?)</script>", re.I | re.S)
 SCRIPT_TYPE_RE = re.compile(r"\btype\s*=\s*([\"'])(.*?)\1", re.I | re.S)
 LINK_REL_RE = re.compile(r"\brel\s*=\s*([\"'])(.*?)\1", re.I | re.S)
+ANY_SCRIPT_BLOCK_RE = re.compile(r"<script\b[^>]*>.*?</script>", re.I | re.S)
+CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 
 
 def is_external_ref(ref: str) -> bool:
@@ -94,9 +96,18 @@ def is_probable_resource_attr(tag: str, attr: str, ref: str) -> bool:
     # A REMOTE <iframe src> is a LIVE EMBED (e.g. a Feishu Docx / Base), not a
     # re-hostable file. Fetching it would chase the embed origin's login 302
     # and 404 the deck; leave external iframe srcs untouched so the embed loads
-    # at runtime. (Local prototype iframes still re-host normally.)
+    # at runtime.
     if tag == "iframe" and is_http_ref(ref):
         return False
+    # Local HTML iframes are pages, not static resources. Uploading them directly
+    # to TOS can return attachment-style delivery headers and blank embedded
+    # demos. The publisher rewrites these through magic-iframe-faas.py before this
+    # script runs; if one reaches here, leave it untouched so the integrity gate
+    # catches it instead of silently producing a broken TOS iframe.
+    if tag == "iframe":
+        path = ref.split("#", 1)[0].split("?", 1)[0].strip().lower()
+        if path.endswith((".html", ".htm")):
+            return False
     if attr in {"src", "poster"}:
         return True
     if attr == "href" and tag == "image":
@@ -346,8 +357,9 @@ def download_external_ref(
 
 def collect_resource_refs(html: str) -> list[str]:
     refs: list[str] = []
+    css_scan = CSS_COMMENT_RE.sub(" ", ANY_SCRIPT_BLOCK_RE.sub(" ", html))
     for regex in (URL_RE, IMPORT_RE):
-        for match in regex.finditer(html):
+        for match in regex.finditer(css_scan):
             ref = next((group for group in match.groups() if group is not None), "").strip()
             if ref:
                 refs.append(ref)
@@ -369,6 +381,21 @@ def collect_resource_refs(html: str) -> list[str]:
             seen.add(ref)
             out.append(ref)
     return out
+
+
+def sub_outside_script_blocks(
+    regex: re.Pattern[str],
+    repl,
+    html: str,
+) -> str:
+    pieces: list[str] = []
+    last = 0
+    for match in ANY_SCRIPT_BLOCK_RE.finditer(html):
+        pieces.append(regex.sub(repl, html[last:match.start()]))
+        pieces.append(match.group(0))
+        last = match.end()
+    pieces.append(regex.sub(repl, html[last:]))
+    return "".join(pieces)
 
 
 def rewrite_refs(
@@ -481,8 +508,8 @@ def rewrite_refs(
                 return match.group(0)
             return f"{prefix}{quote}{html_lib.escape(', '.join(items), quote=True)}{quote}"
 
-        html = URL_RE.sub(replace_url, html)
-        html = IMPORT_RE.sub(replace_import, html)
+        html = sub_outside_script_blocks(URL_RE, replace_url, html)
+        html = sub_outside_script_blocks(IMPORT_RE, replace_import, html)
         html = RESOURCE_ATTR_RE.sub(replace_resource_attr, html)
         html = SRCSET_ATTR_RE.sub(replace_srcset, html)
 
