@@ -196,7 +196,7 @@ Second attempt was Rewrite (1:1 page count) — rejected with "整体
 | Designer-polished PDF/PPT, has UI screenshots, brand-aligned | **Replica** (default) |
 | Markdown / docs / Google Doc / text export | Rewrite |
 | Low-res screenshots / off-brand source / "redesign this" | Rewrite |
-| Customer story table row, "做这个客户案例" | one-pager (Path A/B) |
+| Customer story table row, "做这个客户案例" | Rewrite / raw-first by default; ask if one-pager vs multi-slide is ambiguous |
 | User says "用 native 组件 / 重画 / 升级排版" | Rewrite |
 | User says "保持原样 / 模仿原版 / 别动样式" | Replica |
 
@@ -996,4 +996,3 @@ logo, R13 br-in-title, R56 eyebrow-in-header, P50 base64 budget),
 | Free-style `font-size` like 16 / 17 / 19 / 20 / 24 / 26 / 30 / 32 / 36 / 40 / 48 / 72 / 96 in per-page CSS | Forbidden by R20 modular type-scale | Pick from {14, 18, 22, 28, 38, 44, 52, 56, 64, 88, 100, 132, 160}. Body content ≥ 22. If master truly says exactly 96 px, add `/* allow:typescale */` in the rule and document why |
 
 ---
-

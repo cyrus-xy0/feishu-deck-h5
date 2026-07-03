@@ -3,11 +3,11 @@
 
 ## ONE-PAGER CASE POLICY (mandatory) — 一页纸案例 layout
 
-This is the **canonical layout for a single customer case rendered on
-one slide** (一页纸案例 / one-pager case study). When the trigger
-applies, use the `.story-case` recipe documented below — don't
-improvise a different layout, don't add a cover, don't expand it into
-multiple slides unless the user explicitly asks for that.
+This is the **canonical layout only when a customer case is explicitly
+meant to be rendered as one slide** (一页纸案例 / one-pager case study).
+When that explicit trigger applies, use the `.story-case` recipe documented
+below — don't improvise a different layout, don't add a cover, don't expand it
+into multiple slides unless the user explicitly asks for that.
 
 ### NEVER fabricate STORY ids, source attributions, or interview citations
 
@@ -194,22 +194,23 @@ the offenders, not a template bug.
 
 ### Trigger detection — when to use this layout
 
-Apply the one-pager case layout when ANY of the following is true:
+Apply the one-pager case layout ONLY when at least one explicit trigger is true:
 
 - The user explicitly says **"一页纸案例" / "one-pager case" / "做成一页"
   / "single-page case study" / "压成一页" / "one-page version"**.
-- The user hands you ONE row of a customer-story table / story library
-  / 案例库 and asks to "make a deck" / "试试效果" / "把这一行做出来" /
-  "这个案例做一下".
-- The user provides a single customer case with these typical fields:
-  题目 / 行业痛点 / 钩子 / 故事背景 / 核心情节 / 核心价值. That field
-  shape IS the one-pager case shape.
-- The user asks you to "render this case" / "show this customer story"
-  / "做这个客户案例" without specifying length.
+- The user explicitly asks for the 4-beat customer-story shape:
+  `痛点 / 冲突 / 解法 / 价值` plus hook and scene, or names
+  `story-case` / `content/story-case`.
+- The current `outline.json` or existing `deck.json` already specifies
+  `schema:content/story-case`, `layout: "content"` + `variant: "story-case"`,
+  or a `.slide.story-case` page that is being edited in place.
 
-When in doubt between one-pager vs multi-slide expansion, **default to
-one-pager** and offer to expand if the user wants more depth. One-pager
-is faster to consume, easier to forward, and works as the IM preview.
+Generic customer-case asks are NOT a trigger by themselves. A single row from a
+customer-story table, "做这个客户案例", "把这一行做出来", "render this case", or a
+case brief with fields such as 题目 / 行业痛点 / 钩子 / 故事背景 / 核心情节 /
+核心价值 should go through the normal design-first, raw-first decision process.
+If scope or shape is ambiguous, ask one short question rather than defaulting to
+one-pager.
 
 The CSS class `.story-case` (added on the `.slide` element) is the
 canonical marker for this layout. Any slide with `class="story-case"`
@@ -279,20 +280,21 @@ A deck that bundles **3+ cases** (a "客户案例集" / "story library" /
 - `section` divider per case (optional)
 - One or more content slides per case
 
-The "skip the cover" rule is specifically for single-case / one-row decks.
-If unsure, ask: "is this one case or a bundle?" — the answer determines
-whether the cover stays.
+The "skip the cover" rule is specifically for explicit one-pager case decks.
+If unsure, ask whether this is a one-page case, a multi-slide single-case story,
+or a case bundle — the answer determines whether the cover stays.
 
-### When the user explicitly wants a cover
+### Cover handling outside explicit one-pagers
 
-Override the default if the user says one of:
+For explicit one-pagers, the default remains no cover. Outside explicit
+one-pagers, use the normal deck/story scope decision; do not apply this
+reference's no-cover default just because the material is a single case.
+
+Use or keep a cover when the user says one of:
 - "我要一个封面页" / "give it a cover" / "加一张封面"
 - "做成正式提案" (formal proposal explicitly needs a hero cover)
 - The single case is going to a board / external customer (formal
   context, cover earns its keep)
-
-In all other single-case scenarios, default = no cover, content slide
-opens the deck.
 
 ### Image sizing — magazine-spread top-aligned (v2, frozen 2026-05-03)
 
@@ -438,4 +440,3 @@ extends above OR below the text content, the row is using `1fr`
 instead of `auto` (regression to v1 behavior — fix it).
 
 ---
-

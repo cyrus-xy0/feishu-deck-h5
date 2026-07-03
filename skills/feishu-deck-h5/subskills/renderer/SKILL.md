@@ -95,9 +95,10 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
    If schema validation fails before render, inspect with
    `deck-json/validate-deck.py` or the validator error path and fix `deck.json`.
 7. Before handoff, run asset copy/finalize workflow from the delivery reference.
-8. If rendering a one-pager case, use the `content` layout with
-   `variant: "story-case"` and load the one-pager reference before hand-authoring
-   alternatives.
+8. Use `content` + `variant: "story-case"` only when the user or
+   `outline.json` explicitly calls for a one-pager / four-beat case. Load the
+   one-pager reference before authoring that shape; generic customer cases stay
+   on the normal raw-first/schema-fit path.
 
 ## DeckJSON Rules
 

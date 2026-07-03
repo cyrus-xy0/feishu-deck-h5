@@ -57,9 +57,12 @@ rely on cached chat summaries or earlier reads of `source-dossier.json`, local
 7. Never fabricate attributed facts: no specific company numbers, named quotes,
    source claims, or future-roadmap commitments unless provided by user/local/cloud
    source. General industry/product knowledge is allowed only when labeled as such.
-8. If the brief is a one-pager customer case or a four-beat case story, read
-   `one-pager-case.md` and default to a single `content/story-case` slide without
-   a cover unless the user asks otherwise.
+8. If the brief explicitly asks for a one-pager customer case or names a
+   four-beat case story (`痛点 / 冲突 / 解法 / 价值`), read
+   `one-pager-case.md` and use a single `content/story-case` slide without a
+   cover unless the user asks otherwise. Generic "做这个客户案例" / single-row case
+   inputs are not enough to trigger this default; keep the raw-first design flow
+   and ask one short scope/layout question if the intended shape is ambiguous.
 9. Write or update the run's `PROMPTS.md` alongside `DESIGN-PLAN.md` so the user's
    actual asks survive the design/render handoff.
 10. After writing `outline.json`, self-check it:
