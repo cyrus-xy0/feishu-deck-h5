@@ -79,8 +79,9 @@ These gates apply before dispatching to any subskill:
    logo-wall) are frozen; new pages go raw and `R-LAYOUT-DEPRECATED` (advisory)
    nudges any that don't. See `references/deck-generation-policy.md`. For the
    raw-page authoring contract (the fixed constants — canvas 1920×1080, the
-   {16,24,28,48} ladder, raw renders no header, the motion scope one-liner, the
-   `allow` syntax) plus the insert/set-page/render fast recipe and the
+   {16,24,28,48} ladder, raw does not auto-create a header so authors must use
+   the framework `.header` when a content title is needed, the motion scope
+   one-liner, the `allow` syntax) plus the insert/set-page/render fast recipe and the
    per-page speed discipline, read `references/raw-page-quickstart.md` FIRST —
    it exists so those never-changing facts are not re-discovered each time.
 4. **Two gates: scoped on every edit, whole-deck only at delivery.** An

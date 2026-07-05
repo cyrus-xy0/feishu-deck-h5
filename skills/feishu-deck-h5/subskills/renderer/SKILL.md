@@ -39,11 +39,13 @@ rely on cached chat summaries or earlier reads of `outline.json`,
    file. Use `deck-json/examples/phase-1a-demo.json` as the minimal structured
    example when starting from scratch.
 3. Follow the design plan's raw-first stance: `layout: "raw"` is the default;
-   schema layouts are only for approved pure standard shapes. Keep raw CSS in
+   schema layouts are only for ceremonial / mechanism shapes explicitly approved
+   by the design policy. Keep raw CSS in
    `slide.custom_css`; do not put per-slide CSS in `<head>`. For the fixed raw
    contract you should NOT re-derive each run (canvas 1920×1080, the
-   {16,24,28,48} ladder + `/* allow:typescale */`, raw renders no `.header` so
-   author your own title, scope every rule to `.slide[data-slide-key="K"]`, the
+   {16,24,28,48} ladder + `/* allow:typescale */`, raw does not auto-create a
+   `.header` so author the framework header yourself when a content title is
+   needed, scope every rule to `.slide[data-slide-key="K"]`, the
    `is-current` + reduced-motion motion one-liner, SVG `<text>` floor → use HTML
    labels), read `references/raw-page-quickstart.md`. Author the focal/hero
    element bold the first time — do not escalate timid→bold across render cycles.
@@ -110,8 +112,10 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
 - For raw slides, use the four semantic type variables:
   `var(--fs-title)`, `var(--fs-sub)`, `var(--fs-body)`, `var(--fs-foot)`.
 - For raw slides, prefer `fs-` component classes and narrative patterns from the
-  references before inventing ad-hoc CSS. If the raw page is only a plain card
-  list, use `content/3up` or `content/blocks` instead.
+  references before inventing ad-hoc CSS. If the page is a plain card list,
+  still author it as `layout: "raw"` using framework card/list tokens; do not
+  fall back to frozen body schemas such as `content/3up` or `content/blocks` for
+  new pages.
 - For a raw **content page title**, use the framework header verbatim —
   `<div class="header"><h2 class="title-zh">…</h2></div>`, title-only, single line
   (section number inline). Do NOT invent `.r-head` / `.r-title`: the header guards

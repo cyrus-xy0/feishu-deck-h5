@@ -84,9 +84,11 @@ publish metadata.
   validator/check-only;不要把它混进默认发布链路。
 - 默认发布前必须跑资源体积体检、Magic Page 资产准备、最终 HTML 引用完整性检查。
   `--allow-unaudited` 是历史兼容参数,不再绕过或启用任何发布质量门禁。
-- 妙笔发布默认读取 `MAGIC_TOKEN` 或 `~/.magic-token`;域名默认
+- 妙笔真实发布默认读取 `MAGIC_TOKEN` 或 `~/.magic-token`;域名默认
   `https://magic.solutionsuite.cn`,可用 `MAGIC_BASE_URL` / `--magic-base-url` 指定。
   如果本地没有 token,必须先要求用户提供 token,不得等到发布 API 阶段才失败。
+  `--dry-run` 不需要 token,但仍必须执行资源体检、Magic Page 资产准备、大小门禁和
+  引用完整性检查;它只把资产上传 / FaaS / 最终发布 API 替换成本地 dry-run URL。
 - Magic Page 资源上传默认使用仓库内
   `skills/feishu-deck-h5/assets/magic-upload.js`,也可通过
   `FEISHU_DECK_H5_MAGIC_ASSET_UPLOADER` 或 `--magic-asset-uploader` 指定。
@@ -109,7 +111,7 @@ python3 skills/feishu-deck-h5/subskills/publisher/publish.py \
   --title "<deck title>"
 ```
 
-全链路 dry run,不真实发布:
+全链路 dry run,不真实发布、不写 TOS / FaaS / Magic Page:
 
 ```bash
 python3 skills/feishu-deck-h5/subskills/publisher/publish.py \
@@ -117,6 +119,10 @@ python3 skills/feishu-deck-h5/subskills/publisher/publish.py \
   --title "<deck title>" \
   --dry-run
 ```
+
+`--dry-run` 会写出 `MAGIC_PAGE_PREFLIGHT.md`、`PUBLISH_SIZE_REPORT.md`、
+`PUBLISH_INTEGRITY_REPORT.md` 和 `magic-page-ready.html`;若最终发布字节仍残留
+本地路径、`data:` payload 或超限资源,命令必须非零退出。
 
 ## 发布后自检 (F-285 · 最后一公里)
 

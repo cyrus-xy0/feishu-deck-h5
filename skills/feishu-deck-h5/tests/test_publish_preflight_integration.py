@@ -110,6 +110,87 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
             if run_dir and run_dir.exists():
                 shutil.rmtree(run_dir, ignore_errors=True)
 
+    def test_dry_run_executes_publish_preparation_without_token_or_remote_writes(self) -> None:
+        run_dir: Path | None = None
+        try:
+            with tempfile.TemporaryDirectory(prefix="pub-dry-") as td:
+                t = Path(td)
+                (t / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 64)
+                html = t / "index.html"
+                html.write_text(
+                    '<html><head><style>.h{color:#000}</style></head><body>'
+                    '<script>window.__feishuDeck=1;</script>'
+                    '<div class="slide" data-slide-key="s1"><img src="logo.png"></div>'
+                    '</body></html>',
+                    encoding="utf-8",
+                )
+
+                env = dict(os.environ)
+                env.pop("MAGIC_TOKEN", None)
+                proc = subprocess.run(
+                    [sys.executable, str(PUBLISH),
+                     "--html", str(html), "--title", "Dry Run",
+                     "--dry-run", "--skip-self-check"],
+                    text=True, capture_output=True, env=env,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+                manifest = json.loads(proc.stdout)
+                run_dir = REPO / "runs" / manifest["task_id"].split("/")[0]
+                out_dir = REPO / "runs" / manifest["task_id"] / "output"
+                pub = manifest["publication"]
+
+                self.assertTrue(pub["ok"], pub.get("reason"))
+                self.assertTrue(pub["dry_run"])
+                self.assertEqual(pub["reason"], "dry-run after publish preparation and integrity checks")
+                self.assertTrue((out_dir / "MAGIC_PAGE_PREFLIGHT.md").exists())
+                self.assertTrue((out_dir / "PUBLISH_SIZE_REPORT.md").exists())
+                self.assertTrue((out_dir / "PUBLISH_INTEGRITY_REPORT.md").exists())
+                ready = (out_dir / "magic-page-ready.html").read_text(encoding="utf-8")
+                self.assertIn("https://dryrun.local/feishu-deck-h5/", ready)
+                self.assertNotIn('src="logo.png"', ready)
+                self.assertFalse((out_dir / "publisher-magic-page.log").exists(),
+                                 "dry-run must not call the final Magic Page publish API")
+        finally:
+            if run_dir and run_dir.exists():
+                shutil.rmtree(run_dir, ignore_errors=True)
+
+    def test_dry_run_fails_when_publish_integrity_gate_finds_local_iframe(self) -> None:
+        run_dir: Path | None = None
+        try:
+            with tempfile.TemporaryDirectory(prefix="pub-dry-bad-") as td:
+                t = Path(td)
+                (t / "demo.html").write_text("<html><body>demo</body></html>", encoding="utf-8")
+                html = t / "index.html"
+                html.write_text(
+                    '<html><body><div class="slide" data-slide-key="s1">'
+                    '<iframe src="demo.html"></iframe>'
+                    '</div></body></html>',
+                    encoding="utf-8",
+                )
+
+                env = dict(os.environ)
+                env.pop("MAGIC_TOKEN", None)
+                proc = subprocess.run(
+                    [sys.executable, str(PUBLISH),
+                     "--html", str(html), "--title", "Dry Run Bad",
+                     "--dry-run", "--skip-self-check", "--skip-magic-iframe-faas"],
+                    text=True, capture_output=True, env=env,
+                )
+                self.assertEqual(proc.returncode, 1, proc.stderr or proc.stdout)
+                manifest = json.loads(proc.stdout)
+                run_dir = REPO / "runs" / manifest["task_id"].split("/")[0]
+                out_dir = REPO / "runs" / manifest["task_id"] / "output"
+                pub = manifest["publication"]
+
+                self.assertFalse(pub["ok"])
+                self.assertTrue(pub["dry_run"])
+                self.assertIn("publish artifact integrity check failed", pub["reason"])
+                report = (out_dir / "PUBLISH_INTEGRITY_REPORT.md").read_text(encoding="utf-8")
+                self.assertIn("demo.html", report)
+        finally:
+            if run_dir and run_dir.exists():
+                shutil.rmtree(run_dir, ignore_errors=True)
+
     def test_local_iframe_html_is_proxied_before_publish(self) -> None:
         run_dir: Path | None = None
         try:

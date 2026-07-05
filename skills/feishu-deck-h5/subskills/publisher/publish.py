@@ -452,6 +452,23 @@ def make_magic_assets_cmd(
     return cmd
 
 
+def dry_run_asset_uploader(output_dir: Path) -> Path:
+    """Return a local uploader shim that maps upload keys to deterministic URLs."""
+    uploader = output_dir / "dry-run-magic-upload.js"
+    uploader.write_text(
+        """
+const args = process.argv.slice(2);
+const keyIndex = args.indexOf("--key");
+const rawKey = keyIndex >= 0 ? args[keyIndex + 1] : (args[0] || "asset");
+const key = String(rawKey).replace(/[^A-Za-z0-9._/-]+/g, "-").replace(/^\\/+/, "");
+process.stdout.write("https://dryrun.local/" + key);
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    return uploader
+
+
 def publish_magic_page(
     *,
     html_path: Path,
@@ -461,30 +478,22 @@ def publish_magic_page(
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     base_url = (args.magic_base_url or os.environ.get("MAGIC_BASE_URL") or DEFAULT_MAGIC_BASE_URL).rstrip("/")
-    if args.dry_run or args.magic_page_dry_run:
-        token = "dryrun-" + hashlib.sha1(f"{task_id}:{title}:{html_path}".encode("utf-8")).hexdigest()[:16]
-        payload = {
-            "target": "magic-page",
-            "enabled": True,
-            "ok": True,
-            "dry_run": True,
-            "app_url": f"{base_url}/dryrun/{token}",
-            "app_id": token,
-            "base_url": base_url,
-            "html": repo_rel(html_path),
-            "reason": "dry-run",
-        }
-        write_publish_reports(output_dir, payload)
-        return payload
+    dry_run = bool(args.dry_run or args.magic_page_dry_run)
 
-    if not magic_token_available():
+    if not dry_run and not magic_token_available():
         payload = magic_failure(missing_magic_token_message(), html_path, base_url, None)
         write_publish_reports(output_dir, payload)
         return payload
 
     working_html = html_path
     if not args.skip_magic_asset_prepare:
-        uploader = args.magic_asset_uploader or optional_path(os.environ.get("FEISHU_DECK_H5_MAGIC_ASSET_UPLOADER", "")) or DEFAULT_MAGIC_ASSET_UPLOADER
+        uploader = (
+            dry_run_asset_uploader(output_dir)
+            if dry_run
+            else args.magic_asset_uploader
+            or optional_path(os.environ.get("FEISHU_DECK_H5_MAGIC_ASSET_UPLOADER", ""))
+            or DEFAULT_MAGIC_ASSET_UPLOADER
+        )
 
         # delivery-8: size pre-flight BEFORE upload. Magic Page hard-rejects any
         # single resource over the per-resource limit, and historically that was
@@ -511,7 +520,7 @@ def publish_magic_page(
                 "oversized resources block Magic Page publish (over per-resource limit). "
                 "See MAGIC_PAGE_PREFLIGHT.md and compress/host them, then re-publish"
                 + (f": {sample}" if sample else ""),
-                html_path, base_url, preflight,
+                html_path, base_url, preflight, dry_run=dry_run,
             )
             write_publish_reports(output_dir, payload)
             return payload
@@ -525,7 +534,7 @@ def publish_magic_page(
             log_path=output_dir / "publisher-magic-inline-assets.log",
         )
         if not inline["ok"]:
-            payload = magic_failure("inline-assets failed", prepared, base_url, inline)
+            payload = magic_failure("inline-assets failed", prepared, base_url, inline, dry_run=dry_run)
             write_publish_reports(output_dir, payload)
             return payload
         package_source = prepared
@@ -562,7 +571,7 @@ def publish_magic_page(
             ]
             if faas_record_id:
                 iframe_cmd += ["--faas-record-id", faas_record_id]
-            if args.magic_iframe_faas_dry_run:
+            if dry_run or args.magic_iframe_faas_dry_run:
                 iframe_cmd.append("--dry-run")
             iframe = subprocess_record(
                 iframe_cmd,
@@ -571,7 +580,13 @@ def publish_magic_page(
                 timeout=NETWORK_SUBPROCESS_TIMEOUT,
             )
             if not iframe["ok"]:
-                payload = magic_failure("magic iframe FaaS preparation failed", prepared, base_url, iframe)
+                payload = magic_failure(
+                    "magic iframe FaaS preparation failed",
+                    prepared,
+                    base_url,
+                    iframe,
+                    dry_run=dry_run,
+                )
                 write_publish_reports(output_dir, payload)
                 return payload
             if iframe_ready.exists():
@@ -601,7 +616,7 @@ def publish_magic_page(
             log_path=output_dir / "publisher-magic-assets.log",
         )
         if not package["ok"]:
-            payload = magic_failure("magic-page-assets failed", html_path, base_url, package)
+            payload = magic_failure("magic-page-assets failed", html_path, base_url, package, dry_run=dry_run)
             write_publish_reports(output_dir, payload)
             return payload
         max_html_chars = int(args.magic_max_html_chars or DEFAULT_MAGIC_MAX_HTML_CHARS)
@@ -643,6 +658,7 @@ def publish_magic_page(
                     html_path,
                     base_url,
                     externalized,
+                    dry_run=dry_run,
                 )
                 write_publish_reports(output_dir, payload)
                 return payload
@@ -675,6 +691,7 @@ def publish_magic_page(
                 packaged,
                 base_url,
                 None,
+                dry_run=dry_run,
             )
             payload["size"] = size_payload
             write_publish_reports(output_dir, payload)
@@ -688,8 +705,26 @@ def publish_magic_page(
             working_html,
             base_url,
             None,
+            dry_run=dry_run,
         )
         payload["integrity"] = integrity
+        write_publish_reports(output_dir, payload)
+        return payload
+
+    if dry_run:
+        token = "dryrun-" + hashlib.sha1(f"{task_id}:{title}:{working_html}".encode("utf-8")).hexdigest()[:16]
+        payload = {
+            "target": "magic-page",
+            "enabled": True,
+            "ok": True,
+            "dry_run": True,
+            "app_url": f"{base_url}/dryrun/{token}",
+            "app_id": token,
+            "base_url": base_url,
+            "urls": [],
+            "html": repo_rel(working_html),
+            "reason": "dry-run after publish preparation and integrity checks",
+        }
         write_publish_reports(output_dir, payload)
         return payload
 
@@ -720,7 +755,14 @@ def publish_magic_page(
     return payload
 
 
-def magic_failure(reason: str, html_path: Path, base_url: str, proc: dict[str, Any] | None) -> dict[str, Any]:
+def magic_failure(
+    reason: str,
+    html_path: Path,
+    base_url: str,
+    proc: dict[str, Any] | None,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
     detail = ""
     if proc:
         detail = proc.get("stderr") or proc.get("stdout") or ""
@@ -728,7 +770,7 @@ def magic_failure(reason: str, html_path: Path, base_url: str, proc: dict[str, A
         "target": "magic-page",
         "enabled": True,
         "ok": False,
-        "dry_run": False,
+        "dry_run": dry_run,
         "app_url": "",
         "app_id": "",
         "base_url": base_url,
