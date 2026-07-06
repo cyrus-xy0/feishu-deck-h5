@@ -39,6 +39,33 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# ---- Check 0: Python >= 3.10 (skill sources use PEP 604 `X | None` typing) ----
+# The deck-json tools (render-deck.py, deck-cli.py, import-html-slide.py, …) use
+# `X | None` type syntax, which raises TypeError at import time on Python 3.9.
+# macOS ships /usr/bin/python3 = 3.9, so gate loudly here rather than let a core
+# command crash cryptically later.
+if command -v python3 >/dev/null 2>&1; then
+  if ! python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)' 2>/dev/null; then
+    PYVER="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
+    echo "PREFLIGHT FAIL · exit 4 · python3 too old ($PYVER; need >= 3.10)"
+    echo
+    echo "  This skill's tools use \`X | None\` type syntax (PEP 604), which needs"
+    echo "  Python 3.10+. Your default python3 is $PYVER (macOS ships 3.9)."
+    echo
+    echo "  Fix — install a newer Python and make sure \`python3\` resolves to it:"
+    echo "    brew install python@3.11        # macOS"
+    echo "    # then reopen your shell, or put it earlier on PATH"
+    echo "  Verify: python3 --version  →  should print 3.10 or newer"
+    exit 4
+  fi
+else
+  echo "PREFLIGHT FAIL · exit 4 · python3 not found"
+  echo
+  echo "  This skill requires Python 3.10+ (render/validate/edit are all python3)."
+  echo "  Install it (e.g. \`brew install python@3.11\`) and retry."
+  exit 4
+fi
+
 # ---- Check 1: are we in ephemeral session output only? ----
 case "$SKILL_ROOT" in
   */mnt/outputs|*/mnt/outputs/*)

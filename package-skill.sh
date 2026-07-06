@@ -59,45 +59,57 @@ cat > "$TMP/INSTALL-FROM-ZIP.md" <<EOF
 **Version:** \`$VERSION\`
 **Built:** $BUILT_AT
 
-## Install
+## Install (one command)
 
-Unzip this archive, then move the inner \`$SKILL_NAME/\` directory into
-your harness's skills folder:
+Unzip, then run the bundled installer. It auto-detects your agent's skills
+directory, copies the skill in, and runs preflight:
+
+\`\`\`bash
+unzip $ZIP_NAME
+bash $SKILL_NAME/install-from-zip.sh
+\`\`\`
+
+If auto-detect can't find your skills dir (or you run multiple agents), point
+it explicitly — same skill works for every harness:
+
+\`\`\`bash
+SKILLS_DIR="\$HOME/.claude/skills" bash $SKILL_NAME/install-from-zip.sh   # Claude Code
+SKILLS_DIR="\$HOME/.codex/skills"  bash $SKILL_NAME/install-from-zip.sh   # Codex
+SKILLS_DIR="<harness-root>/skills" bash $SKILL_NAME/install-from-zip.sh   # other agents
+\`\`\`
+
+## Manual alternative
+
+Move the inner \`$SKILL_NAME/\` directory into your harness's skills folder:
 
 | Harness         | Target path                                |
 | --------------- | ------------------------------------------ |
 | Claude Code     | \`~/.claude/skills/$SKILL_NAME/\`         |
+| Codex           | \`~/.codex/skills/$SKILL_NAME/\`          |
 | OpenClaw        | \`~/.openclaw/skills/$SKILL_NAME/\`       |
 | Other           | \`<harness-root>/skills/$SKILL_NAME/\`     |
 
-Quick way (Claude Code on macOS / Linux):
+Then verify:
 
 \`\`\`bash
-unzip $ZIP_NAME
-mkdir -p ~/.claude/skills
-mv $SKILL_NAME ~/.claude/skills/
+bash <skills-dir>/$SKILL_NAME/assets/preflight.sh
 \`\`\`
 
-## Verify
+## Requirements
 
-\`\`\`bash
-bash ~/.claude/skills/$SKILL_NAME/assets/preflight.sh
-\`\`\`
-
-Expect \`PREFLIGHT OK\`. Done — invoke the skill from any chat that has
-a writable mounted folder.
+- **Python 3.10+** (macOS ships 3.9 — install a newer one, e.g.
+  \`brew install python@3.11\`, and make sure \`python3\` resolves to it).
+  Preflight enforces this and prints exact fix steps if it's too old.
+- A modern browser for visual audits (optional; static gates still run).
+- No \`pip install\` / \`npm install\` needed — the skill is self-contained.
 
 ## Notes
 
 - This is a **snapshot** at version \`$VERSION\`. To update, ask the
-  maintainer for a fresh zip, or use the git-based install in the
-  project's \`INSTALL.md\` (requires GitHub access).
-- \`runs/\` (per-invocation outputs) is intentionally excluded from this
-  zip. It will be created at \`~/.claude/skills/$SKILL_NAME/runs/\` (or
-  at the repo root when checked out via git) on first use.
-- The skill is fully self-contained — no \`pip install\` or
-  \`npm install\` required. Stock Python 3.11+ and a modern browser
-  are enough.
+  maintainer for a fresh zip and re-run \`install-from-zip.sh\` (it replaces
+  the old copy in place).
+- \`runs/\` (per-invocation outputs) is excluded from this zip and created
+  on first use.
 EOF
 
 # Build the zip
