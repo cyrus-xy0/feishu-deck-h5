@@ -1,0 +1,65 @@
+name: Dispatch slide-library runtime sync
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - skills/feishu-deck-h5/assets/feishu-deck.css
+      - skills/feishu-deck-h5/assets/feishu-deck.js
+      - skills/feishu-deck-h5/assets/edit-mode/deck-edit-mode.css
+      - skills/feishu-deck-h5/assets/edit-mode/deck-edit-mode.js
+  workflow_dispatch:
+    inputs:
+      deck_h5_ref:
+        description: feishu-deck-h5 ref to sync; defaults to this workflow run SHA
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request slide-library runtime sync
+        env:
+          SLIDE_LIBRARY_SYNC_TOKEN: ${{ secrets.SLIDE_LIBRARY_SYNC_TOKEN }}
+          DECK_H5_REF_INPUT: ${{ github.event.inputs.deck_h5_ref }}
+          DEFAULT_DECK_H5_REF: ${{ github.sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref_name }}
+          SOURCE_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLIDE_LIBRARY_SYNC_TOKEN:-}" ]; then
+            echo "::error::Missing SLIDE_LIBRARY_SYNC_TOKEN. Configure a PAT or GitHub App token that can dispatch workflows in FuQiang/feishu-slide-library."
+            exit 1
+          fi
+          export DECK_H5_REF="${DECK_H5_REF_INPUT:-$DEFAULT_DECK_H5_REF}"
+          python3 - <<'PY' > /tmp/deck-h5-runtime-dispatch.json
+          import json
+          import os
+
+          payload = {
+              "event_type": "deck_h5_runtime_changed",
+              "client_payload": {
+                  "deck_h5_ref": os.environ["DECK_H5_REF"],
+                  "source_repository": os.environ["SOURCE_REPOSITORY"],
+                  "source_sha": os.environ["SOURCE_SHA"],
+                  "source_ref": os.environ["SOURCE_REF"],
+                  "source_run_url": os.environ["SOURCE_RUN_URL"],
+              },
+          }
+          print(json.dumps(payload, ensure_ascii=False))
+          PY
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${SLIDE_LIBRARY_SYNC_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data-binary @/tmp/deck-h5-runtime-dispatch.json \
+            https://api.github.com/repos/FuQiang/feishu-slide-library/dispatches

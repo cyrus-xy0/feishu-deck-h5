@@ -30,6 +30,8 @@ jobs:
         run: |
           test -f assets/feishu-deck.css || (echo "MISSING: feishu-deck.css" && exit 1)
           test -f assets/feishu-deck.js  || (echo "MISSING: feishu-deck.js"  && exit 1)
+          test -f assets/edit-mode/deck-edit-mode.css || (echo "MISSING: edit-mode/deck-edit-mode.css" && exit 1)
+          test -f assets/edit-mode/deck-edit-mode.js  || (echo "MISSING: edit-mode/deck-edit-mode.js"  && exit 1)
           test -f assets/validate.py     || (echo "MISSING: validate.py"     && exit 1)
           test -f _body.partial.html     || (echo "MISSING: _body.partial.html" && exit 1)
           test -f build.sh               || (echo "MISSING: build.sh"        && exit 1)
@@ -44,15 +46,19 @@ jobs:
       - name: JS syntax check
         run: |
           node --check assets/feishu-deck.js
+          node --check assets/edit-mode/deck-edit-mode.js
 
       - name: CSS sanity (balanced braces)
         run: |
           python3 -c "
-          with open('assets/feishu-deck.css') as f: c = f.read()
-          o, n = c.count('{'), c.count('}')
-          if o != n:
-              print(f'CSS UNBALANCED: open={o} close={n}'); exit(1)
-          print(f'CSS balanced: {o}/{n}')
+          for path in ('assets/feishu-deck.css', 'assets/edit-mode/deck-edit-mode.css'):
+              with open(path) as f:
+                  c = f.read()
+              o, n = c.count('{'), c.count('}')
+              if o != n:
+                  print(f'CSS UNBALANCED {path}: open={o} close={n}')
+                  exit(1)
+              print(f'CSS balanced {path}: {o}/{n}')
           "
 
       - name: Preflight self-test (CI environment is non-Cowork — should still pass)
