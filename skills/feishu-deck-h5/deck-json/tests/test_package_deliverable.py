@@ -133,6 +133,73 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertIn("assets/local.png", names)
         self.assertNotIn(".slide-hashes.json", names)
         self.assertFalse(any(name.startswith("output/") for name in names))
+        self.assertFalse(any("\\" in name for name in names))
+
+    def test_package_ingest_promotes_redirect_shell_index(self):
+        (self.output / "index.html").write_text(
+            """<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=deck.html">
+</head><body><a href="deck.html">open</a></body></html>
+""",
+            encoding="utf-8",
+        )
+        (self.output / "deck.html").write_text(
+            '<!doctype html><html><body><div class="slide" data-slide-key="cover">'
+            '<img src="assets/local.png"></div></body></html>',
+            encoding="utf-8",
+        )
+        (self.output / "deck.json").write_text(
+            json.dumps({"schema_version": "1.0", "slides": [{"key": "cover"}]}),
+            encoding="utf-8",
+        )
+        (self.output / "assets-manifest.yaml").write_text(
+            "deck_local:\n  - assets/local.png\n",
+            encoding="utf-8",
+        )
+        assets = self.output / "assets"
+        assets.mkdir()
+        (assets / "local.png").write_bytes(b"fake-png")
+
+        proc = subprocess.run(
+            ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "lark-wide-2026-06-30"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("redirect shell", proc.stderr)
+        with zipfile.ZipFile(self.output / "deck.zip") as zf:
+            names = set(zf.namelist())
+            packaged_index = zf.read("index.html").decode("utf-8")
+
+        self.assertIn("index.html", names)
+        self.assertNotIn("deck.html", names)
+        self.assertIn('data-slide-key="cover"', packaged_index)
+        self.assertNotIn("http-equiv=\"refresh\"", packaged_index)
+        self.assertFalse(any("\\" in name for name in names))
+
+    def test_package_ingest_rejects_unsafe_redirect_shell(self):
+        (self.output / "index.html").write_text(
+            '<!doctype html><meta http-equiv="refresh" content="0; url=../deck.html">',
+            encoding="utf-8",
+        )
+        (self.output / "deck.json").write_text(
+            json.dumps({"schema_version": "1.0", "slides": []}),
+            encoding="utf-8",
+        )
+        (self.output / "assets-manifest.yaml").write_text("assets: []\n", encoding="utf-8")
+        (self.output / "assets").mkdir()
+
+        proc = subprocess.run(
+            ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "lark-wide-2026-06-30"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("unsafe or unsupported target", proc.stderr)
 
     def test_package_ingest_rejects_name(self):
         proc = subprocess.run(

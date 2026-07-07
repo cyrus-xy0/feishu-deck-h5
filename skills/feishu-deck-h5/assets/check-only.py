@@ -65,6 +65,14 @@ ATTR_REF_RE = re.compile(
 CSS_URL_RE = re.compile(r'''url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)''', re.I | re.S)
 STYLE_BLOCK_RE = re.compile(r'<style\b[^>]*>(.*?)</style>', re.I | re.S)
 LINK_TAG_RE = re.compile(r'<link\b[^>]*>', re.I | re.S)
+META_REFRESH_RE = re.compile(
+    r'''<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["'][^"']*?\burl\s*=\s*([^"';>]+)[^"']*["']''',
+    re.I | re.S,
+)
+JS_LOCATION_RE = re.compile(
+    r'''(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']''',
+    re.I,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +796,30 @@ def linked_stylesheet_refs(html: str) -> list[str]:
     return refs
 
 
+def html_redirect_target(html: str) -> str:
+    for pattern in (META_REFRESH_RE, JS_LOCATION_RE):
+        match = pattern.search(html)
+        if match:
+            return html_lib.unescape(match.group(1)).strip().strip('"\'')
+    return ''
+
+
+def is_local_html_redirect(reference: str) -> bool:
+    ref = (reference or '').strip()
+    if not ref or should_ignore_reference(ref) or '\\' in ref or is_windows_drive_path(ref):
+        return False
+    parsed = urlparse(ref)
+    if parsed.scheme or parsed.netloc:
+        return False
+    path_text = unquote(parsed.path or ref).strip()
+    if not path_text or path_text.startswith('/') or Path(path_text).is_absolute():
+        return False
+    parts = [part for part in path_text.split('/') if part]
+    if not parts or any(part in {'.', '..'} for part in parts):
+        return False
+    return Path(path_text).suffix.lower() in HTML_SUFFIXES
+
+
 def resolve_package_reference(reference: str, *, source_dir: Path, package_root: Path) -> tuple[Path | None, str | None]:
     ref = (reference or '').strip().strip('"\'')
     if should_ignore_reference(ref):
@@ -919,6 +951,13 @@ def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None,
                 errors.append(f'primary_html 不是 HTML 文件: {primary}')
 
     if primary_html and primary_html.is_file():
+        try:
+            primary_text = primary_html.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            primary_text = primary_html.read_text(encoding='utf-8', errors='ignore')
+        redirect = html_redirect_target(primary_text)
+        if is_local_html_redirect(redirect):
+            errors.append(f'primary_html 是跳转壳，不能作为入库入口: {redirect}；请把真实 deck 内容写入 index.html')
         errors.extend(inspect_asset_references(primary_html, extract_dir))
     return primary_html, errors, warnings
 

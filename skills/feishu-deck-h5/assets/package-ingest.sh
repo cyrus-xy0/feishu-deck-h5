@@ -46,6 +46,7 @@ import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 out_dir = Path(sys.argv[1]).resolve()
 deck_id = sys.argv[2].strip()
@@ -66,6 +67,15 @@ soft_required = (
     "texts.md",
     "README.md",
 )
+HTML_SUFFIXES = {".html", ".htm"}
+META_REFRESH_RE = re.compile(
+    r"""<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["'][^"']*?\burl\s*=\s*([^"';>]+)[^"']*["']""",
+    re.I | re.S,
+)
+JS_LOCATION_RE = re.compile(
+    r"""(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']""",
+    re.I,
+)
 
 
 def rel(path: Path) -> str:
@@ -79,6 +89,57 @@ def fail(message: str) -> None:
 def is_packaged_metadata(path: Path) -> bool:
     parts = path.relative_to(out_dir).parts
     return any(part.startswith(".") for part in parts)
+
+
+def find_html_redirect_target(html: str) -> str:
+    for pattern in (META_REFRESH_RE, JS_LOCATION_RE):
+        match = pattern.search(html)
+        if match:
+            return match.group(1).strip().strip('"\'')
+    return ""
+
+
+def safe_local_html_redirect_target(raw_target: str) -> Path | None:
+    if not raw_target or "\\" in raw_target:
+        return None
+    parsed = urlparse(raw_target)
+    if parsed.scheme or parsed.netloc:
+        return None
+    path_text = unquote(parsed.path or raw_target).strip()
+    if not path_text or path_text.startswith("/") or Path(path_text).is_absolute():
+        return None
+    parts = [part for part in path_text.split("/") if part]
+    if not parts or any(part in {".", ".."} for part in parts):
+        return None
+    target = out_dir.joinpath(*parts).resolve()
+    try:
+        target.relative_to(out_dir)
+    except ValueError:
+        return None
+    if target.suffix.lower() not in HTML_SUFFIXES or not target.is_file():
+        return None
+    # Only same-directory promotion is safe without rewriting relative asset refs.
+    if target.parent != out_dir:
+        return None
+    return target
+
+
+def promoted_primary_html() -> Path | None:
+    index = out_dir / "index.html"
+    try:
+        html = index.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        html = index.read_text(encoding="utf-8", errors="ignore")
+    redirect = find_html_redirect_target(html)
+    if not redirect:
+        return None
+    target = safe_local_html_redirect_target(redirect)
+    if target is None:
+        fail(f"index.html redirects to an unsafe or unsupported target: {redirect}")
+    if target.name == "index.html":
+        return None
+    print(f"WARNING: index.html is a redirect shell; packaging {target.name} as root index.html", file=sys.stderr)
+    return target
 
 
 for path in out_dir.rglob("*"):
@@ -144,6 +205,7 @@ for item in hard_required:
 if missing_hard_after:
     fail("missing hard required item(s) after manifest generation: " + ", ".join(missing_hard_after))
 
+primary_override = promoted_primary_html()
 zip_path = out_dir / "deck.zip"
 if zip_path.exists():
     zip_path.unlink()
@@ -155,6 +217,8 @@ try:
             continue
         if is_packaged_metadata(item):
             continue
+        if primary_override is not None and item.resolve() == primary_override:
+            continue
         target = stage / item.name
         if item.is_dir():
             shutil.copytree(
@@ -165,6 +229,8 @@ try:
             )
         else:
             shutil.copy2(item, target)
+    if primary_override is not None:
+        shutil.copy2(primary_override, stage / "index.html")
 
     for path in stage.rglob("*"):
         r = path.relative_to(stage).as_posix()
@@ -181,6 +247,8 @@ try:
             arcname = path.relative_to(stage).as_posix()
             if arcname.startswith("output/"):
                 fail("internal error: refusing to write output/ wrapper into deck.zip")
+            if "\\" in arcname:
+                fail(f"internal error: refusing to write backslash path into deck.zip: {arcname}")
             info = zipfile.ZipInfo(arcname)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = (0o100644 & 0xFFFF) << 16

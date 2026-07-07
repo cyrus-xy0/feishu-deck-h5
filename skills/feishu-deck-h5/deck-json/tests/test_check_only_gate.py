@@ -265,6 +265,28 @@ def test_zip_package_contract_rejects_missing_asset_reference():
         assert any("HTML 引用资产缺失: assets/missing.png" in item for item in errors)
 
 
+def test_zip_package_contract_rejects_redirect_shell_primary_html():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members(
+            """<!doctype html>
+<html><head><meta http-equiv="refresh" content="0; url=deck.html"></head>
+<body><a href="deck.html">open</a></body></html>
+"""
+        )
+        members["deck.html"] = (
+            '<!doctype html><html><body><div class="slide" '
+            'data-slide-key="cover">Cover</div></body></html>'
+        )
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert any("primary_html 是跳转壳" in item for item in errors)
+
+
 def test_zip_package_contract_accepts_viewer_download_roundtrip_manifest():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
