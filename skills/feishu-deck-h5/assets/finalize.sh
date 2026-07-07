@@ -154,6 +154,19 @@ if ! run_step "copy-assets" python3 "$SCRIPT_DIR/copy-assets.py" "${COPY_ARGS[@]
     exit 2
 fi
 
+# ---------- 1a · materialize remote images ----------
+# Library/remote packages must not depend on temporary signed image URLs. Local
+# preview may succeed while a p-mira/TOS URL later expires to 403 on the material
+# library. Download http(s) image refs into output/assets/remote/ before
+# validation, optimization, and zipping; fail here if the remote image is already
+# inaccessible.
+if [ "$MODE" = "library" ] || [ "$MODE" = "remote" ]; then
+    echo "  · materialize-remote-images …"
+    if ! run_step "materialize-remote-images" python3 "$SCRIPT_DIR/materialize-remote-images.py" "$OUT_DIR"; then
+        exit 5
+    fi
+fi
+
 # ---------- 1b · optimize images (downscale oversized rasters) ----------
 # F-341: imported/photo decks routinely carry 4K (3840×2160) full-page
 # backgrounds + multi-MB PNGs for a 1920×1080 canvas — pure download + decode

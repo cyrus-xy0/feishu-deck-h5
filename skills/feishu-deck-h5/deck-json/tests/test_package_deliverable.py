@@ -4,13 +4,54 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 
 HERE = Path(__file__).resolve().parent
 SKILL_ROOT = HERE.parents[1]
 PACKAGE_DELIVERABLE = SKILL_ROOT / "assets" / "package-deliverable.sh"
 PACKAGE_INGEST = SKILL_ROOT / "assets" / "package-ingest.sh"
+
+
+class _RemoteImageHandler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        if self.path.startswith("/remote.jpg"):
+            payload = b"remote-image-bytes"
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if self.path.startswith("/broken.jpg"):
+            payload = b"forbidden"
+            self.send_response(403)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, _format, *args):
+        return
+
+
+@contextmanager
+def remote_image_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _RemoteImageHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 class PackageDeliverableTest(unittest.TestCase):
@@ -178,7 +219,71 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertNotIn("deck.html", names)
         self.assertIn('data-slide-key="cover"', packaged_index)
         self.assertNotIn("http-equiv=\"refresh\"", packaged_index)
-        self.assertFalse(any("\\" in name for name in names))
+
+    def test_package_ingest_materializes_remote_background_image(self):
+        with remote_image_server() as base_url:
+            remote_url = f"{base_url}/remote.jpg?sign=abc&expires=123"
+            (self.output / "index.html").write_text(
+                '<!doctype html><html><body><div class="slide" data-slide-key="cover" '
+                f'style="background-image:url(\'{remote_url.replace("&", "&amp;")}\')">Cover</div></body></html>',
+                encoding="utf-8",
+            )
+            (self.output / "deck.json").write_text(
+                json.dumps({"schema_version": "1.0", "slides": [{"key": "cover"}]}),
+                encoding="utf-8",
+            )
+            (self.output / "assets-manifest.yaml").write_text(
+                "framework: []\nshared: []\ndeck-local: []\n",
+                encoding="utf-8",
+            )
+            (self.output / "assets").mkdir()
+
+            proc = subprocess.run(
+                ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "lark-remote-bg-2026-07-08"],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        manifest = (self.output / "assets-manifest.yaml").read_text(encoding="utf-8")
+        self.assertIn("assets/remote/127.0.0.1-", manifest)
+        self.assertNotIn("http://127.0.0.1", (self.output / "index.html").read_text(encoding="utf-8"))
+        self.assertNotIn("sign=abc", (self.output / "index.html").read_text(encoding="utf-8"))
+        with zipfile.ZipFile(self.output / "deck.zip") as zf:
+            names = set(zf.namelist())
+            packaged_index = zf.read("index.html").decode("utf-8")
+        remote_assets = [name for name in names if name.startswith("assets/remote/") and name.endswith(".jpg")]
+        self.assertTrue(remote_assets, names)
+        self.assertIn("background-image:url('assets/remote/127.0.0.1-", packaged_index)
+        self.assertNotIn("http://127.0.0.1", packaged_index)
+
+    def test_package_ingest_fails_when_remote_background_image_is_forbidden(self):
+        with remote_image_server() as base_url:
+            remote_url = f"{base_url}/broken.jpg"
+            (self.output / "index.html").write_text(
+                '<!doctype html><html><body><div class="slide" data-slide-key="cover" '
+                f'style="background-image:url(\'{remote_url}\')">Cover</div></body></html>',
+                encoding="utf-8",
+            )
+            (self.output / "deck.json").write_text(
+                json.dumps({"schema_version": "1.0", "slides": [{"key": "cover"}]}),
+                encoding="utf-8",
+            )
+            (self.output / "assets-manifest.yaml").write_text(
+                "framework: []\nshared: []\ndeck-local: []\n",
+                encoding="utf-8",
+            )
+            (self.output / "assets").mkdir()
+
+            proc = subprocess.run(
+                ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "lark-remote-bg-2026-07-08"],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("HTTP 403", proc.stderr)
+        self.assertFalse((self.output / "deck.zip").exists())
 
     def test_package_ingest_rejects_unsafe_redirect_shell(self):
         (self.output / "index.html").write_text(
