@@ -73,11 +73,40 @@ Designer + Renderer instead).
   ```text
   ✓ pure swap:
       python3 deck-json/fast-image.py <deck-dir> ai-result-incentive new.png --old-src old-name --name concise-name
-      # optional quick look only: assets/shoot-page.py <deck-dir>/index.html --pages <N> --out <tmp>
+      # optional quick look only: assets/shoot-page.py <deck-dir>/index.html <N> --out <tmp>.png
   ✗ pure swap:
       add-asset → get-page → write html/css temp files → set-page → preview → render
       (that is the heavy path for layout changes, not for replacing a src).
   ```
+- **`EDIT` fast-visual nudge (single-page CSS/layout tweak)**: when the user
+  points to one page (`#N`, page N, or a slide key) and asks for a small visual
+  adjustment such as title position, spacing, width, font size, alignment, or a
+  local wrap issue, keep the loop narrow:
+
+  ```text
+  locate-slide/get-page -> minimal fragment edit -> set-page -> one scoped shoot
+  ```
+
+  Rules:
+  - Resolve the page to a stable key, then read only that page with
+    `deck-cli.py get-page <key> --html/--css` (or `locate-slide.py --grep` for
+    a targeted excerpt). Do not load broad references unless the requested fix
+    changes the page's layout shape or fill strategy.
+  - Edit the smallest HTML/CSS surface needed, write through
+    `deck-cli.py set-page`, then run exactly one
+    `render-deck.py <deck.json> <out>/ --scope N --shoot` and inspect the PNG.
+    Use one bounded fix-render only if the screenshot or target-page diagnostics
+    show a blocking error or a visible regression.
+  - Treat other-page warnings, deck-wide asset weight, P51 blur, raw-style
+    migration hints, and unrelated target-page advisory warnings as baseline.
+    Mention them only if they affect the requested page or block handoff; do not
+    chase warning-zero for a requested nudge.
+  - If concurrent edits or page-count drift appear, protect the requested page
+    and avoid backup archaeology. Run at most one `--quick` sync when needed to
+    keep `deck.json` and `index.html` aligned; investigate deeper only when the
+    target page is missing, overwritten, or the guarded write refuses.
+  - Close with a compact process digest (`set-page` count, scoped render count,
+    screenshot path/result, and any baseline warning intentionally left alone).
 - **`EDIT` (fragment edit) — the canonical loop (W1/W3, iteration-loop)**:
 
   ```
@@ -214,6 +243,37 @@ Designer + Renderer instead).
     do **not** delete + paste, and do **not** run `render-deck.py --renumber`
     just to refresh labels; if one label is stale, set that `screen_label`
     directly by key/index after the swap.
+  - **Fast path — insert one or more DeckJSON-native pages after an existing
+    page:** use **`deck-json/lift-insert.py --after DST#index SRC#index
+    [SRC#index ...]`**. This is the default for user requests like "在 #9 后面加几页,
+    把另一个 deck 的 #14/#15 lift 过来" when the source has a sibling `deck.json`.
+    It resolves `#N` against the CURRENT deck order, delegates copy/asset handling
+    to `deck-cli.py paste`, localizes remote `iframe-embed` URLs into
+    `prototypes/` by default, renders only the inserted pages to a temp dir, and
+    structurally patches the existing `index.html` without a whole-deck render.
+
+    ```bash
+    python3 deck-json/lift-insert.py \
+      --after file:///abs/target/index.html#9 \
+      file:///abs/source/output/index.html#14 \
+      file:///abs/source/output/index.html#15 \
+      --verify
+    ```
+
+    Discipline:
+    - First run `deck-json/deck-map.py <target>/index.html` or use
+      `lift-insert.py --dry-run` when a deck has been edited in several sessions;
+      never infer current `#N` from old `screen_label` prefixes or chat memory.
+    - If `deck-cli` refuses with exit 6, run
+      `sync-index-to-deck.py <index.html> <deck.json> --dry-run`. Use
+      `--preserve-index` only when the current `index.html` contains browser edits
+      that must be preserved and you are intentionally avoiding a full re-render.
+    - For inserted iframe pages, keep the default remote localization unless the
+      user explicitly needs a live external iframe; remote iframe white screens
+      should be caught before delivery, not after a screenshot loop.
+    - Verification order is fixed: resolved order -> single-page validate/shoot
+      (`--verify`) -> one sync dry-run. Do not run visual checks before confirming
+      the inserted keys landed immediately after the anchor.
   - **Fast path — one DeckJSON page into an existing deck (copy/insert, incl.
     lift+translate):** `deck-cli.py paste --from SRC --key K <pos>` → `locate-slide.py`
     for the landed position → swap/translate the copy in ONE `apply-text-pairs.py <deck>
@@ -466,6 +526,10 @@ Designer + Renderer instead).
 - `../../deck-json/import-html-slide.py` — insert authored html+css fragments as
   raw slides (per-fragment validate + position pick + auto re-render); the
   sanctioned path for "add one new page to an existing deck".
+- `../../deck-json/lift-insert.py` — multi-page DeckJSON-native lift insert:
+  resolve current `#N`, paste pages after an anchor, localize remote iframe demos,
+  temp-render inserted frames, and structurally patch existing `index.html`
+  without a whole-deck re-render.
 - `../../assets/capture-frames.py` — bespoke-motion pages: one command for
   mid+settled frame capture + §3.5 settle assertions (motion-system.md §3.4).
 - `../../references/deck-state-contract.md` — single-source contract for deck.json
