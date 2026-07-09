@@ -128,7 +128,7 @@ class LiftSlidesShakeTest(unittest.TestCase):
         self.assertEqual(len(hero), 1,
                          f"lift did not append exactly one hero slide.\n"
                          f"stdout:\n{self.proc.stdout}\nstderr:\n{self.proc.stderr}")
-        return hero[0]["data"]["html"]
+        return hero[0]["data"]["html"] + "\n" + (hero[0].get("custom_css") or "")
 
     def test_lift_succeeded(self):
         self.assertEqual(self.proc.returncode, 0,
@@ -142,7 +142,6 @@ class LiftSlidesShakeTest(unittest.TestCase):
 
     def test_bug2_data_page_selectors_fused_not_orphaned(self):
         css = self._hero()
-        css = css[:css.rfind("</style>") + len("</style>")]
         # Correct: key fused onto .slide. Never-match: key then a descendant .slide.
         self.assertRegex(
             css, r'\.slide\[data-slide-key="hero"\]\s+\.matrix',
@@ -163,6 +162,66 @@ class LiftSlidesShakeTest(unittest.TestCase):
         self.assertTrue(copied.is_file(),
                         "<img src='input/icon.svg'> was not carried to the dest "
                         "input/ dir (BUG3/F-76 regressed).")
+
+    def test_lift_hygiene_moves_styles_out_of_data_html(self):
+        deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"][0]
+        self.assertNotIn("<style", hero["data"]["html"].lower(),
+                         "lifted raw data.html must not keep embedded <style>; "
+                         "that CSS is global in the target deck.")
+        self.assertIn(".matrix", hero.get("custom_css") or "",
+                      "recovered per-slide CSS should move into custom_css.")
+
+
+SRC_HTML_POLLUTION = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head>
+<body><div class="deck">
+<div class="slide-frame" data-page="1">
+<div class="slide" data-layout="raw" data-slide-key="polluted" data-screen-label="01 Dirty">
+<style>
+.slide { transform: scale(.8); }
+.card, h1, .stage { position: absolute; left: 0; }
+</style>
+<div class="stage" onclick="evil()"><h1>Polluted</h1><div class="card">x</div></div>
+<script>window.evil = true</script>
+</div>
+</div>
+</div></body></html>
+"""
+
+
+class LiftSlidesPollutionHygieneTest(unittest.TestCase):
+    """A lifted page must not carry unscoped CSS or executable markup in data.html.
+
+    This is the failure mode where source-deck CSS like `.slide`, `.card`, `h1`,
+    or `.stage` enters the target deck as a raw inline <style> and cascades over
+    unrelated pages.
+    """
+
+    def test_lifted_pollution_is_consolidated_and_stripped(self):
+        with tempfile.TemporaryDirectory(prefix="lift-pollution-") as td:
+            tmp = Path(td)
+            src = tmp / "src"; src.mkdir()
+            (src / "index.html").write_text(SRC_HTML_POLLUTION, encoding="utf-8")
+            dst = tmp / "dst"; dst.mkdir()
+            deck_path = dst / "deck.json"
+            deck_path.write_text(DST_DECK, encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(LIFT), str(src / "index.html"),
+                 "--key", "polluted", str(deck_path), "--shake"],
+                capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0,
+                             f"pollution fixture lift failed:\n{proc.stdout}\n{proc.stderr}")
+            deck = json.loads(deck_path.read_text(encoding="utf-8"))
+            slide = [s for s in deck["slides"] if s.get("key") == "polluted"][0]
+            body = slide["data"]["html"].lower()
+            css = slide.get("custom_css") or ""
+            self.assertNotIn("<style", body)
+            self.assertNotIn("<script", body)
+            self.assertNotIn("onclick=", body)
+            self.assertIn(".card, h1, .stage", css)
+            self.assertIn("css hygiene: moved 1 embedded <style>", proc.stdout)
+            self.assertIn("script hygiene: stripped 1 <script> block(s), 1 inline handler(s)",
+                          proc.stdout)
 
 
 # Source fixture for the base64-bloat guard: a head per-slide rule inlines a
@@ -232,7 +291,7 @@ class LiftSlidesBase64Test(unittest.TestCase):
         deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
         hero = [s for s in deck["slides"] if s.get("key") == "hero"]
         self.assertEqual(len(hero), 1, "lift did not append exactly one hero slide")
-        return hero[0]["data"]["html"]
+        return hero[0]["data"]["html"] + "\n" + (hero[0].get("custom_css") or "")
 
     def test_oversized_base64_removed_from_slide(self):
         self.assertNotIn("base64,", self._hero_html(),
@@ -266,7 +325,8 @@ class LiftSlidesBase64Test(unittest.TestCase):
                 [sys.executable, str(LIFT), str(src / "index.html"),
                  "--key", "hero", str(deck), "--shake"],
                 capture_output=True, text=True, check=True)
-            html = json.loads(deck.read_text())["slides"][-1]["data"]["html"]
+            slide = json.loads(deck.read_text())["slides"][-1]
+            html = slide["data"]["html"] + "\n" + (slide.get("custom_css") or "")
             self.assertIn("base64,", html,
                           "small inline base64 was needlessly externalized")
             self.assertFalse(list((dst / "input").glob("lift-hero-*")),
@@ -354,7 +414,8 @@ class LiftSlidesMultilineTagTest(unittest.TestCase):
                          "data-screen-label= leaked into the body (BUG5 regressed).")
 
     def test_per_slide_css_recovered_no_collapse(self):
-        html = self._hero()["data"]["html"]
+        slide = self._hero()
+        html = slide["data"]["html"] + "\n" + (slide.get("custom_css") or "")
         self.assertRegex(
             html, r'\.slide\[data-slide-key="hero"\]\s+\.matrix',
             "the slide's own [data-page]-scoped grid rule was NOT recovered for "
@@ -432,7 +493,7 @@ class LiftSlidesAssetAndDriftTest(unittest.TestCase):
         deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
         hero = [s for s in deck["slides"] if s.get("key") == "hero"]
         self.assertEqual(len(hero), 1, "lift did not append exactly one hero slide")
-        return hero[0]["data"]["html"]
+        return hero[0]["data"]["html"] + "\n" + (hero[0].get("custom_css") or "")
 
     def test_prototype_direct_file_copied(self):
         self._hero_html()
@@ -517,7 +578,7 @@ class LiftSlidesInlineMulticlassTest(unittest.TestCase):
                          "--key hero did not resolve through a MULTI-CLASS .slide "
                          "div `class=\"slide embedded-special-page\"` (BUG7a "
                          f"regressed).\nstdout:\n{self.proc.stdout}\nstderr:\n{self.proc.stderr}")
-        return hero[0]["data"]["html"]
+        return hero[0]["data"]["html"] + "\n" + (hero[0].get("custom_css") or "")
 
     def test_multiclass_slide_lifts(self):
         self.assertEqual(self.proc.returncode, 0,
@@ -593,7 +654,7 @@ class LiftSlidesBase64HeadTest(unittest.TestCase):
         deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
         hero = [s for s in deck["slides"] if s.get("key") == "hero"]
         self.assertEqual(len(hero), 1, "lift did not append exactly one hero slide")
-        return hero[0]["data"]["html"]
+        return hero[0]["data"]["html"] + "\n" + (hero[0].get("custom_css") or "")
 
     def test_kept_rule_base64_intact(self):
         html = self._hero()
@@ -683,7 +744,7 @@ class LiftSlidesDeCollideCssTest(unittest.TestCase):
                          "lift did not de-collide the key to 'hero-2'.\n"
                          f"keys: {[s.get('key') for s in deck['slides']]}\n"
                          f"stdout:\n{self.proc_json.stdout}")
-        return lifted[0]["data"]["html"]
+        return lifted[0]["data"]["html"] + "\n" + (lifted[0].get("custom_css") or "")
 
     def test_json_inlined_css_follows_decollided_key(self):
         css = self._lifted_json_html()
@@ -739,8 +800,9 @@ class LiftFromLegacyHtmlOnlySourceIntoDeckJsonTest(unittest.TestCase):
       · The selected page becomes a `layout: "raw"` slide ADDED to the dest's
         deck.json (the dest's `中间层` gets the page appended), `lifted`-marked +
         carrying structured `lift_origin` provenance.
-      · It carries faithfully (content + the source's per-slide custom_css block,
-        inlined into data.html), re-renders, and strict-validates.
+      · It carries faithfully (content + the source's per-slide CSS, consolidated
+        into custom_css instead of left as global data.html <style>), re-renders,
+        and strict-validates.
 
     This is the native cross-deck path: no manual backfill step is required (in
     contrast to Scenario 1's paste-into-legacy-dest, which DOES require a backfill
@@ -839,9 +901,12 @@ class LiftFromLegacyHtmlOnlySourceIntoDeckJsonTest(unittest.TestCase):
         html = lifted["data"]["html"]
         self.assertIn("Source page B", html, "lifted page content not carried")
         self.assertIn("这一页要被 lift", html, "lifted page body text not carried")
-        # the source's per-slide custom_css block travels inline in data.html
-        self.assertIn("lifted-marker", html,
+        # the source's per-slide custom_css travels, but now in the safe
+        # custom_css home rather than a global inline <style> inside data.html.
+        self.assertIn("lifted-marker", lifted.get("custom_css") or "",
                       "source per-slide custom_css was not carried with the page")
+        self.assertNotIn("<style", html.lower(),
+                         "lifted raw data.html should not retain embedded <style>")
 
     def test_dest_renders_and_validates_after_lift(self):
         r = subprocess.run(
@@ -942,7 +1007,7 @@ class LiftRootAnimFitScaleTest(unittest.TestCase):
         self.assertEqual(len(hero), 1,
                          f"lift did not append exactly one hero slide.\n"
                          f"stdout:\n{self.proc.stdout}\nstderr:\n{self.proc.stderr}")
-        return hero[0]["data"]["html"]
+        return hero[0]["data"]["html"] + "\n" + (hero[0].get("custom_css") or "")
 
     def test_lift_succeeded(self):
         self.assertEqual(self.proc.returncode, 0,
@@ -1114,7 +1179,7 @@ class LiftSlidesHeadBgAssetTest(unittest.TestCase):
         deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
         hero = [s for s in deck["slides"] if s.get("key") == "hero"]
         self.assertEqual(len(hero), 1, "lift did not append exactly one hero slide")
-        return hero[0]["data"]["html"]
+        return hero[0]["data"]["html"] + "\n" + (hero[0].get("custom_css") or "")
 
     def test_head_css_background_file_carried(self):
         html = self._hero_html()
@@ -1163,7 +1228,8 @@ class LiftSlidesPruneDeadTest(unittest.TestCase):
         self.assertEqual(self.proc.returncode, 0,
                          f"lift exited {self.proc.returncode}\n{self.proc.stderr}")
         deck = json.loads(self.dst_deck.read_text(encoding="utf-8"))
-        return [s for s in deck["slides"] if s.get("key") == "hero"][0]["data"]["html"]
+        hero = [s for s in deck["slides"] if s.get("key") == "hero"][0]
+        return hero["data"]["html"] + "\n" + (hero.get("custom_css") or "")
 
     def test_dead_framework_rules_pruned(self):
         html = self._hero_html()
@@ -1260,10 +1326,10 @@ class LiftSlidesReplaceTest(unittest.TestCase):
         self.assertIn("matrix", html, "source body was not swapped into the slot.")
 
     def test_css_rescoped_to_target_key(self):
-        html = self.deck["slides"][1]["data"]["html"]
-        self.assertIn('data-slide-key="tgt2"', html,
+        css = self.deck["slides"][1].get("custom_css") or ""
+        self.assertIn('data-slide-key="tgt2"', css,
                       "lifted CSS not rescoped to the target slot key.")
-        self.assertNotIn('data-slide-key="hero"', html,
+        self.assertNotIn('data-slide-key="hero"', css,
                          "source key leaked into the replaced slot — its selectors "
                          "would match nothing under the tgt2 wrapper.")
 

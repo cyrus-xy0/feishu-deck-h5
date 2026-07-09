@@ -83,11 +83,14 @@ class LiftToNewDeckTest(unittest.TestCase):
     def test_embedded_css_rekeyed_to_new_key(self):
         proc = self._lift_one()
         self.assertEqual(proc.returncode, 0, f"lift failed: {proc.stderr}\n{proc.stdout}")
-        html = json.loads((self.dest / "deck.json").read_text(encoding="utf-8"))["slides"][0]["data"]["html"]
-        self.assertIn('data-slide-key="new-day"', html,
+        slide = json.loads((self.dest / "deck.json").read_text(encoding="utf-8"))["slides"][0]
+        css = slide.get("custom_css") or ""
+        self.assertIn('data-slide-key="new-day"', css,
                       "embedded selectors were not rekeyed to the new key")
-        self.assertNotIn(f'data-slide-key="{OLD_KEY}"', html,
+        self.assertNotIn(f'data-slide-key="{OLD_KEY}"', css,
                          "embedded selectors still orphan onto the old key → unstyled slide")
+        self.assertNotIn("<style", slide["data"]["html"].lower(),
+                         "pasted raw data.html should not retain embedded <style>")
 
     def test_lifted_provenance_stamped(self):
         self.assertEqual(self._lift_one().returncode, 0)

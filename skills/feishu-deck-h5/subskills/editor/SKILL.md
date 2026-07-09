@@ -367,6 +367,13 @@ Designer + Renderer instead).
   is the source's, not a shake mis-scope), then prune only the rules whose leaf
   selector references no element in that slide's body DOM. Keep the framework
   layout block and every rule that targets a live class/tag.
+- **Lift hygiene is automatic and non-optional.** `lift-slides.py` and
+  `deck-cli.py paste` move any lifted raw-page author `<style>` out of
+  `data.html` into `slide.custom_css`, then strip executable `<script>` blocks
+  and inline `on*=` handlers. This prevents source rules like `.slide`, `.card`,
+  `.stage`, `.title`, or `h1` from becoming global CSS in the target deck. If a
+  lifted page looks wrong after this, fix the scoped `custom_css` / rebuild the
+  page; do not paste style/script back into `data.html`.
 - **Conversion/import**: read `converting-existing-material.md` and choose replica
   vs rewrite. Existing material defaults to 1:1 page count unless user says to
   compress/restructure.
@@ -432,10 +439,13 @@ Designer + Renderer instead).
   KPI bars — F-40 known to collapse) get rendered + screenshot-checked **one page
   at a time**, not deferred. (A 24→46 bulk lift of 22 pages at once = 18✗ / 185
   findings dumped at the end — exactly this rule's absence.)
-- **F-63 — lift done = 4 greens** (any non-green = lift not finished; do NOT say
+- **F-63 — lift done = 5 greens** (any non-green = lift not finished; do NOT say
   "done"):
   - [ ] **DOM balance** — `R-DOM` (`audit_dom_integrity`) no ✗; every `.slide-frame`
     is a direct child of `.deck` and contains exactly one `.slide`.
+  - [ ] **CSS/script hygiene** — lifted raw `data.html` has no author `<style>`,
+    no executable `<script>`, and no inline `on*=` handlers; lifted CSS lives in
+    `custom_css` so render-time scoping can bind it to the current slide key.
   - [ ] **Complex component pages screenshot-verified** — phone mock / chat UI / KPI
     bars (F-40) checked by image, not collapsed.
   - [ ] **Font sizes reconciled to the 4 tiers, validator off-ladder clean** — `R20`

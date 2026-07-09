@@ -56,6 +56,10 @@ WHAT IT DOES:
   · Rescopes CSS selectors: `[data-slide-key="X"][data-layout="…"]` → drop the
     [data-layout="…"] filter (so the slide-key-scoped rules still match after
     the wrapper changes to data-layout="raw")
+  · Moves author `<style>` blocks from lifted raw `data.html` into
+    `slide.custom_css`, where render-deck scopes selectors to the current slide
+    key; strips executable `<script>` blocks and inline `on*=` handlers so
+    source-page CSS/JS cannot pollute the target deck.
   · Rewrites asset URLs:
       assets/shared/…           → ../../../skills/feishu-deck-h5/assets/shared/…
       assets/lark-*.{png,jpg}   → ../../../skills/feishu-deck-h5/assets/…
@@ -110,6 +114,7 @@ from pathlib import Path
 # step 1) so render-deck.py + lift-slides.py can't drift on CSS parsing.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deck-json"))
 from _css_utils import iter_css_rules  # noqa: E402
+from _fragment_hygiene import hygienize_lifted_raw_html  # noqa: E402
 
 
 def atomic_write_text(path, text, encoding="utf-8"):
@@ -1263,6 +1268,13 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             # ORIGINAL key); without this the entry's key is `-2` while its embedded
             # selectors still point at the bare key → unstyled slide, dead @keyframes.
             inner = _rekey_inner_css(inner, info["key"], key)
+        # F-401: a lifted raw slide's `data.html` must not keep author <style> or
+        # executable markup. Embedded <style> is global CSS at browser time; move
+        # it into `custom_css`, where render-deck scopes selectors to this slide.
+        # External scripts / on* handlers are code, not data, and must not spread
+        # cross-deck through lift.
+        inner, moved_css, hygiene = hygienize_lifted_raw_html(inner)
+        report.update(hygiene)
         entry = {
             "key": key,
             "layout": "raw",
@@ -1291,6 +1303,8 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
             },
             "data": {"html": inner},
         }
+        if moved_css.strip():
+            entry["custom_css"] = moved_css
         if info["accent"]:
             entry["accent"] = info["accent"]
         if info["decor"]:
@@ -1309,6 +1323,13 @@ def lift(src_html_path, frame_indices, dst_deck_json, output_dir=None, shake=Fal
         miss = report.get("input_missing", [])
         proto = report.get("proto_copied", [])
         print(f"✓ frame {one_indexed:3d} → key={key!r} ({len(inner)} bytes)")
+        if report.get("styles_consolidated"):
+            print(f"    css hygiene: moved {report['styles_consolidated']} "
+                  f"embedded <style> block(s) → custom_css")
+        if report.get("scripts_stripped") or report.get("handlers_stripped"):
+            print(f"    script hygiene: stripped {report.get('scripts_stripped', 0)} "
+                  f"<script> block(s), {report.get('handlers_stripped', 0)} "
+                  f"inline handler(s)")
         if cp: print(f"    input/ copied: {cp}")
         if proto: print(f"    prototypes/ copied: {proto}")
         if miss: print(f"    ✗ input/ MISSING in source: {miss}")

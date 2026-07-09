@@ -221,7 +221,8 @@ python3 deck-json/render-deck.py <deck.json> . --renumber --quick
   `lift-slides.py <源 index.html> --key <K> <目标deck.json> <目标out> --shake --replace <Y> --keep-title`
   —— **就地覆盖目标第 Y 页**(1-based = 页码 #Y)的 body,**保留该页 key + screen_label + 可见标题**;
   自动把源页 CSS rescope 到目标页 key、拷资产(含 `[data-page=N]` 形态的背景图,F-376)、剥 data-text-id、
-  剪掉 `--shake` 多带的死框架规则(F-377)。源是**已发布的 rendered index.html**(feishusolution 包等)时
+  剪掉 `--shake` 多带的死框架规则(F-377)，并把 lifted raw 页里的作者 `<style>` 自动搬进
+  `custom_css`、剥 `<script>`/`on*=`，避免源页宽选择器污染目标 deck。源是**已发布的 rendered index.html**(feishusolution 包等)时
   也走这条——`lift-slides` 专治 head-CSS 漂移。只能 lift **一页**(--replace 覆盖一个槽);
   完了 `render-deck.py <目标deck.json> <out> --scope Y --shoot` 看图即可。
   源帧号(#Y)= `lift-slides.py <源> --index` 列表里的 1-based 行号。
@@ -229,8 +230,9 @@ python3 deck-json/render-deck.py <deck.json> . --renumber --quick
   `custom_css` 为空、CSS 全留在 **rendered index.html 的 `<head>`**(老锚点 `.slide[data-page="NN"]`)、
   `data-accent`/`data-decor` 只在渲染出的 `<div class="slide">` 上时,paste/lift 只搬空 custom_css →
   无样式 + 缺图 + 丢 accent/decor 的坏页。**但这在第 4 步截图里一眼看穿**(本该有样式的页变白板 /
-  图没了 / accent 没了)。本仓**多数页 CSS 内嵌在 `data.html` 里、自包含、随 paste 走、根本不漂**——
-  所以 paste 报了拷资产、render 没坏 = 好,**别预先 `get-page --css` + `grep [data-page=]`**。
+  图没了 / accent 没了)。历史页可能把 CSS 内嵌在 `data.html` 里；当前 lift/paste 会把这些作者
+  `<style>` 先收敛到 `custom_css` 再写入目标 deck。paste 报了拷资产、render 没坏 = 好,**别预先
+  `get-page --css` + `grep [data-page=]`**。
   **只有第 4 步真出坏页才诊断**:`get-page <K> --css` 空 + `grep '\[data-page=' <源>/index.html` 命中 =
   漂移 → 修源 `python3 deck-json/repair-lifted.py <源output目录> --apply`(把 head CSS 迁回各页
   custom_css + 重渲)→ 重 paste。手动恢复细节(少用):从 head 抓 `.slide[data-page="NN"] …` 塞进

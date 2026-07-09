@@ -84,6 +84,7 @@ MUTATION_CMDS = {
 }
 
 sys.path.insert(0, str(HERE))
+from _fragment_hygiene import hygienize_lifted_raw_html  # noqa: E402
 from _safe_write import contained_dest          # noqa: E402  (path-traversal guard)
 
 
@@ -1562,6 +1563,16 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     # doesn't render-fail on R-CSSVAR after paste into a current-framework deck.
     slide, n_vars = _map_retired_vars(slide)
 
+    hygiene = {}
+    if slide.get("layout") == "raw" and isinstance((slide.get("data") or {}).get("html"), str):
+        clean_html, moved_css, hygiene = hygienize_lifted_raw_html(
+            slide.get("data", {}).get("html") or "")
+        slide.setdefault("data", {})["html"] = clean_html
+        if moved_css.strip():
+            existing_css = slide.get("custom_css", "") or ""
+            sep = "\n" if existing_css.strip() else ""
+            slide["custom_css"] = existing_css + sep + moved_css
+
     # Provenance — the validator downgrades typography/color violations to
     # warnings for slides carrying `lifted` (same contract as lift-slides.py).
     slide["lifted"] = f"{src_path.parent.name}#{matches[0].get('key')}"
@@ -1596,6 +1607,13 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     if n_vars:
         print(f"    remapped {n_vars} retired CSS var ref(s) "
               f"({', '.join(f'{o}→{n}' for o, n in _RETIRED_VAR_MAP.items())})")
+    if hygiene.get("styles_consolidated"):
+        print(f"    css hygiene: moved {hygiene['styles_consolidated']} "
+              f"embedded <style> block(s) → custom_css")
+    if hygiene.get("scripts_stripped") or hygiene.get("handlers_stripped"):
+        print(f"    script hygiene: stripped {hygiene.get('scripts_stripped', 0)} "
+              f"<script> block(s), {hygiene.get('handlers_stripped', 0)} "
+              f"inline handler(s)")
     if report["input"]:
         print(f"    input/ copied: {report['input']}")
     if report["prototypes"]:
