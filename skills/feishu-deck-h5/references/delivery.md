@@ -120,6 +120,11 @@ verify the artifact form. Pick exactly **one** valid shape for the destination:
 | **C · hosted URL** *(when the user already deploys to Pages / a CDN)* | Deck lives at a stable web URL. | Ship the URL string. No file attachment. |
 | **D · `deck.zip` for slide-library ingest** *(required for "入库素材库 / 上传素材网站 / 网页入库 / slide library ingest")* | The destination is the material library web ingest pipeline. | `bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>` → upload `runs/<ts>/output/deck.zip`. This is the only standard upload format for the material library. |
 
+The generated `deck.zip` is a self-contained handoff artifact. A material-library consumer must
+be able to validate and ingest it without checking out this repository at runtime. deck-h5
+`check-only` remains an author-side quality gate or an explicitly requested advisory; repository
+availability is not part of the package contract.
+
 **Banned form · single linked HTML**: never hand back just one
 `*.html` file that points to sibling `assets/` / `input/` /
 `prototypes/` directories. It works locally inside the skill folder
