@@ -1,15 +1,49 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "feishu-deck-h5 ingestion manifest",
-  "type": "object",
-  "required": ["task_id", "source", "viewer_sync", "library_ingest", "skipped"],
-  "properties": {
-    "task_id": { "type": "string" },
-    "source": { "type": "string" },
-    "viewer_sync": { "type": "object" },
-    "library_ingest": { "type": "object" },
-    "slide_records": { "type": "array" },
-    "skipped": { "type": "array" }
-  },
-  "additionalProperties": true
+  "oneOf": [
+    {
+      "title": "Library upload package manifest",
+      "type": "object",
+      "required": ["package_type", "deck_id", "primary_html", "asset_closure"],
+      "properties": {
+        "package_type": { "const": "feishu-deck-h5-library" },
+        "deck_id": { "type": "string", "minLength": 1 },
+        "primary_html": { "type": "string", "minLength": 1 },
+        "asset_closure": {
+          "type": "object",
+          "required": [
+            "status",
+            "reachable_file_count",
+            "manifest_file_count",
+            "total_bytes",
+            "digest_sha256"
+          ],
+          "properties": {
+            "status": { "const": "verified" },
+            "reachable_file_count": { "type": "integer", "minimum": 1 },
+            "manifest_file_count": { "type": "integer", "minimum": 0 },
+            "total_bytes": { "type": "integer", "minimum": 1 },
+            "digest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "title": "Post-ingest result manifest",
+      "type": "object",
+      "required": ["task_id", "source", "viewer_sync", "library_ingest", "skipped"],
+      "properties": {
+        "task_id": { "type": "string" },
+        "source": { "type": "string" },
+        "viewer_sync": { "type": "object" },
+        "library_ingest": { "type": "object" },
+        "slide_records": { "type": "array" },
+        "skipped": { "type": "array" }
+      },
+      "additionalProperties": true
+    }
+  ]
 }

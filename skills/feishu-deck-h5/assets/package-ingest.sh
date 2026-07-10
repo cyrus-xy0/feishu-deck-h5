@@ -38,7 +38,19 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 "$SCRIPT_DIR/materialize-remote-images.py" "$OUT_DIR"
 
-python3 - "$OUT_DIR" "$DECK_ID" <<'PY'
+# Fail closed before writing a new package. Removing a previous package first
+# prevents a failed rerun from leaving a stale deck.zip that looks successful.
+ZIP_PATH="$OUT_DIR/deck.zip"
+CLOSURE_REPORT="$OUT_DIR/.asset-closure.json"
+rm -f "$ZIP_PATH" "$CLOSURE_REPORT"
+trap 'rm -f "$CLOSURE_REPORT"' EXIT
+python3 "$SCRIPT_DIR/ingest-asset-closure.py" \
+  "$OUT_DIR" \
+  --primary-html index.html \
+  --manifest assets-manifest.yaml \
+  --report "$CLOSURE_REPORT" >/dev/null
+
+python3 - "$OUT_DIR" "$DECK_ID" "$CLOSURE_REPORT" <<'PY'
 from __future__ import annotations
 
 import json
@@ -53,6 +65,7 @@ from urllib.parse import unquote, urlparse
 
 out_dir = Path(sys.argv[1]).resolve()
 deck_id = sys.argv[2].strip()
+closure_report_path = Path(sys.argv[3]).resolve()
 
 if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", deck_id):
     sys.exit("ERROR: --deck-id must be a stable id using letters, numbers, dot, underscore, or dash")
@@ -179,6 +192,19 @@ manifest = {
     "soft_required": list(soft_required),
     "soft_missing": soft_missing,
 }
+try:
+    closure_report = json.loads(closure_report_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    fail(f"runtime asset closure report is missing or invalid: {exc}")
+if closure_report.get("status") != "verified" or closure_report.get("issues"):
+    fail("runtime asset closure report is not verified")
+manifest["asset_closure"] = {
+    "status": "verified",
+    "reachable_file_count": int(closure_report.get("reachable_file_count") or 0),
+    "manifest_file_count": int(closure_report.get("manifest_file_count") or 0),
+    "total_bytes": int(closure_report.get("total_bytes") or 0),
+    "digest_sha256": str(closure_report.get("digest_sha256") or ""),
+}
 (out_dir / "ingestion-manifest.json").write_text(
     json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     encoding="utf-8",
@@ -210,8 +236,6 @@ if missing_hard_after:
 
 primary_override = promoted_primary_html()
 zip_path = out_dir / "deck.zip"
-if zip_path.exists():
-    zip_path.unlink()
 
 stage = Path(tempfile.mkdtemp(prefix="feishu-deck-ingest-pkg."))
 try:

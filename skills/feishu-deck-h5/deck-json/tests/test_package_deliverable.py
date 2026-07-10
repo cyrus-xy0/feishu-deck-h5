@@ -162,6 +162,9 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertEqual(manifest["deck_id"], "lark-demo-2026-06-11")
         self.assertEqual(manifest["primary_html"], "index.html")
         self.assertIn("README.md", manifest["soft_missing"])
+        self.assertEqual(manifest["asset_closure"]["status"], "verified")
+        self.assertGreaterEqual(manifest["asset_closure"]["reachable_file_count"], 2)
+        self.assertEqual(len(manifest["asset_closure"]["digest_sha256"]), 64)
 
         with zipfile.ZipFile(zip_path) as zf:
             names = set(zf.namelist())
@@ -285,6 +288,61 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertIn("HTTP 403", proc.stderr)
         self.assertFalse((self.output / "deck.zip").exists())
 
+    def test_package_ingest_rejects_missing_nested_script(self):
+        (self.output / "index.html").write_text(
+            '<!doctype html><html><body><iframe src="assets/prototypes/demo/index.html"></iframe></body></html>',
+            encoding="utf-8",
+        )
+        (self.output / "deck.json").write_text(
+            json.dumps({"schema_version": "1.0", "slides": []}),
+            encoding="utf-8",
+        )
+        (self.output / "assets-manifest.yaml").write_text(
+            "deck-local:\n  - assets/prototypes/demo/index.html\n",
+            encoding="utf-8",
+        )
+        child = self.output / "assets" / "prototypes" / "demo" / "index.html"
+        child.parent.mkdir(parents=True)
+        child.write_text('<script type="module" src="app.js"></script>', encoding="utf-8")
+
+        proc = subprocess.run(
+            ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "lark-nested-missing-2026-07-10"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("LOCAL_REF_MISSING", proc.stderr)
+        self.assertIn("assets/prototypes/demo/index.html -> app.js", proc.stderr)
+        self.assertFalse((self.output / "deck.zip").exists())
+
+    def test_package_ingest_rejects_zero_byte_asset(self):
+        (self.output / "index.html").write_text(
+            '<!doctype html><html><body><img src="assets/empty.png"></body></html>',
+            encoding="utf-8",
+        )
+        (self.output / "deck.json").write_text(
+            json.dumps({"schema_version": "1.0", "slides": []}),
+            encoding="utf-8",
+        )
+        (self.output / "assets-manifest.yaml").write_text(
+            "deck-local:\n  - assets/empty.png\n",
+            encoding="utf-8",
+        )
+        assets = self.output / "assets"
+        assets.mkdir()
+        (assets / "empty.png").write_bytes(b"")
+
+        proc = subprocess.run(
+            ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "lark-empty-asset-2026-07-10"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("LOCAL_ASSET_EMPTY", proc.stderr)
+        self.assertFalse((self.output / "deck.zip").exists())
+
     def test_package_ingest_rejects_unsafe_redirect_shell(self):
         (self.output / "index.html").write_text(
             '<!doctype html><meta http-equiv="refresh" content="0; url=../deck.html">',
@@ -304,7 +362,7 @@ class PackageDeliverableTest(unittest.TestCase):
         )
 
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("unsafe or unsupported target", proc.stderr)
+        self.assertIn("LOCAL_REF_ESCAPE index.html -> ../deck.html", proc.stderr)
 
     def test_package_ingest_rejects_name(self):
         proc = subprocess.run(
