@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import html as html_lib
+import importlib.util
 import json
 import re
 import shutil
@@ -73,6 +74,20 @@ JS_LOCATION_RE = re.compile(
     r'''(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']''',
     re.I,
 )
+
+
+def load_ingest_asset_closure():
+    module_path = Path(__file__).resolve().parent / 'ingest-asset-closure.py'
+    spec = importlib.util.spec_from_file_location('feishu_deck_ingest_asset_closure', module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'cannot load runtime asset closure validator: {module_path}')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+INGEST_ASSET_CLOSURE = load_ingest_asset_closure()
 
 
 # ---------------------------------------------------------------------------
@@ -887,6 +902,26 @@ def inspect_asset_references(primary_html: Path, package_root: Path) -> list[str
     return errors
 
 
+def closure_issue_message(issue: object) -> str:
+    code = str(getattr(issue, 'code', '') or '')
+    required_by = str(getattr(issue, 'required_by', '') or '')
+    reference = str(getattr(issue, 'reference', '') or '')
+    message = f'{code} {required_by} -> {reference}'
+    if code == 'LOCAL_REF_MISSING' and required_by == 'index.html':
+        return f'{message} (HTML 引用资产缺失: {reference})'
+    if code == 'LOCAL_REF_ESCAPE':
+        if is_windows_drive_path(reference):
+            return f'{message} (HTML 引用包含 Windows 盘符路径: {reference})'
+        if '\\' in reference:
+            return f'{message} (HTML 引用包含反斜杠路径: {reference})'
+        if urlparse(reference).scheme.lower() == 'file':
+            return f'{message} (HTML 引用本机路径: {reference})'
+        if '..' in Path(unquote(urlparse(reference).path or reference)).parts:
+            return f'{message} (HTML 引用包含 ../ 越界路径: {reference})'
+        return f'{message} (HTML 引用逃逸 ZIP 根目录: {reference})'
+    return message
+
+
 def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None, list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -958,7 +993,12 @@ def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None,
         redirect = html_redirect_target(primary_text)
         if is_local_html_redirect(redirect):
             errors.append(f'primary_html 是跳转壳，不能作为入库入口: {redirect}；请把真实 deck 内容写入 index.html')
-        errors.extend(inspect_asset_references(primary_html, extract_dir))
+        closure = INGEST_ASSET_CLOSURE.inspect_package(
+            extract_dir,
+            primary_html,
+            extract_dir / 'assets-manifest.yaml',
+        )
+        errors.extend(closure_issue_message(issue) for issue in closure.issues)
     return primary_html, errors, warnings
 
 

@@ -265,6 +265,87 @@ def test_zip_package_contract_rejects_missing_asset_reference():
         assert any("HTML 引用资产缺失: assets/missing.png" in item for item in errors)
 
 
+def test_zip_package_contract_rejects_missing_nested_script():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members(
+            '<!doctype html><html><body><iframe src="assets/prototypes/demo/index.html"></iframe></body></html>'
+        )
+        members["assets/prototypes/demo/index.html"] = '<script type="module" src="app.js"></script>'
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert any(
+            "LOCAL_REF_MISSING assets/prototypes/demo/index.html -> app.js" in item
+            for item in errors
+        )
+
+
+def test_zip_package_contract_rejects_missing_javascript_module():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members(
+            '<!doctype html><html><body><script type="module" src="assets/app.js"></script></body></html>'
+        )
+        members["assets/app.js"] = 'import "./missing-module.js";\n'
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert any("LOCAL_REF_MISSING assets/app.js -> ./missing-module.js" in item for item in errors)
+
+
+def test_zip_package_contract_rejects_zero_byte_asset():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members()
+        members["assets/local.png"] = b""
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert any("LOCAL_ASSET_EMPTY index.html -> assets/local.png" in item for item in errors)
+
+
+def test_zip_package_contract_rejects_stale_manifest_path():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members()
+        members["assets-manifest.yaml"] += "  - assets/stale.png\n"
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert any("MANIFEST_REF_MISSING assets-manifest.yaml -> assets/stale.png" in item for item in errors)
+
+
+def test_zip_package_contract_rejects_empty_manifest_only_asset():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members()
+        members["assets-manifest.yaml"] += "  - assets/unused-empty.png\n"
+        members["assets/unused-empty.png"] = b""
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert any(
+            "MANIFEST_ASSET_EMPTY assets-manifest.yaml -> assets/unused-empty.png" in item
+            for item in errors
+        )
+
+
 def test_zip_package_contract_rejects_redirect_shell_primary_html():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
@@ -307,7 +388,7 @@ def test_zip_package_contract_accepts_viewer_download_roundtrip_manifest():
             "source": "viewer-download",
         })
         members["assets/feishu-deck.css"] = "body{margin:0}"
-        members["assets/feishu-deck.js"] = ""
+        members["assets/feishu-deck.js"] = "window.FeishuDeck = {};"
         members.pop("assets/style.css", None)
         members.pop("assets/local.png", None)
 
