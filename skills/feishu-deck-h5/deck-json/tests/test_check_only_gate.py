@@ -300,6 +300,24 @@ def test_zip_package_contract_rejects_missing_javascript_module():
         assert any("LOCAL_REF_MISSING assets/app.js -> ./missing-module.js" in item for item in errors)
 
 
+def test_zip_package_contract_ignores_bare_import_text_inside_vendor_bundle():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members(
+            '<!doctype html><html><body><script src="assets/babel.min.js"></script></body></html>'
+        )
+        members["assets/babel.min.js"] = (
+            'const template = \'import "regenerator-runtime/runtime.js";\';\n'
+        )
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert not any("regenerator-runtime/runtime.js" in item for item in errors)
+
+
 def test_zip_package_contract_rejects_zero_byte_asset():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)

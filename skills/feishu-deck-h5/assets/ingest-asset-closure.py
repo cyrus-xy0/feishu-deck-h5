@@ -53,6 +53,7 @@ JAVASCRIPT_NEW_URL_RE = re.compile(
 META_REFRESH_CONTENT_RE = re.compile(r"(?:^|;)\s*url\s*=\s*['\"]?([^'\";]+)", re.I)
 JS_LOCATION_RE = re.compile(r"(?:window\.)?location(?:\.href)?\s*=\s*['\"]([^'\"]+)['\"]", re.I)
 WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[/\\]")
+LOCAL_JAVASCRIPT_ROOTS = {"assets", "input", "reuse-src", "prototypes", "runtime-library", "grafts"}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -156,10 +157,24 @@ def extract_literal_asset_references(text: str) -> tuple[str, ...]:
 
 
 def extract_javascript_references(text: str) -> tuple[str, ...]:
-    references = [clean_reference(match.group(2)) for match in JAVASCRIPT_REFERENCE_RE.finditer(text or "")]
+    references = [
+        clean_reference(match.group(2))
+        for match in JAVASCRIPT_REFERENCE_RE.finditer(text or "")
+        if is_local_javascript_import(match.group(2))
+    ]
     references.extend(clean_reference(match.group(2)) for match in JAVASCRIPT_NEW_URL_RE.finditer(text or ""))
     references.extend(extract_literal_asset_references(text))
     return tuple(references)
+
+
+def is_local_javascript_import(reference: str) -> bool:
+    value = clean_reference(reference)
+    if value.startswith(("./", "../", "/")):
+        return True
+    parsed = urlparse(value)
+    path = Path(unquote(parsed.path or value))
+    first = next((part for part in path.parts if part not in {".", ".."}), "")
+    return not parsed.scheme and first in LOCAL_JAVASCRIPT_ROOTS
 
 
 def file_references(path: Path) -> tuple[str, ...]:
