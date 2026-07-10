@@ -198,10 +198,9 @@ upload `graph.items`.
 
 Run the Task 3 command. Expected: all tests pass.
 
-### Task 5: Add cross-repository contract CI and run full verification
+### Task 5: Add the cross-repository contract gate and run full verification
 
 **Files:**
-- Create: `.github/workflows/library-package-contract.yml`
 - Create: `scripts/check-library-package-contract.py`
 - Modify: `skills/feishu-deck-h5/deck-json/tests/test_package_deliverable.py`
 
@@ -212,10 +211,13 @@ invokes the checked-out library's `ingest-package.py --resource-checks-only
 --no-deck-h5-gate`. It exits non-zero unless `ready_for_confirm` is true and
 `blocking_issues` is empty.
 
-- [ ] **Step 2: Add the GitHub Actions workflow**
+- [ ] **Step 2: Confirm the cross-repository authentication boundary**
 
-On pull requests touching package files, pushes to `main`, nightly schedule, and
-manual dispatch, check out both repositories and run the contract script.
+Check whether `SLIDE_LIBRARY_SYNC_TOKEN` exists and whether the existing private
+cross-repository dispatch workflow has a successful run. If the secret is not
+configured, do not add a guaranteed-failing workflow. Keep the script as a
+mandatory local pre-merge gate and rely on the two repositories' independent CI
+suites for the mirrored contract tests.
 
 - [ ] **Step 3: Run targeted and complete local regression**
 

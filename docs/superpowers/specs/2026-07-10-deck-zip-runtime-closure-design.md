@@ -33,8 +33,8 @@ The alternatives considered were:
 2. Copy the whole library ingest stack into `feishu-deck-h5`. This is too large
    and would create a second ingest implementation.
 3. Keep a focused closure scanner in the deck skill and add cross-repository
-   contract tests. This preserves offline packaging, keeps responsibilities
-   small, and makes drift visible in CI. This is the selected approach.
+   contract tests. This preserves offline packaging and keeps responsibilities
+   small. This is the selected approach.
 
 ## Architecture
 
@@ -105,6 +105,10 @@ The upstream tests cover:
 The downstream tests cover the same failure classes at pre-confirm and runtime
 publication boundaries. A cross-repository test generates `deck.zip` with
 cloud `feishu-deck-h5` and runs the current library resource gate against it.
+Both repositories are private and the existing cross-repository Actions secret
+is not configured, so this test is a mandatory pre-merge local gate. Each
+repository's ordinary CI still runs its own mirrored contract tests. This avoids
+introducing a permanently failing workflow or silently weakening the check.
 
 ## Delivery and rollout
 
