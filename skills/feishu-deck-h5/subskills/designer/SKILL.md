@@ -13,7 +13,8 @@ description: |
 
 Input: user brief, parsed `input/runtime-library/source-dossier.json` if present,
 local files under `runs/<...>/input/`, and scoped records from the Feishu Base
-knowledge library.
+knowledge library. When the user explicitly selected a reusable template, also
+read its versioned `input/runtime-library/template-pack/template-pack.json`.
 
 Output:
 
@@ -45,27 +46,41 @@ rely on cached chat summaries or earlier reads of `source-dossier.json`, local
    make the degradation explicit instead of silently shipping a degraded deck.
 4. Produce a narrative arc and slide outline. Default to Chinese-only unless the
    user explicitly asks for bilingual or external English-facing pitch.
-5. Apply the raw-first design stance: every slide defaults to `layout: "raw"`
+5. If an approved Template Pack was explicitly selected, verify its exact
+   `template_id`, version, canvas, coverage, slots, safe areas, fonts, and locked
+   VI before choosing page shapes. Only `status: "approved"` may drive a final
+   deck. A draft may inform an explicitly requested review preview, but must not
+   be treated as activated. For each bound page, add `template_role`, the
+   resolved `template_layout_id`, and concrete `slot_requirements` to the
+   outline. Missing roles are legal in the pack but not silently replaceable:
+   if the story needs an `unsupported` role, stop and ask the user to approve a
+   derivation/alias, change that page's role, or generate without the pack.
+6. Apply the raw-first design stance: every slide defaults to `layout: "raw"`
    when it later becomes DeckJSON. In `outline.json`, express that as
    `layout_intent: "raw:<pattern-or-intent>"`. Fall back to schema only for pure
    standard shapes — the single-source allowlist table is in `design-first.md`
    (*Decision rule — 白名单回退判定*; `deck-generation-policy.md` points to it).
    Give every raw slide Q0-Q4 plus a six-dimensional design spec before authoring.
-6. For every slide, include a density budget: core block + supporting evidence <=
+   Template binding does not add a DeckJSON layout: `raw` remains `raw`, and
+   ceremonial pages retain `cover/section/quote/agenda/end`. Without an
+   explicitly selected pack, all default layouts remain unchanged.
+7. For every slide, include a density budget: core block + supporting evidence <=
    layout capacity. If it will not fit, cut or split content instead of shrinking
-   text below the ladder.
-7. Never fabricate attributed facts: no specific company numbers, named quotes,
+   text below the ladder. In template mode, use the approved slot typography and
+   safe area; do not apply the framework type ladder or automatically shrink a
+   template slot.
+8. Never fabricate attributed facts: no specific company numbers, named quotes,
    source claims, or future-roadmap commitments unless provided by user/local/cloud
    source. General industry/product knowledge is allowed only when labeled as such.
-8. If the brief explicitly asks for a one-pager customer case or names a
+9. If the brief explicitly asks for a one-pager customer case or names a
    four-beat case story (`痛点 / 冲突 / 解法 / 价值`), read
    `one-pager-case.md` and use a single `content/story-case` slide without a
    cover unless the user asks otherwise. Generic "做这个客户案例" / single-row case
    inputs are not enough to trigger this default; keep the raw-first design flow
    and ask one short scope/layout question if the intended shape is ambiguous.
-9. Write or update the run's `PROMPTS.md` alongside `DESIGN-PLAN.md` so the user's
+10. Write or update the run's `PROMPTS.md` alongside `DESIGN-PLAN.md` so the user's
    actual asks survive the design/render handoff.
-10. After writing `outline.json`, self-check it:
+11. After writing `outline.json`, self-check it:
     `python3 deck-json/outline-lint.py output/outline.json`. This is a *self-check*,
     not a hard gate — render does not require an `outline.json` and never runs the
     lint. It catches a half-filled outline before render: every top-level
@@ -102,6 +117,11 @@ Write JSON with this shape:
       "key": "cover",
       "role": "cover",
       "layout_intent": "schema:cover",
+      "template_role": "cover",
+      "template_layout_id": "role-cover",
+      "slot_requirements": [
+        {"name": "title", "kind": "text", "required": true}
+      ],
       "is_hero": true,
       "single_focus": "",
       "content": {},
@@ -121,6 +141,13 @@ For `layout_intent`, use `raw:<pattern-or-intent>` by default. Use
 `schema:<layout>` only when the slide is a pure standard shape and include the
 reason in `density_budget` or `design_spec.notes`.
 
+`template_role`, `template_layout_id`, and `slot_requirements` are optional and
+appear only when the user selected a Template Pack. The only roles are
+`cover/raw/section/quote/agenda/end`; they are a visual binding contract, not a
+new business-layout vocabulary. `template_layout_id` must be the exact approved
+layout resolved by that role's `layout_coverage`, including an explicitly
+reviewed alias. Never invent a layout ID to fill a gap.
+
 ## References To Load As Needed
 
 - `../../references/design-phase.md`
@@ -132,6 +159,7 @@ reason in `density_budget` or `design_spec.notes`.
 - `../../references/one-pager-case.md`
 - `../../references/run-artifacts.md`
 - `../../references/assets-and-files.md`
+- `../../references/template-system.md`
 - `../../deck-json/deck-schema.json`
 
 If converting existing PDF/PPT/HTML/docs, also read

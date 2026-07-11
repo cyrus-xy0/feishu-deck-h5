@@ -5,34 +5,37 @@
 
 Before touching files or running tools, lock:
 
-1. **Mode**: pick exactly one from the **Authoritative Mode Enum** below.
+1. **Mode**: pick exactly one from `workflow.yaml`. The table below is its
+   human-readable projection and is checked for parity in CI.
 2. **Scope**: single slide, named slides, whole deck, or one run folder. Default
    to the smallest scope the user named. More work requires user authorization.
 3. **Target**: run dir, `deck.json`, `index.html`, slide key, slide number, source
    file set, or publish destination.
 
-### Authoritative Mode Enum (single source of truth)
+### Mode Enum
 
-This table is the ONE canonical Mode vocabulary for the whole skill. The root
-`SKILL.md` Mandatory Router and every subskill reference this list — do not keep a
-second, differently-spelled mode list anywhere. Names are UPPERCASE_SNAKE (with
-`CHECK-ONLY` / `LIFT+SWAP` kept as the established spellings). Every mode maps to
-the subskill that owns its work.
+`workflow.yaml` is the single machine-owned source. Names are UPPERCASE_SNAKE
+(with `CHECK-ONLY` / `LIFT+SWAP` kept as established spellings). When this table
+changes, update the manifest first and run `python3 assets/skill-contract.py validate`.
 
-| Mode | When it applies | Routes to (subskill) |
-| --- | --- | --- |
-| `CHECK-ONLY` | Check / review / validate an existing `.html` or deck; no content generation or edit requested. | Validator (`subskills/validator/SKILL.md`) |
-| `GENERATION` | A NEW deck, OR converting external PDF / PPT / doc material into a deck, OR any change that produces a fresh run artifact. Design-first. | Designer + Renderer (`subskills/designer/SKILL.md` → `subskills/renderer/SKILL.md`) |
-| `GENERATION_FROM_SOURCE_HTML` | An uploaded HTML is reference / inspiration / "照着这个重新做" — source material, not the artifact to preserve. | Parser → Designer + Renderer (`subskills/parser/SKILL.md` → designer → renderer) |
-| `EDIT_IMPORTED_HTML` | An uploaded HTML IS the target state; user wants to modify / continue / fix it in place. | Editor (`subskills/editor/SKILL.md`) |
-| `EDIT` | Edit copy / layout of an existing deck inside its own run (deck.json / index.html already exist). | Editor (`subskills/editor/SKILL.md`) |
-| `RESKIN` | Foreign / non-Feishu HTML → "换皮" / 套飞书模板 / Feishu 化, same visual design preserved. | Editor (`subskills/editor/SKILL.md`) |
-| `LIFT+SWAP` | Reuse another deck's pages / layout while swapping copy, client, or wording. | Editor (`subskills/editor/SKILL.md`) |
-| `TRANSLATE` | Translate / localize an existing deck (or page range) into another language. | Translator (`subskills/translator/SKILL.md`) |
-| `PARSE` | Parse uploaded source materials into `source-dossier.json` + normalized assets. (A `.pptx` is reconstructed into an editable `canvas` deck.json.) | Parser (`subskills/parser/SKILL.md`) |
-| `IMPORT` | Quality-gate then ingest a confirmed finished HTML into `FuQiang/feishu-slide-library` (入库 / 提交 / 上传 / submit / archive). | Importer (`subskills/importer/SKILL.md`) |
-| `SIMULATE` | Rehearse how a validated deck lands with a target customer / stakeholder. | Simulator (`subskills/simulator/SKILL.md`) |
-| `PUBLISH` | Publish a confirmed HTML to Magic Page / 妙笔 / MagicBook / html-box hosting. | Publisher (`subskills/publisher/SKILL.md`) |
+<!-- BEGIN GENERATED WORKFLOW TABLE -->
+| Mode | Trigger | Owner | Gate |
+| --- | --- | --- | --- |
+| `CHECK-ONLY` | Review or validate an existing deck without changing it | `subskills/validator/SKILL.md` | `CHECK_ONLY` |
+| `GENERATION` | Create a new run artifact or re-author external material | `subskills/designer/SKILL.md -> subskills/renderer/SKILL.md` | `LOCAL_HANDOFF` |
+| `GENERATION_FROM_SOURCE_HTML` | Use HTML as reference or inspiration for a new deck | `subskills/parser/SKILL.md -> subskills/designer/SKILL.md -> subskills/renderer/SKILL.md` | `LOCAL_HANDOFF` |
+| `EDIT` | Change a deck that already exists in its run | `subskills/editor/SKILL.md` | `INTERMEDIATE_EDIT` |
+| `EDIT_IMPORTED_HTML` | Modify an uploaded HTML artifact as the target state | `subskills/editor/SKILL.md` | `INTERMEDIATE_EDIT` |
+| `RESKIN` | Apply Feishu chrome to foreign HTML while preserving its design | `subskills/editor/SKILL.md` | `INTERMEDIATE_EDIT` |
+| `LIFT+SWAP` | Reuse pages or layout from another deck and swap content | `subskills/editor/SKILL.md` | `INTERMEDIATE_EDIT` |
+| `TRANSLATE` | Translate or localize an existing deck | `subskills/translator/SKILL.md` | `INTERMEDIATE_EDIT` |
+| `PARSE` | Normalize source files and extract structured material | `subskills/parser/SKILL.md` | `SOURCE_PARSE` |
+| `TEMPLATE_EXTRACT` | Extract a supplied PPTX into a reviewable, reusable Template Pack | `subskills/template/SKILL.md` | `TEMPLATE_PACK` |
+| `IMPORT` | Quality-gate and ingest a confirmed deck into the slide library | `subskills/importer/SKILL.md` | `LIBRARY_INGEST` |
+| `SIMULATE` | Rehearse stakeholder reactions to a validated deck | `subskills/simulator/SKILL.md` | `PRESENTATION_CHECKPOINT` |
+| `PUBLISH` | Publish a confirmed HTML artifact to Magic Page | `subskills/publisher/SKILL.md` | `MAGIC_PUBLISH` |
+| `MAINTENANCE` | Review, test, repair, optimize, package, or maintain the feishu-deck-h5 codebase or skill itself | `controller` | `REPOSITORY_CHANGE` |
+<!-- END GENERATED WORKFLOW TABLE -->
 
 `EDIT`, `RESKIN`, `LIFT+SWAP`, and `EDIT_IMPORTED_HTML` are the **EDIT family** (all
 route to Editor). `GENERATION` and `GENERATION_FROM_SOURCE_HTML` are the
@@ -318,9 +321,10 @@ open a new run. A beyond-default design on an edited page still passes the desig
 gate, but the work is an edit of the existing artifact. `RESKIN`, `LIFT+SWAP`, and
 `EDIT_IMPORTED_HTML` are the specialized EDIT-family modes documented above.
 
-### TRANSLATE / PARSE / IMPORT / SIMULATE / PUBLISH
+### TRANSLATE / PARSE / IMPORT / SIMULATE / PUBLISH / MAINTENANCE
 
 These map 1:1 to their owning subskills (Translator / Parser / Importer /
-Simulator / Publisher) per the **Authoritative Mode Enum**. Their detailed
+Simulator / Publisher), while `MAINTENANCE` stays with the controller and uses
+repository tests rather than a deck gate. Their detailed
 workflows live in those subskills and in the root `SKILL.md` Canonical Workflow;
 this router only fixes the vocabulary and the routing target.

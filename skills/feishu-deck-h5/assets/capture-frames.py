@@ -30,8 +30,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
+
+
+def _canvas_dimensions(html: Path) -> tuple[int, int]:
+    """Portable rendered HTML owns the canvas; legacy files default to 16:9."""
+    try:
+        raw = html.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 1920, 1080
+    mw = re.search(r"\bdata-deck-width\s*=\s*['\"]([0-9]+)['\"]", raw, re.I)
+    mh = re.search(r"\bdata-deck-height\s*=\s*['\"]([0-9]+)['\"]", raw, re.I)
+    if mw and mh:
+        width, height = int(mw.group(1)), int(mh.group(1))
+        if width > 0 and height > 0:
+            return width, height
+    return 1920, 1080
 
 
 def main() -> int:
@@ -54,6 +70,7 @@ def main() -> int:
         return 2
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    canvas_w, canvas_h = _canvas_dimensions(html)
 
     try:
         from playwright.sync_api import sync_playwright
@@ -118,7 +135,7 @@ def main() -> int:
     report = {}
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        ctx = browser.new_context(viewport={"width": 1920, "height": 1080})
+        ctx = browser.new_context(viewport={"width": canvas_w, "height": canvas_h})
         if not args.allow_remote:
             # F-311: deck 资产应当本地化(R-SELF-CONTAINED);外部请求只会拖慢/挂死
             # (远程 iframe 让 load 与 fonts.ready 永不触发)。默认全拦,要看远程内容

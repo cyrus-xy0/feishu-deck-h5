@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://feishu-deck-h5.local/schema/template-pack.schema.json",
+  "title": "feishu-deck-h5 template design-system pack",
+  "description": "Versioned template contract. A draft may be partial; every supported semantic role is still explicit in layout_coverage.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "template_id",
+    "version",
+    "status",
+    "source",
+    "canvas",
+    "tokens",
+    "brand",
+    "layouts",
+    "layout_coverage",
+    "policies",
+    "extraction_report"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "template_id": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$" },
+    "status": { "type": "string", "enum": ["draft", "approved", "retired"] },
+    "source": {
+      "type": "object",
+      "required": ["path", "filename", "sha256", "slide_count", "master_count", "layout_count", "extracted_at"],
+      "additionalProperties": true
+    },
+    "canvas": { "$ref": "template-dossier.schema.json#/$defs/canvas" },
+    "tokens": {
+      "type": "object",
+      "required": ["colors", "fonts", "typography", "theme_contexts", "source_policy"],
+      "properties": {
+        "colors": { "type": "array", "items": { "type": "object" } },
+        "fonts": { "type": "array", "items": { "type": "object" } },
+        "typography": { "type": "array", "items": { "type": "object" } },
+        "theme_contexts": { "type": "array", "items": { "type": "object" } },
+        "source_policy": { "type": "string", "const": "exact-ooxml-facts-no-normalization" }
+      },
+      "additionalProperties": false
+    },
+    "brand": {
+      "type": "object",
+      "required": ["lock_status", "fixed_element_candidates", "asset_ids", "policy"],
+      "properties": {
+        "lock_status": { "type": "string", "enum": ["pending_confirmation", "locked"] },
+        "fixed_element_candidates": { "type": "array", "items": { "type": "object" } },
+        "asset_ids": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "policy": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "layouts": {
+      "type": "object",
+      "propertyNames": { "pattern": "^role-(cover|raw|section|quote|agenda|end)$" },
+      "additionalProperties": { "$ref": "#/$defs/layout" }
+    },
+    "layout_coverage": {
+      "type": "object",
+      "required": ["cover", "raw", "section", "quote", "agenda", "end"],
+      "properties": {
+        "cover": { "$ref": "#/$defs/coverage" },
+        "raw": { "$ref": "#/$defs/coverage" },
+        "section": { "$ref": "#/$defs/coverage" },
+        "quote": { "$ref": "#/$defs/coverage" },
+        "agenda": { "$ref": "#/$defs/coverage" },
+        "end": { "$ref": "#/$defs/coverage" }
+      },
+      "additionalProperties": false
+    },
+    "policies": {
+      "type": "object",
+      "required": [
+        "typography_mode",
+        "allow_automatic_font_size_change",
+        "allow_automatic_font_substitution",
+        "overflow_resolution_order",
+        "preserve_fixed_elements",
+        "preserve_logo_alignment",
+        "missing_layout_behavior",
+        "whole_page_screenshots",
+        "approval_required_before_activation"
+      ],
+      "properties": {
+        "typography_mode": { "type": "string", "const": "strict" },
+        "allow_automatic_font_size_change": { "type": "boolean", "const": false },
+        "allow_automatic_font_substitution": { "type": "boolean", "const": false },
+        "overflow_resolution_order": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "preserve_fixed_elements": { "type": "boolean", "const": true },
+        "preserve_logo_alignment": { "type": "boolean", "const": true },
+        "missing_layout_behavior": { "type": "string", "const": "block" },
+        "whole_page_screenshots": { "type": "string", "const": "forbidden" },
+        "approval_required_before_activation": { "type": "boolean", "const": true }
+      },
+      "additionalProperties": false
+    },
+    "extraction_report": {
+      "type": "object",
+      "required": ["generated_at", "role_candidates", "missing_roles", "derived_roles", "warnings", "needs_confirmation"],
+      "properties": {
+        "generated_at": { "type": "string" },
+        "role_candidates": { "$ref": "template-dossier.schema.json#/$defs/roleMapCandidates" },
+        "missing_roles": { "type": "array", "items": { "$ref": "#/$defs/role" }, "uniqueItems": true },
+        "derived_roles": { "type": "array", "items": { "$ref": "#/$defs/role" }, "uniqueItems": true },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "needs_confirmation": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "role": {
+      "type": "string",
+      "enum": ["cover", "raw", "section", "quote", "agenda", "end"]
+    },
+    "safeArea": {
+      "type": "object",
+      "required": ["status", "geometry_emu", "geometry", "source", "confidence"],
+      "properties": {
+        "status": { "type": "string", "enum": ["candidate", "confirmed", "unknown"] },
+        "geometry_emu": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["x", "y", "w", "h"],
+              "properties": {
+                "x": { "type": "integer" },
+                "y": { "type": "integer" },
+                "w": { "type": "integer", "minimum": 0 },
+                "h": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        },
+        "geometry": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["x", "y", "w", "h"],
+              "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "w": { "type": "number" },
+                "h": { "type": "number" }
+              },
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        },
+        "source": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "layout": {
+      "type": "object",
+      "required": ["semantic_role", "fixed_elements", "slots", "safe_area", "source", "status", "confidence"],
+      "properties": {
+        "semantic_role": { "$ref": "#/$defs/role" },
+        "fixed_elements": { "type": "array", "items": { "type": "object" } },
+        "slots": { "type": "array", "items": { "type": "object" } },
+        "safe_area": { "$ref": "#/$defs/safeArea" },
+        "background": { "type": ["object", "null"] },
+        "theme_context": { "type": "object" },
+        "needs_confirmation": { "type": "array", "items": { "type": "string" } },
+        "source": { "type": "object" },
+        "status": { "type": "string", "enum": ["native", "derived"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["status", "source", "confidence"],
+      "properties": {
+        "status": { "type": "string", "enum": ["native", "derived", "alias", "unsupported"] },
+        "layout_id": { "type": "string", "pattern": "^role-(cover|raw|section|quote|agenda|end)$" },
+        "alias_to": { "$ref": "#/$defs/role" },
+        "derived_from": { "$ref": "#/$defs/role" },
+        "source": { "type": "object" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "enum": ["native", "derived"] } } },
+          "then": { "required": ["layout_id"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "alias" } } },
+          "then": { "required": ["alias_to"] }
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

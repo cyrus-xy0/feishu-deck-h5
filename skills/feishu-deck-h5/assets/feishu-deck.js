@@ -1,6 +1,7 @@
 /* ============================================================================
    feishu-deck-h5 · runtime
-   - Scale-to-fit each .slide to its frame (1920×1080 design canvas)
+   - Scale-to-fit each .slide to its frame (deck-defined design canvas;
+     legacy default 1920×1080)
    - Auto-detect mobile / narrow viewport → scroll mode (vertical card stack)
    - Desktop default → present mode (one slide per viewport, ←/→/space, wheel)
    - Keyboard: ←/→/PgUp/PgDn/Space/Home/End  ·  quick page-number jump  ·  URL hash sync (#3)
@@ -13,8 +14,8 @@
 (function () {
   'use strict';
 
-  const DESIGN_W = 1920;
-  const DESIGN_H = 1080;
+  const DEFAULT_DESIGN_W = 1920;
+  const DEFAULT_DESIGN_H = 1080;
   const MOBILE_BREAKPOINT = 900;
   const MODE_KEY  = 'fs-deck-mode';
   const IDLE_MS   = 2500;
@@ -22,6 +23,24 @@
   const FS_REFIT_DEBOUNCE = 80;
 
   let activeController = null;       // tracks the current init's AbortController
+
+  // Single runtime source for the deck-wide coordinate plane. New renders
+  // stamp data-deck-width/height and matching CSS vars on `.deck`; legacy HTML
+  // has neither and therefore keeps the historical 1920×1080 behaviour.
+  function deckSize(node) {
+    const root = node && node.closest ? node.closest('.deck') : document.querySelector('.deck');
+    let width = root ? parseFloat(root.dataset.deckWidth || '') : NaN;
+    let height = root ? parseFloat(root.dataset.deckHeight || '') : NaN;
+    if (root && (!(width > 0) || !(height > 0))) {
+      const cs = getComputedStyle(root);
+      if (!(width > 0)) width = parseFloat(cs.getPropertyValue('--fs-deck-width'));
+      if (!(height > 0)) height = parseFloat(cs.getPropertyValue('--fs-deck-height'));
+    }
+    return {
+      width: width > 0 ? width : DEFAULT_DESIGN_W,
+      height: height > 0 ? height : DEFAULT_DESIGN_H,
+    };
+  }
 
   // ============================================================
   // Runtime auto-balance (2026-05-30): after scale-to-fit, geometrically fix
@@ -203,7 +222,8 @@
   //      validate.py / visual-audit.js R-VIS-CANVAS-CENTER detector.
   const _ccMeasure = (slide) => {
     const sr = slide.getBoundingClientRect();
-    const scale = sr.height / 1080;
+    const canvasH = deckSize(slide).height;
+    const scale = sr.height / canvasH;
     if (scale < 0.01) return null;
     const top0 = sr.top;
     const header = slide.querySelector(':scope > .header');
@@ -251,8 +271,9 @@
       any = true;
     });
     if (!any) return null;
-    const canvasMid = (hb + 1080) / 2;
-    return { offset: canvasMid - (t + b) / 2, hb, ccTop: t, ccBot: b, contentH: b - t, bandH: 1080 - hb };
+    const canvasMid = (hb + canvasH) / 2;
+    return { offset: canvasMid - (t + b) / 2, hb, ccTop: t, ccBot: b,
+      contentH: b - t, bandH: canvasH - hb, canvasH };
   };
   function _ccApply(slide) {
     const layout = slide.getAttribute('data-layout') || '';
@@ -304,7 +325,7 @@
       const r = t.getBoundingClientRect(); return Math.abs(r.top - y) > 1 || Math.abs(r.left - x) > 1;
     });
     const ok = after && Math.abs(after.offset) < Math.abs(m.offset) - 2 &&
-               after.ccTop > m.hb - 6 && after.ccBot < 1080 - 4 && !titleMoved;
+               after.ccTop > m.hb - 6 && after.ccBot < after.canvasH - 4 && !titleMoved;
     if (ok) slide.setAttribute('data-fs-canvascentered', '');
     else { el.style.top = pTop; el.style.bottom = pBot; }           // measure-or-revert
   }
@@ -345,7 +366,7 @@
     if (HERO_AB.has(layout) || slide.hasAttribute('data-allow-imbalance')) return Promise.resolve();
     const frames = _ccImageFrames(slide);
     if (!frames.length) return Promise.resolve();
-    const sc = (slide.getBoundingClientRect().height / 1080) || 1;
+    const sc = (slide.getBoundingClientRect().height / deckSize(slide).height) || 1;
     return Promise.all(frames.map(({ el, url }) => new Promise((resolve) => {
       const r = el.getBoundingClientRect();
       const frameW = r.width / sc, frameH = r.height / sc;
@@ -392,12 +413,13 @@
   // fonts.ready because a late font swap can rewrap the title. Idempotent and
   // write-only-on-change, so re-running never invalidates applied fixes.
   function setBandAnchor(slide) {
-    if (!slide) return;
+    if (!slide || slide.hasAttribute('data-template-id')) return;
     const header = slide.querySelector(':scope > .header');
     if (!header || !header.getClientRects().length) return;
     const sr = slide.getBoundingClientRect();
     if (sr.height < 30) return;                           // not laid out
-    const hb = (header.getBoundingClientRect().bottom - sr.top) / (sr.height / 1080);
+    const hb = (header.getBoundingClientRect().bottom - sr.top)
+      / (sr.height / deckSize(slide).height);
     if (!(hb > 40 && hb < 420)) return;                   // degenerate/hero header → keep fallback
     const v = Math.round(hb) + 'px';
     if (slide.style.getPropertyValue('--fs-band-bottom') !== v) {
@@ -406,6 +428,11 @@
   }
   function maybeBalance(slide) {
     if (!slide || slide.hasAttribute('data-fs-balanced')) return;
+    // Template-bound pages use source-authored slot geometry and typography.
+    // Any runtime balance/centering pass would silently rewrite those approved
+    // coordinates, so template mode is an explicit hard stop before we tag or
+    // mutate the slide in any way.
+    if (slide.hasAttribute('data-template-id')) return;
     const deck = slide.closest('.deck');
     if (deck && deck.hasAttribute('data-no-autobalance')) return;
     // In present mode frames are stacked at inset:0, but content-visibility:auto
@@ -598,6 +625,18 @@
 
     // ---- Set up frames + reveal-animation child indices ----
     const frames = Array.from(deck.querySelectorAll('.slide-frame'));
+    // Audit-only startup scope. run-audits.py injects __AUDIT_SCOPE__ BEFORE
+    // this runtime executes; normal decks never define it and keep the exact
+    // all-frame initialization path. During a scoped audit, limit the expensive
+    // auto-balance / bleed promotion / font-ready header measurement passes to
+    // the selected 1-based frames. Navigation + observers still own ALL frames,
+    // so runtime behaviour remains complete if an audit later activates a frame.
+    const auditScope = window.top === window && Array.isArray(window.__AUDIT_SCOPE__)
+      ? new Set(window.__AUDIT_SCOPE__.filter((n) => Number.isInteger(n) && n >= 1))
+      : null;
+    const auditInitFrames = auditScope
+      ? frames.filter((_, i) => auditScope.has(i + 1))
+      : frames;
     frames.forEach((frame, i) => {
       frame.dataset.idx = String(i);
       const slide = frame.querySelector('.slide');
@@ -810,14 +849,15 @@
     // starts the current slide's video.
     const mediaState = frames.map((f) => f.classList.contains('is-current'));
     frames.forEach((f, i) => syncFrameMedia(f, mediaState[i]));
-    // Initial auto-balance pass: runs maybeBalance on EVERY frame (both modes).
+    // Initial auto-balance pass: every frame normally; audit-selected frames
+    // only when run-audits injected window.__AUDIT_SCOPE__ before startup.
     // In present mode all frames are stacked at inset:0, so this pass already
     // balances every frame whose content content-visibility:auto laid out —
     // measured 2026-06-10: most non-current frames, not just the current one.
     // The handful content-visibility skipped (probe height 0) stay untagged and
     // are balanced on first enter by the observer below (a retry, not the
     // primary path).
-    requestAnimationFrame(() => { if (signal.aborted) return; frames.forEach((f) => { const s = f.querySelector('.slide'); maybeBalance(s); try { markBleedPanels(s); } catch (e) { /* never break the deck over layout */ } }); });
+    requestAnimationFrame(() => { if (signal.aborted) return; auditInitFrames.forEach((f) => { const s = f.querySelector('.slide'); maybeBalance(s); try { markBleedPanels(s); } catch (e) { /* never break the deck over layout */ } }); });
     // F-301 · re-measure the band anchor once webfonts settle: a late font swap
     // can rewrap the title/subtitle and change the header bbox bottom. Cheap,
     // idempotent, and skipped for opted-out decks (same data-no-autobalance
@@ -826,7 +866,7 @@
     if (document.fonts && document.fonts.ready && !deck.hasAttribute('data-no-autobalance')) {
       document.fonts.ready.then(() => {
         if (signal.aborted) return;
-        frames.forEach((f) => { try { setBandAnchor(f.querySelector('.slide')); } catch (e) { /* best-effort */ } });
+        auditInitFrames.forEach((f) => { try { setBandAnchor(f.querySelector('.slide')); } catch (e) { /* best-effort */ } });
       });
     }
     const mediaObserver = new MutationObserver((muts) => {
@@ -980,7 +1020,8 @@
     //                   wordmark / corner content. User reported "显示不全".
     // Conclusion: bars are the correct visual behavior; 16:9-content-on-16:10-
     // viewport can't be both "no bars" AND "no clipping". Keep contain.
-    const scale = Math.min(w / DESIGN_W, h / DESIGN_H);
+    const design = deckSize(frame);
+    const scale = Math.min(w / design.width, h / design.height);
     slide.style.setProperty('--fs-scale', String(scale));
   }
 
@@ -1334,11 +1375,14 @@
       c.querySelectorAll('iframe, video').forEach((e) => {
         const ph = document.createElement('div'); ph.className = 'pv-embed'; e.replaceWith(ph);
       });
-      c.style.cssText = 'position:absolute;top:0;left:0;margin:0;width:1920px;height:1080px;' +
+      const design = deckSize(slide);
+      box.style.aspectRatio = design.width + ' / ' + design.height;
+      c.style.cssText = 'position:absolute;top:0;left:0;margin:0;width:' + design.width
+                        + 'px;height:' + design.height + 'px;' +
                         'transform-origin:top left;pointer-events:none;';
       box.appendChild(c);
       const w = box.clientWidth || 480;
-      c.style.transform = 'scale(' + (w / 1920) + ')';
+      c.style.transform = 'scale(' + (w / design.width) + ')';
     }
 
     function renderPV() {
@@ -1368,6 +1412,10 @@
     function buildPV() {
       pv = document.createElement('div');
       pv.className = 'fs-presenter';
+      const design = deckSize(deck);
+      // Presenter lives outside `.deck`, so explicitly bridge the deck ratio to
+      // both current and empty-next preview boxes.
+      pv.style.setProperty('--fs-deck-aspect', design.width + ' / ' + design.height);
       pv.innerHTML =
         '<div class="pv-grid">' +
           '<div class="pv-col"><div class="pv-lab">当前</div><div class="pv-cur pv-box"></div></div>' +
@@ -1654,6 +1702,11 @@
     const frames = Array.from(deck.querySelectorAll('.slide-frame'));
     if (!frames.length) return;
     if (document.querySelector('.fs-mobile-back')) return;  // idempotent
+    const deckCss = getComputedStyle(deck);
+    const designW = parseFloat(deck.dataset.deckWidth
+      || deckCss.getPropertyValue('--fs-deck-width')) || 1920;
+    const designH = parseFloat(deck.dataset.deckHeight
+      || deckCss.getPropertyValue('--fs-deck-height')) || 1080;
 
     const backBtn = document.createElement('div');
     backBtn.className = 'fs-mobile-back';
@@ -1688,7 +1741,7 @@
         requestAnimationFrame(() => {
           const w = frame.clientWidth, h = frame.clientHeight;
           if (!w || !h) return;
-          const scale = Math.min(w / 1920, h / 1080);
+          const scale = Math.min(w / designW, h / designH);
           slide.style.setProperty('--fs-scale', String(scale));
         });
       });

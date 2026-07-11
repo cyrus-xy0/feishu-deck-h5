@@ -95,12 +95,14 @@ because there is nothing to measure):
 - **Focus** — is there a clear first-read, or is everything flat?
 
 **How to apply — scope the look to the work (F-335):** for an
-INTERMEDIATE scoped edit, render `--iter` and eyeball ONLY the changed
+`INTERMEDIATE_EDIT` scoped edit, render `--iter` and eyeball ONLY the changed
 page(s) (auto-scope already re-shot just those — don't re-walk all N
-pages). For a DELIVERY checkpoint (the deck crosses the agent → user
-boundary, or before publish), **look at EVERY page's screenshot** and
+pages). For a `LOCAL_HANDOFF`, `PRESENTATION_CHECKPOINT`, or `LIBRARY_INGEST`
+checkpoint, **look at EVERY page's screenshot** and
 walk it through 「标题位 / 饱满度 / 一致性 / 焦点」 before you trust the
-green light. If it fails, fix and re-render. In multi-agent runs, make
+green light. `MAGIC_PUBLISH` uses the publisher integrity gate and does not
+implicitly add another whole-deck visual pass. If a required gate fails, fix and
+re-render. In multi-agent runs, make
 "post-render visual self-review (changed page(s) intermediate, whole deck
 at delivery)" a **default stage**, not an afterthought. This complements the precise-measurement gate (computed
 `font-size` px, see `check-only` / `validator-rules`): font sizes you
@@ -115,7 +117,7 @@ verify the artifact form. Pick exactly **one** valid shape for the destination:
 
 | Shape | When | What goes back |
 |---|---|---|
-| **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. Use for customer preview, IM forwarding, and single-file viewing. | `python3 assets/inline-assets.py runs/<ts>/output/index.html --out runs/<ts>/output/lark-<customer>-<date>.html` (or `python3 deck-json/render-deck.py runs/<ts>/output --inline`) → ship that per-run inline file. Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. **Do NOT use `build.sh --inline` here — that rebuilds the skill's bundled SAMPLE deck, not the user's run.** Not a slide-library ingest format. |
+| **A · inline single-file HTML** *(default for "show me / 给客户看 / IM 转发 / 链接预览")* | The user just wants to OPEN and SEE the deck. Use for customer preview, IM forwarding, and single-file viewing. | `python3 assets/inline-assets.py runs/<ts>/output/index.html --out runs/<ts>/output/lark-<customer>-<date>.html` (or `python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output --inline`) → ship that per-run inline file. Single self-contained file, base64-inlined CSS/JS/images, ~360 KB. Double-click anywhere, works offline. **Do NOT use `build.sh --inline` here — that rebuilds the skill's bundled SAMPLE deck, not the user's run.** Not a slide-library ingest format. |
 | **B · zipped output folder** *(when the user needs to edit text)* | The user (or their downstream customer / sales / 大客户经理) needs to change copy without Claude in the loop. | `bash assets/package-deliverable.sh runs/<ts>/output/` → ship the resulting `deck-editable.zip`. Includes `index.html` + assets + optional `deck.json` + `assets-manifest.yaml` + `README.txt`. Recipient unzips, opens `index.html`, presses **E** for the built-in visual editor, edits text in-browser, saves with ⌘/Ctrl+S. |
 | **C · hosted URL** *(when the user already deploys to Pages / a CDN)* | Deck lives at a stable web URL. | Ship the URL string. No file attachment. |
 | **D · `deck.zip` for slide-library ingest** *(required for "入库素材库 / 上传素材网站 / 网页入库 / slide library ingest")* | The destination is the material library web ingest pipeline. | `bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>` → upload `runs/<ts>/output/deck.zip`. This is the only standard upload format for the material library. |
@@ -374,7 +376,7 @@ browser (in-browser editor is zero-dep client-side JS).
 If the recipient is "客户/老板看一眼就行" and editing is not in scope,
 ship just the inlined `index.html` (no zip). Run
 `python3 assets/inline-assets.py runs/<ts>/output/index.html --out runs/<ts>/output/lark-<customer>-<date>.html`
-(or `python3 deck-json/render-deck.py runs/<ts>/output --inline`) to produce a
+(or `python3 deck-json/render-deck.py runs/<ts>/output/deck.json runs/<ts>/output --inline`) to produce a
 fully self-contained single file from **the user's run**. Do NOT use
 `build.sh --inline` — that rebuilds the skill's bundled SAMPLE deck.
 

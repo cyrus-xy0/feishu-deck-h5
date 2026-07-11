@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -19,6 +20,54 @@ SAMPLE_HTML = REPO / "examples" / "sample-deck.html"
 
 
 class UploadParserContractTest(unittest.TestCase):
+    def test_external_html_cannot_materialize_parent_secret(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="upload-parser-html-boundary-") as td:
+            root = Path(td)
+            source_dir = root / "upload"
+            source_dir.mkdir()
+            secret = root / "secret.js"
+            secret.write_text("do-not-copy", encoding="utf-8")
+            source = source_dir / "source.html"
+            source.write_text(
+                '<div class="deck"></div><script src="../secret.js"></script>',
+                encoding="utf-8",
+            )
+            out = root / "out"
+            proc = subprocess.run(
+                [sys.executable, str(PARSER), str(source), "--output-dir", str(out)],
+                cwd=REPO,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+            dossier = json.loads((out / "source-dossier.json").read_text(encoding="utf-8"))
+            item = dossier["source_inventory"][0]
+            self.assertEqual(item["html_assets_materialized"]["scripts"], ["../secret.js"])
+            self.assertFalse(any(path.name == "secret.js" for path in (out / "assets").rglob("*")))
+            self.assertTrue(any("asset not found" in warning for warning in item["warnings"]))
+
+    def test_pptx_backend_missing_writes_dossier_but_fails_request(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="upload-parser-pptx-missing-") as td:
+            root = Path(td)
+            source = root / "source.pptx"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("[Content_Types].xml", "<Types/>")
+            out = root / "out"
+            env = os.environ.copy()
+            env["FS_DECK_PPTX_SKILL"] = str(root / "missing-pptx-to-deck")
+            proc = subprocess.run(
+                [sys.executable, str(PARSER), str(source), "--output-dir", str(out)],
+                cwd=REPO,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 3, proc.stderr or proc.stdout)
+            dossier = json.loads((out / "source-dossier.json").read_text(encoding="utf-8"))
+            conversion = dossier["source_inventory"][0]["canvas_conversion"]
+            self.assertFalse(conversion["ok"])
+            self.assertIn("venv python not found", " ".join(conversion["warnings"]))
+
     def test_html_dossier_validates_and_preserves_dependencies(self) -> None:
         with tempfile.TemporaryDirectory(prefix="upload-parser-html-") as td:
             out = Path(td)

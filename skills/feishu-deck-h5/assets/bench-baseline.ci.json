@@ -1,0 +1,36 @@
+{
+  "tool": "bench-render PERF-0",
+  "baseline_kind": "conservative-ci-budget-v1",
+  "deck": "deck-json/tests/fixtures/golden-gate/deck.json",
+  "slides": 3,
+  "runs": 5,
+  "platform": "linux",
+  "runner": "github-actions-ubuntu-latest",
+  "note": "Deterministic gross-regression budget. Replace medians with a stable successful CI artifact after runner history is available.",
+  "segments": {
+    "chromium_coldstart": {
+      "median_ms": 1200.0
+    },
+    "render_advisory": {
+      "median_ms": 8000.0
+    },
+    "validate_static": {
+      "median_ms": 800.0
+    },
+    "validate_visual_json": {
+      "median_ms": 5000.0
+    },
+    "validate_visual_scope_1": {
+      "median_ms": 4500.0
+    },
+    "validate_visual_nocache": {
+      "median_ms": 6500.0
+    },
+    "check_distribution": {
+      "median_ms": 3500.0
+    },
+    "deck_cli_set": {
+      "median_ms": 1000.0
+    }
+  }
+}

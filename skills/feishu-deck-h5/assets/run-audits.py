@@ -16,12 +16,14 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 AUDITS_JS = HERE / "audits.js"
+AUDIT_SHOOT_PAGES_ENV = "FEISHU_DECK_AUDIT_SHOOT_PAGES"
 
 
 def parse_scope(spec):
@@ -59,6 +61,29 @@ def parse_scope(spec):
                     "(0 / negative not allowed)")
             out.append(n)
     return sorted(set(out)) or None
+
+
+def _requested_screenshot_pages(explicit=None):
+    """Normalize optional screenshot pages without changing audit semantics.
+
+    validate.py does not need another CLI surface: render-deck passes the scoped
+    pages through a private environment contract, and direct in-process callers
+    may use the explicit argument. Invalid environment input is ignored because
+    screenshot archival is best-effort and must never turn a valid audit red.
+    """
+    if explicit is None:
+        spec = os.environ.get(AUDIT_SHOOT_PAGES_ENV, "").strip()
+        if not spec:
+            return []
+        try:
+            return parse_scope(spec) or []
+        except (TypeError, ValueError):
+            return []
+    try:
+        pages = sorted({int(n) for n in explicit if int(n) >= 1})
+    except (TypeError, ValueError):
+        return []
+    return pages
 
 
 def _inline_framework_css(page, base_dir):
@@ -152,6 +177,36 @@ def _load_deck_json(base_dir):
         return json.loads(dj.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — unreadable sidecar → treat as absent
         return None
+
+
+def _canvas_dimensions(raw_html, base_dir=None):
+    """Discover the design viewport without requiring a deck.json sidecar.
+
+    Renderer output stamps dimensions on the deck root, which survives inline /
+    portable packaging.  The sibling deck.json is a fallback for intermediate
+    artifacts; old HTML without either signal keeps the 1920x1080 contract.
+    """
+    def _attr(name):
+        m = re.search(
+            rf"\b{name}\s*=\s*['\"]([0-9]+)['\"]",
+            raw_html or "", flags=re.IGNORECASE)
+        return int(m.group(1)) if m else None
+
+    width = _attr("data-deck-width")
+    height = _attr("data-deck-height")
+    if width and height:
+        return width, height
+    if base_dir is not None:
+        deck_json = _load_deck_json(Path(base_dir))
+        canvas = ((deck_json or {}).get("deck") or {}).get("canvas") or {}
+        try:
+            width = int(canvas.get("width"))
+            height = int(canvas.get("height"))
+        except (TypeError, ValueError):
+            width = height = 0
+        if width > 0 and height > 0:
+            return width, height
+    return 1920, 1080
 
 
 # ===========================================================================
@@ -1023,8 +1078,65 @@ class EngineUnavailable(Exception):
     defect. validate.py catches this to degrade / hard-prompt as appropriate."""
 
 
+def _capture_scoped_screenshots(page, html_path, pages):
+    """Capture several scoped pages on the ALREADY settled audit page.
+
+    No browser/context/page is created here. Findings are evaluated before this
+    helper is called, so navigation for pixels cannot alter the finding set. The
+    one audit lifecycle therefore pays one Chromium cold start for audit + all
+    requested `.shoot-pN.png` files.
+    """
+    results = []
+    try:
+        total = page.locator(".slide-frame").count()
+    except Exception:
+        total = 0
+    for n in pages:
+        out = Path(html_path).parent / f".shoot-p{n}.png"
+        if n < 1 or n > total:
+            results.append({"page": n, "path": str(out), "ok": False,
+                            "error": f"page out of range 1..{total}"})
+            continue
+        try:
+            # Use the real runtime hash-navigation path first. It updates
+            # is-current, scale, media and balance exactly like presentation.
+            page.evaluate("(n) => { window.location.hash = '#' + n; }", n)
+            try:
+                page.wait_for_function(
+                    "(n) => { const f = document.querySelectorAll('.slide-frame')[n - 1]; "
+                    "return !!f && f.classList.contains('is-current'); }",
+                    arg=n, timeout=2_500)
+            except Exception:
+                # Plain/static fixtures may not ship the runtime. Keep the
+                # screenshot helper useful without changing the already-finished
+                # audit result: directly expose only the requested frame.
+                page.evaluate(
+                    "(n) => { const fs = [...document.querySelectorAll('.slide-frame')]; "
+                    "fs.forEach((f, i) => f.classList.toggle('is-current', i === n - 1)); }",
+                    n)
+            page.wait_for_timeout(250)
+            try:
+                # Entrance animations are finite; ignore intentional ambient
+                # infinite loops so one decorative pulse cannot add 4s per page.
+                page.wait_for_function(
+                    "() => { const a = document.getAnimations ? document.getAnimations() : []; "
+                    "return a.every(x => { const t = x.effect && x.effect.getTiming "
+                    "? x.effect.getTiming() : null; return (t && t.iterations === Infinity) "
+                    "|| x.playState !== 'running'; }); }",
+                    timeout=4_000)
+            except Exception:
+                pass
+            out.parent.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(out), timeout=10_000)
+            results.append({"page": n, "path": str(out), "ok": out.is_file()})
+        except Exception as exc:  # screenshot is best-effort, audit still authoritative
+            results.append({"page": n, "path": str(out), "ok": False,
+                            "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+    return results
+
+
 def run_unified_engine(html_path, scope=None, *, settle_ms=350,
-                       dom_rules=True, extra_evals=None):
+                       dom_rules=True, extra_evals=None, screenshot_pages=None):
     """Run the unified engine against ONE rendered deck and return the merged
     result dict {engine, version, rules:[...], scope, slides_total, findings:[...]}.
 
@@ -1060,12 +1172,14 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
     the render/eval fails — the caller decides whether that is fatal (run-audits
     CLI: hard exit 2) or a degrade-to-byte-only advisory (validate.py)."""
     html_path = Path(html_path)
+    requested_screenshots = _requested_screenshot_pages(screenshot_pages)
     if not AUDITS_JS.is_file():
         raise EngineUnavailable(f"规则源缺失 {AUDITS_JS}")
 
     # ── runner 层源字节检查读【原始 index.html 字节】(浏览器自动闭合标签会抹掉截断信号,
     #    DOM 看不到 —— R-DOC-INTEGRITY 等【必须】读字节,见上方函数注释 / UNIFY-VALIDATE §0)。
     raw_html = html_path.read_text(encoding="utf-8", errors="replace")
+    canvas_width, canvas_height = _canvas_dimensions(raw_html, html_path.parent)
     runner_findings = runner_source_byte_findings(raw_html, html_path.parent)
     runner_rules = []
     for f in runner_findings:
@@ -1096,6 +1210,7 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             "slides_total": None,
             "findings": all_findings,
             "dom_rules": False,
+            "canvas": {"width": canvas_width, "height": canvas_height},
         }
 
     try:
@@ -1110,11 +1225,25 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
     audits_src = AUDITS_JS.read_text(encoding="utf-8")
     url = html_path.resolve().as_uri()
     _extra_results = {}    # F-290 · results of any caller-supplied extra page evals
+    _screenshot_results = []
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            context = browser.new_context(
+                viewport={"width": canvas_width, "height": canvas_height})
             page = context.new_page()
+            # Make the render scope available before ANY page script runs.  The
+            # framework initializes during DOMContentLoaded, so setting this
+            # after page.goto() is too late for scope-aware startup work and
+            # forces a scoped audit to pay whole-deck initialization costs.
+            # add_init_script runs for the top document and any child frames;
+            # audits.js still owns rule scoping, while the runner uses the same
+            # value below to settle only images in the selected slide frames.
+            page.add_init_script(
+                "window.__AUDIT_SCOPE__ = "
+                + json.dumps(list(scope) if scope else None)
+                + ";"
+            )
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
             # Bounded settle (B/2026-06-06): an embedded live demo can keep the
             # 'load' event pending ~30s, taxing every audit run. Prefer full load
@@ -1133,17 +1262,28 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
                 page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000)
             except Exception:
                 pass
-            # Await <img> decode (bounded). A still-loading <img> contributes its
+            # Await scoped <img> decode (bounded). A still-loading <img> contributes its
             # intrinsic (natural) height to layout, so a `height:100%` image inside
             # an overflow:hidden media box can transiently measure FAR taller than
             # its container → false R-VIS-CARD-OVERFLOW (content-clip). Decoding makes
-            # every image layout-definite before geometry is measured. `img.complete`
+            # each audited image layout-definite before geometry is measured. A
+            # scoped edit must not decode images on the other N-1 pages: those
+            # frames are not evaluated by per-slide rules, while deck-level
+            # source/static rules continue to run on the complete HTML below.
+            # `img.complete`
             # short-circuits the already-loaded common case to a no-op (zero baseline
             # drift); the 2s race caps a slow/broken asset so it can't hang the gate.
             try:
                 page.evaluate(
                     "() => Promise.race(["
-                    "Promise.all([...document.images].map(i => "
+                    "Promise.all((() => {"
+                    "const scope = Array.isArray(window.__AUDIT_SCOPE__) "
+                    "? new Set(window.__AUDIT_SCOPE__) : null;"
+                    "if (!scope) return [...document.images];"
+                    "return [...document.querySelectorAll('.slide-frame')]"
+                    ".flatMap((f, idx) => scope.has(idx + 1) "
+                    "? [...f.querySelectorAll('img')] : []);"
+                    "})().map(i => "
                     "(i.complete && i.naturalWidth) ? Promise.resolve() "
                     ": (i.decode ? i.decode().catch(() => {}) : Promise.resolve()))),"
                     "new Promise(r => setTimeout(r, 2000))])"
@@ -1161,7 +1301,7 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             #    type="text/plain"> ── R29-32 要读 JS 源判 requestFullscreen 等
             #    needle;外链脚本已执行(DOM needle 是真元素),这里只补源可读(不二次执行)。
             _inline_framework_js(page, html_path.parent)
-            # ── 把页面切到 present 模式 ── 每帧拿整块 1920×1080 画布,几何规则(R-OVERFLOW
+            # ── 把页面切到 present 模式 ── 每帧拿整块 deck 设计画布,几何规则(R-OVERFLOW
             #    /canvas-center 等)才量得准(scroll 模式会误报)。镜像旧 run_visual_audits。
             page.evaluate("""
                 () => {
@@ -1189,8 +1329,15 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             # (渲染后 data-layout 会伪装借框架 CSS,不可信)。纯文件读,不含规则逻辑。
             deck_json = _load_deck_json(html_path.parent)
             page.evaluate("(dj) => { window.__DECK_JSON__ = dj; }", deck_json)
+            # Reinforce the init-script value for unusual pages that overwrite
+            # globals during startup; normal decks already received it pre-init.
             page.evaluate("(s) => { window.__AUDIT_SCOPE__ = s; }", scope)
             result = page.evaluate(audits_src)
+            # Findings are now frozen. Reuse THIS page/context/browser for every
+            # requested scoped screenshot; navigation below cannot affect them.
+            if requested_screenshots:
+                _screenshot_results = _capture_scoped_screenshots(
+                    page, html_path, requested_screenshots)
             browser.close()
     except EngineUnavailable:
         raise
@@ -1208,8 +1355,11 @@ def run_unified_engine(html_path, scope=None, *, settle_ms=350,
             rules.append(r)
     result["rules"] = rules
     result["dom_rules"] = True
+    result["canvas"] = {"width": canvas_width, "height": canvas_height}
     if _extra_results:
         result["extra"] = _extra_results    # F-290 · folded-in extra evals
+    if requested_screenshots:
+        result["screenshots"] = _screenshot_results
     return result
 
 

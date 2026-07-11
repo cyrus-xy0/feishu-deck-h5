@@ -143,7 +143,7 @@ fi
 group_end
 
 # ─────────────────────────────────────────────────────────────────────────
-# Check 3 · Runtime deps (python3, git, gh, pip3, optionally playwright)
+# Check 3 · Runtime deps (default generate profile requires Playwright)
 # ─────────────────────────────────────────────────────────────────────────
 group_start 3 "Runtime deps"
 if command -v python3 >/dev/null 2>&1; then
@@ -180,7 +180,7 @@ fi
 if python3 -c "import playwright" 2>/dev/null; then
   mark_ok "playwright ......... installed (visual validator R-VIS-* enabled)"
 else
-  mark_skip "playwright ......... not installed (optional; visual audits R-OVERFLOW / R-VIS-TIER / R-VIS-HIER will skip)"
+  mark_fail "playwright ......... missing (required by the default generate profile)"
 fi
 group_end
 

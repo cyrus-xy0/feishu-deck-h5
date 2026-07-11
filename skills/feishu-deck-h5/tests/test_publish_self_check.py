@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import functools
 import importlib.util
+import inspect
 import shutil
 import socketserver
 import threading
@@ -285,14 +286,27 @@ def test_run_self_check_degrades_when_no_browser(tmp_path, monkeypatch):
     # force capture to report 'no browser' -> skipped, ok True (never blocks),
     # report still written, no crash.
     (tmp_path / "index.html").write_text("<html><body></body></html>", encoding="utf-8")
-    monkeypatch.setattr(SC, "capture_side",
-                        lambda *a, **k: {"ok": False, "reason": "playwright not installed",
-                                         "slides": [], "failed_requests": []})
+    unavailable = {"ok": False, "reason": "playwright not installed",
+                   "slides": [], "failed_requests": []}
+    monkeypatch.setattr(SC, "capture_pair",
+                        lambda *a, **k: (dict(unavailable), dict(unavailable)))
     out = tmp_path / "out"
     payload = SC.run_self_check(local=tmp_path, remote=str(tmp_path), out_dir=out, pages=2)
     assert payload["skipped"] is True and payload["ok"] is False
     assert (out / "publish-self-check.json").exists()
     assert (out / "PUBLISH_SELF_CHECK.md").exists()
+
+
+def test_capture_pair_reuses_one_browser_with_parallel_isolated_contexts():
+    """Structural performance contract: one launch, concurrent sides, one
+    independent context per side. This stays deterministic in browser-less CI."""
+    many_src = inspect.getsource(SC._capture_many)
+    side_src = inspect.getsource(SC._capture_side_with_browser)
+    pair_src = inspect.getsource(SC.capture_pair)
+    assert many_src.count("chromium.launch(") == 1
+    assert "asyncio.gather" in many_src
+    assert "browser.new_context" in side_src
+    assert pair_src.count('"collect_requests":') == 2
 
 
 # ------------------------------------------------------- OPTIONAL end-to-end

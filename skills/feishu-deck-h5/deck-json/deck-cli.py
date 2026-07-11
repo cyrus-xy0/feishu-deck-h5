@@ -32,7 +32,8 @@ Write commands (auto-backup + revalidate + rollback on schema fail):
   paste --from SRC --key K [--new-key NK] [POS]
                               copy a slide from another deck.json into this one (deck.json-
                               native lift) — deep-copies the slide object + its input/ &
-                              prototypes/ assets, auto-suffixes key collisions
+                              prototypes/ assets; differing same-path assets get a
+                              content-hash suffix; auto-suffixes key collisions
 
 Render pipeline:
   render OUTPUT_DIR [--inline] [--skip-...]   wrap render-deck.py
@@ -1246,11 +1247,159 @@ def _canvas_element_srcs(slide: dict) -> list[str]:
     return out
 
 
+def _sha256_file(path: Path) -> str:
+    """Content identity for a pasted asset; timestamps are never identity."""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sha256_tree(path: Path) -> str:
+    """Stable identity for a prototype directory (names + file contents).
+
+    Directory mtimes, permissions and traversal order deliberately do not enter
+    the digest.  A prototype collision is isolated as a whole tree so its own
+    relative CSS/image/script links keep working after paste.
+    """
+    h = hashlib.sha256()
+    for child in sorted(path.rglob("*"), key=lambda p: p.relative_to(path).as_posix()):
+        rel = child.relative_to(path).as_posix().encode("utf-8")
+        if child.is_symlink():
+            h.update(b"L\0" + rel + b"\0" + os.readlink(child).encode("utf-8"))
+        elif child.is_dir():
+            h.update(b"D\0" + rel + b"\0")
+        elif child.is_file():
+            h.update(b"F\0" + rel + b"\0")
+            with child.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    h.update(chunk)
+    return h.hexdigest()
+
+
+def _hash_suffixed_relpath(rel: str, digest: str, *, directory: bool = False) -> str:
+    """Return deterministic sibling path `<stem>-<sha12><suffix>`."""
+    p = Path(rel)
+    if directory:
+        name = f"{p.name}-{digest[:12]}"
+    else:
+        suffix = p.suffix
+        stem = p.name[:-len(suffix)] if suffix else p.name
+        name = f"{stem}-{digest[:12]}{suffix}"
+    return (p.parent / name).as_posix()
+
+
+def _copy_file_by_identity(src: Path, dst_root: Path, desired_rel: str) -> str:
+    """Copy one file without ever overwriting different destination content.
+
+    Same bytes reuse the requested path (dedupe), regardless of mtime. Different
+    bytes at the same path land at a deterministic content-hash sibling. Returns
+    the deck-relative path the pasted slide must reference.
+    """
+    desired = contained_dest(dst_root, desired_rel)
+    if desired is None:
+        raise ValueError(f"asset destination escapes deck root: {desired_rel}")
+    digest = _sha256_file(src)
+    if desired.is_file() and _sha256_file(desired) == digest:
+        return desired_rel
+    if not desired.exists():
+        desired.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, desired)
+        return desired_rel
+
+    alternate_rel = _hash_suffixed_relpath(desired_rel, digest)
+    alternate = contained_dest(dst_root, alternate_rel)
+    if alternate is None:  # defensive; suffixing cannot introduce traversal
+        raise ValueError(f"asset destination escapes deck root: {alternate_rel}")
+    if alternate.is_file():
+        if _sha256_file(alternate) != digest:
+            # A full SHA collision is practically impossible, but silently
+            # reusing different bytes would violate the identity guarantee.
+            alternate_rel = _hash_suffixed_relpath(desired_rel, digest, directory=False)
+            raise RuntimeError(f"content-hash asset collision: {alternate_rel}")
+        return alternate_rel
+    if alternate.exists():
+        raise RuntimeError(f"asset collision path is not a file: {alternate}")
+    alternate.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, alternate)
+    return alternate_rel
+
+
+def _copy_tree_by_identity(src: Path, dst_root: Path, desired_rel: str) -> str:
+    """Copy a prototype tree by content identity, isolating collisions."""
+    desired = contained_dest(dst_root, desired_rel)
+    if desired is None:
+        raise ValueError(f"prototype destination escapes deck root: {desired_rel}")
+    digest = _sha256_tree(src)
+    if desired.is_dir() and _sha256_tree(desired) == digest:
+        return desired_rel
+    if not desired.exists():
+        desired.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, desired)
+        return desired_rel
+
+    alternate_rel = _hash_suffixed_relpath(desired_rel, digest, directory=True)
+    alternate = contained_dest(dst_root, alternate_rel)
+    if alternate is None:
+        raise ValueError(f"prototype destination escapes deck root: {alternate_rel}")
+    if alternate.is_dir():
+        if _sha256_tree(alternate) != digest:
+            raise RuntimeError(f"content-hash prototype collision: {alternate_rel}")
+        return alternate_rel
+    if alternate.exists():
+        raise RuntimeError(f"prototype collision path is not a directory: {alternate}")
+    alternate.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, alternate)
+    return alternate_rel
+
+
+def _rewrite_slide_asset_refs(
+        slide: dict, exact: dict[str, str], prefixes: dict[str, str]) -> None:
+    """Rewrite asset refs recursively in THIS pasted slide only.
+
+    Prefix mappings are reserved for prototype directory roots. Exact mappings
+    use path-token boundaries so a bare `logo.png` cannot mutate
+    `partner-logo.png`. Alternation makes replacements simultaneous: a newly
+    hash-suffixed path is never rewritten a second time by an overlapping key.
+    """
+    changed_exact = {old: new for old, new in exact.items() if old != new}
+    changed_prefixes = {old: new for old, new in prefixes.items() if old != new}
+    prefix_re = (re.compile("|".join(re.escape(k) for k in
+                                    sorted(changed_prefixes, key=len, reverse=True)))
+                 if changed_prefixes else None)
+    exact_re = (re.compile(
+        r"(?<![\w./%+~:@-])(?:" +
+        "|".join(re.escape(k) for k in sorted(changed_exact, key=len, reverse=True)) +
+        r")(?![\w./%+~:@-])") if changed_exact else None)
+
+    def rewrite(v):
+        if isinstance(v, str):
+            if prefix_re:
+                v = prefix_re.sub(lambda m: changed_prefixes[m.group(0)], v)
+            if exact_re:
+                v = exact_re.sub(lambda m: changed_exact[m.group(0)], v)
+            return v
+        if isinstance(v, dict):
+            return {k: rewrite(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [rewrite(x) for x in v]
+        return v
+
+    if isinstance(slide.get("custom_css"), str):
+        slide["custom_css"] = rewrite(slide["custom_css"])
+    if "data" in slide:
+        slide["data"] = rewrite(slide["data"])
+
+
 def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     """Copy a pasted slide's referenced LOCAL assets from the source deck dir to
-    the destination deck dir, preserving deck-relative paths: `input/<file>`,
+    the destination deck dir. Deck-relative paths (`input/<file>`,
     `prototypes/<slug>/`, `assets/shared/<pool>/<file>`, and bare/relative
-    deck-local media. Shared-pool refs ARE copied — from the source deck's local
+    deck-local media) are preserved only when absent or byte-identical. A
+    different destination at the same path is never overwritten: source content
+    lands at a deterministic hash-suffixed sibling and this pasted slide's refs
+    are recursively rewritten. Shared-pool refs ARE copied from the source's local
     copy, or (when the source never localized it: linked-mode / hand-assembled
     source) from the framework shared pool `<skill>/assets/shared/`. Only
     skill-relative (`../../../skills/...`), framework `assets/lark-*`, http(s) and
@@ -1279,6 +1428,8 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     if canvas_srcs:
         text = text + "\n" + "\n".join(canvas_srcs)
     copied = {"input": [], "prototypes": [], "shared": [], "local": [], "missing": []}
+    exact_rewrites: dict[str, str] = {}
+    prefix_rewrites: dict[str, str] = {}
     for fname in sorted(set(re.findall(r"input/([^\s\"'<>()\\?#]+)", text))):
         s = src_dir / "input" / fname
         # mutation-2: a `../`-bearing fname from a crafted/foreign source deck must
@@ -1286,10 +1437,11 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
         # returns None for any ref that escapes — skip + flag it.
         d = contained_dest(dst_dir / "input", fname)
         if s.is_file() and d is not None:
-            d.parent.mkdir(parents=True, exist_ok=True)
-            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
-                shutil.copy2(s, d)
-            copied["input"].append(fname)
+            old_rel = f"input/{fname}"
+            new_rel = _copy_file_by_identity(s, dst_dir, old_rel)
+            exact_rewrites[old_rel] = new_rel
+            copied["input"].append(
+                fname if new_rel == old_rel else f"{fname} -> {new_rel[6:]}")
         else:
             copied["missing"].append(f"input/{fname}")
     # prototypes/ refs come in two shapes: a SUBDIR (`prototypes/<slug>/...`, a
@@ -1306,14 +1458,20 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
         if d is None:
             copied["missing"].append(f"prototypes/{seg}")
         elif s.is_dir():
-            if not d.exists():
-                shutil.copytree(s, d)
-            copied["prototypes"].append(seg + "/")
+            old_root = f"prototypes/{seg}"
+            new_root = _copy_tree_by_identity(s, dst_dir, old_root)
+            exact_rewrites[old_root] = new_root
+            prefix_rewrites[old_root + "/"] = new_root + "/"
+            copied["prototypes"].append(
+                seg + "/" if new_root == old_root else
+                f"{seg}/ -> {new_root[len('prototypes/'):]}/")
         elif s.is_file():
-            d.parent.mkdir(parents=True, exist_ok=True)
-            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
-                shutil.copy2(s, d)
-            copied["prototypes"].append(seg)
+            old_rel = f"prototypes/{seg}"
+            new_rel = _copy_file_by_identity(s, dst_dir, old_rel)
+            exact_rewrites[old_rel] = new_rel
+            shown = new_rel.removeprefix("prototypes/")
+            copied["prototypes"].append(
+                seg if new_rel == old_rel else f"{seg} -> {shown}")
         else:
             copied["missing"].append(f"prototypes/{seg}")
     framework_shared = HERE.parent / "assets" / "shared"
@@ -1332,10 +1490,12 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
         # destination assets/shared/ dir via ../.
         d = contained_dest(dst_dir / "assets" / "shared", ref)
         if s.is_file() and d is not None:
-            d.parent.mkdir(parents=True, exist_ok=True)
-            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
-                shutil.copy2(s, d)
-            copied["shared"].append(ref)
+            old_rel = f"assets/shared/{ref}"
+            new_rel = _copy_file_by_identity(s, dst_dir, old_rel)
+            exact_rewrites[old_rel] = new_rel
+            shown = new_rel.removeprefix("assets/shared/")
+            copied["shared"].append(
+                ref if new_rel == old_rel else f"{ref} -> {shown}")
         else:
             copied["missing"].append(f"assets/shared/{ref}")
     # Bare/relative deck-local media refs (scene.png, ./img.jpg, deck-local
@@ -1351,6 +1511,7 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     # the data:-collapse above somehow missed) backtracks O(n²); the bound caps
     # each attempt at 512 chars → O(n·k). No real asset path approaches 512.
     _ref_re = r'''([^\s"'<>()\\?#]{1,512}\.''' + _MEDIA + r''')(?=[\s"'<>()?#]|$)'''
+    seen_local: set[str] = set()
     for m in re.finditer(_ref_re, text, re.I):
         ref = m.group(1)
         low = ref.lower()
@@ -1360,17 +1521,18 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
                 or ref.startswith("../") or "/../" in ref):
             continue  # handled above / framework / external / escapes deck dir
         rel = ref.lstrip("./")
-        if rel in already or rel in copied["local"]:
+        if rel in already or rel in seen_local:
             continue
+        seen_local.add(rel)
         s = src_dir / rel
         if s.is_file():
-            d = dst_dir / rel
-            d.parent.mkdir(parents=True, exist_ok=True)
-            if not d.exists() or s.stat().st_mtime > d.stat().st_mtime:
-                shutil.copy2(s, d)
-            copied["local"].append(rel)
+            new_rel = _copy_file_by_identity(s, dst_dir, rel)
+            exact_rewrites[ref] = new_rel
+            copied["local"].append(
+                rel if new_rel == rel else f"{rel} -> {new_rel}")
         else:
             copied["missing"].append(rel)
+    _rewrite_slide_asset_refs(slide, exact_rewrites, prefix_rewrites)
     return copied
 
 
@@ -1515,7 +1677,8 @@ def cmd_paste(deck: dict, args) -> tuple[int, dict | None]:
     This is the deck.json-native lift (LIFT-ARCHITECTURE step 3): for decks whose
     per-slide CSS lives in `custom_css` (self-contained-by-construction), pasting
     is a pure object copy — no index.html parsing, no CSS tree-shaking. Local
-    assets (input/, prototypes/) are copied; key collisions auto-suffix."""
+    assets are copied by content identity; path collisions hash-suffix the asset
+    and rewrite this pasted slide only. Slide-key collisions auto-suffix."""
     src_path: Path = args.from_deck
     if not src_path.exists():
         print(f"deck-cli: source deck not found: {src_path}", file=sys.stderr)

@@ -66,6 +66,11 @@ from _index_sig import (  # noqa: E402  F-315 · un-synced-edit clobber guard
     stamp_sig as _index_stamp_sig,
     align_mtime as _index_align_mtime,
 )
+from template_render import (  # noqa: E402  PPT-derived Template Pack adapter
+    TemplateRenderError,
+    apply_template_binding,
+    load_template_context,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -81,6 +86,53 @@ VALIDATE_DECK = HERE / "validate-deck.py"
 VALIDATE_HTML = ASSETS_DIR / "validate.py"
 CHECK_DIST    = ASSETS_DIR / "check-distribution.py"
 COPY_ASSETS   = ASSETS_DIR / "copy-assets.py"
+AUDIT_SHOOT_PAGES_ENV = "FEISHU_DECK_AUDIT_SHOOT_PAGES"
+DEFAULT_CANVAS_WIDTH = 1920
+DEFAULT_CANVAS_HEIGHT = 1080
+# Set once per render after the optional Template Pack is loaded. Folded into
+# the visual auto-scope fingerprint so editing pack JSON/assets is never treated
+# as a byte-identical deck no-op.
+_RUNTIME_TEMPLATE_FINGERPRINT = ""
+
+
+def _deck_canvas(deck: dict) -> tuple[int, int]:
+    """Return the deck-wide design plane, preserving the 1920x1080 baseline.
+
+    JSON-schema validation owns malformed authored values.  The defensive
+    coercion here keeps direct module callers and legacy fixtures safe: an
+    absent/incomplete canvas behaves exactly like every pre-canvas deck.
+    """
+    canvas = (deck.get("deck") or {}).get("canvas") or {}
+    try:
+        width = int(canvas.get("width", DEFAULT_CANVAS_WIDTH))
+        height = int(canvas.get("height", DEFAULT_CANVAS_HEIGHT))
+    except (TypeError, ValueError):
+        return DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT
+    if width < 1 or height < 1:
+        return DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT
+    return width, height
+
+
+def _audit_shoot_env(pages) -> dict:
+    """Environment contract consumed by run-audits' single browser lifecycle."""
+    env = dict(os.environ)
+    env[AUDIT_SHOOT_PAGES_ENV] = ",".join(str(int(n)) for n in pages)
+    return env
+
+
+def _run_scoped_shoot_audit(out_html: Path, pages):
+    """Fallback when the normal render gate did not launch a visual audit.
+
+    One validator call audits all scoped pages and run-audits captures every PNG
+    in that same browser/context. Normal runs/ scoped renders do not use this:
+    their existing visual gate receives the same environment contract directly.
+    """
+    spec = ",".join(map(str, pages))
+    return subprocess.run(
+        [sys.executable, str(VALIDATE_HTML), str(out_html),
+         "--visual", "--json", "--full", "--scope-frames", spec],
+        capture_output=True, text=True, env=_audit_shoot_env(pages),
+    )
 
 # Single-source the run-root precondition: reuse copy-assets.find_run_root so the
 # render-deck pre-check can't drift from the copier's real rule. It did drift —
@@ -136,6 +188,79 @@ except Exception:
             except OSError:
                 pass
             raise
+
+
+class _ArtifactBundleTransaction:
+    """Snapshot/commit/rollback the renderer's user-visible artifact bundle.
+
+    The HTML gate runs after index.html and slide-index.json have been assembled.
+    Treating only index.html transactionally left a rejected render paired with
+    a new slide index (and sometimes new validation sidecars).  This helper
+    snapshots the complete bundle before the first write and restores both file
+    bytes and prior absence on any gate failure.
+    """
+
+    def __init__(self, paths):
+        self._entries = []
+        self._closed = False
+        try:
+            seen = set()
+            for raw in paths:
+                path = Path(raw)
+                if path in seen:
+                    continue
+                seen.add(path)
+                existed = path.is_file()
+                backup = None
+                if path.exists() and not existed:
+                    raise RuntimeError(f"render artifact path is not a file: {path}")
+                if existed:
+                    fd, name = tempfile.mkstemp(
+                        dir=str(path.parent), prefix=f".{path.name}.",
+                        suffix=".bak-pre-render")
+                    os.close(fd)
+                    backup = Path(name)
+                    self._entries.append((path, existed, backup))
+                    shutil.copy2(path, backup)
+                else:
+                    self._entries.append((path, existed, backup))
+        except BaseException:
+            self._cleanup_backups()
+            raise
+
+    def _cleanup_backups(self):
+        for _, _, backup in self._entries:
+            if backup is not None:
+                try:
+                    backup.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def rollback(self) -> None:
+        if self._closed:
+            return
+        errors = []
+        for path, existed, backup in self._entries:
+            try:
+                if existed:
+                    if backup is None or not backup.exists():
+                        raise RuntimeError(f"missing render backup for {path}")
+                    os.replace(backup, path)
+                else:
+                    path.unlink(missing_ok=True)
+            except Exception as exc:
+                errors.append(f"{path}: {exc}")
+        self._closed = True
+        if errors:
+            # Keep any backup whose restore failed for manual recovery.
+            raise RuntimeError("render artifact rollback incomplete: " + "; ".join(errors))
+        self._cleanup_backups()
+
+    def commit(self) -> None:
+        if self._closed:
+            return
+        self._cleanup_backups()
+        self._closed = True
 
 
 def _is_runs_output(out_dir: Path) -> bool:
@@ -940,6 +1065,12 @@ def render_3up_cards(cards: list, slide_no_padded: str) -> str:
 
 def _enrich_cover(ctx, slide):
     snp = ctx["slide_no_padded"]
+    # Default Feishu covers normally author both fields, while a reviewed
+    # Template Pack may intentionally expose no author/date slot. Keep the
+    # legacy fragment stable by supplying empty values instead of inventing
+    # content or forcing a source-template field that does not exist.
+    ctx.setdefault("author", "")
+    ctx.setdefault("date", "")
     ctx["subtitle_html"] = _optional_text_node(
         ctx.get("subtitle"), snp, "subtitle", classes="subtitle")
 
@@ -1038,6 +1169,9 @@ def _enrich_end(ctx, slide):
 
 def _enrich_section(ctx, slide):
     snp = ctx["slide_no_padded"]
+    # Chapter numerals belong to the default Feishu section master; user
+    # templates may provide only a title slot.
+    ctx.setdefault("chapter_num", "")
     # Optional parent_label — when present, marks this as a subsection
     # (PPT layout 3 '二级章节页'). Renders above the title.
     ctx["parent_label_html"] = _optional_text_node(
@@ -1056,6 +1190,11 @@ def _enrich_section(ctx, slide):
         ctx["pills_html"] = f'        <div class="pills">\n{items}\n        </div>'
     else:
         ctx["pills_html"] = ""
+
+
+def _enrich_quote(ctx, slide):
+    # Attribution is optional when the approved quote layout has no such slot.
+    ctx.setdefault("attribution", "")
 
 
 def _enrich_stats_row(ctx, slide):
@@ -1755,7 +1894,7 @@ def _enrich_iframe_embed(ctx, slide):
     # overflow: hidden clips the overshoot.
     # F-314 · `fit_width` convenience: a foreign prototype/H5 usually has a fixed
     # DESIGN width (its `max-width` / container width, e.g. 1320px). The iframe
-    # otherwise stretches that content across the full ~1800px embed body → the
+    # otherwise stretches that content across the full embed body → the
     # design renders centered with empty side gaps AND its text shrinks. Set
     # `data.fit_width` to that design width and the renderer derives the right
     # `zoom` (= body/fit_width) so the prototype renders AT its design width then
@@ -1764,14 +1903,17 @@ def _enrich_iframe_embed(ctx, slide):
     # path — do NOT hand-roll `custom_css` with `!important` to resize the iframe
     # (the framework iframe rule out-specifies it; you scale the wrong base size →
     # content clips off-frame / de-centers). See references/prototype-embed.md.
-    IFRAME_BODY_W = 1800.0   # iframe-embed .stage/.iframe-wrap design width (1920 − 2×60 inset)
+    # iframe-embed keeps the framework's 60px left/right inset; derive the
+    # remaining width from the deck canvas so fit_width also works on wide or
+    # banner-shaped templates. Legacy canvas: 1920 - 120 = 1800 (unchanged).
+    iframe_body_w = max(1.0, float(ctx.get("_deck_canvas_w") or DEFAULT_CANVAS_WIDTH) - 120.0)
     zoom = ctx.get("zoom")
     fit_w = ctx.get("fit_width")
     if not zoom and fit_w:
         try:
             fw = float(fit_w)
             if fw > 0:
-                zoom = round(IFRAME_BODY_W / fw, 4)
+                zoom = round(iframe_body_w / fw, 4)
         except (TypeError, ValueError):
             zoom = None
     if zoom and zoom != 1.0:
@@ -1830,8 +1972,11 @@ _CANVAS_TEXT_ALIGN = {"left": "left", "center": "center", "right": "right",
 
 def _enrich_canvas(ctx, slide):
     data = slide.get("data") or {}
-    W = data.get("canvas_w") or 1920
-    H = data.get("canvas_h") or 1080
+    # A canvas slide may still declare its own source coordinate plane (PPTX
+    # import).  Otherwise inherit the deck-wide canvas instead of silently
+    # falling back to 1920x1080 inside a non-16:9 deck.
+    W = data.get("canvas_w") or ctx.get("_deck_canvas_w") or DEFAULT_CANVAS_WIDTH
+    H = data.get("canvas_h") or ctx.get("_deck_canvas_h") or DEFAULT_CANVAS_HEIGHT
 
     # Optional framework chrome (schema: data.title / data.subtitle) — the
     # standard wordmark + .header so an imported page adopts the deck's
@@ -2038,6 +2183,7 @@ ENRICHERS = {
     ("cover",   None):           _enrich_cover,
     ("agenda",  None):           _enrich_agenda,
     ("section", None):           _enrich_section,
+    ("quote",   None):           _enrich_quote,
     ("content", "3up"):          _enrich_content_3up,
     ("content", "2col"):         _enrich_content_2col,
     ("content", "blocks"):       _enrich_content_blocks,
@@ -2080,7 +2226,9 @@ def _scan_slide_assets(slide_html: str) -> list:
     return sorted(set(_ASSET_REF_RE.findall(slide_html)))
 
 
-def render_slide(slide: dict, slide_index: int, asset_path: str, deck_dir: Path | None = None) -> str:
+def render_slide(slide: dict, slide_index: int, asset_path: str,
+                 deck_dir: Path | None = None,
+                 deck_canvas: tuple[int, int] | None = None) -> str:
     layout  = slide["layout"]
     variant = slide.get("variant")
     tpl_path = _resolve_template_path(layout, variant)
@@ -2089,6 +2237,7 @@ def render_slide(slide: dict, slide_index: int, asset_path: str, deck_dir: Path 
     # Post-medium-6: no pre-normalization. \n → <br> happens inside _esc_br
     # at substitute time (and inside enrichers that call _esc_br directly).
 
+    canvas_w, canvas_h = deck_canvas or (DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT)
     ctx = {
         **data,
         "slide_no":         slide_index + 1,
@@ -2099,6 +2248,8 @@ def render_slide(slide: dict, slide_index: int, asset_path: str, deck_dir: Path 
         "data_attrs":       _build_data_attrs(slide),
         "asset_path":       asset_path,
         "_deck_dir":        deck_dir,
+        "_deck_canvas_w":   canvas_w,
+        "_deck_canvas_h":   canvas_h,
     }
 
     # Render top-level embeddable blocks
@@ -2545,7 +2696,12 @@ def _visual_fingerprint(deck: dict) -> str:
     assets + the layout-aware template set. A mismatch means the visual /
     geometry / distribution audits must cover all pages — but it must NOT
     discard the per-slide content diff (content audits do not read CSS)."""
-    return _hash_files(list(_GLOBAL_VISUAL_ASSETS) + sorted(_deck_template_files(deck)))
+    base = _hash_files(list(_GLOBAL_VISUAL_ASSETS) + sorted(_deck_template_files(deck)))
+    if not _RUNTIME_TEMPLATE_FINGERPRINT:
+        return base
+    return hashlib.sha1(
+        f"{base}:{_RUNTIME_TEMPLATE_FINGERPRINT}".encode("utf-8")
+    ).hexdigest()
 
 
 def _static_engine_fingerprint() -> str:
@@ -2567,13 +2723,10 @@ def _sidecar_state(deck: dict, error_keys=frozenset()) -> dict:
     # mis-numbered any deck with a _disabled slide.)
     active = [s for s in deck.get("slides", []) if not s.get("_disabled")]
     _chrome, _structural = _meta_split(deck)
-    # F-368: a page carrying an UNRESOLVED error-level finding (its key in
-    # error_keys) is stored with a never-matching sentinel instead of its real
-    # hash, so the NEXT render always re-counts it dirty and RE-AUDITS it until
-    # it renders clean. This lets the sidecar be persisted on a gate-FAIL render
-    # whose output lands (so auto-scope engages for work-in-progress decks that
-    # return rc=4) WITHOUT ever letting an erroring page go quiet on a later
-    # scoped edit. `!` is not a hex digit → the sentinel can't equal a sha1.
+    # Backward compatibility for F-368 sidecars written by older renderers: an
+    # unresolved key uses a never-matching sentinel so it is always re-audited.
+    # Current bundle transactions write sidecars only after a gate pass, but old
+    # workspaces may still contain poisoned cells. `!` cannot equal a sha1.
     def _cell(i, s):
         k = s.get("key", f"#{i}")
         return [k, "!unresolved-error" if k in error_keys else _slide_hash(s)]
@@ -2581,8 +2734,8 @@ def _sidecar_state(deck: dict, error_keys=frozenset()) -> dict:
         "schema": _SIDECAR_SCHEMA,
         "note": "iteration-loop auto-scope sidecar — per-slide content hashes "
                 "of the last rendered deck.json (a page with an unresolved "
-                "error-level finding is stored as '!unresolved-error' so it "
-                "re-audits until clean — F-368), plus split visual / "
+                "legacy unresolved-error cell is stored as '!unresolved-error' "
+                "so it re-audits until clean), plus split visual / "
                 "static-engine fingerprints and field-level deck-meta (F-335). "
                 "--iter and the default-on auto-scope diff against this to scope "
                 "the gate / snapshot to changed pages. Auto-written by "
@@ -2703,6 +2856,7 @@ def _auto_scope_decision(deck: dict, sidecar_path: Path) -> dict:
 
 
 def main(argv=None) -> int:
+    global _RUNTIME_TEMPLATE_FINGERPRINT
     ap = argparse.ArgumentParser(
         prog="render-deck.py",
         description="Render a DeckJSON file into a complete HTML deck.",
@@ -2804,7 +2958,9 @@ def main(argv=None) -> int:
     ap.add_argument("--final", action="store_true",
                     help="DELIVERY PROFILE (W6): force a FULL render — ignore "
                          "--iter/--scope, all audits on every page, "
-                         "autosnapshot on. Use before any handoff/publish.")
+                         "autosnapshot on. Use before local handoff, slide-library "
+                         "ingest, or a presentation checkpoint. Magic Page publish "
+                         "uses the publisher artifact-integrity gate instead.")
     ap.add_argument("--force", action="store_true",
                     help="F-315: overwrite index.html even if it carries un-synced "
                          "browser edit-mode / hand edits (the clobber guard would "
@@ -2848,8 +3004,8 @@ def main(argv=None) -> int:
     snapshot_pages = None
     engine_dirty = False
     # F-369: set when a re-render's content is byte-identical to the last CLEAN
-    # render (auto-scope diff empty + no framework/engine change). Because F-368
-    # poisons any erroring page, an empty diff PROVES the deck is clean, so the
+    # render (auto-scope diff empty + no framework/engine change). Sidecars commit
+    # only with a gate-passing artifact bundle, so an empty diff PROVES clean and
     # expensive 6b/6c browser re-audit can be skipped (the cheap static gate still
     # runs). --final / --visual force the full pass and never set this.
     _skip_clean_reaudit = False
@@ -2925,6 +3081,33 @@ def main(argv=None) -> int:
         print(f"render-deck: deck file not found: {args.deck}", file=sys.stderr); return 2
     except json.JSONDecodeError as e:
         print(f"render-deck: invalid JSON: {e}", file=sys.stderr); return 2
+
+    # 2.1 Optional PPT-derived Template Pack. This is a visual binding over the
+    # existing cover/raw/section/quote/agenda/end semantics — never a new layout
+    # enum. The pack is loaded before auto-scope so its JSON/assets participate
+    # in the visual fingerprint; final renders require an approved, strict pack.
+    template_context = None
+    _RUNTIME_TEMPLATE_FINGERPRINT = ""
+    if (deck.get("deck") or {}).get("template_ref") is not None:
+        try:
+            template_context = load_template_context(
+                deck,
+                deck_path=args.deck,
+                output_dir=args.output_dir,
+                final=bool(args.final),
+            )
+        except TemplateRenderError as exc:
+            print(f"render-deck: Template Pack binding failed: {exc}", file=sys.stderr)
+            return 2
+        _RUNTIME_TEMPLATE_FINGERPRINT = template_context["fingerprint"]
+        for binding in template_context.get("inactive", []):
+            print(
+                "render-deck: Template Pack flexible preview — "
+                f"slide key='{binding.get('slide_key')}' role='{binding.get('role')}' "
+                f"is explicit {binding.get('reason')}; framework layout shown only "
+                "for review (final render will refuse).",
+                file=sys.stderr,
+            )
 
     # Resolve --scope slide-key tokens → 1-based page numbers (ACTIVE slides
     # only, matching URL #N / frame_index). Any token that is neither a valid
@@ -3048,8 +3231,8 @@ def main(argv=None) -> int:
                          and not engine_dirty)
                 if _noop and not args.final and not args.visual:
                     # F-369: genuine no-op. An empty content_dirty PROVES the last
-                    # render was visual/geom CLEAN — F-368 poisons any erroring
-                    # page, so it would show dirty here. The deck is byte-identical
+                    # render was visual/geom CLEAN because sidecars land only with
+                    # a passing artifact bundle. The deck is byte-identical
                     # to a passing render, so skip the expensive 6b/6c browser
                     # re-audit; the cheap static gate below still runs and owns the
                     # exit code. --final / --visual force the full pass.
@@ -3139,6 +3322,7 @@ def main(argv=None) -> int:
     slides_html = []
     total = len(active_slides)
     deck_dir = args.deck.resolve().parent
+    deck_canvas = _deck_canvas(deck)
 
     # --renumber: canonicalize every active slide's screen_label leading number
     # to its true frame_index, BEFORE render (so the emitted data-screen-label +
@@ -3172,7 +3356,23 @@ def main(argv=None) -> int:
         try:
             # Pass NEW index (post-skip) for page-number continuity, but include
             # original index in error context for debugging.
-            slide_html = render_slide(slide, new_idx, asset_path, deck_dir=deck_dir)
+            slide_html = render_slide(
+                slide, new_idx, asset_path, deck_dir=deck_dir,
+                deck_canvas=deck_canvas)
+            if template_context is not None:
+                slide_html = apply_template_binding(
+                    slide_html,
+                    template_context["bindings"].get(slide.get("key")),
+                    pack=template_context["pack"],
+                    web_prefix=template_context["web_prefix"],
+                )
+        except TemplateRenderError as e:
+            print(
+                f"render-deck: Template Pack render failed on slide[{orig_idx + 1}] "
+                f"key='{slide.get('key')}': {e}",
+                file=sys.stderr,
+            )
+            return 2
         except SystemExit as e:
             # F-280b · 1-based page index + variant in the locator (matches
             # validate-deck / deck-cli list / URL #N). orig_idx is 0-based.
@@ -3235,12 +3435,41 @@ def main(argv=None) -> int:
     # .deck[data-title-style="X"] / .deck[data-logo-position="Y"]. Per-slide
     # overrides emit on the .slide element instead (handled in render_slide).
     deck_data_attrs_parts = []
+    canvas_w, canvas_h = deck_canvas
+    canvas_meta = deck["deck"].get("canvas") or {}
+    if canvas_meta:
+        canvas_aspect = str(canvas_meta.get("aspect_ratio") or f"{canvas_w}:{canvas_h}")
+        half_w = f"{canvas_w / 2:g}"
+        half_h = f"{canvas_h / 2:g}"
+        # One authoritative deck root carries both machine-readable dimensions
+        # and the CSS variables consumed by the framework. Legacy decks omit the
+        # new attrs entirely and inherit the stylesheet/runtime 1920x1080
+        # defaults, preserving their normalized HTML snapshot byte-for-byte.
+        deck_data_attrs_parts.extend([
+            f' data-deck-width="{canvas_w}"',
+            f' data-deck-height="{canvas_h}"',
+            f' data-deck-aspect="{html.escape(canvas_aspect, quote=True)}"',
+            ' style="'
+            f'--fs-deck-width:{canvas_w}px;'
+            f'--fs-deck-height:{canvas_h}px;'
+            f'--fs-deck-half-width:{half_w}px;'
+            f'--fs-deck-half-height:{half_h}px;'
+            f'--fs-deck-aspect:{canvas_w} / {canvas_h}'
+            '"',
+        ])
     if deck["deck"].get("deck_id"):
         deck_data_attrs_parts.append(f' data-deck-id="{deck["deck"]["deck_id"]}"')
     if deck["deck"].get("title_style"):
         deck_data_attrs_parts.append(f' data-title-style="{deck["deck"]["title_style"]}"')
     if deck["deck"].get("logo_position"):
         deck_data_attrs_parts.append(f' data-logo-position="{deck["deck"]["logo_position"]}"')
+    if template_context is not None:
+        _template_pack = template_context["pack"]
+        deck_data_attrs_parts.extend([
+            f' data-template-id="{html.escape(_template_pack.template_id, quote=True)}"',
+            f' data-template-version="{html.escape(_template_pack.version, quote=True)}"',
+            f' data-template-status="{html.escape(_template_pack.status, quote=True)}"',
+        ])
     if deck["deck"].get("magic_move"):
         # OPT-IN Keynote-style Magic Move: feishu-deck.js wraps present-mode slide
         # changes in document.startViewTransition() when this attr is present.
@@ -3326,57 +3555,55 @@ def main(argv=None) -> int:
     # un-synced edits were folded into deck.json via auto-sync, or we already
     # returned 8. Nothing more to check at the overwrite point.)
 
-    # F-269: the delivery gate (section 6 below) runs AFTER this write. If the
-    # gate then fails (return 4), a naive overwrite would have already replaced
-    # the last "passed-the-gate" index.html with the new BAD one — a failed
-    # render silently corrupts the previously-good deliverable on disk. So back
-    # up any existing index.html FIRST, write the new one ATOMICALLY (no torn
-    # file if killed mid-write), and restore the backup at every gate-fail exit.
-    _index_bak = out_html.with_name("index.html.bak-pre-render")
-    if out_html.exists():
-        shutil.copy2(out_html, _index_bak)
-    else:
-        _index_bak = None   # nothing to restore — this is a fresh render
+    # The gate covers one coherent artifact bundle, not only index.html. Before
+    # F-374, slide-index.json was written before validation but never restored;
+    # a rejected render therefore paired old HTML with a new index. Snapshot all
+    # renderer-owned gate artifacts now. Rollback restores exact prior bytes and
+    # deletes files that were absent before a fresh failed render.
+    _slide_index_path = args.output_dir / "slide-index.json"
+    _auto_scope_path = args.output_dir / _SIDECAR_NAME
+    _validation_baseline_path = args.output_dir / "validate-findings.json"
+    _shoot_pages = list(scope_pages) if getattr(args, "shoot", False) else []
+    _shoot_paths = [args.output_dir / f".shoot-p{n}.png" for n in _shoot_pages]
+    _shoot_audit_ran = False
+    _artifact_bundle = _ArtifactBundleTransaction((
+        out_html,
+        _slide_index_path,
+        _auto_scope_path,
+        _validation_baseline_path,
+        *_shoot_paths,
+    ))
+    # Backups above preserve a previous accepted shot for rollback. Remove the
+    # live copy now so a successful render whose screenshot fails cannot report
+    # a stale PNG as if it belonged to the new HTML.
+    for _shoot_path in _shoot_paths:
+        _shoot_path.unlink(missing_ok=True)
 
-    def _rollback_index_html():
-        """Gate failed: put the previously-good index.html back so a rejected
-        render never leaves a worse file on disk than the validated one that was
-        there before. A FRESH render (no prior good file) leaves its output in
-        place unchanged — matching the long-standing behaviour, and nothing is
-        lost since there was no validated version to clobber.
-
-        Returns True if a prior version was restored (on-disk index.html now
-        reflects the PRIOR deck), False if this was a fresh render whose output
-        stays in place (on-disk index.html reflects the CURRENT deck) — the caller
-        uses this to decide whether the auto-scope sidecar may record THIS deck."""
-        if _index_bak is not None and _index_bak.exists():
-            os.replace(_index_bak, out_html)   # atomic restore
-            print("\n已回滚到上一版 index.html(本次 render 未通过闸门)。",
-                  file=sys.stderr)
-            return True
-        return False
+    def _rollback_artifact_bundle():
+        _artifact_bundle.rollback()
+        print("\n已回滚上一版 render 产物整包(index.html / slide-index / sidecars; "
+              "本次 render 未通过闸门)。", file=sys.stderr)
 
     def _write_sidecar(error_keys=frozenset()):
-        """F-368 · auto-scope sidecar — written whenever THIS render's index.html
-        LANDS on disk: a clean gate pass, OR a gate-FAIL whose fresh output stays
-        (no prior to roll back to). Before F-368 the sidecar was written ONLY past
-        every gate `return 4`, so any deck returning rc=4 (any unresolved finding —
-        the normal work-in-progress state) never persisted one; with no sidecar the
-        next render is treated as a first render → full whole-deck pass, so F-310
-        auto-scope never engaged for exactly the decks edited most. Pages still
-        carrying an error (error_keys) are recorded poisoned so they keep being
-        re-audited until clean (see _sidecar_state). Hash the deck AS RE-READ FROM
-        DISK — the in-memory object is normalized / enriched during render, so
-        hashing it would mismatch the next load and silently force --iter to full.
-        Same never-break policy as the baseline."""
+        """Write auto-scope state only for an artifact bundle that will commit.
+
+        Hash the deck AS RE-READ FROM DISK — the in-memory object is normalized /
+        enriched during render, so hashing it would mismatch the next load and
+        silently force --iter to full. Same never-break policy as the baseline.
+        """
         try:
             _disk_deck = json.loads(args.deck.read_text(encoding="utf-8"))
-            (args.output_dir / _SIDECAR_NAME).write_text(
+            atomic_write_text(
+                _auto_scope_path,
                 json.dumps(_sidecar_state(_disk_deck, error_keys),
                            ensure_ascii=False, indent=1) + "\n",
                 encoding="utf-8")
         except Exception:
-            pass
+            # Never pair new HTML with stale hashes from the prior bundle.
+            try:
+                _auto_scope_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     atomic_write_text(out_html, final, encoding="utf-8")
 
@@ -3405,7 +3632,7 @@ def main(argv=None) -> int:
         ],
     }
     atomic_write_text(
-        args.output_dir / "slide-index.json",
+        _slide_index_path,
         json.dumps(slide_index, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -3418,13 +3645,8 @@ def main(argv=None) -> int:
         _geom_block = False
         _dist_block = False
         _vis_block = False
-        # F-368: 1-based page numbers carrying a BLOCKING finding this render
-        # (collected by the advisory below) → recorded poisoned in the sidecar so
-        # they re-audit until clean, even if the gate-fail sidecar lands.
-        _unresolved_pages: set = set()
-        # F-368: when the visual engine couldn't run at all (Playwright down) we
-        # know NO page's true state, so a landed gate-fail must NOT write a sidecar
-        # (it would falsely hash every page "clean"). Set by the advisory below.
+        # Whether the visual engine ran; engine-down blocks a real delivery render
+        # unless explicitly accepted, and the whole artifact bundle then rolls back.
         _engine_down = False
         # F-290: the layout-distribution audit folded into the 6b visual pass
         # (validate.py --with-distribution), so 6c can use it instead of spawning a
@@ -3494,7 +3716,16 @@ def main(argv=None) -> int:
         # findings (the 收尾来回 wall). Full / --final / /tmp renders are unchanged.
         if not args.visual or (scope_pages and _is_runs):
             validate_cmd.append("--no-visual")
-        rc = subprocess.run(validate_cmd, capture_output=True, text=True)
+        _primary_visual = "--no-visual" not in validate_cmd
+        if _primary_visual and scope_pages:
+            validate_cmd += ["--scope-frames", ",".join(map(str, scope_pages))]
+        rc = subprocess.run(
+            validate_cmd, capture_output=True, text=True,
+            env=(_audit_shoot_env(_shoot_pages)
+                 if _primary_visual and _shoot_pages else None),
+        )
+        if _primary_visual and _shoot_pages:
+            _shoot_audit_ran = True
         # Always show validator output (digest is helpful)
         print(rc.stdout)
 
@@ -3594,7 +3825,7 @@ def main(argv=None) -> int:
         # baseline file is (re)written further down on every render whose
         # index.html actually lands. Fingerprint = (code, slide-KEY, selector or
         # msg-head) — keyed, so insert/reorder doesn't shift identity.
-        _BASELINE_FILE = out_html.parent / "validate-findings.json"
+        _BASELINE_FILE = _validation_baseline_path
         _fi2key = {}
         try:
             _fi = 0
@@ -3649,7 +3880,10 @@ def main(argv=None) -> int:
             adv = subprocess.run(
                 _adv_cmd,
                 capture_output=True, text=True,
+                env=(_audit_shoot_env(_shoot_pages) if _shoot_pages else None),
             )
+            if _shoot_pages:
+                _shoot_audit_ran = True
             # F-255: a GENUINE engine-down (Playwright/Chromium missing) must be
             # detected OUTSIDE the swallow below, so a render whose quality is
             # actually UNVERIFIED loudly BLOCKS instead of silently passing. The
@@ -3832,13 +4066,6 @@ def main(argv=None) -> int:
                 # rolls back index.html, so its findings never become baseline.
                 _baseline_now = [_finding_fp(f) for f in _vis_errors + _geom]
                 _baseline_ready = True
-                # F-368: poison ONLY pages with a BLOCKING finding (_vis_errors +
-                # _geom). The F-292-exempt dead-code hygiene rules (R-VIS-DEAD-*)
-                # are deliberately NOT included — they don't gate delivery, so a
-                # deck full of advisory dead rules can still auto-scope. A poisoned
-                # page re-audits every render until it renders clean.
-                _unresolved_pages |= {f.get("slide") for f in (_vis_errors + _geom)
-                                      if isinstance(f.get("slide"), int)}
                 if _geom and not os.environ.get("DECK_ALLOW_GEOM_OVERFLOW"):
                     print("\n❌ BLOCKING · geometry breakage (content clipped / "
                           "spilled past its box / overlapping a sibling — real "
@@ -3965,18 +4192,13 @@ def main(argv=None) -> int:
                 f"geometry={_gc_geometry} distribution={_gc_distribution} "
                 f"scope={_gc_scope}", file=sys.stderr)
 
-        # F-368: pages with an unresolved error this render, as KEYS — passed to
-        # _write_sidecar() on a landed gate-fail so they re-audit until clean.
-        _err_keys = frozenset(
-            k for k in (_fi2key.get(p) for p in _unresolved_pages) if k)
-
         if _static_rc != 0:    # F-319: scope-demoted on --scope (see above)
             print(file=sys.stderr)
             print("render-deck: rendered HTML failed validate.py — fix the TEMPLATE that produced the bad slide, not the output.", file=sys.stderr)
             if rc.stderr.strip():
                 print(rc.stderr, file=sys.stderr)
             _print_gate_coverage()
-            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
+            _rollback_artifact_bundle()
             return 4
 
         if _vis_block:
@@ -3990,13 +4212,7 @@ def main(argv=None) -> int:
                   "DECK_ALLOW_NO_VISUAL=1 (ship without the visual gate).",
                   file=sys.stderr)
             _print_gate_coverage()
-            # F-368: a FRESH render that stays on disk records its sidecar (the
-            # erroring pages poisoned) so the next edit can auto-scope; a rollback
-            # leaves the PRIOR deck on disk, whose own sidecar already stands.
-            # Skip when the engine was DOWN — with no findings we can't tell which
-            # pages are clean, so hashing them would silently mark them audited.
-            if not _rollback_index_html() and not _engine_down:
-                _write_sidecar(_err_keys)
+            _rollback_artifact_bundle()
             return 4
 
         if _geom_block:
@@ -4007,8 +4223,7 @@ def main(argv=None) -> int:
                   "spilling/overlapping element, or set DECK_ALLOW_GEOM_OVERFLOW=1 if "
                   "it is genuinely intentional.", file=sys.stderr)
             _print_gate_coverage()
-            if not _rollback_index_html():   # F-368: fresh stay → record sidecar
-                _write_sidecar(_err_keys)
+            _rollback_artifact_bundle()
             return 4
 
         if _dist_block:
@@ -4019,7 +4234,7 @@ def main(argv=None) -> int:
                   "empty canvas, even the box insets, or mark the slide intentional "
                   "with \"allow\": [\"imbalance\"] in deck.json.", file=sys.stderr)
             _print_gate_coverage()
-            _rollback_index_html()   # F-269: don't leave a gate-rejected file on disk
+            _rollback_artifact_bundle()
             return 4
 
         # Gate passed — emit the coverage line on the success path too, so a
@@ -4045,7 +4260,7 @@ def main(argv=None) -> int:
                     _kept = [fp for fp in _prev.get("fingerprints", [])
                              if not (isinstance(fp, list) and len(fp) > 1
                                      and str(fp[1]) in _scope_keys)]
-                _BASELINE_FILE.write_text(json.dumps({
+                atomic_write_text(_BASELINE_FILE, json.dumps({
                     "schema": 1,
                     "note": "F-302 shipped-findings baseline — fingerprints of "
                             "error-level visual/geometry findings present in the "
@@ -4055,21 +4270,29 @@ def main(argv=None) -> int:
                     "fingerprints": _kept + _baseline_now,
                 }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
             except Exception:
-                pass   # baseline bookkeeping must never break a render
+                # Baseline bookkeeping must never break a render, but stale
+                # findings for prior HTML are worse than no baseline (which
+                # safely forces a fresh comparison next time).
+                try:
+                    _BASELINE_FILE.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
-        # W3 · auto-scope sidecar — gate passed, so this index.html lands clean
-        # (no poisoned pages). A gate-FAIL whose fresh output stays records its own
-        # sidecar at each `return 4` above (F-368). See _write_sidecar().
+        # W3 · auto-scope sidecar — gate passed, so this coherent artifact bundle
+        # lands clean. A gate failure restores the previous sidecar with the rest
+        # of the bundle instead of recording rejected output.
         _write_sidecar()
 
-    # F-269: gate passed (or was skipped via --skip-validate-html) — the new
-    # index.html is the one we keep, so drop the pre-render backup. We're past
-    # every `return 4`, so reaching here means no rollback is needed.
-    if _index_bak is not None and _index_bak.exists():
-        try:
-            _index_bak.unlink()
-        except OSError:
-            pass
+    else:
+        # A validation-skipped render cannot truthfully carry forward validation
+        # state for the prior HTML. Commit the new HTML/index with those sidecars
+        # absent; the next normal render will perform a full gate.
+        _auto_scope_path.unlink(missing_ok=True)
+        _validation_baseline_path.unlink(missing_ok=True)
+
+    # Past every gate-fail exit: commit the HTML, slide index and validation
+    # sidecars together, then discard all pre-render snapshots.
+    _artifact_bundle.commit()
 
     # 7. Post-render asset handling — choose one of:
     #    (a) --inline: base64-inline CSS/JS/images into the HTML (single-file)
@@ -4255,60 +4478,43 @@ def main(argv=None) -> int:
         pass  # never let the stamp fail a successful render
     _index_align_mtime(out_html, args.deck)
 
-    # F-354 · one-pass verify. After a scoped render, run the visual gate on the
-    # scoped page(s) + screenshot each, so the agent's edit→check loop is ONE
-    # command instead of render → validate → shoot-page (three Chromium
-    # round-trips). Findings + PNG path are printed for the agent to read. Numbers
-    # are 1-based page index (= URL #N = --scope's own numbering), so hidden slides
-    # don't skew the mapping. Best-effort: a Chromium hiccup never fails the render.
+    # F-375 · one browser lifecycle for scoped verify + every screenshot. The
+    # normal runs/ visual gate received FEISHU_DECK_AUDIT_SHOOT_PAGES above, so
+    # run-audits captured these PNGs AFTER freezing its finding set on the same
+    # settled page/context. If this render intentionally skipped that visual gate
+    # (/tmp, --skip-validate-html, --quick), make exactly ONE fallback validator
+    # call for the whole scope — never one validator + one Chromium per page.
     if getattr(args, "shoot", False):
-        if not scope_pages:
+        if not _shoot_pages:
             print("  ⚠ --shoot needs --scope (which page to verify) — skipped.",
                   file=sys.stderr)
         else:
-            _shoot_page = ASSETS_DIR / "shoot-page.py"
-            for _n in scope_pages:
+            if not _shoot_audit_ran:
+                try:
+                    _shot_verify = _run_scoped_shoot_audit(out_html, _shoot_pages)
+                    _shoot_audit_ran = True
+                    # This fallback is post-gate/best-effort, matching the old
+                    # --shoot contract. Surface focused findings without changing
+                    # the already-successful render exit code.
+                    try:
+                        _shot_data = json.loads(_shot_verify.stdout or "{}")
+                        _shot_findings = (_shot_data.get("errors", [])
+                                          + _shot_data.get("warnings", []))
+                        if _shot_findings:
+                            print("\n  scoped visual findings:", file=sys.stderr)
+                            for _f in _shot_findings[:20]:
+                                print(f"    [{_f.get('code', '?')}] "
+                                      f"{_f.get('msg', '')}", file=sys.stderr)
+                    except Exception:
+                        pass
+                except Exception as _e:
+                    print(f"  scoped visual audit skipped: {_e}", file=sys.stderr)
+            for _n, _png in zip(_shoot_pages, _shoot_paths):
                 print(f"\n──── SHOOT · page {_n} (one-pass verify · focused on "
                       f"this page) ────", file=sys.stderr)
-                _png = out_html.parent / f".shoot-p{_n}.png"
-                # F-365: launch the visual audit and the screenshot CONCURRENTLY.
-                # They are independent (both only READ the rendered HTML; the audit
-                # writes nothing, the shoot writes a PNG), so two parallel Chromium
-                # cold-starts collapse the wall-clock to ≈ the slower of the two
-                # instead of their sum — ~halving the edit→verify loop hit on every
-                # scoped edit. `--slide _n` (F-361) keeps findings focused to THIS
-                # page so the verdict isn't buried in pre-existing deck-wide noise.
-                try:
-                    _audit = subprocess.Popen(
-                        [sys.executable, str(VALIDATE_HTML), str(out_html),
-                         "--visual", "--scope-frames", str(_n), "--slide", str(_n)],
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                except Exception as _e:
-                    _audit = None
-                    print(f"  visual gate skipped: {_e}", file=sys.stderr)
-                try:
-                    _shot = subprocess.Popen(
-                        [sys.executable, str(_shoot_page), str(out_html),
-                         str(_n), "--out", str(_png)],
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                except Exception as _e:
-                    _shot = None
-                    print(f"  SHOT skipped: {_e}", file=sys.stderr)
-                if _audit is not None:
-                    try:
-                        print(_audit.communicate(timeout=180)[0], file=sys.stderr)
-                    except Exception as _e:
-                        _audit.kill()
-                        print(f"  visual gate skipped: {_e}", file=sys.stderr)
-                if _shot is not None:
-                    try:
-                        _shot.communicate(timeout=180)
-                        print(f"  SHOT: {_png}" if _png.exists()
-                              else "  SHOT: (screenshot failed — Chromium unavailable?)",
-                              file=sys.stderr)
-                    except Exception as _e:
-                        _shot.kill()
-                        print(f"  SHOT skipped: {_e}", file=sys.stderr)
+                print(f"  SHOT: {_png}" if _png.exists()
+                      else "  SHOT: (screenshot failed — Chromium unavailable?)",
+                      file=sys.stderr)
     return 0
 
 

@@ -65,6 +65,58 @@
           "default": "rewrite",
           "description": "rewrite = full HTML composition via layouts; replica = each slide is a page-as-image."
         },
+        "template_ref": {
+          "type": "object",
+          "required": ["id", "version", "path"],
+          "additionalProperties": false,
+          "description": "Optional pinned Template Pack binding. This does not add a DeckJSON layout: existing cover/raw/section/quote/agenda/end semantics are mapped through the pack's explicit native/derived/alias/unsupported coverage contract. The pack must be snapshotted inside the current run/deck root; final renders require an approved pack and strict mode.",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "description": "Expected template_id. Renderer refuses a path whose pack id differs."
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Expected immutable Template Pack version. Renderer refuses a mismatch."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*:)(?![/~]).+$",
+              "description": "Local path relative to deck.json, normally ../input/runtime-library/template-pack/template-pack.json. Absolute paths and URI schemes are forbidden."
+            },
+            "mode": {
+              "enum": ["strict", "flexible"],
+              "default": "strict",
+              "description": "strict refuses any role used by the deck that is not explicitly available. flexible is an intermediate review-only preview of incomplete coverage; --final always requires strict."
+            },
+            "allow_draft": {
+              "type": "boolean",
+              "default": false,
+              "description": "Intermediate-preview annotation only. It never bypasses the final approved-pack gate."
+            }
+          }
+        },
+        "canvas": {
+          "type": "object",
+          "required": ["width", "height"],
+          "additionalProperties": false,
+          "description": "Optional deck-wide design canvas. Omit for the legacy 1920x1080 default. width/height are the CSS-pixel coordinate plane used by the runtime, preview, screenshots and visual audits; source_*_emu preserve the originating PPT page size when available; aspect_ratio is descriptive provenance such as '16:9' or '16:3'.",
+          "properties": {
+            "width": { "type": "integer", "minimum": 1, "description": "Design-canvas width in CSS px." },
+            "height": { "type": "integer", "minimum": 1, "description": "Design-canvas height in CSS px." },
+            "source_width_emu": { "type": "integer", "minimum": 1, "description": "Optional original PPT page width in EMU." },
+            "source_height_emu": { "type": "integer", "minimum": 1, "description": "Optional original PPT page height in EMU." },
+            "aspect_ratio": {
+              "type": "string",
+              "pattern": "^\\s*[0-9]+(?:\\.[0-9]+)?\\s*[:/]\\s*[0-9]+(?:\\.[0-9]+)?\\s*$",
+              "description": "Optional human-readable source ratio, e.g. '16:9', '4:3' or '16:3'. Runtime geometry is always derived from width/height."
+            }
+          }
+        },
         "title_style": {
           "enum": ["center-single", "center-double", "left-double", "left"],
           "default": "left-double",
@@ -151,6 +203,11 @@
         "custom_css": {
           "type": "string",
           "description": "Per-slide CSS, authored WITHOUT a scope prefix. The renderer wraps each selector in `.slide[data-slide-key=KEY]` and emits it as a co-located `<style data-fs-custom-css>` block inside the slide, so the CSS travels with the slide on lift/clone/paste and round-trips (never a head/page `<style>` that vanishes on republish). Already `[data-slide-key=]`-scoped selectors pass through; legacy `[data-page=NN]` selectors are rewritten to the slide-key scope; `@media`/`@supports` recurse; `@keyframes`/`@font-face` pass verbatim. Use sparingly — still subject to R20/R06 type-ladder rules."
+        },
+        "template_layout_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "description": "Optional explicit layout candidate within the pinned Template Pack. It must belong to this slide's semantic role (or the role reached by an explicit alias); it never bypasses unsupported coverage."
         },
         "notes": {
           "type": "string",
@@ -655,14 +712,14 @@
     },
 
     "data_cover": {
-      "description": "Master spec: title + initiator name + date. No subtitle (opt-in via bilingual setting).",
+      "description": "Default master recommends title + initiator name + date. Template-bound covers may omit fields that have no approved slot. No subtitle by default (opt-in via bilingual setting).",
       "type": "object",
-      "required": ["title", "author", "date"],
+      "required": ["title"],
       "additionalProperties": false,
       "properties": {
         "title":    { "type": "string", "minLength": 1, "description": "Can contain \\n for hard line break. Do NOT put a literal <br> here — the cover title is an ESCAPED field, so a literal <br> renders escaped and trips R-ESC-HTML at render time. The renderer converts a newline escape into <br>; deck-cli new-deck auto-normalises a literal <br> for you." },
-        "author":   { "type": "string", "minLength": 1, "description": "Initiator's personal name (NOT team/department)." },
-        "date":     { "type": "string", "minLength": 1, "description": "Display date, e.g. '2026.05.20' or '客户提案 · 2026 Q2'." },
+        "author":   { "type": "string", "minLength": 1, "description": "Optional for Template Packs without an author slot; default Feishu covers should use the initiator's personal name (NOT team/department)." },
+        "date":     { "type": "string", "minLength": 1, "description": "Optional for Template Packs without a date slot; default Feishu covers should use a display date such as '2026.05.20' or '客户提案 · 2026 Q2'." },
         "subtitle": { "type": "string", "description": "OPT-IN bilingual EN subtitle. Default is OMIT." }
       }
     },
@@ -695,10 +752,10 @@
 
     "data_section": {
       "type": "object",
-      "required": ["chapter_num", "title"],
+      "required": ["title"],
       "additionalProperties": false,
       "properties": {
-        "chapter_num": { "type": "string", "pattern": "^\\d{2}(?:\\.\\d+)?\\.$", "description": "E.g. '02.' (top-level) or '02.1.' (subsection · PPT layout 3 '二级章节页'). Trailing period required per master spec." },
+        "chapter_num": { "type": "string", "pattern": "^\\d{2}(?:\\.\\d+)?\\.$", "description": "Optional for Template Packs without a chapter-number slot. Default Feishu sections use '02.' or '02.1.' with the trailing period." },
         "parent_label": { "type": "string", "description": "Optional parent-chapter label, e.g. '02. 业务挑战 > 02.1 客户视角'. Shown above the title when this is a subsection." },
         "title": { "type": "string", "minLength": 1, "description": "Chapter title. Hero layout — <br>/\\n allowed." },
         "lede":  { "type": "string", "description": "One-line sub-lede." },
@@ -939,11 +996,11 @@
     "data_quote": {
       "description": "Single quote slide. accent_phrase splits lead/accent/tail so teal highlight is byte-perfect.",
       "type": "object",
-      "required": ["quote", "attribution"],
+      "required": ["quote"],
       "additionalProperties": false,
       "properties": {
         "quote":       { "$ref": "#/$defs/accent_phrase" },
-        "attribution": { "type": "string", "minLength": 1 },
+        "attribution": { "type": "string", "minLength": 1, "description": "Optional for Template Packs whose quote layout has no attribution slot." },
         "title":       { "type": "string", "description": "For screen_label / texts.md. Not visually rendered (the quote IS the page)." }
       }
     },
@@ -1201,12 +1258,12 @@
         "iframe_title": { "type": "string", "description": "iframe `title` attr for a11y. Defaults to data.title when omitted." },
         "hint":         { "type": "string", "description": "Bottom-right pill caption, e.g. '报告可滚动查阅'. Omit / empty to hide the pill." },
         "zoom":         { "type": "number", "minimum": 0.5, "maximum": 2.5, "description": "Optional content scaling. 1.0 = native (default); >1 enlarges (use when embedded text is hard to read at slide scale); <1 shrinks (use when prototype is wider than the iframe). Implemented via CSS transform + width/height compensation, so the iframe always fills its container regardless of zoom. PREFER `fit_width` for a fixed-width prototype — it derives the right zoom for you." },
-        "fit_width":    { "type": "number", "minimum": 320, "maximum": 4096, "description": "PREFERRED for embedding a fixed-width foreign prototype/H5. Set to the prototype's DESIGN width in px (its `max-width` / container width, e.g. 1320). The renderer derives `zoom` = 1800 / fit_width so the prototype renders AT its design width then scales up to fill the ~1800px embed body — bigger text, no empty side gaps. Fills by width; a taller-than-frame app stays scrollable. Ignored if `zoom` is set explicitly. Do NOT resize the iframe via custom_css !important (framework rule out-specifies it → clips/de-centers)." }
+        "fit_width":    { "type": "number", "minimum": 320, "maximum": 4096, "description": "PREFERRED for embedding a fixed-width foreign prototype/H5. Set to the prototype's DESIGN width in px (its `max-width` / container width, e.g. 1320). The renderer derives `zoom` = (deck canvas width - 120px framework inset) / fit_width so the prototype renders AT its design width then scales up to fill the embed body — bigger text, no empty side gaps. On the legacy 1920px canvas this remains 1800 / fit_width. Fills by width; a taller-than-frame app stays scrollable. Ignored if `zoom` is set explicitly. Do NOT resize the iframe via custom_css !important (framework rule out-specifies it → clips/de-centers)." }
       }
     },
 
     "data_canvas": {
-      "description": "canvas layout — a slide as a structured list of absolutely-positioned elements (text boxes / images / shapes), NOT an HTML blob and NOT an image. This is the PPTX → structured-JSON intermediate (DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3). Geometry is px on a canvas_w × canvas_h plane (default 1920×1080); the renderer converts to cqw/cqh. Each element carries a stable `id` that is the round-trip anchor for sync-index-to-deck.py. placeholder:true marks a page that couldn't be reconstructed (live chart / SmartArt / OLE) — rendered as a '本页待重做 · 源第 N 页' notice.",
+      "description": "canvas layout — a slide as a structured list of absolutely-positioned elements (text boxes / images / shapes), NOT an HTML blob and NOT an image. This is the PPTX → structured-JSON intermediate (DECKJSON-UNIFIED-INTERMEDIATE-SPEC §3). Geometry is px on a canvas_w × canvas_h plane; when those fields are omitted the renderer inherits deck.canvas (or the legacy 1920×1080 default). The renderer converts coordinates to cqw/cqh. Each element carries a stable `id` that is the round-trip anchor for sync-index-to-deck.py. placeholder:true marks a page that couldn't be reconstructed (live chart / SmartArt / OLE) — rendered as a '本页待重做 · 源第 N 页' notice.",
       "type": "object",
       "required": ["elements"],
       "additionalProperties": false,

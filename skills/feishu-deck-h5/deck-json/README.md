@@ -35,6 +35,8 @@ deck-json/
 ├── deck-schema.json      ← JSON Schema Draft 2020-12 · 单一字段源
 ├── validate-deck.py      ← stdlib 校验器(schema + 业务规则)
 ├── render-deck.py        ← 渲染器(triple-gate: schema → render → validate.py)
+├── template-pack.py      ← Template Pack 覆盖/状态/资产安全合同 + CLI gate
+├── template_render.py    ← 将 Template Pack 绑定到现有 Layout DOM
 ├── deck-cli.py           ← 14 个原子操作命令
 │
 ├── templates/            ← 渲染器使用的 24 个 layout/block 片段模板
@@ -63,6 +65,20 @@ python3 render-deck.py runs/<ts>/output/deck.json runs/<ts>/output/
 ---
 
 ## Schema 一览
+
+### Deck canvas 与 Template Pack
+
+- `deck.canvas` 可选；不写时保持旧版 1920×1080。写入后，runtime、编辑器、
+  Presenter、preview、截图和视觉审计共用同一宽高。
+- `deck.template_ref` 以 `id + version + deck.json 相对路径` 固定一份当前 run
+  内的 Template Pack。Final 只接受已确认的 `approved` 版本且要求 strict。
+- Template Pack 不新增 `slide.layout`：只把现有 `cover/raw/section/quote/agenda/end`
+  映射到六个语义角色；旧正文 Layout 映射到 `raw`，`canvas/replica/iframe-embed`
+  是技术机制并绕过视觉模板。
+- 覆盖状态只有 `native/derived/alias/unsupported`。模板可以不具备六类页面，
+  但当前 deck 用到的缺失角色必须阻断，不能单页偷偷回落到默认飞书模板。
+
+完整生命周期见 `../references/template-system.md`。
 
 ### 12 base layouts + 2 specials
 

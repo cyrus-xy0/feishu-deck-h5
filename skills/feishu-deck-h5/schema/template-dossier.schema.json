@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://feishu-deck-h5.local/schema/template-dossier.schema.json",
+  "title": "feishu-deck-h5 PPTX template dossier",
+  "description": "Factual, untrusted extraction of a PPTX template. It contains source geometry and role candidates, but does not activate semantic layouts.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source",
+    "canvas",
+    "theme",
+    "masters",
+    "layouts",
+    "slides",
+    "assets",
+    "role_candidates",
+    "confidence",
+    "warnings",
+    "untrusted"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "source": {
+      "type": "object",
+      "required": ["path", "filename", "sha256", "slide_count", "master_count", "layout_count", "extracted_at"],
+      "properties": {
+        "path": { "type": "string" },
+        "filename": { "type": "string", "pattern": "\\.[Pp][Pp][Tt][Xx]$" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "slide_count": { "type": "integer", "minimum": 0 },
+        "master_count": { "type": "integer", "minimum": 1 },
+        "layout_count": { "type": "integer", "minimum": 0 },
+        "extracted_at": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "canvas": { "$ref": "#/$defs/canvas" },
+    "theme": {
+      "type": "object",
+      "required": ["themes"],
+      "properties": {
+        "themes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["part", "colors", "fonts"],
+            "properties": {
+              "part": { "type": "string" },
+              "name": { "type": ["string", "null"] },
+              "color_scheme_name": { "type": ["string", "null"] },
+              "colors": { "type": "object" },
+              "fonts": { "type": "object" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "masters": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/master" }
+    },
+    "layouts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceLayout" }
+    },
+    "slides": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceSlide" }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "source_parts", "used_by_parts", "sha256", "bytes", "extension"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^asset-[a-f0-9]{12}$" },
+          "path": { "type": "string", "pattern": "^assets/" },
+          "source_parts": { "type": "array", "items": { "type": "string" } },
+          "used_by_parts": { "type": "array", "items": { "type": "string" } },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "extension": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "role_candidates": { "$ref": "#/$defs/roleMapCandidates" },
+    "confidence": {
+      "type": "object",
+      "required": ["overall", "needs_confirmation"],
+      "properties": {
+        "overall": { "type": "number", "minimum": 0, "maximum": 1 },
+        "needs_confirmation": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "untrusted": { "type": "boolean", "const": true }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "role": {
+      "type": "string",
+      "enum": ["cover", "raw", "section", "quote", "agenda", "end"]
+    },
+    "canvas": {
+      "type": "object",
+      "required": [
+        "source_width_emu",
+        "source_height_emu",
+        "width_inches",
+        "height_inches",
+        "width_points",
+        "height_points",
+        "aspect_ratio",
+        "orientation",
+        "recommended_design_canvas",
+        "design_width",
+        "design_height"
+      ],
+      "properties": {
+        "source_width_emu": { "type": "integer", "exclusiveMinimum": 0 },
+        "source_height_emu": { "type": "integer", "exclusiveMinimum": 0 },
+        "width_inches": { "type": "number", "exclusiveMinimum": 0 },
+        "height_inches": { "type": "number", "exclusiveMinimum": 0 },
+        "width_points": { "type": "number", "exclusiveMinimum": 0 },
+        "height_points": { "type": "number", "exclusiveMinimum": 0 },
+        "aspect_ratio": {
+          "type": "object",
+          "required": ["label", "value"],
+          "properties": {
+            "label": { "type": "string", "pattern": "^[0-9]+:[0-9]+$" },
+            "value": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "orientation": { "type": "string", "enum": ["landscape", "portrait", "square"] },
+        "recommended_design_canvas": {
+          "type": "object",
+          "required": ["width", "height", "policy"],
+          "properties": {
+            "width": { "type": "integer", "exclusiveMinimum": 0 },
+            "height": { "type": "integer", "exclusiveMinimum": 0 },
+            "policy": { "type": "string", "const": "preserve-source-aspect-ratio" }
+          },
+          "additionalProperties": false
+        },
+        "design_width": { "type": "integer", "exclusiveMinimum": 0 },
+        "design_height": { "type": "integer", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "geometry": {
+      "type": "object",
+      "required": ["x", "y", "w", "h", "normalized"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "w": { "type": "integer", "minimum": 0 },
+        "h": { "type": "integer", "minimum": 0 },
+        "normalized": {
+          "type": "object",
+          "required": ["x", "y", "w", "h"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "w": { "type": "number" },
+            "h": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "element": {
+      "type": "object",
+      "required": ["id", "source_layer", "shape_id", "shape_type", "z_index", "geometry_emu", "is_placeholder"],
+      "properties": {
+        "id": { "type": "string" },
+        "source_layer": { "type": "string", "enum": ["master", "layout", "slide"] },
+        "source_part": { "type": ["string", "null"] },
+        "shape_id": { "type": "integer" },
+        "name": { "type": ["string", "null"] },
+        "shape_type": { "type": "string" },
+        "z_index": { "type": "integer", "minimum": -1 },
+        "geometry_emu": { "$ref": "#/$defs/geometry" },
+        "source_geometry_emu": {
+          "type": "object",
+          "required": ["x", "y", "w", "h"],
+          "properties": {
+            "x": { "type": "integer" },
+            "y": { "type": "integer" },
+            "w": { "type": "integer", "minimum": 0 },
+            "h": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "geometry": {
+          "type": "object",
+          "required": ["x", "y", "w", "h"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "w": { "type": "number" },
+            "h": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "rotation_degrees": { "type": "number" },
+        "is_placeholder": { "type": "boolean" },
+        "style": { "type": "object" },
+        "text": { "type": "string" },
+        "asset_id": { "type": "string" },
+        "src": { "type": ["string", "null"] },
+        "theme_context": { "type": "object" },
+        "source_stack_plane": {
+          "type": "string",
+          "enum": ["background", "foreground", "interleaved"]
+        },
+        "source_stack_evidence": { "type": "object" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/element" } },
+        "fixed_by_source": { "type": "boolean" },
+        "replaceable_candidate": { "type": "boolean" },
+        "candidate_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "approval_required": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "slot": {
+      "type": "object",
+      "required": [
+        "id",
+        "placeholder_index",
+        "placeholder_type",
+        "z_index",
+        "slot_kind",
+        "system_field",
+        "geometry_emu",
+        "text_styles",
+        "source",
+        "confidence",
+        "approval_required"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "placeholder_index": { "type": "integer" },
+        "placeholder_type": { "type": "string" },
+        "z_index": { "type": "integer", "minimum": 0 },
+        "slot_kind": { "type": "string" },
+        "semantic_name": { "type": "string" },
+        "semantic_name_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "system_field": { "type": "boolean" },
+        "name": { "type": ["string", "null"] },
+        "prompt_text": { "type": "string" },
+        "geometry_emu": { "$ref": "#/$defs/geometry" },
+        "geometry": { "type": "object" },
+        "text_styles": { "type": "array", "items": { "type": "object" } },
+        "style": { "type": "object" },
+        "source": { "type": "object" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "approval_required": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "master": {
+      "type": "object",
+      "required": ["id", "index", "part", "theme_part", "color_map", "theme_context", "fixed_elements", "placeholders", "text_styles", "layout_ids"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^master-[0-9]+$" },
+        "index": { "type": "integer", "minimum": 1 },
+        "name": { "type": ["string", "null"] },
+        "part": { "type": ["string", "null"] },
+        "theme_part": { "type": ["string", "null"] },
+        "color_map": { "type": "object", "additionalProperties": { "type": "string" } },
+        "theme_context": { "type": "object" },
+        "background": { "type": ["object", "null"] },
+        "fixed_elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
+        "placeholders": { "type": "array", "items": { "$ref": "#/$defs/slot" } },
+        "text_styles": { "type": "object" },
+        "layout_ids": { "type": "array", "items": { "type": "string", "pattern": "^layout-[0-9]+$" } }
+      },
+      "additionalProperties": false
+    },
+    "sourceLayout": {
+      "type": "object",
+      "required": ["id", "index", "part", "master_id", "theme_part", "color_map", "theme_context", "fixed_elements", "placeholders", "used_by_slides"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^layout-[0-9]+$" },
+        "index": { "type": "integer", "minimum": 1 },
+        "name": { "type": ["string", "null"] },
+        "part": { "type": ["string", "null"] },
+        "master_id": { "type": "string", "pattern": "^master-[0-9]+$" },
+        "theme_part": { "type": ["string", "null"] },
+        "color_map": { "type": "object", "additionalProperties": { "type": "string" } },
+        "theme_context": { "type": "object" },
+        "background": { "type": ["object", "null"] },
+        "fixed_elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
+        "placeholders": { "type": "array", "items": { "$ref": "#/$defs/slot" } },
+        "used_by_slides": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+      },
+      "additionalProperties": false
+    },
+    "sourceSlide": {
+      "type": "object",
+      "required": ["id", "index", "slide_id", "part", "layout_id", "master_id", "theme_part", "color_map", "theme_context", "title", "text_sample", "placeholders", "sample_elements"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^slide-[0-9]+$" },
+        "index": { "type": "integer", "minimum": 1 },
+        "slide_id": { "type": "integer" },
+        "part": { "type": ["string", "null"] },
+        "layout_id": { "type": ["string", "null"] },
+        "master_id": { "type": ["string", "null"] },
+        "theme_part": { "type": ["string", "null"] },
+        "color_map": { "type": "object", "additionalProperties": { "type": "string" } },
+        "theme_context": { "type": "object" },
+        "title": { "type": "string" },
+        "text_sample": { "type": "string" },
+        "placeholders": { "type": "array", "items": { "$ref": "#/$defs/slot" } },
+        "sample_elements": { "type": "array", "items": { "$ref": "#/$defs/element" } }
+      },
+      "additionalProperties": false
+    },
+    "candidate": {
+      "type": "object",
+      "required": ["source_kind", "selector", "layout_id", "confidence", "reason"],
+      "properties": {
+        "source_kind": { "type": "string", "enum": ["layout", "slide"] },
+        "selector": { "type": "string" },
+        "layout_id": { "type": "string" },
+        "slide_id": { "type": "string" },
+        "name": { "type": ["string", "null"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "roleMapCandidates": {
+      "type": "object",
+      "required": ["cover", "raw", "section", "quote", "agenda", "end"],
+      "properties": {
+        "cover": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+        "raw": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+        "section": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+        "quote": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+        "agenda": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+        "end": { "type": "array", "items": { "$ref": "#/$defs/candidate" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}

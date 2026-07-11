@@ -12,6 +12,7 @@ It measures, each `--runs` times (median / min / max reported):
   · render_advisory             render-deck.py default (no --visual, no autosnap)
   · validate_static             validate.py --no-visual   (byte/source rules, 0 browser)
   · validate_visual_json        validate.py --visual --json (engine + font probe)
+  · validate_visual_scope_1     same visual gate scoped to the first slide
   · validate_visual_nocache     same, DECK_NO_FONT_PROBE_CACHE=1 (shows PERF-A delta)
   · check_distribution          check-distribution.py --json (6c geometry)
   · deck_cli_set                deck-cli.py set (a write op)
@@ -31,8 +32,9 @@ Usage:
   segment's median is >PCT% slower than the baseline (segments below
   --noise-floor ms, default 50, are ignored as timing noise). Compare only
   same-environment numbers — a darwin baseline does not transfer to a CI ubuntu
-  runner, so the CI gate (.github/workflows/bench.yml) compares against a
-  baseline captured ON CI. See PERF-OPT-PLAN-2026-06-16.md / AUDIT-2026-06-17.
+  runner. The CI gate starts from a committed conservative Ubuntu budget and
+  should be tightened with stable successful CI artifacts as history accrues.
+  See PERF-OPT-PLAN-2026-06-16.md / AUDIT-2026-06-17.
 """
 from __future__ import annotations
 
@@ -61,6 +63,7 @@ CHROMIUM_NOTE = {
     "render_advisory": "3 (engine + font-probe + distribution, same html)",
     "validate_static": "0 (byte/source only)",
     "validate_visual_json": "2 (engine + font-probe) — 1 once PERF-A cache is warm",
+    "validate_visual_scope_1": "2 (scoped engine + font-probe)",
     "validate_visual_nocache": "2 (engine + font-probe, cache bypassed)",
     "check_distribution": "1",
     "deck_cli_set": "0 (schema-validate spawn only)",
@@ -130,6 +133,23 @@ def _regressions(segments, baseline_segments, pct, noise_floor):
     return out
 
 
+def _regression_gate_precondition(compare, fail_on_regress):
+    """Return an error when a requested regression gate cannot compare.
+
+    This is intentionally checked before any expensive browser benchmark. A
+    missing baseline used to burn the whole job and then exit green, silently
+    disabling the canary. Callers/tests can exercise the fail-closed contract
+    without launching Chromium.
+    """
+    if fail_on_regress is None:
+        return None
+    if compare is None:
+        return "--fail-on-regress needs --compare <baseline.json>"
+    if not Path(compare).is_file():
+        return f"--compare baseline not found: {compare}"
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("deck", type=Path, help="deck.json to benchmark")
@@ -149,6 +169,11 @@ def main():
     if not deck.is_file():
         print(f"bench-render: deck not found: {deck}", file=sys.stderr)
         return 2
+    gate_error = _regression_gate_precondition(args.compare, args.fail_on_regress)
+    if gate_error:
+        print(f"bench-render: {gate_error}; regression gate failed closed",
+              file=sys.stderr)
+        return 3
     try:
         n_slides = len(json.loads(deck.read_text(encoding="utf-8")).get("slides", []))
     except (OSError, ValueError):
@@ -214,6 +239,9 @@ def main():
         _bench_cmd("validate_static", [sys.executable, str(VALIDATE), h, "--no-visual"])
         _bench_cmd("validate_visual_json",
                    [sys.executable, str(VALIDATE), h, "--visual", "--json"])
+        _bench_cmd("validate_visual_scope_1",
+                   [sys.executable, str(VALIDATE), h, "--visual", "--json",
+                    "--scope-frames", "1"])
         _bench_cmd("validate_visual_nocache",
                    [sys.executable, str(VALIDATE), h, "--visual", "--json"],
                    env={"DECK_NO_FONT_PROBE_CACHE": "1"})
@@ -256,10 +284,13 @@ def main():
 
     exit_code = 0
     if args.compare and not args.compare.is_file():
-        # A missing baseline is NOT a failure — the first CI run seeds it from
-        # this run's --out. Only say so loudly when a gate was requested.
+        # A requested gate without its comparison source is not a gate at all.
+        # Fail closed so a renamed/deleted baseline cannot silently turn the
+        # scheduled performance canary dormant again.
+        if args.fail_on_regress is not None:
+            exit_code = 3
         print(f"\n  ! --compare baseline not found: {args.compare}"
-              + ("  (no regression gate this run — seed it from --out)"
+              + ("  (regression gate cannot run)"
                  if args.fail_on_regress is not None else ""),
               file=sys.stderr)
     elif args.compare:
@@ -289,7 +320,8 @@ def main():
             else:
                 print(f"\n  ✔ no segment regressed > {args.fail_on_regress:.0f}% vs baseline.")
     elif args.fail_on_regress is not None:
-        print("\n  ! --fail-on-regress needs --compare <baseline.json>; no gate applied.",
+        exit_code = 3
+        print("\n  ! --fail-on-regress needs --compare <baseline.json>; gate failed closed.",
               file=sys.stderr)
 
     if not args.keep:

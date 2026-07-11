@@ -1,7 +1,7 @@
 """Tests for deck-json/outline-lint.py — the designer outline.json self-check.
 
 outline-lint is a SELF-CHECK, not a render gate: these tests pin that it
-(1) accepts a well-formed outline and the real shipped runs, (2) flags a
+(1) accepts well-formed deterministic syntax variants, (2) flags a
 missing top-level contract key, (3) enforces the six-dimension design_spec +
 non-empty density_budget on `raw:` slides only, and (4) reports violations with
 the slide key + 1-based locator (F-280 convention).
@@ -85,17 +85,20 @@ class OutlineLintCli(unittest.TestCase):
         self.assertEqual(rc, 0, log)
         self.assertIn("OK", log)
 
-    def test_real_shipped_outlines_pass(self):
-        # Both real runs are legitimately-designed shipped decks; one writes the
-        # six dims with explicit labels, the other with compact slash shorthand.
-        # The self-check must NOT false-positive on either (anti-overblock).
-        found = list((REPO.parent.parent / "runs").glob("*/output/outline.json"))
-        if not found:
-            self.skipTest("no real runs/*/output/outline.json present")
-        for f in found:
-            with self.subTest(outline=str(f)):
-                rc, log = self._run(path=f)
-                self.assertEqual(rc, 0, f"{f} should pass:\n{log}")
+    def test_six_dimension_syntax_variants_pass(self):
+        # Pin both supported authoring forms without scanning mutable local runs/.
+        # A unit test must not change result when a historical or in-progress run
+        # is added beside the repository.
+        explicit = _valid_outline()
+        compact = _valid_outline()
+        compact["slides"][1]["design_spec"] = {
+            "Q0": "现象页",
+            "visual": "44/700/居中/-0.01em · 2级卡 panel · glow border",
+        }
+        for syntax, outline in (("explicit-labels", explicit), ("compact-slash", compact)):
+            with self.subTest(syntax=syntax):
+                rc, log = self._run(outline)
+                self.assertEqual(rc, 0, log)
 
     # --- shape errors -----------------------------------------------------
 

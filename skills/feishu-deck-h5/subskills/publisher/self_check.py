@@ -15,8 +15,8 @@ This module is a standalone, independently-callable check. Inputs:
     remote  — the final published URL (https://..., or — for local testing —
               a file:// URL or a http://127.0.0.1 server serving a copy).
 
-It opens BOTH with Playwright, captures the first N slides of each, and on the
-REMOTE side additionally:
+It opens BOTH with one Playwright/Chromium process and two isolated contexts,
+captures local and remote concurrently, and on the REMOTE side additionally:
 
   1. collects failed network requests (404 / blocked / DNS) — a "broken link"
      red card. This is the dimension that has no validator: validate.py checks
@@ -56,6 +56,7 @@ cards fire.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -277,29 +278,29 @@ _SHOW_SLIDE_JS = r"""
 """
 
 
-def _deck_scope(page):
+async def _deck_scope(page):
     """Return the Page/Frame that actually contains the deck.
 
     Magic Page may wrap the published HTML in an internal frame. The audience
     still sees the deck, but querying only the top document yields zero slides.
     """
     try:
-        if page.query_selector(".slide-frame"):
+        if await page.query_selector(".slide-frame"):
             return page
     except Exception:
         pass
     for frame in page.frames:
         try:
-            if frame.query_selector(".slide-frame"):
+            if await frame.query_selector(".slide-frame"):
                 return frame
         except Exception:
             continue
     return page
 
 
-def _slide_iframe_count(scope, slide_idx: int) -> int:
+async def _slide_iframe_count(scope, slide_idx: int) -> int:
     try:
-        return int(scope.evaluate(
+        return int(await scope.evaluate(
             """(i) => {
               const frames = [...document.querySelectorAll('.slide-frame')];
               const s = frames[i] && frames[i].querySelector('.slide');
@@ -311,42 +312,49 @@ def _slide_iframe_count(scope, slide_idx: int) -> int:
         return 0
 
 
-def _wait_for_current_slide_iframes(page, scope, slide_idx: int) -> None:
+async def _wait_for_current_slide_iframes(page, scope, slide_idx: int) -> None:
     """Let iframe-heavy slides settle before screenshotting.
 
     Magic Page can wrap iframes through its own router and Playwright may switch
     slides faster than the child document paints. A short wait only on iframe
     slides avoids false black-frame diffs without slowing simple decks.
     """
-    if _slide_iframe_count(scope, slide_idx) <= 0:
+    if await _slide_iframe_count(scope, slide_idx) <= 0:
         return
     try:
-        page.wait_for_timeout(IFRAME_SETTLE_MS)
+        await page.wait_for_timeout(IFRAME_SETTLE_MS)
     except Exception:
         pass
     try:
-        page.wait_for_load_state("networkidle", timeout=2_500)
+        await page.wait_for_load_state("networkidle", timeout=2_500)
     except Exception:
         pass
 
 
-def capture_side(uri: str, out_dir: Path, *, pages: int, collect_requests: bool) -> dict[str, Any]:
-    """Open a deck URL, screenshot the first `pages` slides, return per-slide
-    metadata (idx/key/layout/effective face/png path) plus, when requested,
-    failed network requests. Returns {'ok': False, 'reason': ...} if Playwright
-    is unavailable so the caller can degrade gracefully rather than crash."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return {"ok": False, "reason": "playwright not installed", "slides": [], "failed_requests": []}
+async def _capture_side_with_browser(
+    browser,
+    uri: str,
+    out_dir: Path,
+    *,
+    pages: int,
+    collect_requests: bool,
+) -> dict[str, Any]:
+    """Capture one side inside its own isolated browser context.
 
+    The caller owns the browser so local and remote can share one Chromium
+    process while keeping cookies, storage, service workers and failures fully
+    isolated. This coroutine is safe to run under asyncio.gather().
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     failed: list[dict[str, Any]] = []
     slides: list[dict[str, Any]] = []
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": DESIGN_W, "height": DESIGN_H}, device_scale_factor=1)
-        page = ctx.new_page()
+    ctx = None
+    try:
+        ctx = await browser.new_context(
+            viewport={"width": DESIGN_W, "height": DESIGN_H},
+            device_scale_factor=1,
+        )
+        page = await ctx.new_page()
         if collect_requests:
             page.on("requestfailed", lambda req: failed.append({
                 "url": req.url,
@@ -369,46 +377,130 @@ def capture_side(uri: str, out_dir: Path, *, pages: int, collect_requests: bool)
                     pass
 
             page.on("response", _on_response)
-        page.goto(uri, wait_until="domcontentloaded", timeout=60_000)
-        for fn in (
-            lambda: page.wait_for_load_state("load", timeout=4_000),
-            lambda: page.evaluate("() => Promise.race([(document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(r => setTimeout(r, 2000))])"),
-            lambda: page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000),
+        await page.goto(uri, wait_until="domcontentloaded", timeout=60_000)
+        for awaitable in (
+            page.wait_for_load_state("load", timeout=4_000),
+            page.evaluate("() => Promise.race([(document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(r => setTimeout(r, 2000))])"),
+            page.wait_for_function("() => document.querySelector('.deck[data-js-ready]')", timeout=5_000),
         ):
             try:
-                fn()
+                await awaitable
             except Exception:
                 pass
         scope = page
         for _ in range(20):
-            scope = _deck_scope(page)
+            scope = await _deck_scope(page)
             try:
-                if scope.query_selector(".slide-frame"):
+                if await scope.query_selector(".slide-frame"):
                     break
             except Exception:
                 pass
-            page.wait_for_timeout(250)
+            await page.wait_for_timeout(250)
         try:
-            scope.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
+            await scope.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
         except Exception:
             pass
-        page.wait_for_timeout(300)
-        meta = scope.evaluate(_SLIDE_META_JS)
+        await page.wait_for_timeout(300)
+        meta = await scope.evaluate(_SLIDE_META_JS)
         meta = meta[: max(0, pages)] if pages is not None else meta
         for m in meta:
             try:
-                scope.evaluate(_SHOW_SLIDE_JS, m["idx"] - 1)
-                page.wait_for_timeout(350)
-                _wait_for_current_slide_iframes(page, scope, m["idx"] - 1)
+                await scope.evaluate(_SHOW_SLIDE_JS, m["idx"] - 1)
+                await page.wait_for_timeout(350)
+                await _wait_for_current_slide_iframes(page, scope, m["idx"] - 1)
                 fn = out_dir / f"s{m['idx']:02d}.png"
-                page.screenshot(path=str(fn), clip={"x": 0, "y": 0, "width": DESIGN_W, "height": DESIGN_H})
+                await page.screenshot(
+                    path=str(fn),
+                    clip={"x": 0, "y": 0, "width": DESIGN_W, "height": DESIGN_H},
+                )
                 m["png"] = str(fn)
             except Exception as exc:
                 m["png"] = ""
                 m["capture_error"] = str(exc)
             slides.append(m)
-        browser.close()
-    return {"ok": True, "slides": slides, "failed_requests": failed}
+        return {"ok": True, "slides": slides, "failed_requests": failed}
+    except Exception as exc:  # browser/navigation faults degrade to a reported skip
+        return {
+            "ok": False,
+            "reason": str(exc),
+            "slides": slides,
+            "failed_requests": failed,
+        }
+    finally:
+        if ctx is not None:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+
+
+def _capture_many(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Capture one or more decks with one Chromium and one context per deck."""
+    try:
+        from playwright.async_api import async_playwright
+    except Exception:
+        return [
+            {"ok": False, "reason": "playwright not installed", "slides": [], "failed_requests": []}
+            for _ in requests
+        ]
+
+    async def _run() -> list[dict[str, Any]]:
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    # asyncio.gather overlaps local/remote navigation, font
+                    # settling and screenshots. Context isolation prevents the
+                    # local file from sharing storage/session state with Magic.
+                    return list(await asyncio.gather(*[
+                        _capture_side_with_browser(browser, **request)
+                        for request in requests
+                    ]))
+                finally:
+                    await browser.close()
+        except Exception as exc:
+            return [
+                {"ok": False, "reason": str(exc), "slides": [], "failed_requests": []}
+                for _ in requests
+            ]
+
+    return asyncio.run(_run())
+
+
+def capture_side(uri: str, out_dir: Path, *, pages: int, collect_requests: bool) -> dict[str, Any]:
+    """Backward-compatible single-side capture using the shared-browser core."""
+    return _capture_many([{
+        "uri": uri,
+        "out_dir": out_dir,
+        "pages": pages,
+        "collect_requests": collect_requests,
+    }])[0]
+
+
+def capture_pair(
+    local_uri: str,
+    local_out: Path,
+    remote_uri: str,
+    remote_out: Path,
+    *,
+    pages: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Capture local and remote concurrently in two isolated contexts."""
+    captures = _capture_many([
+        {
+            "uri": local_uri,
+            "out_dir": local_out,
+            "pages": pages,
+            "collect_requests": False,
+        },
+        {
+            "uri": remote_uri,
+            "out_dir": remote_out,
+            "pages": pages,
+            "collect_requests": True,
+        },
+    ])
+    return captures[0], captures[1]
 
 
 # ------------------------------------------------------------------ comparison
@@ -665,10 +757,13 @@ def run_self_check(
     remote_uri = normalize_remote(remote)
     out_dir = out_dir.expanduser().resolve()
 
-    local_cap = capture_side(local_html.as_uri(), out_dir / "self-check" / "local",
-                             pages=pages, collect_requests=False)
-    remote_cap = capture_side(remote_uri, out_dir / "self-check" / "remote",
-                              pages=pages, collect_requests=True)
+    local_cap, remote_cap = capture_pair(
+        local_html.as_uri(),
+        out_dir / "self-check" / "local",
+        remote_uri,
+        out_dir / "self-check" / "remote",
+        pages=pages,
+    )
 
     if not local_cap.get("ok") or not remote_cap.get("ok"):
         reason = local_cap.get("reason") or remote_cap.get("reason") or "capture failed"

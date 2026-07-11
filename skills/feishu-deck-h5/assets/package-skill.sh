@@ -167,5 +167,6 @@ echo "  size    : $TAR_SIZE   (source was $SRC_SIZE)"
 echo
 echo "  Install on the target platform:"
 echo "    tar -xzf $(basename "$TARBALL") -C <skills-dir>/"
-echo "    bash <skills-dir>/feishu-deck-h5/assets/check-mira.sh   # verify env"
+echo "    bash <skills-dir>/feishu-deck-h5/assets/preflight.sh --profile <capability>"
+echo "    # install declared sibling skills first for profiles such as pptx"
 exit 0

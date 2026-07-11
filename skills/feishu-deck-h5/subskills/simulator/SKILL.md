@@ -40,8 +40,8 @@ brief
   -> async simulator
   -> user decides revise vs confirm publishable
   -> publish-magic-page if needed
-  -> user confirms ingestion
-  -> publisher
+  -> user confirms library ingestion if needed
+  -> importer
 ```
 
 典型用户请求:

@@ -435,12 +435,20 @@ def xml_texts(raw: bytes) -> list[str]:
 # (it uses feishu-deck-h5 as its render backend). Resolve it as a sibling, with
 # fallbacks to the legacy nested location and the registered ~/.claude symlink so
 # the parser keeps working across layouts.
+_PPTX_SKILL_OVERRIDE = os.environ.get("FS_DECK_PPTX_SKILL", "").strip()
+_PPTX_SKILL_CANDIDATES = (
+    [Path(_PPTX_SKILL_OVERRIDE).expanduser()]
+    if _PPTX_SKILL_OVERRIDE
+    else [
+        REPO.parent / "pptx-to-deck",                 # sibling (new layout)
+        REPO / "pptx-to-html",                        # legacy nested
+        Path.home() / ".claude" / "skills" / "pptx-to-deck",  # registered symlink
+    ]
+)
 PPTX_SKILL_DIR = next(
-    (d for d in (REPO.parent / "pptx-to-deck",                 # sibling (new layout)
-                 REPO / "pptx-to-html",                         # legacy nested
-                 Path.home() / ".claude" / "skills" / "pptx-to-deck")  # registered symlink
+    (d for d in _PPTX_SKILL_CANDIDATES
      if (d / "assets" / "build_pptx.py").is_file()),
-    REPO.parent / "pptx-to-deck",                              # default for the warning path
+    _PPTX_SKILL_CANDIDATES[0],
 )
 PPTX_VENV_PY = PPTX_SKILL_DIR / ".venv" / "bin" / "python3"
 BUILD_PPTX = PPTX_SKILL_DIR / "assets" / "build_pptx.py"
@@ -452,8 +460,9 @@ def build_pptx_canvas(pptx_path: Path, out_dir: Path, title: str = "") -> dict[s
     (run in the pptx-to-deck venv). Emits deck.json + extracted images under
     `out_dir`, then renders index.html. Returns a structured result record for
     the source-dossier: deck.json path, slide count, the `unreconstructed`
-    page-number report, and any warnings. Never raises — a conversion failure is
-    recorded as a warning so the dossier still writes."""
+    page-number report, and any warnings. The caller writes the dossier for
+    provenance but exits non-zero when ``ok`` is false; a requested PPTX
+    conversion must never look successful when the backend is unavailable."""
     result: dict[str, Any] = {
         "engine": "build_pptx",
         "layout": "canvas",
@@ -652,10 +661,10 @@ def local_html_asset_path(html_path: Path, ref: str) -> Path | None:
     """Resolve a local HTML asset ref, ignoring remote/data/hash refs.
 
     Containment guard (F-287 untrusted source): a source HTML may carry a
-    crafted ref like ``../../../etc/passwd``. After resolving, reject anything
-    that escapes the source HTML's own directory so a malicious source cannot
-    drive an arbitrary-file read/copy into the deliverable. (parse.py lives
-    outside deck-json/ so the guard is inlined rather than importing _safe_write.)
+    crafted ref like ``../../../etc/passwd``. External sources are confined to
+    their own directory. Bundled/trusted skill examples may also resolve within
+    the skill root so ``examples/sample-deck.html -> ../assets/...`` remains a
+    valid self-check without granting that exception to uploaded HTML.
     """
     ref = str(ref).strip()
     if not ref or is_url(ref) or ref.startswith(("data:", "#", "mailto:", "tel:")):
@@ -665,7 +674,14 @@ def local_html_asset_path(html_path: Path, ref: str) -> Path | None:
         return None
     base = html_path.parent.resolve()
     candidate = (base / clean).resolve()
-    if candidate != base and base not in candidate.parents:
+    allowed_roots = [base]
+    skill_root = REPO.resolve()
+    try:
+        html_path.resolve().relative_to(skill_root)
+        allowed_roots.append(skill_root)
+    except ValueError:
+        pass
+    if not any(candidate == root or root in candidate.parents for root in allowed_roots):
         return None
     return candidate if candidate.is_file() else None
 
@@ -1630,6 +1646,7 @@ def main(argv: list[str] | None = None) -> int:
         pptx_canvas_root = out_dir / "pptx-canvas"
     prepared_sources = [prepare_runtime_source(source, library_dir) for source in args.sources]
     inventory = []
+    conversion_failures: list[str] = []
     for prepared in prepared_sources:
         item = inventory_source(str(prepared["runtime_source"]))
         item["original_source"] = prepared["original_source"]
@@ -1673,6 +1690,8 @@ def main(argv: list[str] | None = None) -> int:
             if conv.get("ok"):
                 item["deck_json"] = conv.get("deck_json", "")
                 item["unreconstructed_slides"] = conv.get("unreconstructed_slides", [])
+            else:
+                conversion_failures.append(str(item.get("original_source") or pptx_path))
             warnings = list(item.get("warnings") or [])
             warnings.extend(conv.get("warnings") or [])
             if warnings:
@@ -1776,6 +1795,12 @@ def main(argv: list[str] | None = None) -> int:
     dossier_path = out_dir / "source-dossier.json"
     write_json(dossier_path, dossier)
     print(json.dumps({"dossier": str(dossier_path), **dossier}, ensure_ascii=False, indent=2))
+    if conversion_failures:
+        print(
+            "PPTX conversion failed for: " + ", ".join(conversion_failures),
+            file=sys.stderr,
+        )
+        return 3
     missing = [src for src in inventory if not src.get("exists", True)]
     return 0 if args.allow_missing or not missing else 2
 

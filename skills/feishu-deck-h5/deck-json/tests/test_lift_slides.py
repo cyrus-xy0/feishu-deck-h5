@@ -177,12 +177,13 @@ SRC_HTML_POLLUTION = """<!doctype html><html lang="zh-CN"><head><meta charset="u
 <body><div class="deck">
 <div class="slide-frame" data-page="1">
 <div class="slide" data-layout="raw" data-slide-key="polluted" data-screen-label="01 Dirty">
-<style>
+<style data-source="framework">
 .slide { transform: scale(.8); }
 .card, h1, .stage { position: absolute; left: 0; }
 </style>
-<div class="stage" onclick="evil()"><h1>Polluted</h1><div class="card">x</div></div>
-<script>window.evil = true</script>
+<div class="stage" onclick="evil()"><h1>Polluted</h1><div class="card">x</div>
+<a href="javascript:evil()">unsafe</a><iframe srcdoc="&lt;script&gt;evil()&lt;/script&gt;"></iframe></div>
+<script data-source="framework">window.evil = true</script>
 </div>
 </div>
 </div></body></html>
@@ -218,6 +219,8 @@ class LiftSlidesPollutionHygieneTest(unittest.TestCase):
             self.assertNotIn("<style", body)
             self.assertNotIn("<script", body)
             self.assertNotIn("onclick=", body)
+            self.assertNotIn("javascript:", body)
+            self.assertNotIn("srcdoc=", body)
             self.assertIn(".card, h1, .stage", css)
             self.assertIn("css hygiene: moved 1 embedded <style>", proc.stdout)
             self.assertIn("script hygiene: stripped 1 <script> block(s), 1 inline handler(s)",

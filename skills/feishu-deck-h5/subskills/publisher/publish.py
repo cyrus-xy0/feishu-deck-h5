@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -429,6 +430,7 @@ def make_magic_assets_cmd(
     source_html: Path,
     upload_workers: int,
     keep_inline_code: bool,
+    legacy_uploader: bool = False,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -449,6 +451,8 @@ def make_magic_assets_cmd(
     ]
     if keep_inline_code:
         cmd.append("--keep-inline-code")
+    if legacy_uploader:
+        cmd.append("--legacy-uploader")
     return cmd
 
 
@@ -456,17 +460,102 @@ def dry_run_asset_uploader(output_dir: Path) -> Path:
     """Return a local uploader shim that maps upload keys to deterministic URLs."""
     uploader = output_dir / "dry-run-magic-upload.js"
     uploader.write_text(
-        """
+        r"""
+const fs = require("fs");
+const crypto = require("crypto");
+const readline = require("readline");
 const args = process.argv.slice(2);
-const keyIndex = args.indexOf("--key");
-const rawKey = keyIndex >= 0 ? args[keyIndex + 1] : (args[0] || "asset");
-const key = String(rawKey).replace(/[^A-Za-z0-9._/-]+/g, "-").replace(/^\\/+/, "");
-process.stdout.write("https://dryrun.local/" + key);
+const manifestIndex = args.indexOf("--batch-manifest");
+const ndjson = args.includes("--batch-ndjson");
+const baseIndex = args.indexOf("--base-url");
+const baseRaw = String(baseIndex >= 0 ? args[baseIndex + 1] : "https://magic.solutionsuite.cn")
+  .trim().replace(/\/+$/, "");
+const base = /^https?:\/\//i.test(baseRaw) ? baseRaw : "https://" + baseRaw;
+const cleanKey = (raw) => String(raw || "asset")
+  .replace(/[^A-Za-z0-9._/-]+/g, "-").replace(/^\/+/, "");
+
+function responseFor(request) {
+  const items = request.items.map((item) => {
+    const payload = fs.readFileSync(item.file);
+    const sha256 = crypto.createHash("sha256").update(payload).digest("hex");
+    const cacheKey = crypto.createHash("sha256")
+      .update(base + "\0" + item.key + "\0" + sha256).digest("hex");
+    if (sha256 !== item.sha256 || cacheKey !== item.cache_key || item.id !== cacheKey) {
+      return {...item, ok: false, error: "dry-run manifest integrity mismatch"};
+    }
+    return {...item, ok: true, url: "https://dryrun.local/" + cleanKey(item.key)};
+  });
+  return {
+    protocol: "magic-upload-batch/v1",
+    request_id: request.request_id || "",
+    ok: items.every((item) => item.ok),
+    base_url: base,
+    items
+  };
+}
+
+async function main() {
+  if (ndjson) {
+    const rl = readline.createInterface({input: process.stdin, crlfDelay: Infinity});
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      process.stdout.write(JSON.stringify(responseFor(JSON.parse(line))) + "\n");
+    }
+    return;
+  }
+  if (manifestIndex >= 0) {
+    const response = responseFor(JSON.parse(fs.readFileSync(args[manifestIndex + 1], "utf8")));
+    process.stdout.write(JSON.stringify(response));
+    process.exitCode = response.ok ? 0 : 1;
+    return;
+  }
+  const keyIndex = args.indexOf("--key");
+  const rawKey = keyIndex >= 0 ? args[keyIndex + 1] : (args[0] || "asset");
+  process.stdout.write("https://dryrun.local/" + cleanKey(rawKey));
+}
+main().catch((error) => { console.error(error.message); process.exit(1); });
 """.strip()
         + "\n",
         encoding="utf-8",
     )
     return uploader
+
+
+def _run_magic_assets(
+    *,
+    package_source: Path,
+    packaged: Path,
+    uploader: Path,
+    base_url: str,
+    task_id: str,
+    source_html: Path,
+    upload_workers: int,
+    keep_inline_code: bool,
+    output_dir: Path,
+    log_name: str,
+    legacy_uploader: bool = False,
+) -> dict[str, Any]:
+    """Run one Magic asset-packaging pass.
+
+    Keeping this at one choke point makes the performance contract testable:
+    prediction passes use the deterministic dry-run uploader, then a live
+    publish invokes the real uploader exactly once in the selected mode.
+    """
+    return subprocess_record(
+        make_magic_assets_cmd(
+            package_source=package_source,
+            packaged=packaged,
+            uploader=uploader,
+            base_url=base_url,
+            task_id=task_id,
+            source_html=source_html,
+            upload_workers=upload_workers,
+            keep_inline_code=keep_inline_code,
+            legacy_uploader=legacy_uploader,
+        ),
+        cwd=REPO,
+        log_path=output_dir / log_name,
+    )
 
 
 def publish_magic_page(
@@ -571,6 +660,8 @@ def publish_magic_page(
             ]
             if faas_record_id:
                 iframe_cmd += ["--faas-record-id", faas_record_id]
+            if args.legacy_magic_asset_uploader:
+                iframe_cmd.append("--legacy-uploader")
             if dry_run or args.magic_iframe_faas_dry_run:
                 iframe_cmd.append("--dry-run")
             iframe = subprocess_record(
@@ -596,65 +687,73 @@ def publish_magic_page(
         # default. Externalizing them turns feishu-deck.js into a hash-named hosted
         # script that the publish-bytes runtime-presence check no longer recognizes
         # ("runtime missing" false negative — it cost a manual round-trip on every
-        # publish). Keep inline first for small decks, then run a local Magic Page
-        # body-size gate; if the inline artifact is too large, automatically
-        # repackage with code externalized before the API call.
-        keep_inline_code = not args.externalize_inline_code
-        package_cmd = make_magic_assets_cmd(
+        # publish). The old implementation uploaded the keep-inline artifact,
+        # measured it, then uploaded every shared asset AGAIN when the HTML was
+        # too large and code had to be externalized. Instead, package first with a
+        # deterministic local URL shim (zero remote writes), select the mode from
+        # that exact artifact, then perform at most ONE real upload pass.
+        requested_keep_inline = not args.externalize_inline_code
+        max_html_chars = int(args.magic_max_html_chars or DEFAULT_MAGIC_MAX_HTML_CHARS)
+        attempts: list[dict[str, Any]] = []
+
+        preview_uploader = dry_run_asset_uploader(output_dir)
+        preview_inline = output_dir / "magic-page-ready.keep-inline-preview.html"
+        preview_keep_inline = requested_keep_inline
+        preview = _run_magic_assets(
             package_source=package_source,
-            packaged=packaged,
-            uploader=uploader,
+            packaged=preview_inline,
+            uploader=preview_uploader,
             base_url=base_url,
             task_id=task_id,
             source_html=source_html,
             upload_workers=args.magic_upload_workers,
-            keep_inline_code=keep_inline_code,
+            keep_inline_code=preview_keep_inline,
+            output_dir=output_dir,
+            log_name="publisher-magic-assets-preview.log",
+            legacy_uploader=False,
         )
-        package = subprocess_record(
-            package_cmd,
-            cwd=REPO,
-            log_path=output_dir / "publisher-magic-assets.log",
-        )
-        if not package["ok"]:
-            payload = magic_failure("magic-page-assets failed", html_path, base_url, package, dry_run=dry_run)
+        if not preview["ok"]:
+            payload = magic_failure(
+                "magic-page-assets prediction failed",
+                html_path,
+                base_url,
+                preview,
+                dry_run=dry_run,
+            )
             write_publish_reports(output_dir, payload)
             return payload
-        max_html_chars = int(args.magic_max_html_chars or DEFAULT_MAGIC_MAX_HTML_CHARS)
-        attempts: list[dict[str, Any]] = []
-        final_chars = html_char_count(packaged)
+
+        preview_chars = html_char_count(preview_inline)
         attempts.append(
             {
-                "mode": "keep-inline-code" if keep_inline_code else "externalize-inline-code",
-                "html": repo_rel(packaged),
-                "chars": final_chars,
-                "ok": final_chars <= max_html_chars,
+                "mode": "keep-inline-code" if preview_keep_inline else "externalize-inline-code",
+                "phase": "prediction",
+                "html": repo_rel(preview_inline),
+                "chars": preview_chars,
+                "ok": preview_chars <= max_html_chars,
             }
         )
         auto_externalized = False
-        if keep_inline_code and final_chars > max_html_chars:
-            inline_too_large = output_dir / "magic-page-ready.keep-inline-too-large.html"
-            try:
-                packaged.replace(inline_too_large)
-            except OSError:
-                inline_too_large = packaged
-            externalized_cmd = make_magic_assets_cmd(
+        selected_keep_inline = preview_keep_inline
+        selected_preview = preview_inline
+        if preview_keep_inline and preview_chars > max_html_chars:
+            preview_externalized = output_dir / "magic-page-ready.externalized-preview.html"
+            externalized = _run_magic_assets(
                 package_source=package_source,
-                packaged=packaged,
-                uploader=uploader,
+                packaged=preview_externalized,
+                uploader=preview_uploader,
                 base_url=base_url,
                 task_id=task_id,
                 source_html=source_html,
                 upload_workers=args.magic_upload_workers,
                 keep_inline_code=False,
-            )
-            externalized = subprocess_record(
-                externalized_cmd,
-                cwd=REPO,
-                log_path=output_dir / "publisher-magic-assets-externalized.log",
+                output_dir=output_dir,
+                log_name="publisher-magic-assets-externalized-preview.log",
+                legacy_uploader=False,
             )
             if not externalized["ok"]:
                 payload = magic_failure(
-                    "magic-page-assets failed while auto-externalizing inline code after HTML size preflight",
+                    "magic-page-assets prediction failed while auto-externalizing inline code",
                     html_path,
                     base_url,
                     externalized,
@@ -663,16 +762,98 @@ def publish_magic_page(
                 write_publish_reports(output_dir, payload)
                 return payload
             auto_externalized = True
-            final_chars = html_char_count(packaged)
-            attempts[0]["html"] = repo_rel(inline_too_large)
+            selected_keep_inline = False
+            selected_preview = preview_externalized
+            externalized_chars = html_char_count(preview_externalized)
             attempts.append(
                 {
                     "mode": "externalize-inline-code",
-                    "html": repo_rel(packaged),
-                    "chars": final_chars,
-                    "ok": final_chars <= max_html_chars,
+                    "phase": "prediction",
+                    "html": repo_rel(preview_externalized),
+                    "chars": externalized_chars,
+                    "ok": externalized_chars <= max_html_chars,
                 }
             )
+
+        selected_preview_chars = html_char_count(selected_preview)
+        if selected_preview_chars > max_html_chars:
+            # Even the selected mode cannot fit. Preserve the predicted artifact
+            # and report, but do not make a knowingly-useless remote upload.
+            shutil.copy2(selected_preview, packaged)
+            attempts.append(
+                {
+                    "mode": "keep-inline-code" if selected_keep_inline else "externalize-inline-code",
+                    "phase": "final-prediction",
+                    "html": repo_rel(packaged),
+                    "chars": selected_preview_chars,
+                    "ok": False,
+                }
+            )
+            reason = (
+                f"Magic Page HTML body is {selected_preview_chars} chars, over the "
+                f"{max_html_chars} char limit"
+            )
+            size_payload = {
+                "ok": False,
+                "max_html_chars": max_html_chars,
+                "final_html": repo_rel(packaged),
+                "final_chars": selected_preview_chars,
+                "auto_externalized_inline_code": auto_externalized,
+                "attempts": attempts,
+                "reason": reason,
+            }
+            write_publish_size_report(output_dir, size_payload)
+            payload = magic_failure(
+                "publish artifact size check failed before Magic Page asset upload: " + reason,
+                packaged,
+                base_url,
+                None,
+                dry_run=dry_run,
+            )
+            payload["size"] = size_payload
+            write_publish_reports(output_dir, payload)
+            return payload
+
+        # Dry-run preparation is itself the selected deterministic package; live
+        # publishing now performs exactly one uploader-backed package pass.
+        if dry_run:
+            shutil.copy2(selected_preview, packaged)
+            package = preview
+        else:
+            package = _run_magic_assets(
+                package_source=package_source,
+                packaged=packaged,
+                uploader=uploader,
+                base_url=base_url,
+                task_id=task_id,
+                source_html=source_html,
+                upload_workers=args.magic_upload_workers,
+                keep_inline_code=selected_keep_inline,
+                output_dir=output_dir,
+                log_name="publisher-magic-assets.log",
+                legacy_uploader=bool(args.legacy_magic_asset_uploader),
+            )
+            if not package["ok"]:
+                payload = magic_failure(
+                    "magic-page-assets failed",
+                    html_path,
+                    base_url,
+                    package,
+                    dry_run=dry_run,
+                )
+                write_publish_reports(output_dir, payload)
+                return payload
+
+        final_chars = html_char_count(packaged)
+        attempts.append(
+            {
+                "mode": "keep-inline-code" if selected_keep_inline else "externalize-inline-code",
+                "phase": "final",
+                "html": repo_rel(packaged),
+                "chars": final_chars,
+                "ok": final_chars <= max_html_chars,
+            }
+        )
         size_payload = {
             "ok": final_chars <= max_html_chars,
             "max_html_chars": max_html_chars,
@@ -869,6 +1050,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     ap.add_argument("--magic-page-script", type=Path)
     ap.add_argument("--magic-asset-uploader", type=Path)
+    ap.add_argument(
+        "--legacy-magic-asset-uploader",
+        action="store_true",
+        help=(
+            "explicitly allow a custom uploader that lacks the JSON batch "
+            "protocol; uses bounded one-process-per-asset fallback"
+        ),
+    )
     ap.add_argument("--magic-base-url", default="")
     ap.add_argument("--magic-page-dry-run", action="store_true")
     ap.add_argument("--magic-page-open-source", action="store_true")

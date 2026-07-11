@@ -2,7 +2,7 @@
 # feishu-deck-h5 · preflight check
 # Verifies a local mount is present and writable before any skill action.
 #
-# Usage: bash assets/preflight.sh
+# Usage: bash assets/preflight.sh [--profile core|generate|edit|pptx|publish|import|template] [--json]
 #
 # Exit codes:
 #   0  OK — running from a writable mount OR successfully bootstrapped a
@@ -35,6 +35,33 @@
 # any non-zero exit means the agent must STOP and refuse to proceed.
 
 set -e
+
+PROFILE="generate"
+JSON_OUTPUT=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --profile)
+      [ "$#" -ge 2 ] || { echo "PREFLIGHT FAIL · exit 64 · --profile needs a value"; exit 64; }
+      PROFILE="$2"; shift
+      ;;
+    --json) JSON_OUTPUT=1 ;;
+    -h|--help)
+      echo "usage: preflight.sh [--profile core|generate|edit|pptx|publish|import|template] [--json]"
+      exit 0
+      ;;
+    *) echo "PREFLIGHT FAIL · exit 64 · unknown option: $1"; exit 64 ;;
+  esac
+  shift
+done
+case "$PROFILE" in
+  core|generate|edit|pptx|publish|import|template) ;;
+  *) echo "PREFLIGHT FAIL · exit 64 · unknown profile: $PROFILE"; exit 64 ;;
+esac
+
+PREFLIGHT_RESULT="failed"
+if [ "$JSON_OUTPUT" -eq 1 ]; then
+  trap '_rc=$?; if [ "$_rc" -eq 0 ]; then _ok=true; else _ok=false; fi; printf "{\"ok\":%s,\"profile\":\"%s\",\"result\":\"%s\",\"exit_code\":%s}\n" "$_ok" "$PROFILE" "$PREFLIGHT_RESULT" "$_rc"' EXIT
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -92,20 +119,14 @@ if [[ -z "$SKILL_ROOT" ]]; then
   exit 1
 fi
 
-# ---- Check 3: required asset files present in source? ----
-# Done BEFORE the writable check so an empty/incomplete RO mount fails fast
-# (rather than bootstrapping a broken mirror).
+# ---- Check 3: bootstrap contract present in source? ----
+# Full capability files are machine-owned by dependency-policy.yaml and checked
+# by check-profile.py below. These three files are the minimum needed to mirror
+# and perform that authoritative profile check from the writable copy.
 REQUIRED=(
-  "assets/feishu-deck.css"
-  "assets/feishu-deck.js"
-  "assets/validate.py"
-  "assets/audits.js"
-  "assets/run-audits.py"
-  "assets/lark-logo.png"
-  "assets/lark-cover-bg.jpg"
-  "_body.partial.html"
-  "build.sh"
   "SKILL.md"
+  "assets/check-profile.py"
+  "references/dependency-policy.yaml"
 )
 MISSING=()
 for f in "${REQUIRED[@]}"; do
@@ -202,7 +223,7 @@ PY
   echo "  workspace (RW) : $WORKSPACE"
   echo "  mirrored via   : $MIRROR_TOOL"
   echo "  ephemeral      : no"
-  echo "  files          : ${#REQUIRED[@]}/${#REQUIRED[@]} present (mirrored)"
+  echo "  bootstrap      : ${#REQUIRED[@]}/${#REQUIRED[@]} files present (mirrored)"
   echo
   echo "  ACTION REQUIRED — agent MUST cd into the workspace before running"
   echo "  any further skill commands (new-run.sh, render.py, build.sh, etc.):"
@@ -212,6 +233,7 @@ PY
   echo "  All paths in SKILL.md become relative to the workspace once you cd."
   echo "  The runs/<ts>/output/ artifact will land in the workspace, where"
   echo "  the user (or harness) can pick it up for delivery."
+  PREFLIGHT_RESULT="bootstrapped"
   exit 0
 fi
 
@@ -220,8 +242,12 @@ fi
 # main GitHub clone" footgun: deck output lands in a folder the user can't
 # easily find / commit / push from. Soft-warn (don't fail), and surface the
 # competing paths so the agent can ask the user which one to use.
-if command -v git >/dev/null 2>&1 && [ -d "$SKILL_ROOT/.git" ]; then
-  CURRENT_REMOTE=$(git -C "$SKILL_ROOT" remote get-url origin 2>/dev/null || echo "")
+REPO_ROOT=""
+if command -v git >/dev/null 2>&1; then
+  REPO_ROOT="$(git -C "$SKILL_ROOT" rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+if [ -n "$REPO_ROOT" ]; then
+  CURRENT_REMOTE=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
   if [ -n "$CURRENT_REMOTE" ]; then
     # Identify directories by (device, inode) instead of path string, so the
     # comparison survives macOS APFS/HFS case-insensitivity (~/Documents/Github
@@ -242,7 +268,7 @@ if command -v git >/dev/null 2>&1 && [ -d "$SKILL_ROOT/.git" ]; then
     # fresh scan by deleting the file or setting FS_DECK_NOCACHE=1.
     PREFLIGHT_CACHE="${SKILL_ROOT}/.feishu-deck-h5-preflight-cache"
     PREFLIGHT_CACHE_MAX_AGE=86400
-    SKILL_ROOT_ID="$(fs_id "$SKILL_ROOT")"
+    SKILL_ROOT_ID="$(fs_id "$REPO_ROOT")"
     CACHE_KEY="${SKILL_ROOT_ID}|${CURRENT_REMOTE}"
     OTHER_CLONES=""
     USED_CACHE=0
@@ -330,7 +356,13 @@ if command -v node >/dev/null 2>&1; then
   fi
 fi
 
-# ---- Check 7: visual-audit capability probe (F-255) — non-fatal ----
+# ---- Check 7: profile capabilities (machine-owned dependency policy) ----
+if ! python3 "$SKILL_ROOT/assets/check-profile.py" --profile "$PROFILE"; then
+  echo "PREFLIGHT FAIL · exit 5 · capability profile '$PROFILE' is unavailable"
+  exit 5
+fi
+
+# ---- Check 8: visual-audit capability probe (F-255) — informative for core/import ----
 # The delivery quality gate (geometry / visual / distribution) runs the
 # Playwright/Chromium engine. On a real (runs/) delivery render that engine is
 # now REQUIRED — render-deck BLOCKS if it can't run (escape: DECK_ALLOW_NO_VISUAL=1).
@@ -346,7 +378,7 @@ else
   echo "CAPABILITY visual-audit: OFF — install: pip install playwright && python -m playwright install chromium (gates degrade to static-only; runs/ delivery will BLOCK unless DECK_ALLOW_NO_VISUAL=1)"
 fi
 
-# ---- Check 8: CJK preferred-font probe (F-283 step 1) — non-fatal ----
+# ---- Check 9: CJK preferred-font probe (F-283 step 1) — non-fatal ----
 # The framework's CJK face (方正兰亭黑 Pro GB18030) is a LOCALLY-LICENSED font
 # with NO @font-face / NO bundling, so visual-audit geometry (overflow / balance
 # / title-position) is measured against whatever CJK face THIS host actually has.
@@ -400,8 +432,10 @@ fi
 
 # ---- All checks passed ----
 echo "PREFLIGHT OK"
+echo "  profile   : $PROFILE"
 echo "  skill root: $SKILL_ROOT"
 echo "  writable  : yes"
 echo "  ephemeral : no"
-echo "  files     : ${#REQUIRED[@]}/${#REQUIRED[@]} present"
+echo "  bootstrap : ${#REQUIRED[@]}/${#REQUIRED[@]} files present"
+PREFLIGHT_RESULT="ok"
 exit 0

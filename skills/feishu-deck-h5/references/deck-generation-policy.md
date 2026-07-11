@@ -17,7 +17,7 @@ Why this is mandatory:
 
 - **Stability**: most HTML/CSS drift is eliminated because authors describe what
   the slide is, not how each pixel is positioned.
-- **Editability**: text edits use `deck-cli.py set` or JSON edits, then rerender.
+- **Editability**: text and page edits use `deck-cli.py`, then rerender.
 - **Versionability**: JSON diffs are readable; giant HTML diffs are not.
 - **Liftability**: slides keep stable keys, assets, `custom_css`, and schema data.
 
@@ -25,7 +25,14 @@ Minimal flow:
 
 ```bash
 # after router + design + preflight + run creation
-$EDITOR runs/<ts>/output/deck.json
+python3 skills/feishu-deck-h5/deck-json/deck-cli.py \
+  runs/<ts>/output/deck.json new-deck \
+  --title "<title>" --author "<author>" --date "<YYYY.MM.DD>"
+
+# import/set pages through the guarded CLI; do not open deck.json in an editor
+python3 skills/feishu-deck-h5/deck-json/deck-cli.py \
+  runs/<ts>/output/deck.json set-page <key> \
+  --html <slide.html> --css <slide.css>
 
 python3 skills/feishu-deck-h5/deck-json/render-deck.py \
   runs/<ts>/output/deck.json \
@@ -39,14 +46,10 @@ Use `deck-json/examples/phase-1a-demo.json` as the smallest schema example and
 
 ## Authoring Paths
 
-### Option A · Direct JSON Edit
+### Option A · Atomic CLI Ops
 
-Best for batch generation and structural rewrites. Edit `deck.json` directly,
-render, then validate. Keep slide keys semantic and stable.
-
-### Option B · Atomic CLI Ops
-
-Best for scoped edits:
+This is the only general write path for both initial population and scoped edits.
+It carries the file lock, optimistic guard, backup, schema validation, and rollback:
 
 ```bash
 python3 skills/feishu-deck-h5/deck-json/deck-cli.py runs/<ts>/output/deck.json set slides.3.data.title "新标题"
@@ -61,7 +64,7 @@ For deck-native lift:
 python3 skills/feishu-deck-h5/deck-json/deck-cli.py DST/deck.json paste --from SRC/deck.json --key <key>
 ```
 
-### Option C · Browser Edit Mode
+### Option B · Browser Edit Mode
 
 Rendered decks load `assets/edit-mode/deck-edit-mode.css` and
 `assets/edit-mode/deck-edit-mode.js`. Press `E` to edit text in the browser,

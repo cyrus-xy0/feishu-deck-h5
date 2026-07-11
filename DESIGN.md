@@ -2,8 +2,10 @@
 
 > Brand-safe, dark, cinematic, bilingual (ZH primary / EN secondary) HTML
 > presentation system, derived from the **飞书母版 2025 (深色通用)** PowerPoint
-> theme. Single HTML file, 1920×1080 design canvas, scaled fluidly to PC
-> 16:9 + mobile vertical. Generated decks must look indistinguishable from a
+> theme. The default system uses a 1920×1080 design canvas, scaled fluidly to PC
+> 16:9 + mobile vertical. A user-approved Template Pack may replace the canvas,
+> typography, colors, fixed VI and six semantic layout bindings for that deck;
+> see `skills/feishu-deck-h5/references/template-system.md`. Generated decks must look indistinguishable from a
 > hand-built Lark sales deck. Use ONLY the tokens listed below.
 
 ---
@@ -199,7 +201,8 @@ States are listed where applicable.
 ## 5. Layout Principles
 
 ### Canvas
-- **1920 × 1080** (16:9). Fixed pixel design. Scaled to fit by JS via `--fs-scale` on each `.slide`.
+- **Default:** 1920 × 1080 (16:9). Fixed pixel design, scaled to fit by JS via `--fs-scale` on each `.slide`.
+- **Template Pack:** use the pack's exact ratio-matched `deck.canvas`; never force it back to 16:9. The same width/height contract drives runtime, preview, screenshots and audits.
 - Outer padding: `96` px left/right, `64–90` px top/bottom (`--fs-pad-x`, `--fs-pad-y`).
 - Implicit grid: 8 columns, 24 px gutter. Express via `repeat(N, 1fr)` Grid.
 
@@ -349,12 +352,12 @@ The deck supports **two render modes** in a single HTML file. JS auto-detects an
 | Mode          | Trigger                                  | Behavior |
 |---------------|------------------------------------------|---|
 | **`present`** | Default on viewport > 900 px wide        | One slide visible, fills viewport via scale-to-fit. ←/→/PgUp/PgDn/Space/Home/End to navigate. Wheel scroll ± 1. Touch swipe ± 1. URL hash `#3` syncs current slide. Indicator and mode toggle in corners. |
-| **`scroll`**  | Default on viewport ≤ 900 px wide. Also reachable by toggle button or `?mode=scroll`. | All `.slide-frame` elements stack vertically with 12 px gap, each at 16:9 aspect filling container width. Tap a frame to enter present mode for that slide. Smooth-scroll to selection. |
+| **`scroll`**  | Default on viewport ≤ 900 px wide. Also reachable by toggle button or `?mode=scroll`. | All `.slide-frame` elements stack vertically with 12 px gap, each at the resolved deck aspect ratio and filling container width. Tap a frame to enter present mode for that slide. Smooth-scroll to selection. |
 
 ### Sizing & scale
-- Design canvas is fixed 1920 × 1080. Each slide is `position: absolute; width: 1920px; height: 1080px` and is transformed by `transform: scale(var(--fs-scale))`.
-- JS attaches a `ResizeObserver` to each `.slide-frame` and recomputes `--fs-scale = min(frame.clientWidth / 1920, frame.clientHeight / 1080)`.
-- Mobile scroll mode → frame width = container width (≤ 1280 px max), aspect-ratio 16/9, scale ≈ width / 1920.
+- The untemplated default is 1920 × 1080; `deck.canvas` may supply another positive width/height. Each slide uses the resolved dimensions and is transformed by `transform: scale(var(--fs-scale))`.
+- JS attaches a `ResizeObserver` to each `.slide-frame` and recomputes `--fs-scale = min(frame.clientWidth / deckWidth, frame.clientHeight / deckHeight)`.
+- Mobile scroll mode → frame width = container width (≤ 1280 px max), resolved deck aspect ratio, scale ≈ width / deckWidth.
 
 ### Touch targets
 - The mode-toggle button and indicator are 44 px+ tall on actual rendered output. The slide content itself is non-interactive on phones (it's a deck, not a form).
@@ -473,7 +476,7 @@ tokens defined in DESIGN.md / feishu-deck.css. Hard rules:
     (brand line · page no.). Cover and end use top-left wordmark.
 
   CHECKLIST before delivery (run all 11 items)
-    [ ] Slide is 1920×1080.
+    [ ] Slide uses 1920×1080 by default, or exactly matches the pinned Template Pack canvas.
     [ ] One accent. Cyan only for inline word.
     [ ] ZH ≥ EN; ZH on top.
     [ ] No emoji, no '!' '…' '???'.
@@ -493,4 +496,3 @@ If content is missing, use 〔TODO〕 placeholders that are easy to find later.
 > "Produce a single feishu-deck-h5 slide using `data-layout=\"content-3up\"`. Title 「先进团队的工作方式」 / 'The way advanced teams work'. Three pillars: 即时同步、共识对齐、闭环交付. Accent: blue. Eyebrow: CHAPTER 02 / 06. No emoji. No drop shadow. Render the wordmark top-right and the footer with page no. 04. Output only HTML — no Markdown, no preamble."
 
 > "Produce a `data-layout=\"stats\"` slide. KPIs: 30万人组织 (秒级触达 3 秒)、98% 已读率、3.2x ROI、< 60 秒 决策时长. Accent: teal. Eyebrow: BUSINESS IMPACT. Footnote: 数据样本 12 家中国头部企业 · 2024 Q3-Q4. Output only HTML."
-

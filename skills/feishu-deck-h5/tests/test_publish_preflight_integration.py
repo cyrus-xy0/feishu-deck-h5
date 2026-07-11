@@ -24,11 +24,27 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PUBLISH = REPO / "subskills/publisher/publish.py"
 
-UPLOADER_JS = (
-    'const p=process.argv[2];const i=process.argv.indexOf("--key");'
-    'const k=i>=0?process.argv[i+1]:p;'
-    'console.log("https://tos.example.test/"+k.replace(/[^A-Za-z0-9._/-]+/g,"-"));'
-)
+UPLOADER_JS = r'''
+const fs=require("fs");const readline=require("readline");
+const args=process.argv.slice(2);
+const mi=args.indexOf("--batch-manifest");
+const clean=(k)=>String(k).replace(/[^A-Za-z0-9._/-]+/g,"-");
+const respond=(m)=>{
+  const items=m.items.map((item)=>({...item,ok:true,url:"https://tos.example.test/"+clean(item.key)}));
+  return {protocol:"magic-upload-batch/v1",request_id:m.request_id||"",ok:true,base_url:m.base_url,items};};
+async function main(){
+if(args.includes("--batch-ndjson")){
+  const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
+  for await(const line of rl){if(line.trim())process.stdout.write(JSON.stringify(respond(JSON.parse(line)))+"\n");}
+}else if(mi>=0){
+  const m=JSON.parse(fs.readFileSync(args[mi+1],"utf8"));process.stdout.write(JSON.stringify(respond(m)));
+}else{
+  const p=process.argv[2];const i=process.argv.indexOf("--key");const k=i>=0?process.argv[i+1]:p;
+  console.log("https://tos.example.test/"+clean(k));
+}
+}
+main().catch((e)=>{console.error(e.message);process.exit(1);});
+'''.strip()
 # mock Magic Page publisher: echo a JSON app_url, ignore the upload.
 PUBLISHER_JS = (
     'console.log(JSON.stringify({app_url:"https://magic.example.test/html-box/test123",'
@@ -252,21 +268,54 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
             with tempfile.TemporaryDirectory(prefix="pub-size-") as td:
                 t = Path(td)
                 uploader = t / "up.js"
-                uploader.write_text(UPLOADER_JS, encoding="utf-8")
+                uploader.write_text(
+                    r'''
+const fs=require("fs");const readline=require("readline");const args=process.argv.slice(2);
+const mi=args.indexOf("--batch-manifest");
+const clean=(k)=>String(k).replace(/[^A-Za-z0-9._/-]+/g,"-");
+const respond=(m)=>{
+  fs.appendFileSync(process.env.MOCK_UPLOAD_LOG,"REQUEST\n"+m.items.map(i=>i.key).join("\n")+"\n");
+  const items=m.items.map(i=>({...i,ok:true,url:"https://tos.example.test/"+clean(i.key)}));
+  return {protocol:"magic-upload-batch/v1",request_id:m.request_id||"",ok:true,base_url:m.base_url,items};};
+async function main(){
+if(args.includes("--batch-ndjson")){
+  fs.appendFileSync(process.env.MOCK_UPLOAD_LOG,"BATCH_PROCESS\n");
+  const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
+  for await(const line of rl){if(line.trim())process.stdout.write(JSON.stringify(respond(JSON.parse(line)))+"\n");}
+}else if(mi>=0){
+  const m=JSON.parse(fs.readFileSync(args[mi+1],"utf8"));process.stdout.write(JSON.stringify(respond(m)));
+}else{
+  const p=process.argv[2];const i=args.indexOf("--key");const k=i>=0?args[i+1]:p;
+  fs.appendFileSync(process.env.MOCK_UPLOAD_LOG,"SINGLE_PROCESS\n"+k+"\n");
+  console.log("https://tos.example.test/"+clean(k));
+}
+}
+main().catch((e)=>{console.error(e.message);process.exit(1);});
+'''.strip(),
+                    encoding="utf-8",
+                )
                 publisher = t / "pub-limit.js"
                 publisher.write_text(PUBLISHER_LIMIT_JS, encoding="utf-8")
+                upload_log = t / "uploads.log"
+                (t / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 64)
 
                 html = t / "index.html"
                 html.write_text(
                     "<html><head><style>"
                     + (".huge{color:#123456;}" * 160)
                     + "</style></head><body>"
-                    '<div class="slide" data-slide-key="s1">size gate</div>'
+                    '<div class="slide" data-slide-key="s1">size gate'
+                    '<img src="logo.png"></div>'
                     "</body></html>",
                     encoding="utf-8",
                 )
 
-                env = dict(os.environ, MAGIC_TOKEN="dummy-token-for-test", MOCK_MAGIC_MAX_CHARS="1000")
+                env = dict(
+                    os.environ,
+                    MAGIC_TOKEN="dummy-token-for-test",
+                    MOCK_MAGIC_MAX_CHARS="1000",
+                    MOCK_UPLOAD_LOG=str(upload_log),
+                )
                 proc = subprocess.run(
                     [sys.executable, str(PUBLISH),
                      "--html", str(html), "--title", "Size Integration",
@@ -293,6 +342,14 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
                 self.assertIn("auto_externalized_inline_code: True", size_report)
                 self.assertIn("mode: `keep-inline-code`", size_report)
                 self.assertIn("mode: `externalize-inline-code`", size_report)
+
+                # Prediction uses only the local deterministic uploader. The
+                # selected externalized mode performs one real package/upload
+                # pass, so shared assets are never uploaded twice.
+                uploaded_keys = upload_log.read_text(encoding="utf-8").splitlines()
+                logo_uploads = [key for key in uploaded_keys if key.endswith("logo.png")]
+                self.assertEqual(len(logo_uploads), 1, uploaded_keys)
+                self.assertEqual(uploaded_keys.count("BATCH_PROCESS"), 1, uploaded_keys)
         finally:
             if run_dir and run_dir.exists():
                 shutil.rmtree(run_dir, ignore_errors=True)

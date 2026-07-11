@@ -11,8 +11,8 @@ iteration, tripping over the same gotchas each time:
     current-index state and lands on the wrong / a half-faded frame.  (We drive
     the framework's OWN keyboard nav so currentIdx + pager + is-current + the
     entrance reveal all stay consistent — then wait for the reveal to settle.)
-  · a letterbox-seam check needs a NON-16:9 viewport + a FULL-viewport shot, not
-    the 1920×1080 design clip.  (`--aspect` handles it.)
+  · a letterbox-seam check needs a viewport whose ratio differs from the deck +
+    a FULL-viewport shot, not the design-canvas clip. (`--aspect` handles it.)
 
     shoot.py <index.html | run-dir> [--pages 19,20|cover,zengzhang]
              [--out DIR] [--aspect 16:10]
@@ -20,8 +20,8 @@ iteration, tripping over the same gotchas each time:
 --pages : comma list of 1-based frame indices AND/OR slide keys. Default: all.
 --out   : dir for the PNGs. Default: <dir-of-index>/_shoots.
 --aspect: viewport aspect ratio (W:H or W/H).
-          16:9 (default) → 1920×1080, clipped to the design box (no letterbox).
-          anything else (e.g. 16:10) → 1920×round(1920·H/W) viewport, FULL-viewport
+          omitted → deck canvas, clipped to the design box (no letterbox).
+          anything else (e.g. 16:10) → design-width×round(width·H/W) viewport, FULL-viewport
           shot so the present-mode letterbox bands are visible — the lens for
           verifying the F-318 letterbox seam at fullscreen aspect ratios.
 
@@ -29,11 +29,12 @@ Exit: 0 if every requested page was shot; 2 on bad input / engine missing; 3 if
 some requested pages were not found.
 """
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
 
-DESIGN_W, DESIGN_H = 1920, 1080
+DEFAULT_DESIGN_W, DEFAULT_DESIGN_H = 1920, 1080
 
 # (idx 1-based, key) for every .slide-frame, in render order.
 _META_JS = r"""
@@ -70,6 +71,27 @@ def _resolve_index(target: str) -> Path | None:
     return p if p.is_file() else None
 
 
+def _read_canvas(index: Path) -> tuple[int, int]:
+    """Read portable root attributes first, then sibling deck.json, then legacy."""
+    try:
+        raw = index.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        raw = ""
+    mw = re.search(r"\bdata-deck-width\s*=\s*['\"]([0-9]+)['\"]", raw, re.I)
+    mh = re.search(r"\bdata-deck-height\s*=\s*['\"]([0-9]+)['\"]", raw, re.I)
+    if mw and mh and int(mw.group(1)) > 0 and int(mh.group(1)) > 0:
+        return int(mw.group(1)), int(mh.group(1))
+    sidecar = index.parent / "deck.json"
+    try:
+        canvas = (json.loads(sidecar.read_text(encoding="utf-8")).get("deck") or {}).get("canvas") or {}
+        width, height = int(canvas.get("width")), int(canvas.get("height"))
+        if width > 0 and height > 0:
+            return width, height
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    return DEFAULT_DESIGN_W, DEFAULT_DESIGN_H
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Present-mode screenshots of specific deck pages (ticket C).")
@@ -79,9 +101,9 @@ def main(argv=None) -> int:
                          "(e.g. '19,20' or 'cover,zengzhang'). Default: all pages.")
     ap.add_argument("--out", default=None,
                     help="output dir for PNGs (default: <index-dir>/_shoots).")
-    ap.add_argument("--aspect", default="16:9",
-                    help="viewport aspect W:H. 16:9=design clip (default); other "
-                         "ratios (16:10, 21:9) shoot the full letterboxed viewport.")
+    ap.add_argument("--aspect", default=None,
+                    help="viewport aspect W:H. Omit for the deck's design clip; "
+                         "a different ratio (16:10, 21:9) captures letterboxing.")
     ap.add_argument("--allow-external", action="store_true",
                     help="let http(s) through (for shooting a live external embed). "
                          "Default BLOCKS external requests so remote webfonts fail "
@@ -94,15 +116,16 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
-    ratio = _parse_aspect(args.aspect)
+    design_w, design_h = _read_canvas(index)
+    ratio = _parse_aspect(args.aspect) if args.aspect else (design_w, design_h)
     if ratio is None:
         print(f"✗ bad --aspect {args.aspect!r} (use W:H, e.g. 16:10)", file=sys.stderr)
         return 2
     w_r, h_r = ratio
-    vp_h = round(DESIGN_W * h_r / w_r)
-    design_mode = abs(vp_h - DESIGN_H) <= 1     # 16:9 → design clip, no letterbox
+    vp_h = round(design_w * h_r / w_r)
+    design_mode = abs(vp_h - design_h) <= 1
     if design_mode:
-        vp_h = DESIGN_H
+        vp_h = design_h
 
     out_dir = Path(args.out).expanduser() if args.out else index.parent / "_shoots"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -117,7 +140,7 @@ def main(argv=None) -> int:
     written, missing = [], []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": DESIGN_W, "height": vp_h},
+        ctx = browser.new_context(viewport={"width": design_w, "height": vp_h},
                                   device_scale_factor=1)
         page = ctx.new_page()
         # Block external http(s) by default: a live embed / remote webfont never
@@ -203,13 +226,15 @@ def main(argv=None) -> int:
             fn = out_dir / f"p{m['idx']:02d}-{m['key']}.png"
             if design_mode:
                 page.screenshot(path=str(fn), timeout=15_000,
-                                clip={"x": 0, "y": 0, "width": DESIGN_W, "height": DESIGN_H})
+                                clip={"x": 0, "y": 0,
+                                      "width": design_w, "height": design_h})
             else:
                 page.screenshot(path=str(fn), timeout=15_000)   # full viewport → letterbox visible
             written.append((m, fn))
         browser.close()
 
-    mode = "design 1920×1080" if design_mode else f"letterbox {DESIGN_W}×{vp_h}"
+    mode = (f"design {design_w}×{design_h}" if design_mode
+            else f"letterbox {design_w}×{vp_h} (deck {design_w}×{design_h})")
     for m, fn in written:
         print(f"  p{m['idx']:>2} {m['key']:<22} → {fn}")
     print(f"📸 {len(written)} shot(s) · {mode} · {out_dir}", file=sys.stderr)

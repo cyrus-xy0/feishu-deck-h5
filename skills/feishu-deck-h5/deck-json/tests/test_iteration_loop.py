@@ -318,11 +318,9 @@ def _raw_page(key, label, text):
                              f' {text} 这里写得足够长以正常渲染</p></div>'}}
 
 
-def test_gate_fail_render_persists_sidecar_and_next_edit_auto_scopes(tmp_path):
-    # F-368 · a deck that FAILS the visual gate (rc=4 — the normal work-in-progress
-    # state) must STILL persist the auto-scope sidecar, with the erroring page
-    # poisoned. Before F-368 the sidecar was written only past every gate return,
-    # so such decks never got one → every render was a full whole-deck pass.
+def test_fresh_visual_gate_fail_leaves_no_render_bundle(tmp_path):
+    # F-374 · gate state is one transaction. A fresh failed render has no prior
+    # HTML/index/sidecars to restore, so all four artifacts must remain absent.
     import pytest
     if not _playwright_ok():
         pytest.skip("Playwright/Chromium unavailable — visual gate cannot run")
@@ -344,29 +342,15 @@ def test_gate_fail_render_persists_sidecar_and_next_edit_auto_scopes(tmp_path):
 
     r1 = _render(deck, out)
     assert r1.returncode == 4, "the floor page must block the visual gate\n" + r1.stderr
-    sidecar = out / ".slide-hashes.json"
-    assert sidecar.exists(), "F-368: a gate-fail render must still persist the sidecar"
-    cells = dict(json.loads(sidecar.read_text(encoding="utf-8"))["slides"])
-    assert cells["floorpg"] == "!unresolved-error", "the offender must be poisoned"
-    assert cells["cleanx"] != "!unresolved-error", "a clean page keeps its real hash"
-
-    # edit the CLEAN page → the next render must AUTO-SCOPE (not a full pass) and
-    # the still-erroring floor page must stay in scope (keeps re-auditing).
-    d = json.loads(deck.read_text(encoding="utf-8"))
-    for s in d["slides"]:
-        if s["key"] == "cleanx":
-            s["data"]["html"] = s["data"]["html"].replace("Alpha", "Alpha-EDIT")
-    deck.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-
-    r2 = _render(deck, out)
-    assert "scope=auto:" in r2.stderr, "auto-scope must engage now there is a sidecar\n" + r2.stderr
-    assert "AUTO-SCOPE: off" not in r2.stderr, "must not fall back to a full render"
+    for name in ("index.html", "slide-index.json", ".slide-hashes.json",
+                 "validate-findings.json"):
+        assert not (out / name).exists(), f"failed visual gate leaked {name}"
 
 
 def test_no_change_rerender_skips_visual_reaudit(tmp_path):
     # F-369 · a re-render byte-identical to the last CLEAN render skips the
     # expensive 6b/6c browser passes (the cheap static gate still runs). Safe
-    # because F-368 poisons any erroring page → an empty diff PROVES clean.
+    # because the sidecar commits only with a passing artifact bundle.
     import pytest
     if not _playwright_ok():
         pytest.skip("Playwright/Chromium unavailable — visual gate cannot run")

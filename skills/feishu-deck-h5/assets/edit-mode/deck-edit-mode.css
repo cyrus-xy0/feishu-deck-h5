@@ -202,7 +202,9 @@ body.deck-edit-mode .deck[data-mode="scroll"] {
 .es-thumb {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  /* JS stamps the deck ratio inline because the sidebar lives outside `.deck`;
+     this variable fallback preserves legacy 16:9 before the first thumb builds. */
+  aspect-ratio: var(--fs-deck-aspect, 1920 / 1080);
   border-radius: 4px;
   overflow: hidden;
   background: #04081b;

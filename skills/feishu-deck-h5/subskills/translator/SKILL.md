@@ -20,7 +20,7 @@ glossary, **overflow-after-translation** (target text is longer than CJK → cli
 external-iframe coverage, brand-asset/lang swap, baked-image reporting.
 
 ## Router lock
-`mode=translate | scope=deck | page-range | target=index.html(+deck.json) | --lang=<code>`.
+`Mode=TRANSLATE | Scope=deck|page-range | Target=index.html(+deck.json) | --lang=<code>`.
 Default target language English; default glossary `subskills/translator/glossary.default.json`
 (override with `runs/<deck>/glossary.json`).
 

@@ -26,8 +26,8 @@ copied assets, validator rules, or business-rule text.
 
 ## Modes
 
-Mode names follow the single **Authoritative Mode Enum** in
-`../../references/request-router.md`. `CHECK-ONLY` is the validator's owning mode;
+Mode names come from `../../references/workflow.yaml`; the readable decisions
+live in `../../references/request-router.md`. `CHECK-ONLY` is the validator's owning mode;
 post-render gating and scoped-edit validation run as the gate step of whatever
 generation/edit mode the controller locked.
 
@@ -60,8 +60,9 @@ For a single-slide / scoped edit, the canonical gate is `render-deck.py --iter`
 (F-335) scopes the static gate AND the making-of snapshot to the changed page(s);
 a framework / CSS change re-runs only the VISUAL audit deck-wide while content +
 snapshot stay scoped. The whole-deck validator path is the DELIVERY gate (Hard
-Gate 4) — run it before the deck crosses to the user or before publish, not after
-every intermediate edit.
+Gate 4) — run it before local handoff, presentation checkpoint, or library
+ingest, not after every intermediate edit. Magic Page publish uses the
+Publisher's resource/reference integrity gate instead.
 
 To check-only a scoped review of finished HTML, pass the scope through so the
 auditor narrows the per-page rules to the locked pages:

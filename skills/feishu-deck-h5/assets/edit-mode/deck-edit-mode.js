@@ -26,6 +26,16 @@
   const isMac  = /Mac/i.test(navigator.platform);
   const DOWNLOAD_REQUESTED = { download: true };
 
+  function deckSize() {
+    if (!deck) return { width: 1920, height: 1080 };
+    const cs = getComputedStyle(deck);
+    const width = parseFloat(deck.dataset.deckWidth
+      || cs.getPropertyValue('--fs-deck-width')) || 1920;
+    const height = parseFloat(deck.dataset.deckHeight
+      || cs.getPropertyValue('--fs-deck-height')) || 1080;
+    return { width, height };
+  }
+
   // ── identify text leaves to make contenteditable ──────────────────────
   function getTextLeaves() {
     if (!deck) return [];
@@ -238,12 +248,13 @@
   // Mirror of feishu-deck.js scaleFrame — compute --fs-scale per frame from
   // its current width/height. Safe to call any time; idempotent.
   function refitFrames() {
+    const design = deckSize();
     document.querySelectorAll('.slide-frame').forEach((frame) => {
       const slide = frame.querySelector('.slide');
       if (!slide) return;
       const w = frame.clientWidth, h = frame.clientHeight;
       if (!w || !h) return;
-      const scale = Math.min(w / 1920, h / 1080);
+      const scale = Math.min(w / design.width, h / design.height);
       slide.style.setProperty('--fs-scale', String(scale));
     });
   }
@@ -1005,11 +1016,11 @@
   }
 
   // Build a live thumbnail preview (PPT/Keynote slide navigator). Clone the real
-  // 1920×1080 `.slide` and scale it into the 16:9 thumb box — its own CSS renders
+  // deck-sized `.slide` and scale it into the matching-aspect thumb box — its own CSS renders
   // a faithful mini-preview, fully offline, no rasterization. The clone lives
   // OUTSIDE any `.slide-frame`, so the `.slide-frame.is-current` reveal rule never
   // hides its children. We must restore the sizing that `.slide-frame .slide`
-  // normally provides (1920×1080 + scale), and neutralize heavy embeds.
+  // normally provides (deck canvas + scale), and neutralize heavy embeds.
   function buildThumb(thumbEl, slide) {
     if (!thumbEl || !slide) return;
     thumbEl.textContent = '';
@@ -1023,13 +1034,16 @@
       ph.className = 'es-thumb-embed';
       el.replaceWith(ph);
     });
+    const design = deckSize();
+    thumbEl.style.aspectRatio = design.width + ' / ' + design.height;
     clone.style.cssText =
-      'position:absolute;top:0;left:0;margin:0;width:1920px;height:1080px;' +
+      'position:absolute;top:0;left:0;margin:0;width:' + design.width
+      + 'px;height:' + design.height + 'px;' +
       'transform-origin:top left;pointer-events:none;';
     thumbEl.appendChild(clone);
-    // thumbEl is in the DOM → clientWidth is live; scale 1920 down to fit.
+    // thumbEl is in the DOM → clientWidth is live; scale the deck width to fit.
     const w = thumbEl.clientWidth || 224;
-    clone.style.transform = 'scale(' + (w / 1920) + ')';
+    clone.style.transform = 'scale(' + (w / design.width) + ')';
   }
 
   let sbDragSrc = null;

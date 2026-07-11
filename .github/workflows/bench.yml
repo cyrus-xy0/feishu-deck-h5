@@ -11,15 +11,11 @@ name: bench
 # artifact (trend history), and only HARD-FAILS on a gross (>40%) regression
 # against a CI-captured baseline.
 #
-# SEEDING THE GATE (one-time, by a human): the gate is dormant until a baseline
-# exists, because a darwin/local baseline does not transfer to an ubuntu runner.
-#   1. Run this workflow (Actions → bench → Run workflow).
-#   2. Download the `bench-result` artifact (bench-result.json).
-#   3. Commit it as skills/feishu-deck-h5/assets/bench-baseline.ci.json.
-# From then on every run compares against it and fails the job on >40%
-# regression. Refresh the baseline after an intentional perf change. Tune the
-# threshold / add larger corpora (drop more deck.json under the bench step) once
-# a trend is visible.
+# The committed baseline starts as a conservative, deterministic Ubuntu budget,
+# so the gate is active from the first run. Replace its medians with a stable
+# successful `bench-result` artifact after enough runner history exists. A
+# missing/renamed baseline is a hard error: bench-render fails closed instead of
+# silently turning this workflow into a no-op.
 
 on:
   schedule:
@@ -51,14 +47,26 @@ jobs:
         # it, render_advisory would time the 0-browser fast path (~0.5s) and the
         # numbers would be meaningless.
         run: |
-          pip install playwright pyyaml jsonschema beautifulsoup4
+          pip install playwright pyyaml jsonschema beautifulsoup4 pytest pillow
           python3 -m playwright install --with-deps chromium
 
-      - name: Bench the corpus (gate dormant until baseline committed)
+      - name: Verify deterministic performance contracts
+        # These pin the non-wall-clock regressions that shared runners cannot
+        # measure reliably: pre-init scope/image filtering, one browser for the
+        # two publisher self-check sides, one real asset-upload pass, and the
+        # fail-closed baseline contract.
+        run: |
+          python3 -m pytest -q \
+            deck-json/tests/test_scoped_audit.py \
+            deck-json/tests/test_bench_render_regress.py \
+            tests/test_publish_self_check.py \
+            tests/test_publish_preflight_integration.py \
+            -k 'not end_to_end'
+
+      - name: Bench the corpus
         # golden-gate (3p) is the fixed-cost canary: it captures the dominant
-        # per-launch cold-start + launch-count + font-probe-cache cost (the AUDIT
-        # finding) regardless of page count. --compare is a no-op + exit 0 until
-        # assets/bench-baseline.ci.json exists, so the first run just seeds it.
+        # per-launch cold-start + scoped/full visual-gate + font-probe-cache cost
+        # regardless of page count.
         run: |
           python3 assets/bench-render.py \
             deck-json/tests/fixtures/golden-gate/deck.json \

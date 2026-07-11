@@ -4,10 +4,9 @@ F-269
   • render-deck.py / deck-cli.py / lift-slides.py write index.html, slide-index
     .json and deck.json ATOMICALLY (temp file + os.replace) — a kill mid-write
     never leaves a torn file.
-  • render-deck.py writes index.html BEFORE the delivery gate; on a gate fail
-    (return 4) it must RESTORE the previously-good index.html instead of leaving
-    the rejected one on disk. A successful (or gate-skipped) render drops the
-    backup.
+  • render-deck.py snapshots index.html, slide-index.json, .slide-hashes.json and
+    validate-findings.json as one gate transaction. A gate fail restores every
+    prior byte (and prior absence); success drops every backup.
 
 F-270
   • --inline base64-inlines <img src> / <source src> / <video src|poster> and
@@ -97,6 +96,30 @@ def _simple_deck(title="T", body="这是一段足够长的正文内容用来填�
     }
 
 
+def _force_static_gate_failure(monkeypatch):
+    """Patch only validate.py so render-deck reaches its portable rc=4 path."""
+    real_run = subprocess.run
+    validate_html = str(RD.VALIDATE_HTML)
+
+    def fake_run(cmd, *args, **kwargs):
+        command = [str(c) for c in cmd] if isinstance(cmd, (list, tuple)) else []
+        if validate_html in command and "--json" in command:
+            return subprocess.CompletedProcess(
+                cmd, 1,
+                stdout=json.dumps({"ok": False, "errors": [
+                    {"path": "$.slides[0]", "msg": "forced FAIL",
+                     "slide": 1, "key": None}],
+                    "warnings": [], "soft_warnings": []}),
+                stderr="",
+            )
+        if validate_html in command:
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="forced FAIL\n", stderr="")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(RD.subprocess, "run", fake_run)
+
+
 # ==========================================================================
 # F-269 · atomic_write_text mechanics (portable)
 # ==========================================================================
@@ -157,6 +180,7 @@ def test_successful_render_outputs_and_no_bak_left():
         json.loads((out / "slide-index.json").read_text())  # valid JSON
         # success path must clean up the pre-render backup + any temp turds
         assert not (out / "index.html.bak-pre-render").exists()
+        assert not any(p.name.endswith(".bak-pre-render") for p in out.iterdir())
         assert list(out.glob(".*.tmp")) == []
 
 
@@ -164,7 +188,7 @@ def test_successful_render_outputs_and_no_bak_left():
 # F-269 · gate FAIL rolls back the previously-good index.html (portable —
 # drives the STATIC gate via a monkeypatched validate-html subprocess call)
 # ==========================================================================
-def test_gate_fail_rolls_back_previous_index_html(monkeypatch, capsys, tmp_path):
+def test_gate_fail_rolls_back_previous_artifact_bundle(monkeypatch, capsys, tmp_path):
     out = tmp_path / "out"
     out.mkdir()
 
@@ -174,40 +198,22 @@ def test_gate_fail_rolls_back_previous_index_html(monkeypatch, capsys, tmp_path)
     good_path.write_text(json.dumps(good, ensure_ascii=False), encoding="utf-8")
     rc0 = RD.main([str(good_path), str(out) + "/", "--skip-copy-assets"])
     assert rc0 == 0
-    v1 = (out / "index.html").read_text(encoding="utf-8")
-    assert "GOOD-V1" in v1
+    assert "GOOD-V1" in (out / "index.html").read_text(encoding="utf-8")
+
+    # Seed the fourth bundle member too. A /tmp static render does not produce a
+    # visual findings baseline on its own, but rollback must preserve one if the
+    # destination already has it.
+    (out / "validate-findings.json").write_bytes(b'{"sentinel":"GOOD"}\n')
+    names = ("index.html", "slide-index.json", ".slide-hashes.json",
+             "validate-findings.json")
+    before = {name: (out / name).read_bytes() for name in names}
 
     # 2. Second render of DIFFERENT content, but force the static HTML gate to
     #    fail. Monkeypatch render-deck's subprocess.run so ONLY the main
     #    validate-html call (validate.py without --json) returns rc=1; every
     #    other subprocess (json-schema validate, advisory, copy-assets) runs for
     #    real.
-    real_run = subprocess.run
-    VH = str(RD.VALIDATE_HTML)
-
-    def fake_run(cmd, *a, **k):
-        cl = [str(c) for c in cmd] if isinstance(cmd, (list, tuple)) else []
-        if VH in cl and "--json" in cl:
-            # F-335/F-319: the scope-aware static gate re-runs `validate.py
-            # --no-visual --json` to attribute findings and demote OUT-of-scope
-            # ones. Now that a chrome-title change no longer forces a full pass
-            # (F-335), this BAD-V2 render auto-scopes to page 1 — so the forced
-            # failure must come back as an IN-scope (slide 1) error here, else the
-            # demotion would (correctly) clear an unbacked failure. Report a real
-            # slide-1 error so the gate failure survives and the rollback fires.
-            return subprocess.CompletedProcess(
-                cmd, 1,
-                stdout=json.dumps({"ok": False, "errors": [
-                    {"path": "$.slides[0]", "msg": "forced FAIL",
-                     "slide": 1, "key": None}],
-                    "warnings": [], "soft_warnings": []}),
-                stderr="")
-        if VH in cl and "--json" not in cl:
-            return subprocess.CompletedProcess(cmd, 1, stdout="forced FAIL\n",
-                                               stderr="")
-        return real_run(cmd, *a, **k)
-
-    monkeypatch.setattr(RD.subprocess, "run", fake_run)
+    _force_static_gate_failure(monkeypatch)
 
     bad = _simple_deck(title="BAD-V2", body="第二版会被闸门拒绝的正文内容文字足够长")
     bad_path = tmp_path / "bad.json"
@@ -216,14 +222,40 @@ def test_gate_fail_rolls_back_previous_index_html(monkeypatch, capsys, tmp_path)
 
     assert rc1 == 4, "a static-gate failure must return 4"
     # the BAD render must NOT have clobbered the previously-good file
-    after = (out / "index.html").read_text(encoding="utf-8")
-    assert after == v1, "index.html must be rolled back to the last good version"
-    assert "GOOD-V1" in after and "BAD-V2" not in after
+    after = {name: (out / name).read_bytes() for name in names}
+    assert after == before, "every render artifact must roll back byte-for-byte"
+    assert b"GOOD-V1" in after["index.html"] and b"BAD-V2" not in after["index.html"]
     err = capsys.readouterr().err
     assert "回滚" in err, f"expected a rollback notice on stderr:\n{err}"
     # backup consumed by the restore, no temp turds
-    assert not (out / "index.html.bak-pre-render").exists()
+    assert not any(p.name.endswith(".bak-pre-render") for p in out.iterdir())
     assert list(out.glob(".*.tmp")) == []
+
+
+def test_fresh_gate_fail_restores_whole_bundle_absence(monkeypatch, tmp_path):
+    out = tmp_path / "fresh"
+    out.mkdir()
+    bad_path = tmp_path / "bad.json"
+    bad_path.write_text(json.dumps(_simple_deck(title="FRESH-BAD"), ensure_ascii=False),
+                        encoding="utf-8")
+    _force_static_gate_failure(monkeypatch)
+
+    rc = RD.main([str(bad_path), str(out) + "/", "--skip-copy-assets"])
+    assert rc == 4
+    for name in ("index.html", "slide-index.json", ".slide-hashes.json",
+                 "validate-findings.json"):
+        assert not (out / name).exists(), f"fresh failed render leaked {name}"
+    assert not any(p.name.endswith(".bak-pre-render") for p in out.iterdir())
+
+
+def test_final_help_routes_magic_publish_to_publisher_gate():
+    proc = subprocess.run([sys.executable, str(RENDER), "--help"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0
+    help_text = " ".join(proc.stdout.split())
+    assert "local handoff, slide-library ingest, or a presentation checkpoint" in help_text
+    assert "Magic Page publish uses the publisher artifact-integrity gate" in help_text
+    assert "Use before any handoff/publish" not in help_text
 
 
 # ==========================================================================

@@ -1,7 +1,8 @@
 /* ============================================================================
    feishu-deck-h5 · design system stylesheet
    Source of truth for every slide. Do not invent tokens; use only these.
-   Canvas: 1920×1080. Scaled by JS via --fs-scale on each .slide-frame.
+   Canvas: deck-defined; legacy default 1920×1080. Scaled by JS via
+   --fs-scale on each .slide-frame.
    ============================================================================ */
 
 :root {
@@ -82,6 +83,12 @@
 
   /* — Runtime scale (set by JS) — */
   --fs-scale: 1;
+  /* — Deck canvas (renderer overrides these on .deck) — */
+  --fs-deck-width: 1920px;
+  --fs-deck-height: 1080px;
+  --fs-deck-half-width: 960px;
+  --fs-deck-half-height: 540px;
+  --fs-deck-aspect: 1920 / 1080;
 
   /* — Motion tokens (AVAILABLE, not mandatory) —
      The deck's shared motion language. custom_css MAY reference these so bespoke
@@ -131,20 +138,22 @@ body {
 /* Wrapper that holds N slide-frames */
 .deck { position: relative; width: 100%; }
 
-/* The slide-frame is the responsive box. Internally it's pixel-perfect 1920×1080.
+/* The slide-frame is the responsive box. Internally it uses the deck's exact
+   design canvas (1920×1080 when deck.canvas is absent).
    Perf: contain isolates layout/paint inside the frame; transitions become local
    repaints instead of full-document. */
 .slide-frame {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--fs-deck-aspect, 1920 / 1080);
   overflow: hidden;
   background: #000;
   contain: layout paint size;
 }
 .slide-frame .slide {
   position: absolute; top: 0; left: 0;
-  width: 1920px; height: 1080px;
+  width: var(--fs-deck-width, 1920px);
+  height: var(--fs-deck-height, 1080px);
   transform-origin: top left;
   transform: scale(var(--fs-scale, 1)) translateZ(0);  /* GPU layer hint */
   will-change: transform;
@@ -330,8 +339,10 @@ body {
 .deck[data-mode="present"] .slide-frame .slide {
   position: absolute;
   left: 50%; top: 50%;
-  width: 1920px; height: 1080px;
-  margin: -540px 0 0 -960px;        /* negative half-size: own center on parent center */
+  width: var(--fs-deck-width, 1920px);
+  height: var(--fs-deck-height, 1080px);
+  margin-top: calc(0px - var(--fs-deck-half-height, 540px));
+  margin-left: calc(0px - var(--fs-deck-half-width, 960px));
   transform: scale(var(--fs-scale, 1)) translateZ(0);  /* GPU layer hint */
   transform-origin: center center;  /* scale around the slide's center */
   will-change: transform;
@@ -4022,7 +4033,7 @@ body {
 .fs-presenter .pv-box {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--fs-deck-aspect, 1920 / 1080);
   overflow: hidden;
   background: #000;
   border-radius: 10px;

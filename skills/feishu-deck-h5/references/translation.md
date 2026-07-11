@@ -1,6 +1,6 @@
 # translation — feishu-deck-h5 reference
 
-> When to read: routed to `subskills/translator/SKILL.md` (mode=translate). Deep
+> When to read: routed to `subskills/translator/SKILL.md` (`Mode=TRANSLATE`). Deep
 > detail behind that subskill: branch thresholds, command recipes, the failure
 > modes unique to translating a deck. Design rationale: `docs/TRANSLATOR-SUBSKILL-DESIGN-2026-06-04.md`.
 

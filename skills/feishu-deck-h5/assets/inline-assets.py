@@ -12,10 +12,14 @@ from __future__ import annotations
 import argparse
 import base64
 import html as html_lib
+import os
 import re
 import sys
 from pathlib import Path
 from urllib.parse import unquote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from safe_resources import resolve_local_file
 
 
 MIME_MAP = {
@@ -27,8 +31,14 @@ MIME_MAP = {
     ".webp": "image/webp",
     ".ico": "image/x-icon",
 }
+LOCAL_ASSET_SUFFIXES = set(MIME_MAP) | {
+    ".apng", ".avif", ".bmp", ".css", ".js", ".mjs", ".wasm",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".mp4", ".webm", ".mov", ".m4v", ".mp3", ".wav", ".ogg",
+}
 ATTR_RE = re.compile(r"([:\w-]+)\s*=\s*([\"'])(.*?)\2", re.S)
 URL_RE = re.compile(r"url\(\s*([\"']?)([^)\"']+)\1\s*\)")
+SKILL_ROOT = Path(__file__).resolve().parents[1]
 
 
 # F-270: LOCAL refs that didn't resolve to a file. resolve_asset used to return
@@ -66,14 +76,43 @@ def strip_ref(ref: str) -> str:
     return unquote(s.split("#", 1)[0].split("?", 1)[0])
 
 
-def resolve_asset(base_path: Path, ref: str) -> Path | None:
+def trusted_asset_roots(html_path: Path) -> tuple[Path, ...]:
+    """Return the explicit local roots a deck is allowed to reference."""
+    base = html_path.resolve().parent
+    roots = [base, SKILL_ROOT / "assets", SKILL_ROOT / "deck-json" / "templates"]
+    # Modern runs put HTML in <run>/output and may legitimately reference the
+    # sibling input/prototypes directories. Legacy runs put index.html at the run
+    # root. Never generalize this to an arbitrary ancestor.
+    if base.name == "output":
+        roots.append(base.parent)
+    runs_root = (SKILL_ROOT / "runs").resolve()
+    try:
+        rel = base.relative_to(runs_root)
+        if rel.parts:
+            roots.append(runs_root / rel.parts[0])
+    except ValueError:
+        pass
+    return tuple(dict.fromkeys(root.resolve() for root in roots))
+
+
+def resolve_asset(
+    base_path: Path,
+    ref: str,
+    *,
+    allowed_roots: tuple[Path, ...] | None = None,
+) -> Path | None:
     if is_external_ref(ref):
         return None
     raw = strip_ref(ref)
     if not raw:
         return None
-    candidate = (base_path.parent / raw).resolve()
-    if candidate.is_file():
+    candidate = resolve_local_file(
+        base_path.parent,
+        raw,
+        allowed_roots=allowed_roots or trusted_asset_roots(base_path),
+        allowed_suffixes=LOCAL_ASSET_SUFFIXES,
+    )
+    if candidate is not None:
         return candidate
     # Local ref but no file on disk — record it so main() can warn (was silent).
     if ref not in _MISSING_LOCAL_REFS:
@@ -100,24 +139,31 @@ def attr_escape(value: str) -> str:
     return html_lib.escape(value, quote=True)
 
 
-def upload_staging_ref(asset: Path) -> str:
-    # Magic Page publisher writes the prepared HTML into a fresh run directory.
-    # Use absolute local refs as a temporary upload staging contract; the next
-    # step rewrites them to TOS URLs before the HTML is sent to Magic Page.
-    return asset.resolve().as_posix()
+def upload_staging_ref(asset: Path, resource_base: Path) -> str:
+    # The next publisher step resolves these refs against --asset-base-dir. Keep
+    # the staging contract relative so untrusted HTML can never smuggle an
+    # arbitrary absolute path into an upload command.
+    return Path(os.path.relpath(asset.resolve(), resource_base.resolve())).as_posix()
 
 
-def inline_css_urls(css: str, css_path: Path, *, inline_images: bool) -> tuple[str, int]:
+def inline_css_urls(
+    css: str,
+    css_path: Path,
+    *,
+    inline_images: bool,
+    allowed_roots: tuple[Path, ...] | None = None,
+    resource_base: Path | None = None,
+) -> tuple[str, int]:
     count = 0
 
     def replace_url(match: re.Match[str]) -> str:
         nonlocal count
         ref = match.group(2)
-        asset = resolve_asset(css_path, ref)
+        asset = resolve_asset(css_path, ref, allowed_roots=allowed_roots)
         if asset is None:
             return match.group(0)
         if not inline_images:
-            return f"url('{upload_staging_ref(asset)}')"
+            return f"url('{upload_staging_ref(asset, resource_base or css_path.parent)}')"
         uri = data_uri(asset)
         if uri is None:
             return match.group(0)
@@ -130,6 +176,7 @@ def inline_css_urls(css: str, css_path: Path, *, inline_images: bool) -> tuple[s
 def inline_css_links(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int, int]:
     count = 0
     image_count = 0
+    roots = trusted_asset_roots(html_path)
 
     def replace_link(match: re.Match[str]) -> str:
         nonlocal count, image_count
@@ -138,11 +185,17 @@ def inline_css_links(html: str, html_path: Path, *, inline_images: bool) -> tupl
         href = attr_value(tag, "href")
         if "stylesheet" not in rel or not href:
             return tag
-        asset = resolve_asset(html_path, href)
+        asset = resolve_asset(html_path, href, allowed_roots=roots)
         if asset is None:
             return tag
         css = asset.read_text(encoding="utf-8")
-        css, n_images = inline_css_urls(css, asset, inline_images=inline_images)
+        css, n_images = inline_css_urls(
+            css,
+            asset,
+            inline_images=inline_images,
+            allowed_roots=roots,
+            resource_base=html_path.parent,
+        )
         count += 1
         image_count += n_images
         return (
@@ -156,6 +209,7 @@ def inline_css_links(html: str, html_path: Path, *, inline_images: bool) -> tupl
 
 def rewrite_preload_image_links(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
     count = 0
+    roots = trusted_asset_roots(html_path)
 
     def replace_link(match: re.Match[str]) -> str:
         nonlocal count
@@ -165,19 +219,20 @@ def rewrite_preload_image_links(html: str, html_path: Path, *, inline_images: bo
         href = attr_value(tag, "href")
         if "preload" not in rel or as_type != "image" or not href:
             return tag
-        asset = resolve_asset(html_path, href)
+        asset = resolve_asset(html_path, href, allowed_roots=roots)
         if asset is None or data_uri(asset) is None:
             return tag
         count += 1
         if inline_images:
             return ""
-        return tag.replace(href, attr_escape(upload_staging_ref(asset)))
+        return tag.replace(href, attr_escape(upload_staging_ref(asset, html_path.parent)))
 
     return re.sub(r"<link\b[^>]*?>", replace_link, html, flags=re.S | re.I), count
 
 
 def inline_js_scripts(html: str, html_path: Path) -> tuple[str, int]:
     count = 0
+    roots = trusted_asset_roots(html_path)
 
     def replace_script(match: re.Match[str]) -> str:
         nonlocal count
@@ -185,7 +240,7 @@ def inline_js_scripts(html: str, html_path: Path) -> tuple[str, int]:
         src = attr_value(tag, "src")
         if not src:
             return match.group(0)
-        asset = resolve_asset(html_path, src)
+        asset = resolve_asset(html_path, src, allowed_roots=roots)
         if asset is None:
             return match.group(0)
         js = asset.read_text(encoding="utf-8")
@@ -207,11 +262,18 @@ def inline_js_scripts(html: str, html_path: Path) -> tuple[str, int]:
 
 def inline_css_images(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
     count = 0
+    roots = trusted_asset_roots(html_path)
     style_re = re.compile(r"(<style\b[^>]*>)(.*?)</style>", re.S | re.I)
 
     def replace_in_style(match: re.Match[str]) -> str:
         nonlocal count
-        css, n_images = inline_css_urls(match.group(2), html_path, inline_images=inline_images)
+        css, n_images = inline_css_urls(
+            match.group(2),
+            html_path,
+            inline_images=inline_images,
+            allowed_roots=roots,
+            resource_base=html_path.parent,
+        )
         count += n_images
         return f"{match.group(1)}{css}</style>"
 
@@ -220,6 +282,7 @@ def inline_css_images(html: str, html_path: Path, *, inline_images: bool) -> tup
 
 def inline_img_tags(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
     count = 0
+    roots = trusted_asset_roots(html_path)
 
     def replace_img(match: re.Match[str]) -> str:
         nonlocal count
@@ -228,12 +291,12 @@ def inline_img_tags(html: str, html_path: Path, *, inline_images: bool) -> tuple
         # (or contains) the src filename (e.g. data-name="logo.png" before src) must
         # not be corrupted. group(2)=quote, group(3)=src value.
         pre, quote, src = match.group(1), match.group(2), match.group(3)
-        asset = resolve_asset(html_path, src)
+        asset = resolve_asset(html_path, src, allowed_roots=roots)
         if asset is None:
             return match.group(0)
         if not inline_images:
             count += 1
-            return f"{pre}{quote}{attr_escape(upload_staging_ref(asset))}{quote}"
+            return f"{pre}{quote}{attr_escape(upload_staging_ref(asset, html_path.parent))}{quote}"
         uri = data_uri(asset)
         if uri is None:
             return match.group(0)
@@ -250,16 +313,17 @@ def inline_img_tags(html: str, html_path: Path, *, inline_images: bool) -> tuple
 
 def inline_html_style_urls(html: str, html_path: Path, *, inline_images: bool) -> tuple[str, int]:
     count = 0
+    roots = trusted_asset_roots(html_path)
 
     def replace_url(match: re.Match[str]) -> str:
         nonlocal count
         ref = match.group(2)
-        asset = resolve_asset(html_path, ref)
+        asset = resolve_asset(html_path, ref, allowed_roots=roots)
         if asset is None:
             return match.group(0)
         if not inline_images:
             count += 1
-            return f"url('{upload_staging_ref(asset)}')"
+            return f"url('{upload_staging_ref(asset, html_path.parent)}')"
         uri = data_uri(asset)
         if uri is None:
             return match.group(0)

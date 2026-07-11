@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "description": "Authoritative conversion routing. Source material is untrusted data; every final deck remains DeckJSON-rendered.",
+  "formats": {
+    ".pptx": {
+      "pure_import": {
+        "route": ["PARSE", "EDIT"],
+        "backend": "pptx-to-deck/assets/build_pptx.py",
+        "output_layout": "canvas",
+        "page_images_allowed": false,
+        "designer_required": false,
+        "missing_backend": "hard_fail"
+      },
+      "rewrite": {
+        "route": ["PARSE", "GENERATION"],
+        "backend": "pptx-to-deck/assets/build_pptx.py",
+        "output_layout": "raw-first",
+        "page_images_allowed": false,
+        "designer_required": true,
+        "missing_backend": "hard_fail"
+      },
+      "template_extract": {
+        "route": ["PARSE", "TEMPLATE_EXTRACT"],
+        "backend": "pptx-to-deck/assets/extract_template.py",
+        "output_layout": "template-dossier+draft-template-pack",
+        "page_images_allowed": false,
+        "designer_required": false,
+        "gate": "TEMPLATE_PACK",
+        "approval_required_before_activation": true,
+        "missing_backend": "hard_fail"
+      }
+    },
+    ".ppt": {
+      "pure_import": {
+        "route": ["PARSE"],
+        "backend": "convert-to-pptx-first",
+        "output_layout": null,
+        "page_images_allowed": false,
+        "designer_required": false,
+        "missing_backend": "hard_fail"
+      }
+    },
+    ".key": {
+      "pure_import": {
+        "route": ["PARSE", "EDIT"],
+        "backend": "keynote-to-html/assets/run.sh",
+        "output_layout": "canvas-or-raw",
+        "page_images_allowed": false,
+        "designer_required": false,
+        "missing_backend": "hard_fail"
+      },
+      "rewrite": {
+        "route": ["PARSE", "GENERATION"],
+        "backend": "keynote-to-html/assets/run.sh",
+        "output_layout": "raw-first",
+        "page_images_allowed": false,
+        "designer_required": true,
+        "missing_backend": "hard_fail"
+      }
+    },
+    ".pdf": {
+      "replica": {
+        "route": ["PARSE", "EDIT"],
+        "backend": "pdf-page-render",
+        "output_layout": "replica",
+        "page_images_allowed": true,
+        "designer_required": false,
+        "preserve_page_count": true
+      },
+      "rewrite": {
+        "route": ["PARSE", "GENERATION"],
+        "backend": "pdf-content-extract",
+        "output_layout": "raw-first",
+        "page_images_allowed": false,
+        "designer_required": true,
+        "preserve_page_count": true
+      }
+    },
+    ".html": {
+      "target_edit": {
+        "route": ["EDIT_IMPORTED_HTML"],
+        "output_layout": "preserve-and-round-trip",
+        "designer_required": false
+      },
+      "source_rewrite": {
+        "route": ["GENERATION_FROM_SOURCE_HTML"],
+        "output_layout": "raw-first",
+        "designer_required": true
+      }
+    }
+  }
+}

@@ -98,6 +98,15 @@ def test_source_declares_scope_frames_flag_and_threads_engine_scope():
     assert "__AUDIT_SCOPE__" in src
 
 
+def test_runner_injects_scope_before_navigation_and_filters_image_settle():
+    """Browser-less structural guard for the scoped startup optimization."""
+    runner = (VALIDATE.parent / "run-audits.py").read_text(encoding="utf-8")
+    engine = runner[runner.index("def run_unified_engine"):]
+    assert engine.index("page.add_init_script") < engine.index("page.goto(url")
+    assert "scope.has(idx + 1)" in runner
+    assert ".flatMap((f, idx)" in runner
+
+
 def test_scope_frames_single_parsed_to_engine(monkeypatch, tmp_path):
     code, cap = _run_main_capture_scope(
         monkeypatch, tmp_path, ["--no-visual", "--scope-frames", "2"])
@@ -251,6 +260,53 @@ def test_scope_only_first_page_anchors_deck_rule_there():
     assert _floor_slides(findings) == {1}
     ni = _no_imagery(findings)
     assert ni and ni[0].get("slide_idx") == 1
+
+
+def test_scope_is_visible_pre_init_and_only_scoped_images_decode(tmp_path):
+    """The audit scope is an init-script input, not a late post-load filter.
+
+    A page-authored script must see scope=[2], and the runner's bounded image
+    settle must call decode only for the image inside frame 2. Deck-level rule
+    semantics are covered by the neighbouring R-VIS-NO-IMAGERY test.
+    """
+    html = tmp_path / "index.html"
+    html.write_text(
+        """<!doctype html><html><head><script>
+        window.__scopeSeenDuringDocumentScript = window.__AUDIT_SCOPE__;
+        window.__decodedImageIds = [];
+        HTMLImageElement.prototype.decode = function () {
+          window.__decodedImageIds.push(this.id);
+          return Promise.resolve();
+        };
+        </script></head><body>
+        <div class="deck" data-js-ready>
+          <div class="slide-frame"><div class="slide" data-slide-key="one">
+            <img id="off-scope" src="missing-one.png">
+          </div></div>
+          <div class="slide-frame"><div class="slide" data-slide-key="two">
+            <img id="in-scope" src="missing-two.png">
+          </div></div>
+        </div></body></html>""",
+        encoding="utf-8",
+    )
+    try:
+        result = EH._ENGINE.run_unified_engine(
+            html,
+            scope=[2],
+            settle_ms=0,
+            dom_rules=True,
+            extra_evals={
+                "scope_and_decodes": """() => ({
+                  scope: window.__scopeSeenDuringDocumentScript,
+                  decoded: window.__decodedImageIds
+                })""",
+            },
+        )
+    except EH.EngineUnavailable as exc:
+        pytest.skip(f"unified engine unavailable: {exc}")
+    observed = result["extra"]["scope_and_decodes"]
+    assert observed["scope"] == [2]
+    assert observed["decoded"] == ["in-scope"]
 
 
 if __name__ == "__main__":

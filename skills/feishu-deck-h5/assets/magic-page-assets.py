@@ -15,8 +15,10 @@ import argparse
 import base64
 import hashlib
 import html as html_lib
+import json
 import mimetypes
 import re
+import selectors
 import shlex
 import subprocess
 import sys
@@ -24,13 +26,18 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import unquote, unquote_to_bytes, urlparse
-from urllib.request import Request, urlopen
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from safe_resources import download_public_resource, resolve_local_file
 
 
 RESOURCE_ATTRS = {"src", "href", "poster"}
 NON_DEPENDENCY_SCHEMES = {"", "about", "blob", "javascript", "mailto", "tel"}
 NETWORK_TIMEOUT_SECONDS = 20
 DEFAULT_UPLOAD_WORKERS = 6
+MAX_UPLOAD_WORKERS = 16
+BATCH_UPLOAD_TIMEOUT_SECONDS = 600
+BATCH_PROTOCOL = "magic-upload-batch/v1"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 # delivery-7: cap remote bodies so a hostile/huge URL can't exhaust memory.
 MAX_EXTERNAL_BYTES = 64 * 1024 * 1024  # 64 MB
@@ -48,11 +55,24 @@ MIME_SUFFIXES = {
     "application/font-woff": ".woff",
     "application/font-woff2": ".woff2",
     "application/javascript": ".js",
+    "application/ecmascript": ".js",
+    "application/x-javascript": ".js",
     "text/javascript": ".js",
+    "text/ecmascript": ".js",
     "text/css": ".css",
     "video/mp4": ".mp4",
     "video/webm": ".webm",
     "audio/mpeg": ".mp3",
+}
+EXTERNAL_RESOURCE_TYPES = set(MIME_SUFFIXES) | {
+    "application/octet-stream",
+    "application/wasm",
+    "application/vnd.ms-fontobject",
+}
+LOCAL_RESOURCE_SUFFIXES = {
+    ".apng", ".avif", ".bmp", ".gif", ".ico", ".jpg", ".jpeg", ".png", ".svg", ".webp",
+    ".css", ".js", ".mjs", ".wasm", ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".mp4", ".webm", ".mov", ".m4v", ".mp3", ".wav", ".ogg",
 }
 URL_RE = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)]*))\s*\)", re.I)
 IMPORT_RE = re.compile(r"@import\s+(?:url\(\s*)?(?:\"([^\"]*)\"|'([^']*)'|([^;'\")\s]+))(?:\s*\))?", re.I)
@@ -135,20 +155,26 @@ def strip_ref(ref: str) -> str:
     return unquote(s.split("#", 1)[0].split("?", 1)[0])
 
 
+def trusted_asset_roots(html_path: Path, base_dir: Path) -> tuple[Path, ...]:
+    roots = [base_dir.resolve(), SKILL_ROOT / "assets", SKILL_ROOT / "deck-json" / "templates"]
+    if base_dir.name == "output":
+        roots.append(base_dir.parent)
+    return tuple(dict.fromkeys(root.resolve() for root in roots))
+
+
 def resolve_asset(html_path: Path, ref: str, *, base_dir: Path | None = None) -> Path | None:
     if is_external_ref(ref) or ref.strip().startswith("data:"):
         return None
     raw = strip_ref(ref)
     if not raw:
         return None
-    roots = [base_dir or html_path.parent]
-    if SKILL_ROOT not in roots:
-        roots.append(SKILL_ROOT)
-    for root in roots:
-        candidate = (root / raw).resolve()
-        if candidate.is_file():
-            return candidate
-    return None
+    base = (base_dir or html_path.parent).resolve()
+    return resolve_local_file(
+        base,
+        raw,
+        allowed_roots=trusted_asset_roots(html_path, base),
+        allowed_suffixes=LOCAL_RESOURCE_SUFFIXES,
+    )
 
 
 def safe_key_part(value: str) -> str:
@@ -165,8 +191,18 @@ def key_for(asset: Path, base_dir: Path, key_prefix: str) -> str:
 
 
 def upload_file(asset: Path, *, uploader: Path, base_url: str, key: str) -> str:
+    """Explicit legacy single-file uploader path.
+
+    Normal packaging uses upload_batch() once. This function remains only for
+    callers that opt into --legacy-uploader for an older custom script.
+    """
     cmd = ["node", str(uploader), str(asset), "--key", key, "--base-url", base_url, "-q"]
-    proc = subprocess.run(cmd, text=True, capture_output=True)
+    proc = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        timeout=BATCH_UPLOAD_TIMEOUT_SECONDS,
+    )
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip() or "unknown upload failure"
         raise RuntimeError(f"upload failed for {asset}: {detail}")
@@ -176,49 +212,327 @@ def upload_file(asset: Path, *, uploader: Path, base_url: str, key: str) -> str:
     return url
 
 
-def upload_bytes(
-    payload: bytes,
-    *,
-    suffix: str,
-    uploader: Path,
-    base_url: str,
-    key_prefix: str,
-    folder: str,
-    temp_dir: Path,
-    cache: dict[str, str],
-) -> str:
-    digest = hashlib.sha256(payload).hexdigest()[:16]
-    cache_key = f"{folder}:{digest}:{suffix}"
-    if cache_key in cache:
-        return cache[cache_key]
-    tmp = temp_dir / f"{folder}-{digest}{suffix}"
-    tmp.write_bytes(payload)
-    key = "/".join(part for part in (safe_key_part(key_prefix), f"{folder}/{digest}{suffix}") if part)
-    url = upload_file(tmp, uploader=uploader, base_url=base_url, key=key)
-    cache[cache_key] = url
-    return url
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def upload_asset(
-    asset: Path,
-    *,
-    base_dir: Path,
-    uploader: Path,
-    base_url: str,
-    key_prefix: str,
-    cache: dict[Path, str],
-) -> str:
+def _normalized_base_url(base_url: str) -> str:
+    raw = str(base_url or "https://magic.solutionsuite.cn").strip().rstrip("/")
+    if not raw:
+        return "https://magic.solutionsuite.cn"
+    return raw if re.match(r"^https?://", raw, re.I) else "https://" + raw
+
+
+def _upload_spec(asset: Path, *, key: str, base_url: str) -> dict[str, str]:
     resolved = asset.resolve()
-    if resolved in cache:
-        return cache[resolved]
-    url = upload_file(
-        resolved,
-        uploader=uploader,
-        base_url=base_url,
-        key=key_for(resolved, base_dir.resolve(), key_prefix),
+    sha256 = _file_sha256(resolved)
+    normalized_base = _normalized_base_url(base_url)
+    cache_key = hashlib.sha256(
+        f"{normalized_base}\0{key}\0{sha256}".encode("utf-8")
+    ).hexdigest()
+    content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    return {
+        "id": cache_key,
+        "file": str(resolved),
+        "key": key,
+        "content_type": content_type,
+        "sha256": sha256,
+        "cache_key": cache_key,
+    }
+
+
+def _validate_batch_payload(
+    payload: object,
+    specs: list[dict[str, str]],
+    *,
+    returncode: int,
+    stderr: str,
+    expected_request_id: str | None = None,
+) -> dict[str, str]:
+    if not isinstance(payload, dict) or payload.get("protocol") != BATCH_PROTOCOL:
+        detail = stderr.strip() or "uploader returned no valid batch JSON"
+        raise RuntimeError(
+            "batch uploader protocol error: " + detail
+            + "; custom legacy uploaders require explicit --legacy-uploader"
+        )
+    rows = payload.get("items")
+    if not isinstance(rows, list):
+        raise RuntimeError("batch uploader protocol error: items must be a JSON array")
+    expected = {spec["id"]: spec for spec in specs}
+    seen: dict[str, dict] = {}
+    errors: list[str] = []
+    urls: dict[str, str] = {}
+    if expected_request_id is not None and str(payload.get("request_id") or "") != expected_request_id:
+        errors.append("batch response request_id mismatch")
+    if payload.get("error"):
+        errors.append(str(payload.get("error")))
+    for row in rows:
+        if not isinstance(row, dict):
+            errors.append("non-object result row")
+            continue
+        item_id = str(row.get("id") or "")
+        spec = expected.get(item_id)
+        if spec is None:
+            errors.append(f"unexpected result id {item_id!r}")
+            continue
+        if item_id in seen:
+            errors.append(f"duplicate result id {item_id}")
+            continue
+        seen[item_id] = row
+        for field in ("key", "sha256", "cache_key"):
+            if str(row.get(field) or "") != spec[field]:
+                errors.append(f"{spec['key']}: result {field} mismatch")
+        if not row.get("ok"):
+            errors.append(f"{spec['key']}: {row.get('error') or 'upload failed'}")
+            continue
+        url = str(row.get("url") or "")
+        if not url.startswith(("http://", "https://")):
+            errors.append(f"{spec['key']}: uploader returned non-URL {url!r}")
+            continue
+        urls[item_id] = url
+    missing = [spec["key"] for item_id, spec in expected.items() if item_id not in seen]
+    if missing:
+        errors.append("missing result rows: " + ", ".join(missing[:8]))
+    if returncode != 0 and not errors:
+        errors.append(stderr.strip() or f"batch uploader exited {returncode}")
+    if errors:
+        raise RuntimeError("batch upload failed: " + "; ".join(errors[:12]))
+    return urls
+
+
+def upload_batch(
+    specs: list[dict[str, str]],
+    *,
+    uploader: Path,
+    base_url: str,
+    workers: int,
+    temp_dir: Path,
+    legacy_uploader: bool = False,
+) -> dict[str, str]:
+    """Upload unique staged specs and return cache_key/id -> public URL.
+
+    Native mode invokes exactly one Node process with a content-addressed JSON
+    manifest. Legacy fallback is deliberately opt-in and bounded; unsupported
+    custom uploaders never trigger a silent N-process fallback.
+    """
+    unique: dict[str, dict[str, str]] = {}
+    for spec in specs:
+        prior = unique.get(spec["cache_key"])
+        if prior and prior != spec:
+            raise RuntimeError(f"upload cache-key collision for {spec['key']}")
+        unique[spec["cache_key"]] = spec
+    ordered = list(unique.values())
+    if not ordered:
+        return {}
+    bounded_workers = max(1, min(MAX_UPLOAD_WORKERS, int(workers or 1)))
+    if legacy_uploader:
+        def _one(spec: dict[str, str]) -> tuple[str, str]:
+            if _file_sha256(Path(spec["file"])) != spec["sha256"]:
+                raise RuntimeError(f"staged content changed before legacy upload: {spec['key']}")
+            return spec["id"], upload_file(
+                Path(spec["file"]),
+                uploader=uploader,
+                base_url=base_url,
+                key=spec["key"],
+            )
+
+        urls: dict[str, str] = {}
+        with ThreadPoolExecutor(max_workers=bounded_workers) as pool:
+            futures = [pool.submit(_one, spec) for spec in ordered]
+            for future in as_completed(futures):
+                item_id, url = future.result()
+                urls[item_id] = url
+        return urls
+
+    manifest = temp_dir / "magic-upload-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "protocol": BATCH_PROTOCOL,
+                "base_url": _normalized_base_url(base_url),
+                "items": ordered,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
     )
-    cache[resolved] = url
-    return url
+    proc = subprocess.run(
+        [
+            "node",
+            str(uploader),
+            "--batch-manifest",
+            str(manifest),
+            "--base-url",
+            base_url,
+            "--workers",
+            str(bounded_workers),
+        ],
+        text=True,
+        capture_output=True,
+        timeout=BATCH_UPLOAD_TIMEOUT_SECONDS,
+    )
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        payload = None
+    return _validate_batch_payload(
+        payload,
+        ordered,
+        returncode=proc.returncode,
+        stderr=proc.stderr,
+    )
+
+
+class BatchUploadSession:
+    """One native Node uploader process serving one or more bounded batches."""
+
+    def __init__(
+        self,
+        *,
+        uploader: Path,
+        base_url: str,
+        workers: int,
+        temp_dir: Path,
+        legacy_uploader: bool = False,
+    ) -> None:
+        self.uploader = uploader
+        self.base_url = _normalized_base_url(base_url)
+        self.workers = max(1, min(MAX_UPLOAD_WORKERS, int(workers or 1)))
+        self.temp_dir = temp_dir
+        self.legacy_uploader = legacy_uploader
+        self._proc = None
+        self._stderr_file = None
+        self._request_no = 0
+
+    def __enter__(self):
+        return self
+
+    def _start(self) -> None:
+        if self._proc is not None or self.legacy_uploader:
+            return
+        stderr_path = self.temp_dir / "magic-upload-session.stderr.log"
+        self._stderr_file = stderr_path.open("w+", encoding="utf-8")
+        self._proc = subprocess.Popen(
+            [
+                "node",
+                str(self.uploader),
+                "--batch-ndjson",
+                "--base-url",
+                self.base_url,
+                "--workers",
+                str(self.workers),
+            ],
+            text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self._stderr_file,
+            bufsize=1,
+        )
+
+    def _stderr(self) -> str:
+        if self._stderr_file is None:
+            return ""
+        self._stderr_file.flush()
+        self._stderr_file.seek(0)
+        return self._stderr_file.read()
+
+    def upload(self, specs: list[dict[str, str]], *, temp_dir: Path) -> dict[str, str]:
+        if self.legacy_uploader:
+            return upload_batch(
+                specs,
+                uploader=self.uploader,
+                base_url=self.base_url,
+                workers=self.workers,
+                temp_dir=temp_dir,
+                legacy_uploader=True,
+            )
+        unique: dict[str, dict[str, str]] = {}
+        for spec in specs:
+            prior = unique.get(spec["cache_key"])
+            if prior and prior != spec:
+                raise RuntimeError(f"upload cache-key collision for {spec['key']}")
+            unique[spec["cache_key"]] = spec
+        ordered = list(unique.values())
+        if not ordered:
+            return {}
+        self._start()
+        if self._proc is None or self._proc.stdin is None or self._proc.stdout is None:
+            raise RuntimeError("batch uploader session is not running")
+        self._request_no += 1
+        request_id = f"batch-{self._request_no}"
+        request = {
+            "protocol": BATCH_PROTOCOL,
+            "request_id": request_id,
+            "base_url": self.base_url,
+            "items": ordered,
+        }
+        try:
+            self._proc.stdin.write(json.dumps(request, ensure_ascii=False, separators=(",", ":")) + "\n")
+            self._proc.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            raise RuntimeError("batch uploader session closed before request: " + self._stderr()) from exc
+
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._proc.stdout, selectors.EVENT_READ)
+            if not selector.select(BATCH_UPLOAD_TIMEOUT_SECONDS):
+                self._proc.kill()
+                raise RuntimeError(
+                    f"batch uploader timed out after {BATCH_UPLOAD_TIMEOUT_SECONDS}s"
+                )
+            line = self._proc.stdout.readline()
+        finally:
+            selector.close()
+        if not line:
+            code = self._proc.poll()
+            raise RuntimeError(
+                f"batch uploader session ended unexpectedly (exit {code}): {self._stderr()}"
+            )
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "batch uploader returned invalid NDJSON: " + line[:300]
+                + "; custom legacy uploaders require explicit --legacy-uploader"
+            ) from exc
+        return _validate_batch_payload(
+            payload,
+            ordered,
+            returncode=0,
+            stderr=self._stderr(),
+            expected_request_id=request_id,
+        )
+
+    def __exit__(self, exc_type, exc, tb):
+        exit_code = 0
+        stderr = ""
+        if self._proc is not None:
+            try:
+                if self._proc.stdin is not None:
+                    try:
+                        self._proc.stdin.close()
+                    except BrokenPipeError:
+                        pass
+                exit_code = self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+                exit_code = self._proc.wait(timeout=5)
+            finally:
+                if self._proc.stdout is not None:
+                    self._proc.stdout.close()
+            stderr = self._stderr()
+        if self._stderr_file is not None:
+            self._stderr_file.close()
+        if exc_type is None and exit_code != 0:
+            raise RuntimeError(
+                f"batch uploader session exited {exit_code}: {stderr.strip()}"
+            )
+        return False
 
 
 def data_uri_payload(ref: str) -> tuple[str, bytes] | None:
@@ -233,80 +547,75 @@ def data_uri_payload(ref: str) -> tuple[str, bytes] | None:
         try:
             return mime, base64.b64decode(compact, validate=True)
         except Exception as exc:
-            raise RuntimeError(f"invalid base64 image data URI: {exc}") from exc
+            raise RuntimeError(f"invalid base64 data URI: {exc}") from exc
     return mime, unquote_to_bytes(payload)
 
 
-def upload_data_uri(
-    ref: str,
-    *,
-    uploader: Path,
-    base_url: str,
-    key_prefix: str,
-    cache: dict[str, str],
-    temp_dir: Path,
-) -> str | None:
-    parsed = data_uri_payload(ref)
-    if parsed is None:
-        return None
-    if ref in cache:
-        return cache[ref]
-    mime, payload = parsed
-    suffix = MIME_SUFFIXES.get(mime) or mimetypes.guess_extension(mime) or ".img"
-    digest = hashlib.sha256(payload).hexdigest()[:16]
-    tmp = temp_dir / f"data-image-{digest}{suffix}"
-    tmp.write_bytes(payload)
-    key = "/".join(part for part in (safe_key_part(key_prefix), f"data-uri/{digest}{suffix}") if part)
-    url = upload_file(tmp, uploader=uploader, base_url=base_url, key=key)
-    cache[ref] = url
-    return url
+def _data_upload_kind(mime: str) -> tuple[str, str]:
+    lowered = mime.lower()
+    if lowered == "text/css":
+        return "css", "css"
+    if lowered in {
+        "application/javascript", "application/ecmascript",
+        "application/x-javascript", "text/javascript", "text/ecmascript",
+    }:
+        return "js", "js"
+    return "data", "data-uri"
 
 
-def upload_ref_uncached(
+def stage_ref_uncached(
     ref: str,
     *,
     html_path: Path,
     base_dir: Path,
-    uploader: Path,
     base_url: str,
     key_prefix: str,
     temp_dir: Path,
-) -> tuple[str | None, str]:
+) -> tuple[dict[str, str] | None, str]:
+    """Resolve/download one already-collected reference, but do not upload it.
+
+    All local containment and remote SSRF/MIME/size checks happen here before a
+    manifest is ever passed to Node.
+    """
     parsed = data_uri_payload(ref)
     if parsed is not None:
         mime, payload = parsed
-        suffix = MIME_SUFFIXES.get(mime) or mimetypes.guess_extension(mime) or ".img"
-        digest = hashlib.sha256(payload).hexdigest()[:16]
-        tmp = temp_dir / f"data-image-{digest}{suffix}"
-        tmp.write_bytes(payload)
-        key = "/".join(part for part in (safe_key_part(key_prefix), f"data-uri/{digest}{suffix}") if part)
-        return upload_file(tmp, uploader=uploader, base_url=base_url, key=key), "data"
+        suffix = MIME_SUFFIXES.get(mime) or mimetypes.guess_extension(mime) or ".bin"
+        digest = hashlib.sha256(payload).hexdigest()
+        kind, folder = _data_upload_kind(mime)
+        tmp = temp_dir / f"{folder}-{digest[:16]}{suffix}"
+        if not tmp.exists():
+            tmp.write_bytes(payload)
+        key = "/".join(
+            part
+            for part in (
+                safe_key_part(key_prefix),
+                f"{folder}/{digest[:16]}{suffix}",
+            )
+            if part
+        )
+        return _upload_spec(tmp, key=key, base_url=base_url), kind
     if is_http_ref(ref):
         url = normalize_http_ref(ref)
         downloaded = download_external_ref(url, temp_dir=temp_dir, cache={})
-        public = upload_file(
-            downloaded,
-            uploader=uploader,
-            base_url=base_url,
-            key="/".join(
-                part
-                for part in (
-                    safe_key_part(key_prefix),
-                    f"external/{hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]}{downloaded.suffix}",
-                )
-                if part
-            ),
+        key = "/".join(
+            part
+            for part in (
+                safe_key_part(key_prefix),
+                f"external/{hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]}{downloaded.suffix}",
+            )
+            if part
         )
-        return public, "external"
+        return _upload_spec(downloaded, key=key, base_url=base_url), "external"
     asset = resolve_asset(html_path, ref, base_dir=base_dir)
     if asset is None:
         return None, ""
+    resolved = asset.resolve()
     return (
-        upload_file(
-            asset.resolve(),
-            uploader=uploader,
+        _upload_spec(
+            resolved,
+            key=key_for(resolved, base_dir.resolve(), key_prefix),
             base_url=base_url,
-            key=key_for(asset.resolve(), base_dir.resolve(), key_prefix),
         ),
         "local",
     )
@@ -330,26 +639,20 @@ def download_external_ref(
     url = normalize_http_ref(ref)
     if url in cache:
         return cache[url]
-    request = Request(url, headers={"User-Agent": "feishu-deck-h5-publisher/1.0"})
-    with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
-        # delivery-7: refuse oversized bodies early (Content-Length when present),
-        # and read at most MAX_EXTERNAL_BYTES + 1 so an unsized/streaming response
-        # can't read the whole thing into memory.
-        declared = response.headers.get("content-length")
-        if declared is not None and declared.isdigit() and int(declared) > MAX_EXTERNAL_BYTES:
-            raise RuntimeError(
-                f"external resource too large ({int(declared)} bytes > "
-                f"{MAX_EXTERNAL_BYTES} cap): {url}")
-        payload = response.read(MAX_EXTERNAL_BYTES + 1)
-        content_type = response.headers.get("content-type", "application/octet-stream")
-    if len(payload) > MAX_EXTERNAL_BYTES:
-        raise RuntimeError(
-            f"external resource exceeds {MAX_EXTERNAL_BYTES}-byte cap: {url}")
-    if not payload:
-        raise RuntimeError(f"external resource is empty: {url}")
+    downloaded = download_public_resource(
+        url,
+        max_bytes=MAX_EXTERNAL_BYTES,
+        timeout=NETWORK_TIMEOUT_SECONDS,
+        user_agent="feishu-deck-h5-publisher/1.0",
+        allowed_types=EXTERNAL_RESOURCE_TYPES,
+        allowed_type_prefixes=("image/", "font/", "audio/", "video/"),
+    )
+    payload = downloaded.payload
+    content_type = downloaded.content_type
     digest = hashlib.sha256(payload).hexdigest()[:16]
-    suffix = suffix_from_url(url, content_type)
-    target = temp_dir / f"external-{digest}{suffix}"
+    suffix = suffix_from_url(downloaded.url, content_type)
+    url_digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+    target = temp_dir / f"external-{url_digest}-{digest}{suffix}"
     target.write_bytes(payload)
     cache[url] = target
     return target
@@ -398,7 +701,7 @@ def sub_outside_script_blocks(
     return "".join(pieces)
 
 
-def rewrite_refs(
+def _rewrite_refs_batched(
     html: str,
     html_path: Path,
     *,
@@ -407,42 +710,40 @@ def rewrite_refs(
     key_prefix: str,
     asset_base_dir: Path | None = None,
     upload_workers: int = DEFAULT_UPLOAD_WORKERS,
-) -> tuple[str, int, int, int]:
+    legacy_uploader: bool = False,
+    upload_session: BatchUploadSession | None = None,
+) -> tuple[str, dict[str, int]]:
     base_dir = (asset_base_dir or html_path.parent).resolve()
 
     with tempfile.TemporaryDirectory(prefix="magic-page-assets-") as tmp_name:
         temp_dir = Path(tmp_name)
         url_map: dict[str, str] = {}
-        counts = {"local": 0, "data": 0, "external": 0}
+        counts = {"local": 0, "data": 0, "external": 0, "css": 0, "js": 0}
 
         uploadable = [
             ref for ref in collect_resource_refs(html)
             if ref.strip().startswith("data:") or is_http_ref(ref) or resolve_asset(html_path, ref, base_dir=base_dir)
         ]
-        workers = max(1, int(upload_workers or 1))
+        workers = max(1, min(MAX_UPLOAD_WORKERS, int(upload_workers or 1)))
+        staged_by_ref: dict[str, tuple[dict[str, str] | None, str]] = {}
         if workers == 1:
             for ref in uploadable:
-                url, kind = upload_ref_uncached(
+                staged_by_ref[ref] = stage_ref_uncached(
                     ref,
                     html_path=html_path,
                     base_dir=base_dir,
-                    uploader=uploader,
                     base_url=base_url,
                     key_prefix=key_prefix,
                     temp_dir=temp_dir,
                 )
-                if url:
-                    url_map[ref] = url
-                    counts[kind] += 1
         else:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 future_to_ref = {
                     pool.submit(
-                        upload_ref_uncached,
+                        stage_ref_uncached,
                         ref,
                         html_path=html_path,
                         base_dir=base_dir,
-                        uploader=uploader,
                         base_url=base_url,
                         key_prefix=key_prefix,
                         temp_dir=temp_dir,
@@ -451,10 +752,32 @@ def rewrite_refs(
                 }
                 for future in as_completed(future_to_ref):
                     ref = future_to_ref[future]
-                    url, kind = future.result()
-                    if url:
-                        url_map[ref] = url
-                        counts[kind] += 1
+                    staged_by_ref[ref] = future.result()
+
+        specs: list[dict[str, str]] = []
+        ref_to_id: dict[str, str] = {}
+        # Iterate in source order even when staging ran concurrently so the
+        # manifest and diagnostics are deterministic.
+        for ref in uploadable:
+            spec, kind = staged_by_ref.get(ref, (None, ""))
+            if spec is None:
+                continue
+            specs.append(spec)
+            ref_to_id[ref] = spec["id"]
+            counts[kind] += 1
+        if upload_session is not None:
+            uploaded = upload_session.upload(specs, temp_dir=temp_dir)
+        else:
+            uploaded = upload_batch(
+                specs,
+                uploader=uploader,
+                base_url=base_url,
+                workers=workers,
+                temp_dir=temp_dir,
+                legacy_uploader=legacy_uploader,
+            )
+        for ref, item_id in ref_to_id.items():
+            url_map[ref] = uploaded[item_id]
 
         def public_url(ref: str) -> str | None:
             return url_map.get(ref)
@@ -513,7 +836,32 @@ def rewrite_refs(
         html = RESOURCE_ATTR_RE.sub(replace_resource_attr, html)
         html = SRCSET_ATTR_RE.sub(replace_srcset, html)
 
-    return html, counts["local"], counts["data"], counts["external"]
+    return html, counts
+
+
+def rewrite_refs(
+    html: str,
+    html_path: Path,
+    *,
+    uploader: Path,
+    base_url: str,
+    key_prefix: str,
+    asset_base_dir: Path | None = None,
+    upload_workers: int = DEFAULT_UPLOAD_WORKERS,
+    legacy_uploader: bool = False,
+) -> tuple[str, int, int, int]:
+    """Compatibility wrapper for callers that only rewrite resource refs."""
+    rewritten, counts = _rewrite_refs_batched(
+        html,
+        html_path,
+        uploader=uploader,
+        base_url=base_url,
+        key_prefix=key_prefix,
+        asset_base_dir=asset_base_dir,
+        upload_workers=upload_workers,
+        legacy_uploader=legacy_uploader,
+    )
+    return rewritten, counts["local"], counts["data"], counts["external"]
 
 
 def script_type_allows_externalize(attrs: str) -> bool:
@@ -529,62 +877,95 @@ def script_type_allows_externalize(attrs: str) -> bool:
     }
 
 
-def externalize_inline_blocks(
+def externalize_inline_blocks_batched(
     html: str,
     *,
     uploader: Path,
     base_url: str,
     key_prefix: str,
+    upload_workers: int = DEFAULT_UPLOAD_WORKERS,
+    legacy_uploader: bool = False,
+    upload_session: BatchUploadSession | None = None,
 ) -> tuple[str, int, int]:
-    cache: dict[str, str] = {}
+    """Externalize already-resource-rewritten CSS/JS in one bounded batch."""
     css_count = 0
     js_count = 0
-
     with tempfile.TemporaryDirectory(prefix="magic-page-code-") as tmp_name:
         temp_dir = Path(tmp_name)
+        specs_by_token: dict[tuple[str, str], dict[str, str]] = {}
 
-        def replace_style(match: re.Match[str]) -> str:
-            nonlocal css_count
-            attrs, css = match.groups()
-            if not css.strip():
-                return match.group(0)
-            url = upload_bytes(
-                css.encode("utf-8"),
-                suffix=".css",
+        def register(folder: str, suffix: str, text: str) -> str:
+            payload = text.encode("utf-8")
+            digest = hashlib.sha256(payload).hexdigest()
+            token = (folder, digest)
+            if token not in specs_by_token:
+                staged = temp_dir / f"{folder}-{digest[:16]}{suffix}"
+                staged.write_bytes(payload)
+                key = "/".join(
+                    part
+                    for part in (
+                        safe_key_part(key_prefix),
+                        f"{folder}/{digest[:16]}{suffix}",
+                    )
+                    if part
+                )
+                specs_by_token[token] = _upload_spec(
+                    staged,
+                    key=key,
+                    base_url=base_url,
+                )
+            return specs_by_token[token]["id"]
+
+        for match in STYLE_BLOCK_RE.finditer(html):
+            _attrs, css = match.groups()
+            if css.strip():
+                register("css", ".css", css)
+                css_count += 1
+        for match in SCRIPT_BLOCK_RE.finditer(html):
+            attrs, js = match.groups()
+            if js.strip() and script_type_allows_externalize(attrs):
+                register("js", ".js", js)
+                js_count += 1
+
+        specs = list(specs_by_token.values())
+        if upload_session is not None:
+            uploaded = upload_session.upload(specs, temp_dir=temp_dir)
+        else:
+            uploaded = upload_batch(
+                specs,
                 uploader=uploader,
                 base_url=base_url,
-                key_prefix=key_prefix,
-                folder="css",
+                workers=upload_workers,
                 temp_dir=temp_dir,
-                cache=cache,
+                legacy_uploader=legacy_uploader,
             )
-            css_count += 1
-            return f'<link rel="stylesheet" href="{html_lib.escape(url, quote=True)}">'
+
+        def replace_style(match: re.Match[str]) -> str:
+            _attrs, css = match.groups()
+            if not css.strip():
+                return match.group(0)
+            digest = hashlib.sha256(css.encode("utf-8")).hexdigest()
+            item_id = specs_by_token[("css", digest)]["id"]
+            return (
+                '<link rel="stylesheet" href="'
+                + html_lib.escape(uploaded[item_id], quote=True)
+                + '">'
+            )
 
         def replace_script(match: re.Match[str]) -> str:
-            nonlocal js_count
             attrs, js = match.groups()
             if not js.strip() or not script_type_allows_externalize(attrs):
                 return match.group(0)
-            url = upload_bytes(
-                js.encode("utf-8"),
-                suffix=".js",
-                uploader=uploader,
-                base_url=base_url,
-                key_prefix=key_prefix,
-                folder="js",
-                temp_dir=temp_dir,
-                cache=cache,
-            )
-            js_count += 1
+            digest = hashlib.sha256(js.encode("utf-8")).hexdigest()
+            item_id = specs_by_token[("js", digest)]["id"]
             clean_attrs = attrs.rstrip()
+            url = html_lib.escape(uploaded[item_id], quote=True)
             if clean_attrs:
-                return f'<script{clean_attrs} src="{html_lib.escape(url, quote=True)}"></script>'
-            return f'<script src="{html_lib.escape(url, quote=True)}"></script>'
+                return f'<script{clean_attrs} src="{url}"></script>'
+            return f'<script src="{url}"></script>'
 
         html = STYLE_BLOCK_RE.sub(replace_style, html)
         html = SCRIPT_BLOCK_RE.sub(replace_script, html)
-
     return html, css_count, js_count
 
 
@@ -598,6 +979,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--asset-base-dir", help="Directory used to resolve relative resources after HTML was copied/inlined")
     parser.add_argument("--keep-inline-code", action="store_true", help="do not externalize inline <style>/<script> blocks")
     parser.add_argument("--upload-workers", type=int, default=DEFAULT_UPLOAD_WORKERS, help="parallel asset upload workers")
+    parser.add_argument(
+        "--legacy-uploader",
+        action="store_true",
+        help=(
+            "explicitly allow an older custom uploader without the JSON batch "
+            "protocol (spawns one bounded process per unique asset)"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -616,24 +1005,42 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         html = src.read_text(encoding="utf-8")
-        rewritten, local_uploaded, data_uploaded, external_uploaded = rewrite_refs(
-            html,
-            src,
-            uploader=uploader,
-            base_url=args.base_url,
-            key_prefix=args.key_prefix,
-            asset_base_dir=Path(args.asset_base_dir).expanduser().resolve() if args.asset_base_dir else None,
-            upload_workers=args.upload_workers,
-        )
         css_uploaded = 0
         js_uploaded = 0
-        if not args.keep_inline_code:
-            rewritten, css_uploaded, js_uploaded = externalize_inline_blocks(
-                rewritten,
+        with tempfile.TemporaryDirectory(prefix="magic-upload-session-") as session_tmp:
+            with BatchUploadSession(
                 uploader=uploader,
                 base_url=args.base_url,
-                key_prefix=args.key_prefix,
-            )
+                workers=args.upload_workers,
+                temp_dir=Path(session_tmp),
+                legacy_uploader=args.legacy_uploader,
+            ) as upload_session:
+                # Resources first, so CSS that contains local/data/remote url()
+                # is rewritten before its final bytes are hashed and uploaded.
+                rewritten, counts = _rewrite_refs_batched(
+                    html,
+                    src,
+                    uploader=uploader,
+                    base_url=args.base_url,
+                    key_prefix=args.key_prefix,
+                    asset_base_dir=Path(args.asset_base_dir).expanduser().resolve() if args.asset_base_dir else None,
+                    upload_workers=args.upload_workers,
+                    legacy_uploader=args.legacy_uploader,
+                    upload_session=upload_session,
+                )
+                if not args.keep_inline_code:
+                    rewritten, css_uploaded, js_uploaded = externalize_inline_blocks_batched(
+                        rewritten,
+                        uploader=uploader,
+                        base_url=args.base_url,
+                        key_prefix=args.key_prefix,
+                        upload_workers=args.upload_workers,
+                        legacy_uploader=args.legacy_uploader,
+                        upload_session=upload_session,
+                    )
+        local_uploaded = counts["local"]
+        data_uploaded = counts["data"]
+        external_uploaded = counts["external"]
         dst.write_text(rewritten, encoding="utf-8")
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -647,6 +1054,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  external refs: {external_uploaded}")
     print(f"  css blocks   : {css_uploaded}")
     print(f"  js blocks    : {js_uploaded}")
+    print(f"  uploader mode: {'legacy-explicit' if args.legacy_uploader else 'batch-ndjson'}")
     print(f"  key prefix   : {shlex.quote(args.key_prefix)}")
     return 0
 

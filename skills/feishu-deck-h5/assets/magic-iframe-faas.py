@@ -29,6 +29,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from safe_resources import resolve_local_file
+
 
 DEFAULT_MAGIC_BASE_URL = "https://magic.solutionsuite.cn"
 TOKEN_FILES = (
@@ -101,8 +104,12 @@ def resolve_local_iframe(src: str, base_dir: Path) -> Optional[Path]:
     suffix = Path(urlparse(raw).path).suffix.lower()
     if suffix not in {".html", ".htm"}:
         return None
-    candidate = (base_dir / raw.lstrip("/")).resolve()
-    return candidate if candidate.is_file() else None
+    return resolve_local_file(
+        base_dir,
+        raw,
+        allowed_roots=(base_dir,),
+        allowed_suffixes=(".html", ".htm"),
+    )
 
 
 def read_token() -> str:
@@ -147,6 +154,7 @@ def prepare_child_html(
     base_url: str,
     key_prefix: str,
     upload_workers: int,
+    legacy_uploader: bool = False,
 ) -> Path:
     child_dir = work_dir / "children"
     child_dir.mkdir(parents=True, exist_ok=True)
@@ -164,27 +172,27 @@ def prepare_child_html(
         ],
         cwd=Path.cwd(),
     )
-    subprocess_json_or_text(
-        [
-            sys.executable,
-            str(MAGIC_PAGE_ASSETS),
-            str(inlined),
-            "--out",
-            str(ready),
-            "--uploader",
-            str(uploader),
-            "--base-url",
-            base_url,
-            "--key-prefix",
-            f"{key_prefix}/iframe-assets/{index:02d}-{stem}",
-            "--asset-base-dir",
-            str(iframe_path.parent),
-            "--keep-inline-code",
-            "--upload-workers",
-            str(upload_workers),
-        ],
-        cwd=Path.cwd(),
-    )
+    asset_cmd = [
+        sys.executable,
+        str(MAGIC_PAGE_ASSETS),
+        str(inlined),
+        "--out",
+        str(ready),
+        "--uploader",
+        str(uploader),
+        "--base-url",
+        base_url,
+        "--key-prefix",
+        f"{key_prefix}/iframe-assets/{index:02d}-{stem}",
+        "--asset-base-dir",
+        str(iframe_path.parent),
+        "--keep-inline-code",
+        "--upload-workers",
+        str(upload_workers),
+    ]
+    if legacy_uploader:
+        asset_cmd.append("--legacy-uploader")
+    subprocess_json_or_text(asset_cmd, cwd=Path.cwd())
     return ready
 
 
@@ -282,6 +290,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--faas-record-id", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--upload-workers", type=int, default=4)
+    parser.add_argument(
+        "--legacy-uploader",
+        action="store_true",
+        help=(
+            "explicitly allow an older custom uploader for iframe child assets; "
+            "the built-in uploader uses the batch protocol"
+        ),
+    )
     args = parser.parse_args(argv or sys.argv[1:])
 
     src = Path(args.html).resolve()
@@ -325,6 +341,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 base_url=base_url,
                 key_prefix=args.key_prefix,
                 upload_workers=args.upload_workers,
+                legacy_uploader=args.legacy_uploader,
             )
             digest = hashlib.sha256(ready.read_bytes()).hexdigest()[:16]
             key = "/".join(

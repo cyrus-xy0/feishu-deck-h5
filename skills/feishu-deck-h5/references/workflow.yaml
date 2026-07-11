@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "description": "Authoritative feishu-deck-h5 mode routing. This file is JSON-compatible YAML so stdlib tooling can parse it.",
+  "modes": {
+    "CHECK-ONLY": {
+      "family": "VALIDATE",
+      "owner": "subskills/validator/SKILL.md",
+      "trigger": "Review or validate an existing deck without changing it",
+      "gate": "CHECK_ONLY",
+      "references": ["references/check-only.md", "references/validator-rules.md"]
+    },
+    "GENERATION": {
+      "family": "GENERATION",
+      "owner": "subskills/designer/SKILL.md -> subskills/renderer/SKILL.md",
+      "trigger": "Create a new run artifact or re-author external material",
+      "gate": "LOCAL_HANDOFF",
+      "references": ["references/design-first.md", "references/raw-page-quickstart.md"]
+    },
+    "GENERATION_FROM_SOURCE_HTML": {
+      "family": "GENERATION",
+      "owner": "subskills/parser/SKILL.md -> subskills/designer/SKILL.md -> subskills/renderer/SKILL.md",
+      "trigger": "Use HTML as reference or inspiration for a new deck",
+      "gate": "LOCAL_HANDOFF",
+      "references": ["references/conversion-policy.yaml", "references/design-first.md"]
+    },
+    "EDIT": {
+      "family": "EDIT",
+      "owner": "subskills/editor/SKILL.md",
+      "trigger": "Change a deck that already exists in its run",
+      "gate": "INTERMEDIATE_EDIT",
+      "references": ["references/deck-state-contract.md"]
+    },
+    "EDIT_IMPORTED_HTML": {
+      "family": "EDIT",
+      "owner": "subskills/editor/SKILL.md",
+      "trigger": "Modify an uploaded HTML artifact as the target state",
+      "gate": "INTERMEDIATE_EDIT",
+      "references": ["references/deck-state-contract.md", "references/round-trip-integrity.md"]
+    },
+    "RESKIN": {
+      "family": "EDIT",
+      "owner": "subskills/editor/SKILL.md",
+      "trigger": "Apply Feishu chrome to foreign HTML while preserving its design",
+      "gate": "INTERMEDIATE_EDIT",
+      "references": ["references/reskin.md"]
+    },
+    "LIFT+SWAP": {
+      "family": "EDIT",
+      "owner": "subskills/editor/SKILL.md",
+      "trigger": "Reuse pages or layout from another deck and swap content",
+      "gate": "INTERMEDIATE_EDIT",
+      "references": ["references/round-trip-integrity.md"]
+    },
+    "TRANSLATE": {
+      "family": "EDIT",
+      "owner": "subskills/translator/SKILL.md",
+      "trigger": "Translate or localize an existing deck",
+      "gate": "INTERMEDIATE_EDIT",
+      "references": ["references/translation.md"]
+    },
+    "PARSE": {
+      "family": "INGEST_SOURCE",
+      "owner": "subskills/parser/SKILL.md",
+      "trigger": "Normalize source files and extract structured material",
+      "gate": "SOURCE_PARSE",
+      "references": ["references/conversion-policy.yaml"]
+    },
+    "TEMPLATE_EXTRACT": {
+      "family": "TEMPLATE",
+      "owner": "subskills/template/SKILL.md",
+      "trigger": "Extract a supplied PPTX into a reviewable, reusable Template Pack",
+      "gate": "TEMPLATE_PACK",
+      "references": ["references/conversion-policy.yaml", "references/template-system.md"]
+    },
+    "IMPORT": {
+      "family": "DELIVERY",
+      "owner": "subskills/importer/SKILL.md",
+      "trigger": "Quality-gate and ingest a confirmed deck into the slide library",
+      "gate": "LIBRARY_INGEST",
+      "references": ["references/delivery.md"]
+    },
+    "SIMULATE": {
+      "family": "REHEARSAL",
+      "owner": "subskills/simulator/SKILL.md",
+      "trigger": "Rehearse stakeholder reactions to a validated deck",
+      "gate": "PRESENTATION_CHECKPOINT",
+      "references": []
+    },
+    "PUBLISH": {
+      "family": "DELIVERY",
+      "owner": "subskills/publisher/SKILL.md",
+      "trigger": "Publish a confirmed HTML artifact to Magic Page",
+      "gate": "MAGIC_PUBLISH",
+      "references": []
+    },
+    "MAINTENANCE": {
+      "family": "REPOSITORY",
+      "owner": "controller",
+      "trigger": "Review, test, repair, optimize, package, or maintain the feishu-deck-h5 codebase or skill itself",
+      "gate": "REPOSITORY_CHANGE",
+      "references": ["references/dependency-policy.yaml"]
+    }
+  }
+}

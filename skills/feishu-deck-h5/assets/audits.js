@@ -23,6 +23,20 @@
     'cover', 'section', 'big-stat', 'end', 'quote', 'image-text',
   ]);
 
+  // Deck-wide design plane. New renderer output stamps data-deck-width/height
+  // plus CSS variables on `.deck`; standalone/legacy HTML keeps 1920×1080.
+  const deckSize = (node) => {
+    const root = node && node.closest ? node.closest('.deck') : document.querySelector('.deck');
+    let width = root ? parseFloat(root.dataset.deckWidth || '') : NaN;
+    let height = root ? parseFloat(root.dataset.deckHeight || '') : NaN;
+    if (root && (!(width > 0) || !(height > 0))) {
+      const cs = getComputedStyle(root);
+      if (!(width > 0)) width = parseFloat(cs.getPropertyValue('--fs-deck-width'));
+      if (!(height > 0)) height = parseFloat(cs.getPropertyValue('--fs-deck-height'));
+    }
+    return { width: width > 0 ? width : 1920, height: height > 0 ? height : 1080 };
+  };
+
   // 短选择器(tag.cls.cls),用于 finding 定位。处理 SVG className.baseVal。
   const shortSel = (el) => {
     const tag = el.tagName.toLowerCase();
@@ -53,7 +67,7 @@
     if (direct) return direct;
     const sr = slide.getBoundingClientRect();
     if (sr.height < 30) return null;
-    const scale = sr.height / 1080;
+    const scale = sr.height / deckSize(slide).height;
     for (const el of slide.querySelectorAll('.header')) {
       if (el.closest('.stage')) continue;
       if (!el.querySelector('.title-zh, .title-en, h1, h2')) continue;
@@ -446,8 +460,7 @@
     '\\.(?:column-pill|side-pill|focus-pill|'
     + 'agenda-label|story-label|case-label)(?![-_\\w])');
 
-  // ── @media 解析(对应 _media_query_matches,固定 1920×1080 画布)。
-  const _DECK_VW = 1920, _DECK_VH = 1080;
+  // ── @media 解析(对应 _media_query_matches,使用 deck 设计画布)。
   const MQ_FEATURE_RE = /\(\s*(min|max)-(width|height)\s*:\s*(\d+)\s*px\s*\)/;
   const mediaQueryMatches = (query) => {
     const q = (query || '').trim().toLowerCase();
@@ -464,7 +477,8 @@
         const mm = MQ_FEATURE_RE.exec(p);
         if (mm) {
           const kind = mm[1], dim = mm[2], val = parseInt(mm[3], 10);
-          const cur = dim === 'width' ? _DECK_VW : _DECK_VH;
+          const canvas = deckSize();
+          const cur = dim === 'width' ? canvas.width : canvas.height;
           if ((kind === 'min' && cur < val) || (kind === 'max' && cur > val)) { active = false; break; }
         }
       }
@@ -891,6 +905,13 @@
     'contact', 'eyebrow', 'pill', 'tag', 'chip', 'badge', 'demo-tag',
     'demo-label', 'caption-meta', 'cite',
   ];
+  // A Template Pack carries its own approved typography and slot geometry.
+  // Framework-specific typography/title-baseline rules must not rewrite that
+  // contract; universal geometry, overflow, overlap and contrast rules still
+  // run normally. Presence is renderer-owned, never inferred from CSS names.
+  const visIsTemplateSlide = (slide) => !!(
+    slide && slide.hasAttribute && slide.hasAttribute('data-template-id')
+  );
 
   // ── 静态↔视觉 chrome 词表对齐(2026-06-11)─────────────────────────────────
   // 此前是两套词表:静态检查(R06/R20,_validate_common.py 的 _CHROME_CLASS_RE)
@@ -1143,7 +1164,7 @@
       id: 'R-VIS-CANVAS-CENTER',
       severity: 'warn',
       evaluate(slide, ctx) {
-        const { slide_idx, scale, isHeroLayout } = ctx;
+        const { slide_idx, scale, isHeroLayout, canvasHeight } = ctx;
         if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
 
         const _ccSr = slide.getBoundingClientRect();
@@ -1188,10 +1209,10 @@
         if (!ccAny) return [];
 
         const contentMid = (ccTop + ccBot) / 2;
-        const canvasMid = (_ccHb + 1080) / 2;
+        const canvasMid = (_ccHb + canvasHeight) / 2;
         const offset = canvasMid - contentMid;        // >0 偏上, <0 偏下
         const contentH = ccBot - ccTop;
-        const bandH = 1080 - _ccHb;
+        const bandH = canvasHeight - _ccHb;
         // is_full = 内容并集确实高过可用带 → 无法不溢出地居中 → 顶对齐/溢出是对的,豁免。
         const isFull = bandH <= 8 || contentH > (bandH - 8);
 
@@ -1238,7 +1259,7 @@
       id: 'R-VIS-FILL',
       severity: 'warn',
       evaluate(slide, ctx) {
-        const { slide_idx, layout, scale, isHeroLayout } = ctx;
+        const { slide_idx, layout, scale, isHeroLayout, canvasHeight } = ctx;
         // 只查 raw 页:schema 版式(content/stats/flow/…)由框架版式约束填充+居中,且
         // 既有 R-VIS-BALANCE / CANVAS-CENTER 已覆盖,本规则不二次猜测(否则误报正常 schema 页)。
         if (layout !== 'raw') return [];
@@ -1288,7 +1309,7 @@
         });
         if (!any) return [];
         const contentH = bot - top;
-        const bandH = 1080 - hb;
+        const bandH = canvasHeight - hb;
         if (bandH <= 8) return [];
         const fill = contentH / bandH;
         const THRESHOLD = 0.52;
@@ -2582,7 +2603,8 @@
     {
       // R36 · present-mode 居中用 absolute + 负 margin(不用 grid place-items)。(步骤 3
       // 第四批迁自 _validate_audits.py audit_centering_pattern)。原版扫整份 HTML 文本:
-      //   ① 缺 `margin:-540px 0 0 -960px`(空白容忍)→ err
+      //   ① 缺 legacy `margin:-540px 0 0 -960px` 或 deck-canvas-aware
+      //      `margin-top/left:calc(0px - var(--fs-deck-half-*…))` → err
       //   ② present-mode .slide-frame 仍 `display:grid` → err
       // 移植:对整 deck 全部 CSS 源文本(含框架,runner 注入)做同套正则。这两条都是
       // 框架 chrome 约定(feishu-deck.css 提供 absolute+负 margin 居中),deck 级、整 deck
@@ -2597,13 +2619,18 @@
 
         const css = allStyleText();
         const findings = [];
-        // 原版:re.compile(r'margin:\s*-540px\s+0\s+0\s+-960px')(空白容忍)。
-        const MARGIN_RE = /margin:\s*-540px\s+0\s+0\s+-960px/;
-        if (!MARGIN_RE.test(css)) {
+        // Legacy fixed-canvas pattern remains accepted for imported/old HTML;
+        // current framework CSS uses equivalent negative half-canvas variables.
+        const LEGACY_MARGIN_RE = /margin:\s*-540px\s+0\s+0\s+-960px/;
+        const DYNAMIC_MARGIN_TOP_RE = /margin-top:\s*calc\(\s*0px\s*-\s*var\(\s*--fs-deck-half-height(?:\s*,\s*540px)?\s*\)\s*\)/;
+        const DYNAMIC_MARGIN_LEFT_RE = /margin-left:\s*calc\(\s*0px\s*-\s*var\(\s*--fs-deck-half-width(?:\s*,\s*960px)?\s*\)\s*\)/;
+        const hasNegativeHalfCanvas = LEGACY_MARGIN_RE.test(css)
+          || (DYNAMIC_MARGIN_TOP_RE.test(css) && DYNAMIC_MARGIN_LEFT_RE.test(css));
+        if (!hasNegativeHalfCanvas) {
           findings.push({
             rule: 'R36', severity: 'error', slide_idx,
             message: 'present-mode slide centering is not the absolute + '
-              + 'negative-margin pattern (margin: -540px 0 0 -960px) — grid '
+              + 'negative-half-canvas margin pattern — grid '
               + 'place-items can cause transform clipping',
           });
         }
@@ -3283,7 +3310,7 @@
       id: 'R-OVERFLOW',
       severity: 'error',
       evaluate(slide, ctx) {
-        const { slide_idx, label, scale } = ctx;
+        const { slide_idx, label, scale, canvasWidth, canvasHeight } = ctx;
         const TOL = 2;  // design px,抗亚像素抖动
         const _sr = slide.getBoundingClientRect();
         const _st = _sr.top, _sl = _sr.left;
@@ -3319,8 +3346,8 @@
           if (vr - vl < 6 || vb - vt < 6) return;
           const left = (vl - _sl) / scale, right = (vr - _sl) / scale;
           const top = (vt - _st) / scale, bot = (vb - _st) / scale;
-          if (right - 1920 > overR) overR = right - 1920;
-          if (bot - 1080 > overB) overB = bot - 1080;
+          if (right - canvasWidth > overR) overR = right - canvasWidth;
+          if (bot - canvasHeight > overB) overB = bot - canvasHeight;
           if (-left > overL) overL = -left;
           if (-top > overT) overT = -top;
         });
@@ -3657,6 +3684,7 @@
       severity: 'error',
       evaluate(slide, ctx) {
         const { slide_idx, isHeroLayout } = ctx;
+        if (visIsTemplateSlide(slide)) return [];
         const findings = [];
         const textEls = slide.querySelectorAll('*');
         const seenTierViolations = new Set();
@@ -3777,6 +3805,7 @@
       severity: 'error',
       evaluate(slide, ctx) {
         const { slide_idx, isHeroLayout, scale } = ctx;
+        if (visIsTemplateSlide(slide)) return [];
         if (isHeroLayout) return [];   // hero 版式整体豁免(producer 在循环内 skip,等价)
         const _scale = scale;
         const findings = [];
@@ -4155,6 +4184,7 @@
       severity: 'error',
       evaluate(slide, ctx) {
         const { slide_idx, layout } = ctx;
+        if (visIsTemplateSlide(slide)) return [];
         // TITLE_SKIP_LAYOUTS 逐字搬 producer(注意与 HERO_LAYOUTS 不同:含 replica、不含 image-text? —
         // 实为 cover/section/end/quote/big-stat/replica/image-text,逐字对齐 producer 第 564 行)。
         const TITLE_SKIP_LAYOUTS = new Set(['cover', 'section', 'end', 'quote',
@@ -4169,7 +4199,7 @@
         const headerRendered = !!header && header.getClientRects().length > 0;
         if (!(header && titleEl && headerRendered)) return [];
         // 本规则自算 scale = slide bbox 高 / 1080(逐字搬 producer 第 580 行,非 ctx.scale)。
-        const scale = (slide.getBoundingClientRect().height / 1080) || 1;
+        const scale = (slide.getBoundingClientRect().height / deckSize(slide).height) || 1;
         const headerTop = Math.round(
           (header.getBoundingClientRect().top - slide.getBoundingClientRect().top) / scale);
         const expectedTop = 61;
@@ -4220,6 +4250,7 @@
       severity: 'warn',
       evaluate(slide, ctx) {
         const { slide_idx, layout, isHeroLayout } = ctx;
+        if (visIsTemplateSlide(slide)) return [];
         if (layout !== 'raw') return [];
         if (isHeroLayout || slide.hasAttribute('data-allow-imbalance')) return [];
         const hdr = slide.querySelector(':scope > .header');
@@ -4238,7 +4269,7 @@
           // tol=8 与 TITLE-POSITION 对齐。severity 仍 warn(F-256:error 级 R-VIS 阻断,
           // raw 标题位做 error 会 block 大量现存漂移 raw deck);warn 进 advisory,作者可见即修。
           const sr0 = slide.getBoundingClientRect();
-          const scale0 = (sr0.height / 1080) || 1;
+          const scale0 = (sr0.height / deckSize(slide).height) || 1;
           const fwHeaderTop = Math.round((hdr.getBoundingClientRect().top - sr0.top) / scale0);
           const expFw = 61, tolFw = 8;
           if (Math.abs(fwHeaderTop - expFw) <= tolFw) return [];
@@ -4257,7 +4288,7 @@
           }];
         }
         const sr = slide.getBoundingClientRect();
-        const scale = (sr.height / 1080) || 1;
+        const scale = (sr.height / deckSize(slide).height) || 1;
         let tEl = null, tTop = Infinity;
         for (const el of slide.querySelectorAll('*')) {
           if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
@@ -5062,7 +5093,7 @@
         const { slide_idx } = ctx;
         const sr = slide.getBoundingClientRect();
         const slideArea = (sr.width * sr.height) || 1;
-        const scale = (sr.height / 1080) || 1;
+        const scale = (sr.height / deckSize(slide).height) || 1;
         const interOf = (a, b) => ({
           ix: Math.min(a.right, b.right) - Math.max(a.left, b.left),
           iy: Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top),
@@ -5346,7 +5377,7 @@
           if (h1 < h2 * 2) return;
           const cs = getComputedStyle(el);
           const parent = el.offsetParent;
-          const parentH = parent ? parent.getBoundingClientRect().height : 1080;
+          const parentH = parent ? parent.getBoundingClientRect().height : deckSize(slide).height;
           const selector = shortSel(el);
           const top = cs.top;
           const bottom = cs.bottom;
@@ -6052,6 +6083,7 @@
       severity: 'warn',
       evaluate(slide, ctx) {
         const { slide_idx, label, layout } = ctx;
+        if (visIsTemplateSlide(slide)) return [];
         const findings = [];
         const HERO_FLOORS = {
           cover: [{ sel: 'h1.title, .title-zh, .cover-title, .cover-h1', floor: 88, role: '封面主标题', spec: 100 }],
@@ -6696,20 +6728,18 @@
       // 素材里的指令文本原样进模型上下文(prompt 注入),而执行模型手握 render/publish/入库
       // 写权限;raw 页允许任意 markup,lift 从外来 deck 拎页会带任意 <script> 经 slide-library
       // 跨 deck 传染;发布到带飞书登录的 CF worker = XSS 进内网受众浏览器。这条不做完整安全
-      // 工程,只做最低防线:检出【非框架来源】的可执行内容 —— ① 内联 / 外链 <script>(src 非
-      // 框架脚本),② on* 内联事件属性(onclick/onload/onerror…)。
+      // 工程,只做最低防线:检出 slide 子树内的可执行内容 —— ① 内联 / 外链 <script>,
+      // ② on* / srcdoc,③ javascript:/active data: URL。
       //
-      // 框架脚本 vs 外来脚本(豁免规则,examples 零误报的关键):
+      // 框架脚本 vs 外来脚本(边界规则,examples 零误报的关键):
       //   · 只扫【.slide 子树】(slide.querySelectorAll) —— 框架自注入的脚本(feishu-deck.js
       //     /edit-mode/present-mode/fs-deck-notes 数据岛)永远挂在 <body> 直下、不在任何 .slide
       //     里,天然在扫描范围之外。raw 页 / 外来 deck 的 <script> 才住在 slide 的 data.html 里。
-      //   · belt-and-suspenders(即便框架将来把脚本塞进 slide 附近):
-      //       - data-source="framework"(渲染器 --inline / runner _inline_framework_js 给框架
-      //         脚本打的标记,与 R-CSS-CROSS-PAGE / sheetIsFramework 同一约定)豁免;
-      //       - 非可执行 type(application/json 数据岛 / text/plain runner 注入的源副本)豁免;
-      //       - src 指向框架脚本(…/feishu-deck.js / …/deck-edit-mode.js / …/deck-present.js)豁免。
-      //   · 就近祖先链带 data-allow-foreign-script → 整豁免(确属故意写脚本的 bespoke raw 页的
-      //     最后逃生口,与 data-allow-* 一族一致)。
+      //   · data-source="framework" 与 framework-looking basename 都是作者可伪造输入,
+      //     绝不作为 slide 内脚本的 provenance。只有非可执行 type(application/json /
+      //     text/plain)豁免。
+      //   · data-allow-foreign-script 只允许 authored 页显式豁免;lifted/imported 不可信页
+      //     不能用同样可伪造的属性把 ERROR 消掉。
       //
       // 严重度按【来源】分级(最危险的外来脚本入库传染判 error):
       //   · lifted 页(data-lifted) / imported deck(<meta fs-deck-origin=imported>)= error
@@ -6721,22 +6751,21 @@
       severity: 'warn',
       evaluate(slide, ctx) {
         const { slide_idx } = ctx;
-        // 就近祖先链 opt-out(bespoke raw 页故意写脚本)。
-        for (let p = slide; p && p !== document.body && p.parentElement; p = p.parentElement) {
-          if (p.hasAttribute && p.hasAttribute('data-allow-foreign-script')) return [];
-        }
         // 来源分级:lifted 帧(data-lifted)或 imported deck(<meta fs-deck-origin=imported>)
         // = error(外来脚本入库会跨 deck 传染);普通生成页 = warn(作者显式选择,降级)。
         const untrusted = slideIsLifted(slide) || deckOriginImported();
         const sev = untrusted ? 'error' : 'warn';
         const origin = slideIsLifted(slide) ? 'LIFTED'
           : (deckOriginImported() ? 'IMPORTED' : 'authored');
+        // Authored bespoke pages retain an explicit escape hatch. Imported/lifted
+        // markup cannot self-assert that permission.
+        if (!untrusted) {
+          for (let p = slide; p && p !== document.body && p.parentElement; p = p.parentElement) {
+            if (p.hasAttribute && p.hasAttribute('data-allow-foreign-script')) return [];
+          }
+        }
 
-        // 框架脚本 src 模式(渲染器 _shell.html 注入的、与 R-DOC-INTEGRITY 的 feishu-deck.js
-        // needle 同源;edit/present 子脚本同目录)。命中即框架自注入,豁免。
-        const FRAMEWORK_SRC_RE = /(?:^|\/)(?:feishu-deck\.js|deck-edit-mode\.js|deck-present-mode\.js|deck-present\.js)(?:[?#]|$)/i;
-        const isFrameworkScript = (s) => {
-          if (s.getAttribute && s.getAttribute('data-source') === 'framework') return true;
+        const isNonExecutableScript = (s) => {
           const type = (s.getAttribute && (s.getAttribute('type') || '')).trim().toLowerCase();
           // 非可执行块不是脚本:application/json 数据岛(fs-deck-notes)、text/plain(runner
           // 注入的框架源副本)。可执行 = 空 / text|application/javascript|…/ module / mjs。
@@ -6745,17 +6774,15 @@
               && type !== 'text/jsx' && type !== 'application/ecmascript') {
             return true;
           }
-          const src = (s.getAttribute && (s.getAttribute('src') || '')).trim();
-          if (src && FRAMEWORK_SRC_RE.test(src)) return true;
           return false;
         };
 
         const findings = [];
         const seen = new Set();   // 同一指纹一页只报一次,降噪
 
-        // ① 非框架 <script>(.slide 子树内)。
+        // ① 可执行 <script>(.slide 子树内)。真实 framework runtime 永远在 slide 外。
         slide.querySelectorAll('script').forEach((s) => {
-          if (isFrameworkScript(s)) return;
+          if (isNonExecutableScript(s)) return;
           const src = (s.getAttribute && (s.getAttribute('src') || '')).trim();
           const what = src
             ? `<script src="${src.slice(0, 80)}">`
@@ -6766,7 +6793,7 @@
             rule: 'R-FOREIGN-SCRIPT', severity: sev, slide_idx, origin,
             sample: what,
             message:
-              `slide ${slide_idx} (${origin}): non-framework executable ${what} `
+              `slide ${slide_idx} (${origin}): executable ${what} `
               + 'lives inside the slide. Foreign material (parsed HTML/PPTX/Lark docs, '
               + 'a lifted page from another deck) is DATA, not code — a stray '
               + '<script> here runs in every viewer (and, once ingested to '
@@ -6784,32 +6811,56 @@
           });
         });
 
-        // ② on* 内联事件属性(onclick / onload / onerror / onmouseover …)。整 slide 子树
-        //    + slide 自身;扫属性名,name-free。框架渲染器不产出 on* 内联事件 → 干净 deck 零触发。
+        // ② executable attributes. Framework renderer does not emit these.
         const ON_ATTR_RE = /^on[a-z]+$/;
+        const ACTIVE_URL_ATTRS = new Set([
+          'href', 'src', 'srcset', 'xlink:href', 'action', 'formaction', 'poster', 'background',
+        ]);
+        const normalizedUrl = (value) => {
+          const box = document.createElement('textarea');
+          box.innerHTML = value || '';
+          return (box.value || '').replace(/[\x00-\x20\x7f]+/g, '').toLowerCase();
+        };
+        const activeUrl = (value) => {
+          const normalized = normalizedUrl(value);
+          const candidates = [normalized, ...normalized.split(',').map((v) => v.trim().split(/\s+/)[0])];
+          return candidates.some((candidate) => {
+            if (/^(?:javascript|vbscript):/.test(candidate)) return true;
+            const match = candidate.match(/^data:([^;,]+)/);
+            return !!(match && /^(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/javascript|application\/javascript|text\/ecmascript|application\/ecmascript|text\/xml|application\/xml)$/.test(match[1]));
+          });
+        };
         const scan = [slide, ...slide.querySelectorAll('*')];
         for (const el of scan) {
           if (!el.attributes) continue;
           if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
           for (const attr of el.attributes) {
             const name = (attr.name || '').toLowerCase();
-            if (!ON_ATTR_RE.test(name)) continue;
+            let kind = '';
+            if (ON_ATTR_RE.test(name)) kind = 'inline event handler';
+            else if (name === 'srcdoc') kind = 'srcdoc HTML';
+            else if (ACTIVE_URL_ATTRS.has(name) && activeUrl(attr.value || '')) kind = 'active URL';
+            else if (name === 'style'
+                && (/(?:expression\s*\(|-moz-binding\s*:)/i.test(attr.value || '')
+                    || [...String(attr.value || '').matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)]
+                      .some((m) => activeUrl(m[2])))) kind = 'active style URL';
+            if (!kind) continue;
             const tag = (el.tagName || '').toLowerCase();
-            const fp = 'on:' + tag + ':' + name;
+            const fp = 'attr:' + tag + ':' + name;
             if (seen.has(fp)) continue;
             seen.add(fp);
             findings.push({
               rule: 'R-FOREIGN-SCRIPT', severity: sev, slide_idx, origin,
               sample: `<${tag} ${name}=…>`,
               message:
-                `slide ${slide_idx} (${origin}): inline event handler `
-                + `\`${name}\` on <${tag}> — an on* attribute is executable code `
+                `slide ${slide_idx} (${origin}): ${kind} `
+                + `\`${name}\` on <${tag}> is executable content `
                 + 'in the page. Same injection surface as a <script>: foreign '
                 + 'material is data, not code. '
                 + (untrusted
                     ? 'Lifted/imported from an untrusted source → ERROR: remove the '
-                      + 'handler before ingest/publish.'
-                    : 'Remove the handler (wire behavior in framework JS instead); '
+                      + 'attribute before ingest/publish.'
+                    : 'Remove the attribute (wire behavior in framework JS instead); '
                       + 'opt out with data-allow-foreign-script only for an '
                       + 'intentionally-scripted bespoke raw page.'),
             });
@@ -7022,7 +7073,7 @@
           // 与 R-VIS-TITLE-POSITION 一致 —— agenda 等隐藏 header 版式无标题可量)。
           if (!(header && titleEl && header.getClientRects().length > 0)) return;
           const sr = sl.getBoundingClientRect();
-          const scale = (sr.height / 1080) || 1;
+          const scale = (sr.height / deckSize(sl).height) || 1;
           const top = Math.round((titleEl.getBoundingClientRect().top - sr.top) / scale);
           const fs = Math.round(parseFloat(getComputedStyle(titleEl).fontSize) / scale);
           samples.push({ idx: i + 1, top, fs });
@@ -7176,6 +7227,7 @@
         if (!ctx.isFirstInScope) return [];   // deck 级:整 deck 算一次
         if (typeof window !== 'undefined') window.__RDECK_TSBUDGET_DONE__ = true;
         if (typeof document === 'undefined') return [];
+        if (document.querySelector('.deck[data-template-id]')) return [];
         if (document.querySelector('[data-allow-typescale-budget]')) return [];
         // opt-out 注释在【任意】CSS 都认(作者写在 custom_css 也行)。
         if (allStyleText().indexOf('allow:typescale-budget') >= 0) return [];
@@ -7382,6 +7434,7 @@
       const slide_idx = idx + 1;
       if (scopeSet && !scopeSet.has(slide_idx)) return;
       const layout = slide.getAttribute('data-layout') || '';
+      const canvas = deckSize(slide);
       const ctx = {
         slide_idx,
         label: slide.getAttribute('data-screen-label') || `slide-${slide_idx}`,
@@ -7389,6 +7442,8 @@
         isHeroLayout: HERO_LAYOUTS.has(layout),
         isFirstInScope: slide_idx === firstInScopeIdx,
         scale: parseFloat(getComputedStyle(slide).getPropertyValue('--fs-scale')) || 1,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
         shortSel,
         hasOwnText,
         HERO_LAYOUTS,

@@ -92,6 +92,10 @@ publish metadata.
 - Magic Page 资源上传默认使用仓库内
   `skills/feishu-deck-h5/assets/magic-upload.js`,也可通过
   `FEISHU_DECK_H5_MAGIC_ASSET_UPLOADER` 或 `--magic-asset-uploader` 指定。
+  默认 uploader 使用 `magic-upload-batch/v1` NDJSON 协议，在一个长驻 Node
+  进程内有界并发上传资源与重写后的 CSS/JS，并校验每个资源的
+  key、SHA-256 和返回 URL。不支持该协议的旧自定义 uploader 不会自动
+  降级；只能在用户确认兼容需求后显式传 `--legacy-magic-asset-uploader`。
 
 ## 标准命令
 

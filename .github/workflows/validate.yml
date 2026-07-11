@@ -9,9 +9,9 @@ on:
 
 jobs:
   validate:
-    name: build + self-check
+    name: build + static + repository tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
 
     defaults:
       run:
@@ -47,6 +47,7 @@ jobs:
         run: |
           node --check assets/feishu-deck.js
           node --check assets/edit-mode/deck-edit-mode.js
+          node --check assets/audits.js
 
       - name: CSS sanity (balanced braces)
         run: |
@@ -66,7 +67,10 @@ jobs:
           # CI runs in a fresh GitHub runner, not a Cowork session. The preflight
           # script must still pass (no /sessions/*/mnt/outputs path), proving the
           # check works correctly in non-Cowork environments too.
-          bash assets/preflight.sh
+          bash assets/preflight.sh --profile core
+
+      - name: Validate machine-owned skill contracts
+        run: python3 assets/skill-contract.py validate
 
       - name: Build (linked + inlined)
         run: |
@@ -84,16 +88,18 @@ jobs:
       - name: Validate inlined deck (--strict)
         run: python3 assets/validate.py examples/sample-deck-inline.html --strict
 
-      - name: DeckJSON unit tests
-        # The suite migrated to pytest (fixtures / skips / parametrize) during the
-        # UNIFY-VALIDATE-ARCH refactor, so `unittest discover` errors on import
-        # (ModuleNotFoundError: pytest). Install pytest and run pytest. Chromium is
-        # not installed on the runner, so the browser-backed visual tests skip via
-        # their `_chromium_ok()` / `skip_if_no_engine()` graceful-degrade guards —
-        # the byte/source + logic tests (contracts, golden, byte rules) all run.
+      - name: Repository unit tests
+        # Keep this job browser-free so logic/docs/parser/publisher coverage is
+        # fast and deterministic. Browser-backed tests skip here and run in the
+        # dedicated smoke job below.
         run: |
           pip install pytest pyyaml jsonschema beautifulsoup4
-          python3 -m pytest deck-json/tests/ -q
+          python3 -m pytest -q \
+            tests/ \
+            deck-json/tests/ \
+            subskills/parser/tests/ \
+            subskills/simulator/tests/ \
+            log-tool/test_deck_log_diff.py
 
       - name: Summary
         if: always()
@@ -105,3 +111,38 @@ jobs:
           grep -cE '^\[ \] +[0-9]+\. ' SKILL.md || true
           echo "=== audit functions in validate.py ==="
           grep -cE '^def (audit|check)_' assets/validate.py || true
+
+  browser-smoke:
+    name: Chromium gate smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    defaults:
+      run:
+        working-directory: skills/feishu-deck-h5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chromium test dependencies
+        run: |
+          pip install pytest playwright pyyaml jsonschema beautifulsoup4 pillow
+          python3 -m playwright install --with-deps chromium
+
+      - name: Generate-profile preflight launches Chromium
+        run: bash assets/preflight.sh --profile generate --json
+
+      - name: Browser-backed validator smoke
+        run: |
+          bash build.sh
+          python3 assets/validate.py examples/sample-deck.html --visual --json
+          python3 -m pytest -q \
+            deck-json/tests/test_scoped_audit.py \
+            deck-json/tests/test_atomic_render.py \
+            tests/test_publish_self_check.py

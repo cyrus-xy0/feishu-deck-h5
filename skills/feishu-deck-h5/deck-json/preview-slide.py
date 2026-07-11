@@ -2,7 +2,7 @@
 """Fast single-slide preview for feishu-deck-h5.
 
 Reads ONE slide from a deck.json, drops it into the framework shell
-(`.deck > .slide-frame.is-current > .slide`), forces 1920x1080 static
+(`.deck > .slide-frame.is-current > .slide`), forces the deck canvas static
 (no present-mode scaling / no JS), screenshots it 1:1, and — by default —
 runs the unified audit engine (audits.js) on the rendered slide so you get
 the per-slide GATE findings (geometry / typescale / overflow / drop-shadow /
@@ -29,10 +29,20 @@ Usage:
   preview-slide.py <deck.json> 21 --out /tmp/p21.png
   preview-slide.py <deck.json> --key foo --no-gate   # screenshot only
 """
-import sys, os, json, argparse, time, pathlib
+import sys, os, json, argparse, time, pathlib, importlib.util, html
 
 HERE = pathlib.Path(__file__).resolve().parent
 AUDITS_JS = HERE.parent / "assets" / "audits.js"
+ASSETS_DIR = HERE.parent / "assets"
+
+
+def _load_renderer():
+    spec = importlib.util.spec_from_file_location("_preview_render_deck", HERE / "render-deck.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load render-deck.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 # Rules that structurally CANNOT be judged on a single static slide preview —
 # they validate the framework shell / present-mode chrome / whole-deck
@@ -60,14 +70,38 @@ def _suppressed(rule: str) -> bool:
     return False
 
 
+def _template_root_attrs(pack) -> str:
+    """Return escaped provenance attrs for the standalone preview harness."""
+    return (
+        f' data-template-id="{html.escape(str(pack.template_id), quote=True)}"'
+        f' data-template-version="{html.escape(str(pack.version), quote=True)}"'
+        f' data-template-status="{html.escape(str(pack.status), quote=True)}"'
+    )
+
+
+def _single_slide_deck(deck: dict, slide: dict) -> dict:
+    """Return a non-mutating deck view for page-scoped template validation.
+
+    ``preview-slide`` is deliberately a one-page command.  A supported cover
+    must remain previewable while another page is still mapped to an explicit
+    ``unsupported`` role during Template Pack review; the full/final renderer
+    continues to validate every authored slide.
+    """
+    scoped = dict(deck)
+    scoped["slides"] = [slide]
+    return scoped
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("deck", help="path to deck.json")
     ap.add_argument("page", nargs="?", type=int, help="1-based page number")
     ap.add_argument("--key", help="slide key instead of page number")
     ap.add_argument("--out", default=None, help="output PNG path")
-    ap.add_argument("--width", type=int, default=1920)
-    ap.add_argument("--height", type=int, default=1080)
+    ap.add_argument("--width", type=int, default=None,
+                    help="screenshot viewport width (default: deck canvas width)")
+    ap.add_argument("--height", type=int, default=None,
+                    help="screenshot viewport height (default: deck canvas height)")
     ap.add_argument("--scale", type=int, default=1, help="device_scale_factor (2 for retina detail)")
     ap.add_argument("--wait", type=int, default=500, help="ms settle before shot")
     ap.add_argument("--no-gate", action="store_true",
@@ -77,6 +111,11 @@ def main():
     deck_path = os.path.abspath(args.deck)
     rundir = os.path.dirname(deck_path)
     d = json.load(open(deck_path, encoding="utf-8"))
+    canvas = (d.get("deck") or {}).get("canvas") or {}
+    design_w = int(canvas.get("width") or 1920)
+    design_h = int(canvas.get("height") or 1080)
+    viewport_w = args.width or design_w
+    viewport_h = args.height or design_h
     slides = d["slides"]
     if args.key:
         matches = [i for i, s in enumerate(slides) if s.get("key") == args.key]
@@ -93,45 +132,59 @@ def main():
     s = slides[idx]
     key = s.get("key", "")
     layout = s.get("layout", "raw")
-    accent = s.get("accent", "")
-    label = s.get("screen_label", "")
-    html = (s.get("data") or {}).get("html", "")
-    css = s.get("custom_css", "") or ""
-    title_style = d.get("title_style") or "left-double"
+    title_style = (d.get("deck") or {}).get("title_style") or "left-double"
 
-    if not html and layout != "raw":
-        print(f"[warn] page {idx+1} ({key}) is layout='{layout}' with no data.html — "
-              f"schema layouts render from data fields via render-deck, not previewable here.",
-              file=sys.stderr)
-
-    attrs = f'data-layout="{layout}" data-slide-key="{key}"'
-    if accent:
-        attrs += f' data-accent="{accent}"'
-    if label:
-        attrs += f' data-screen-label="{label}"'
-    # slide-level visual-audit opt-outs → data-allow-<tok> on .slide (parity with
-    # render-deck _build_data_attrs) so the preview gate respects them.
-    for tok in (s.get("allow") or []):
-        attrs += f' data-allow-{tok}'
+    # Use the production slide dispatcher instead of hand-wrapping data.html.
+    # This makes schema layouts and Template Pack bindings preview exactly the
+    # same DOM/CSS as a real render while keeping the one-page fast harness.
+    renderer = _load_renderer()
+    asset_path = pathlib.Path(os.path.relpath(ASSETS_DIR, rundir)).as_posix()
+    try:
+        rendered_slide = renderer.render_slide(
+            s,
+            idx,
+            asset_path,
+            deck_dir=pathlib.Path(rundir),
+            deck_canvas=(design_w, design_h),
+        )
+        template_context = renderer.load_template_context(
+            _single_slide_deck(d, s),
+            deck_path=pathlib.Path(deck_path),
+            output_dir=pathlib.Path(rundir),
+            final=False,
+        )
+        if template_context is not None:
+            rendered_slide = renderer.apply_template_binding(
+                rendered_slide,
+                template_context["bindings"].get(key),
+                pack=template_context["pack"],
+                web_prefix=template_context["web_prefix"],
+            )
+    except Exception as exc:
+        sys.exit(f"preview-slide: render failed for key '{key}' layout='{layout}': {exc}")
+    rendered_slide = rendered_slide.replace(
+        'class="slide-frame"', 'class="slide-frame is-current"', 1)
+    template_root_attrs = ""
+    if template_context is not None:
+        pack = template_context["pack"]
+        template_root_attrs = _template_root_attrs(pack)
 
     harness = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<link rel="stylesheet" href="assets/feishu-deck.css">
+<link rel="stylesheet" href="{asset_path}/feishu-deck.css">
 <style>
-  html,body{{margin:0;padding:0;background:#000;width:{args.width}px;height:{args.height}px;overflow:hidden}}
-  .deck{{position:static!important;margin:0!important;padding:0!important;width:{args.width}px;height:{args.height}px;background:#000}}
+  html,body{{margin:0;padding:0;background:#000;width:{viewport_w}px;height:{viewport_h}px;overflow:hidden}}
+  .deck{{position:static!important;margin:0!important;padding:0!important;width:{viewport_w}px;height:{viewport_h}px;background:#000}}
   .slide-frame{{position:static!important;transform:none!important;opacity:1!important;left:0!important;top:0!important;
-    margin:0!important;width:{args.width}px;height:{args.height}px;display:block!important;visibility:visible!important}}
-  .slide-frame > .slide,.slide{{transform:none!important;width:1920px!important;height:1080px!important;
+    margin:0!important;width:{viewport_w}px;height:{viewport_h}px;display:block!important;visibility:visible!important}}
+  .slide-frame > .slide,.slide{{transform:none!important;width:{design_w}px!important;height:{design_h}px!important;
     position:relative!important;left:0!important;top:0!important}}
-{css}
 </style></head>
 <body>
-<div class="deck" data-title-style="{title_style}">
-  <div class="slide-frame is-current">
-    <div class="slide" {attrs}>
-{html}
-    </div>
-  </div>
+<div class="deck" data-title-style="{title_style}" data-deck-width="{design_w}"
+  data-deck-height="{design_h}" data-deck-aspect="{design_w}:{design_h}"
+  {template_root_attrs}
+  style="--fs-deck-width:{design_w}px;--fs-deck-height:{design_h}px;--fs-deck-half-width:{design_w / 2:g}px;--fs-deck-half-height:{design_h / 2:g}px;--fs-deck-aspect:{design_w} / {design_h}">
+{rendered_slide}
 </div>
 </body></html>"""
 
@@ -150,7 +203,7 @@ def main():
     gate_err = None
     with sync_playwright() as p:
         b = p.chromium.launch(headless=True)
-        pg = b.new_page(viewport={"width": args.width, "height": args.height},
+        pg = b.new_page(viewport={"width": viewport_w, "height": viewport_h},
                         device_scale_factor=args.scale)
         pg.goto(url)
         pg.wait_for_timeout(args.wait)
@@ -169,7 +222,8 @@ def main():
         os.remove(prev)
     except OSError:
         pass
-    print(f"preview p{idx+1} ({key}) -> {out}  [{time.time()-t0:.1f}s]")
+    print(f"preview p{idx+1} ({key}) -> {out}  "
+          f"[{design_w}x{design_h} · {time.time()-t0:.1f}s]")
 
     # ---- in-preview gate report (single-slide, static; framework/deck rules suppressed) ----
     if args.no_gate:

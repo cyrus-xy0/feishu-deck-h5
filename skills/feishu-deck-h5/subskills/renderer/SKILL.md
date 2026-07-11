@@ -16,6 +16,9 @@ Input:
 - `runs/<...>/output/outline.json`
 - local assets under `runs/<...>/input/runtime-library/assets/`
 - source files under `runs/<...>/input/`
+- the explicitly selected, version-pinned
+  `runs/<...>/input/runtime-library/template-pack/template-pack.json` when the
+  outline declares Template Pack bindings
 - scoped cloud asset records from the Feishu Base asset library
 - framework assets under `skills/feishu-deck-h5/assets/`
 
@@ -24,6 +27,7 @@ Output:
 - `runs/<...>/output/deck.json`
 - `runs/<...>/output/index.html`
 - copied/shared assets needed for local preview and handoff
+- copied pack-relative Template Pack assets when a pack is selected
 
 Inline freshness rule: when this subskill is not running as a separate
 multi-agent worker, reread the current upstream files before rendering. Do not
@@ -33,7 +37,10 @@ rely on cached chat summaries or earlier reads of `outline.json`,
 ## Rendering Flow
 
 1. Read `outline.json` and `DESIGN-PLAN.md`; do not silently change the design
-   plan. If content/layout must change, update the plan first.
+   plan. If content/layout must change, update the plan first. If slides declare
+   `template_role`, also read the exact selected Template Pack version and
+   `references/template-system.md`. Verify that every `template_layout_id`
+   resolves from the pack's coverage; never infer a replacement layout.
 2. Use DeckJSON-first for all deck output. Fill `deck.json` using
    `deck-json/deck-schema.json`; raw slides and schema slides both live in this
    file. Use `deck-json/examples/phase-1a-demo.json` as the minimal structured
@@ -42,13 +49,20 @@ rely on cached chat summaries or earlier reads of `outline.json`,
    schema layouts are only for ceremonial / mechanism shapes explicitly approved
    by the design policy. Keep raw CSS in
    `slide.custom_css`; do not put per-slide CSS in `<head>`. For the fixed raw
-   contract you should NOT re-derive each run (canvas 1920×1080, the
+   contract you should NOT re-derive each run (the untemplated legacy canvas is
+   1920×1080, the
    {16,24,28,48} ladder + `/* allow:typescale */`, raw does not auto-create a
    `.header` so author the framework header yourself when a content title is
    needed, scope every rule to `.slide[data-slide-key="K"]`, the
    `is-current` + reduced-motion motion one-liner, SVG `<text>` floor → use HTML
    labels), read `references/raw-page-quickstart.md`. Author the focal/hero
    element bold the first time — do not escalate timid→bold across render cycles.
+   A selected Template Pack does not create a new DeckJSON layout: it binds
+   `cover/raw/section/quote/agenda/end` over existing layouts and maps legacy
+   body layouts to `raw`. Its `canvas.design_width/design_height`, slot
+   typography, safe areas, and fixed layers replace the corresponding default
+   shell for bound slides; do not force that pack back to 16:9 or the framework
+   type ladder.
    - **底色归 `.slide-frame`,不在 `.slide` 写整页背景(mandatory)。** 普通
      raw / content 单页的底色由框架 master 机制铺:`.slide-frame` 按 layout 分发
      `#000 var(--fs-asset-content-bg) center/cover`(= `lark-content-bg.jpg`,飞书
@@ -59,6 +73,10 @@ rely on cached chat summaries or earlier reads of `outline.json`,
      「底色不对」。也 **不默认加灰底大面板**(半透明灰黑 panel 与暗底相乘 → 显脏
      显闷);分区用边框 / 细分隔 / 留白。唯一例外:raw 页有意模拟 cover / end /
      replica,才在该页按需覆盖背景并说明原因。
+   - **Template Pack exception:** when a bound role supplies an approved fixed
+     background/VI layer, that pack layer is the master. Do not inject the
+     default Feishu background or wordmark over it, and do not move, recolor,
+     resize, cover, or re-align locked elements.
 4. Look up assets locally first. If missing and cloud assets are needed, query the
    configured Feishu Base via `lark-base`; download or reference only assets needed
    for locked slides.
@@ -73,13 +91,17 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
    While iterating on individual pages, add `--iter` (auto-scopes audits to the
    changed pages via the `.slide-hashes.json` sidecar, skips the autosnapshot,
    prints a text echo of changed slides). Before any handoff, render once with
-   `--final` (full audits + autosnapshot). Every render writes its complete
+   `--final` (full audits + autosnapshot). At this boundary the Template Pack
+   runtime must load the version pinned by the deck: final accepts only
+   `status: "approved"`. A draft may bind only in an explicitly requested
+   preview and never in final handoff. Every render writes its complete
    output to `<output_dir>/last-render.log` and ends with an errors-only
    digest — on a BLOCK, read the log instead of re-running.
 
    For fast iteration on one raw page, `deck-json/preview-slide.py <deck.json>
    --key <slide_key>` drops that single slide into the framework shell, screenshots
-   it 1:1 at 1920×1080 AND runs the per-slide gate (audits.js: geometry / typescale /
+   it 1:1 at the resolved design canvas (1920×1080 only when no custom canvas is
+   declared) AND runs the per-slide gate (audits.js: geometry / typescale /
    overflow / drop-shadow / soft-white / focal) — all in ~2s, no deck.json write, no
    autosnapshot. So you catch layout-rule violations in the SAME pass instead of a
    12s `render-deck` round-trip. ALWAYS pass `--key` (drift-proof: page numbers shift
@@ -106,6 +128,23 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
 
 - `deck.json` remains the source of truth.
 - Every slide needs a stable `key`.
+- When a Template Pack is selected, pin its exact template ID/version and local
+  pack snapshot. Selecting or approving a pack never changes the framework
+  default for other decks.
+- Resolve template coverage before authoring output. The only roles are
+  `cover/raw/section/quote/agenda/end`, with statuses
+  `native/derived/alias/unsupported`. Missing/unsupported is a hard error for a
+  required strict role. Report it and stop; never mix in the default Feishu
+  shell for only that page. Aliases and derivations must already be approved.
+- Consume Template Pack layouts through `deck-json/template-pack.py` so alias
+  cycles, state, asset containment, and per-slide bindings share one runtime
+  contract. Pack assets must remain local and pack-relative; reject traversal,
+  absolute, remote/data URI, or symlink-escape paths.
+- Preserve template slots and fixed layers exactly. Do not automatically change
+  font family, font size, weight, color, line height, alignment, geometry,
+  z-order, Logo alignment, or fixed VI. Resolve overflow by shortening copy,
+  selecting another approved layout, splitting the slide, then asking for
+  confirmation—not by shrinking text.
 - Chinese-only is default; set language metadata only when designer requested it.
 - Use framework tokens and schema fields instead of hand-tuned CSS wherever
   possible.
@@ -134,7 +173,8 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
 - Do not use emoji or hand-drawn approximations for official Feishu product icons.
   Use the official asset pool described in `assets-and-files.md`.
 - **Budget heights before you place absolutely-positioned raw panels — and PIN
-  `line-height`.** Canvas is 1920×1080; the framework header eats ~61→~200px, so
+  `line-height`.** On the default 1920×1080 canvas the framework header eats
+  ~61→~200px, so
   body content lives in ~220–1010px. When you give a `.qc-panel`-style box a fixed
   `height`, the content inside it must fit *that* box. The #1 way the math goes
   wrong: **CJK `line-height: normal` ≈ 2.0×** — a 24px pill / tag / kicker renders
@@ -165,5 +205,6 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
 - `../../references/round-trip-integrity.md`
 - `../../references/operational-notes.md`
 - `../../references/troubleshooting.md`
+- `../../references/template-system.md`
 
 After rendering, route to validator. Do not publish from renderer.

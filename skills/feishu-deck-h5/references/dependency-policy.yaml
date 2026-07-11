@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "description": "Capability dependencies consumed by assets/check-profile.py and documented by INSTALL-CLOUD.md.",
+  "profiles": {
+    "core": {
+      "files": [
+        "SKILL.md",
+        "build.sh",
+        "_body.partial.html",
+        "assets/feishu-deck.css",
+        "assets/feishu-deck.js",
+        "assets/validate.py",
+        "assets/audits.js",
+        "assets/run-audits.py",
+        "assets/lark-logo.png",
+        "assets/lark-cover-bg.jpg",
+        "assets/check-profile.py",
+        "assets/skill-contract.py",
+        "deck-json/render-deck.py",
+        "deck-json/template-pack.py",
+        "deck-json/template_render.py",
+        "deck-json/deck-cli.py",
+        "deck-json/deck-schema.json",
+        "references/workflow.yaml",
+        "references/conversion-policy.yaml",
+        "references/gate-policy.yaml",
+        "references/dependency-policy.yaml"
+      ],
+      "commands": [],
+      "python_modules": [],
+      "chromium_launch": false,
+      "siblings": []
+    },
+    "generate": {
+      "extends": "core",
+      "files": ["subskills/renderer/SKILL.md", "subskills/validator/SKILL.md"],
+      "commands": [],
+      "python_modules": ["playwright"],
+      "chromium_launch": true,
+      "siblings": []
+    },
+    "edit": {
+      "extends": "generate",
+      "files": ["subskills/editor/SKILL.md"],
+      "commands": [],
+      "python_modules": [],
+      "chromium_launch": true,
+      "siblings": []
+    },
+    "pptx": {
+      "extends": "generate",
+      "files": ["subskills/parser/SKILL.md", "subskills/parser/parse.py"],
+      "commands": [],
+      "python_modules": [],
+      "chromium_launch": true,
+      "siblings": [
+        {
+          "name": "pptx-to-deck",
+          "required_files": [".venv/bin/python3", "assets/build_pptx.py"]
+        }
+      ]
+    },
+    "template": {
+      "extends": "core",
+      "files": [
+        "subskills/template/SKILL.md",
+        "schema/template-dossier.schema.json",
+        "schema/template-pack.schema.json",
+        "deck-json/template-pack.py",
+        "references/template-system.md"
+      ],
+      "commands": [],
+      "python_modules": [],
+      "chromium_launch": false,
+      "siblings": [
+        {
+          "name": "pptx-to-deck",
+          "required_files": [".venv/bin/python3", "assets/extract_template.py"]
+        }
+      ]
+    },
+    "publish": {
+      "extends": "core",
+      "files": ["subskills/publisher/SKILL.md", "subskills/publisher/publish.py", "assets/magic-upload.js"],
+      "commands": ["node"],
+      "python_modules": ["playwright"],
+      "chromium_launch": true,
+      "siblings": []
+    },
+    "import": {
+      "extends": "core",
+      "files": ["subskills/importer/SKILL.md", "subskills/importer/ingest.py"],
+      "commands": ["gh"],
+      "python_modules": ["playwright"],
+      "chromium_launch": true,
+      "siblings": []
+    }
+  }
+}

@@ -38,7 +38,7 @@ Run these checks **in order**, stop at the first match:
 
 Then restart the session. (Slash commands cannot be invoked by an agent — the user has to type them.)
 
-**Verify:** after restart, `bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh` should print `PREFLIGHT OK`.
+**Verify:** after restart, `bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh --profile generate` should print `PREFLIGHT OK`.
 
 ### 2. install.sh path (any harness with `~/.claude/skills/` convention)
 
@@ -60,13 +60,18 @@ CLAUDE_DIR=~/.openclaw bash install.sh
 
 **Verify:** the script auto-runs `preflight.sh` at the end. Look for `PREFLIGHT OK`.
 
+The installer never deletes an existing skill path. A correct symlink is left
+unchanged; a different symlink or real directory is refused so local work is
+preserved. To intentionally replace it, use `--force --backup`; the old path is
+moved to a timestamped backup before the new link is created.
+
 ### 3. Manual path (fallback when nothing else fits)
 
 ```bash
 git clone git@github.com:FuQiang/feishu-deck-h5.git ~/Projects/feishu-deck-h5
 mkdir -p ~/.claude/skills
 ln -s ~/Projects/feishu-deck-h5/skills/feishu-deck-h5 ~/.claude/skills/feishu-deck-h5
-bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh
+bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh --profile generate
 ```
 
 ---

@@ -7,24 +7,20 @@ page from a foreign deck drags arbitrary `<script>` that spreads cross-deck via
 slide-library; publishing to the Feishu-login CF viewer = XSS in an internal
 audience's browser.
 
-R-FOREIGN-SCRIPT (audits.js) detects NON-FRAMEWORK executable content inside a
-`.slide` — an inline/external `<script>` (src not a framework script) or an `on*`
-inline event attribute. It is **provenance-graded**: lifted (`data-lifted`) /
+R-FOREIGN-SCRIPT (audits.js) detects executable content inside a `.slide` —
+scripts, event handlers, srcdoc, and active URLs. It is **provenance-graded**:
+lifted (`data-lifted`) /
 imported (`<meta name="fs-deck-origin" content="imported">`) slides = ERROR (the
 foreign script spreads on ingest); ordinary authored pages = WARN.
 
-The CRITICAL calibration: it must NOT flag the framework's own injected scripts —
-a clean rendered deck legitimately carries `<script src=…feishu-deck.js>` /
-edit-mode / present-mode / an `fs-deck-notes` JSON island. Those sit at `<body>`
-level (never inside a `.slide`), so scoping the scan to the `.slide` subtree
-exempts them; belt-and-suspenders, the rule also exempts `data-source="framework"`,
-non-executable `type` (`application/json` / `text/plain`), and framework `src`
-patterns.
+Real framework scripts sit at `<body>` level, never inside a `.slide`. A marker
+or framework-looking basename inside a slide is author-controlled and must not
+be trusted. Non-executable `type` islands remain safe.
 
 These cases pin: foreign `<script>` (inline + src) and `on*` handlers fire;
-severity grades by lift/import provenance; framework scripts (body-level + the
-exemption markers) produce ZERO findings; the `data-allow-foreign-script` opt-out
-silences a deliberately-scripted bespoke raw page.
+severity grades by lift/import provenance; body-level framework scripts produce
+ZERO findings; an authored page may opt out, but lifted markup cannot self-grant
+that permission.
 """
 import sys
 import pathlib
@@ -97,6 +93,17 @@ def test_onerror_handler_fires():
     assert len(hits) >= 1, f"onerror handler not flagged: {hits}"
 
 
+def test_javascript_url_and_srcdoc_fire():
+    hits = _run(_slide('<a href="java&#x73;cript:steal()">x</a>'
+                       '<iframe srcdoc="&lt;script&gt;steal()&lt;/script&gt;"></iframe>'))
+    assert len(hits) >= 2, f"active URL/srcdoc not flagged: {hits}"
+
+
+def test_active_data_url_fires():
+    hits = _run(_slide('<iframe src="data:text/html,&lt;script&gt;x()&lt;/script&gt;"></iframe>'))
+    assert hits, f"active data URL not flagged: {hits}"
+
+
 # ── severity grading by provenance ───────────────────────────────────────────
 def test_lifted_slide_script_is_error():
     """A lifted slide (data-lifted, untrusted source) → ERROR, not warn."""
@@ -114,21 +121,19 @@ def test_imported_deck_script_is_error():
         f"imported deck foreign script must be ERROR: {[h['severity'] for h in hits]}"
 
 
-# ── must-NOT-fire: framework scripts / clean decks (zero false positives) ─────
-def test_framework_script_data_source_exempt():
-    """A <script data-source="framework"> (the renderer/runner marker) inside a
-    slide is the framework's own injected JS → NEVER flagged."""
+# ── forged provenance must fire; true framework remains outside slides ───────
+def test_forged_framework_marker_inside_slide_fires():
+    """An imported fragment cannot self-assert framework provenance."""
     hits = _run(_slide('<script data-source="framework">deckInit()</script>'))
-    assert hits == [], f"framework-marked script false-positived: {hits}"
+    assert hits, f"forged framework marker bypassed audit: {hits}"
 
 
-def test_framework_src_exempt():
-    """A <script src=…feishu-deck.js> is the framework runtime → exempt even
-    without the data-source marker (linked-mode src pattern)."""
+def test_framework_looking_basename_inside_slide_fires():
+    """A filename is not provenance; real runtime lives outside the slide."""
     hits = _run(_slide('<script src="../../assets/feishu-deck.js"></script>'))
-    assert hits == [], f"framework feishu-deck.js src false-positived: {hits}"
+    assert hits, f"framework-looking basename bypassed audit: {hits}"
     hits2 = _run(_slide('<script src="../assets/edit-mode/deck-edit-mode.js" defer></script>'))
-    assert hits2 == [], f"framework edit-mode src false-positived: {hits2}"
+    assert hits2, f"framework-looking edit-mode basename bypassed audit: {hits2}"
 
 
 def test_json_data_island_exempt():
@@ -178,11 +183,12 @@ def test_opt_out_silences_intentional_script():
     assert hits == [], f"data-allow-foreign-script opt-out did not silence: {hits}"
 
 
-def test_opt_out_silences_even_when_lifted():
-    """The opt-out wins over the lifted→error grade (explicit author override)."""
+def test_opt_out_cannot_be_forged_by_lifted_fragment():
+    """Untrusted markup cannot self-grant an execution escape hatch."""
     hits = _run(_slide('<script>intentional()</script>', lifted=True,
                        extra_attrs=' data-allow-foreign-script'))
-    assert hits == [], f"opt-out did not override lifted-error: {hits}"
+    assert hits and all(h["severity"] == "error" for h in hits), \
+        f"lifted opt-out incorrectly bypassed audit: {hits}"
 
 
 if __name__ == "__main__":

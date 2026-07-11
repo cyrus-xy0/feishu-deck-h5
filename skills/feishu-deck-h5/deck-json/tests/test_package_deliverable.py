@@ -223,7 +223,7 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertIn('data-slide-key="cover"', packaged_index)
         self.assertNotIn("http-equiv=\"refresh\"", packaged_index)
 
-    def test_package_ingest_materializes_remote_background_image(self):
+    def test_package_ingest_rejects_loopback_background_image(self):
         with remote_image_server() as base_url:
             remote_url = f"{base_url}/remote.jpg?sign=abc&expires=123"
             (self.output / "index.html").write_text(
@@ -247,18 +247,9 @@ class PackageDeliverableTest(unittest.TestCase):
                 text=True,
             )
 
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        manifest = (self.output / "assets-manifest.yaml").read_text(encoding="utf-8")
-        self.assertIn("assets/remote/127.0.0.1-", manifest)
-        self.assertNotIn("http://127.0.0.1", (self.output / "index.html").read_text(encoding="utf-8"))
-        self.assertNotIn("sign=abc", (self.output / "index.html").read_text(encoding="utf-8"))
-        with zipfile.ZipFile(self.output / "deck.zip") as zf:
-            names = set(zf.namelist())
-            packaged_index = zf.read("index.html").decode("utf-8")
-        remote_assets = [name for name in names if name.startswith("assets/remote/") and name.endswith(".jpg")]
-        self.assertTrue(remote_assets, names)
-        self.assertIn("background-image:url('assets/remote/127.0.0.1-", packaged_index)
-        self.assertNotIn("http://127.0.0.1", packaged_index)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("non-public destination IP", proc.stderr)
+        self.assertFalse((self.output / "deck.zip").exists())
 
     def test_package_ingest_fails_when_remote_background_image_is_forbidden(self):
         with remote_image_server() as base_url:
@@ -285,7 +276,7 @@ class PackageDeliverableTest(unittest.TestCase):
             )
 
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("HTTP 403", proc.stderr)
+        self.assertIn("non-public destination IP", proc.stderr)
         self.assertFalse((self.output / "deck.zip").exists())
 
     def test_package_ingest_rejects_missing_nested_script(self):

@@ -59,6 +59,37 @@
             "type": "string",
             "description": "raw:<pattern-or-intent> by default; schema:<layout> only for pure standard shapes."
           },
+          "template_role": {
+            "type": "string",
+            "enum": ["cover", "raw", "section", "quote", "agenda", "end"],
+            "description": "Optional semantic binding into an explicitly selected Template Pack. This does not add or replace a DeckJSON business layout."
+          },
+          "template_layout_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional approved Template Pack layout_id selected for this slide. It must resolve from template_role coverage; no silent fallback."
+          },
+          "slot_requirements": {
+            "type": "array",
+            "description": "Optional content requirements to match against the approved template layout's replaceable slots.",
+            "items": {
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "kind": { "type": "string" },
+                    "required": { "type": "boolean" },
+                    "content_hint": {},
+                    "max_items": { "type": "integer", "minimum": 1 }
+                  },
+                  "additionalProperties": true
+                }
+              ]
+            }
+          },
           "is_hero": { "type": "boolean" },
           "single_focus": { "type": "string" },
           "content": {},

@@ -65,3 +65,19 @@ def test_empty_and_none_inputs_safe():
     assert bench._regressions({}, {}, 20.0, 50.0) == []
     assert bench._regressions(None, None, 20.0, 50.0) == []
     assert bench._regressions({"a": _seg(100.0)}, None, 20.0, 50.0) == []
+
+
+def test_requested_gate_fails_closed_without_baseline(tmp_path):
+    missing = tmp_path / "missing-baseline.json"
+    assert "baseline not found" in bench._regression_gate_precondition(missing, 40.0)
+    assert "needs --compare" in bench._regression_gate_precondition(None, 40.0)
+
+
+def test_no_gate_does_not_require_baseline(tmp_path):
+    assert bench._regression_gate_precondition(tmp_path / "missing.json", None) is None
+
+
+def test_benchmark_includes_scoped_visual_segment():
+    src = (HERE / "assets" / "bench-render.py").read_text(encoding="utf-8")
+    assert '"validate_visual_scope_1"' in src
+    assert '"--scope-frames", "1"' in src

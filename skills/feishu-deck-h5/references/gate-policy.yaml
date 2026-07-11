@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "description": "Authoritative lifecycle gates. Documentation and CLI help must refer to these gate IDs.",
+  "gates": {
+    "SOURCE_PARSE": {
+      "command": "parser-specific",
+      "scope": "source bundle",
+      "blocking": true
+    },
+    "TEMPLATE_PACK": {
+      "command": "python3 schema/validate-contract.py --schema schema/template-dossier.schema.json --instance <template-dossier.json> && python3 schema/validate-contract.py --schema schema/template-pack.schema.json --instance <template-pack.json> && python3 deck-json/template-pack.py validate <template-pack.json> --verify-assets",
+      "scope": "template dossier, draft pack, assets, preview, role coverage, and approval record",
+      "blocking": true,
+      "requires_user_approval": true,
+      "approval_transition": "draft to immutable approved version"
+    },
+    "INTERMEDIATE_EDIT": {
+      "command": "render-deck.py <deck.json> <output-dir> --scope <keys> --shoot",
+      "scope": "changed slides",
+      "blocking": true
+    },
+    "LOCAL_HANDOFF": {
+      "command": "render-deck.py <deck.json> <output-dir> --final",
+      "scope": "whole deck",
+      "blocking": true
+    },
+    "MAGIC_PUBLISH": {
+      "command": "subskills/publisher/publish.py <index.html>",
+      "scope": "publish artifact resources and references",
+      "blocking": true,
+      "requires_whole_deck_visual_gate": false
+    },
+    "LIBRARY_INGEST": {
+      "command": "subskills/importer/importer.py",
+      "scope": "whole deck plus package",
+      "blocking": true,
+      "requires_whole_deck_visual_gate": true
+    },
+    "PRESENTATION_CHECKPOINT": {
+      "command": "render-deck.py <deck.json> <output-dir> --final",
+      "scope": "whole deck",
+      "blocking": true
+    },
+    "CHECK_ONLY": {
+      "command": "assets/check-only.sh <index.html>",
+      "scope": "requested deck or pages",
+      "blocking": false
+    },
+    "REPOSITORY_CHANGE": {
+      "command": "python3 assets/skill-contract.py validate && python3 -m pytest -q tests deck-json/tests subskills/parser/tests subskills/simulator/tests log-tool/test_deck_log_diff.py",
+      "scope": "changed code and contracts",
+      "blocking": true
+    }
+  }
+}
