@@ -3,7 +3,7 @@
    - Scale-to-fit each .slide to its frame (1920×1080 design canvas)
    - Auto-detect mobile / narrow viewport → scroll mode (vertical card stack)
    - Desktop default → present mode (one slide per viewport, ←/→/space, wheel)
-   - Keyboard: ←/→/PgUp/PgDn/Space/Home/End  ·  URL hash sync (#3)
+   - Keyboard: ←/→/PgUp/PgDn/Space/Home/End  ·  quick page-number jump  ·  URL hash sync (#3)
    - Mode toggle button: 演示 ↔ 浏览  (entering 演示 also requests fullscreen)
    - F-key + bottom button: fullscreen toggle
    - Auto-fade chrome after 2.5s idle (mousemove throttled to 100ms)
@@ -913,6 +913,7 @@
     ui.querySelector('.ctl.next').addEventListener('click', () => {
       goTo(deck, frames, stepNext(frames, currentIdx(frames)));
     }, { signal });
+    bindPageJump(ui.querySelector('.cur'), deck, frames, signal);
     ui.querySelector('.ctl.fs').addEventListener('click', toggleFullscreen, { signal });
 
     // ---- Window resize / orientation ----
@@ -1026,6 +1027,70 @@
     let n = 0;
     for (let i = 0; i <= idx && i < frames.length; i++) if (!isHidden(frames[i])) n++;
     return Math.max(1, n);
+  }
+
+  // Convert the visible-only page number shown in the pager (1..N) back to the
+  // physical frame index used by goTo(). Hidden slides deliberately have no
+  // visible ordinal, so entering "2" when raw frame #2 is hidden lands on the
+  // second VISIBLE slide (raw frame #3).
+  function visibleIndexAtOrdinal(frames, ordinal) {
+    let n = 0;
+    for (let i = 0; i < frames.length; i++) {
+      if (isHidden(frames[i])) continue;
+      n++;
+      if (n === ordinal) return i;
+    }
+    return -1;
+  }
+
+  function pageInputValue(input, ordinal) {
+    return input && input.hasAttribute('data-pad-page') ? pad(ordinal) : String(ordinal);
+  }
+
+  function syncPageInput(input, frames) {
+    if (!input) return;
+    const total = visibleCount(frames);
+    const pos = visibleOrdinal(frames, currentIdx(frames));
+    input.value = pageInputValue(input, pos);
+    input.disabled = total === 0;
+    const minDigits = input.hasAttribute('data-pad-page') ? 2 : 1;
+    input.style.width = (Math.max(minDigits, String(Math.max(1, total)).length) + 0.8) + 'ch';
+  }
+
+  // Shared by the audience pager and the presenter view. Invalid input restores
+  // the current page; out-of-range input clamps to the first/last visible page,
+  // matching the retired pptx-to-editable-html pager's forgiving behaviour.
+  function jumpToVisibleOrdinal(deck, frames, raw) {
+    const total = visibleCount(frames);
+    const text = String(raw == null ? '' : raw).trim();
+    if (!total || !/^-?\d+$/.test(text)) return false;
+    const ordinal = Math.max(1, Math.min(total, parseInt(text, 10)));
+    const idx = visibleIndexAtOrdinal(frames, ordinal);
+    if (idx < 0) return false;
+    if (idx === currentIdx(frames)) updateUI(deck, frames);
+    else goTo(deck, frames, idx);
+    return true;
+  }
+
+  function bindPageJump(input, deck, frames, signal) {
+    if (!input) return;
+    input.addEventListener('focus', () => input.select(), { signal });
+    input.addEventListener('change', () => {
+      jumpToVisibleOrdinal(deck, frames, input.value);
+      syncPageInput(input, frames);
+    }, { signal });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        input.blur();                 // blur fires one change → one navigation
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();          // do not close presenter/fullscreen
+        syncPageInput(input, frames); // cancel the draft value
+        input.blur();
+      }
+    }, { signal });
   }
 
   // Restart-on-enter for slide media (2026-05-24).
@@ -1289,8 +1354,9 @@
       const ta = pv.querySelector('.pv-notes');
       ta.value = (key && notes[key]) ? notes[key] : '';
       ta.placeholder = '写这一页的讲稿…（自动存入页面;💾 或 ⌘S 保存到文件)';
-      pv.querySelector('.pv-pos').textContent =
-        visibleOrdinal(frames, ci) + ' / ' + visibleCount(frames);
+      const pageInput = pv.querySelector('.pv-page-input');
+      if (document.activeElement !== pageInput) syncPageInput(pageInput, frames);
+      pv.querySelector('.pv-total').textContent = String(visibleCount(frames));
       pv.querySelector('.pv-nextlabel').textContent = hasNext ? '下一页' : '（已是最后一页）';
     }
 
@@ -1311,7 +1377,11 @@
         '</div>' +
         '<div class="pv-bar">' +
           '<button class="pv-btn pv-prev" type="button">‹ 上一页</button>' +
-          '<span class="pv-pos">1 / 1</span>' +
+          '<span class="pv-pos" title="输入页码后按 Enter 跳转">' +
+            '<input class="pv-page-input" type="text" inputmode="numeric" ' +
+              'value="1" aria-label="跳转到页码" autocomplete="off" spellcheck="false">' +
+            '<span class="pv-page-sep"> / </span><span class="pv-total">1</span>' +
+          '</span>' +
           '<button class="pv-btn pv-nextbtn" type="button">下一页 ›</button>' +
           '<span class="pv-timer">00:00</span>' +
           '<button class="pv-btn pv-reset" type="button" title="计时归零">↺</button>' +
@@ -1322,6 +1392,7 @@
       document.body.appendChild(pv);
       pv.querySelector('.pv-prev').onclick    = () => goTo(deck, frames, stepPrev(frames, curIdx()));
       pv.querySelector('.pv-nextbtn').onclick = () => goTo(deck, frames, stepNext(frames, curIdx()));
+      bindPageJump(pv.querySelector('.pv-page-input'), deck, frames, signal);
       pv.querySelector('.pv-proj').onclick    = openProjector;
       pv.querySelector('.pv-exit').onclick    = closePresenter;
       pv.querySelector('.pv-reset').onclick   = () => { timerStart = Date.now(); };
@@ -1464,7 +1535,11 @@
         '<button class="ctl prev" type="button" title="上一页 (←)" aria-label="Previous slide">' +
           '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M15 18l-6-6 6-6"/></svg>' +
         '</button>' +
-        '<span class="indicator"><span class="cur">01</span><span class="sep"> / </span><span class="total">01</span></span>' +
+        '<span class="indicator" title="输入页码后按 Enter 跳转">' +
+          '<input class="cur" type="text" inputmode="numeric" value="01" ' +
+            'data-pad-page aria-label="跳转到页码" autocomplete="off" spellcheck="false">' +
+          '<span class="sep"> / </span><span class="total">01</span>' +
+        '</span>' +
         '<button class="ctl next" type="button" title="下一页 (→ / Space)" aria-label="Next slide">' +
           '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 6l6 6-6 6"/></svg>' +
         '</button>' +
@@ -1474,7 +1549,7 @@
           '<svg class="i-exit"  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="nav-hint">← →&nbsp;翻页&nbsp; ·&nbsp; F&nbsp;全屏&nbsp; ·&nbsp; P&nbsp;演示者&nbsp; ·&nbsp; E&nbsp;编辑</div>';
+      '<div class="nav-hint">← →&nbsp;翻页&nbsp; ·&nbsp; 点页码跳转&nbsp; ·&nbsp; F&nbsp;全屏&nbsp; ·&nbsp; P&nbsp;演示者&nbsp; ·&nbsp; E&nbsp;编辑</div>';
     return ui;
   }
 
@@ -1489,7 +1564,8 @@
     const isPresent = deck.dataset.mode === 'present';
     const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
 
-    ui.querySelector('.cur').textContent   = pad(pos);
+    const pageInput = ui.querySelector('.cur');
+    if (document.activeElement !== pageInput) syncPageInput(pageInput, frames);
     ui.querySelector('.total').textContent = pad(total);
     const pct = total > 0 ? (pos / total) * 100 : 0;
     ui.querySelector('.deck-progress .bar').style.width = pct + '%';

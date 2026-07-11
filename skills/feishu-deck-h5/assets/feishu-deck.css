@@ -432,6 +432,20 @@ body {
   font: 600 var(--fs-foot)/1 var(--fs-font-latin); letter-spacing: 0.10em;
   color: #fff;
 }
+.deck-ui .deck-controls .indicator .cur {
+  width: 2.8ch; min-width: 24px; box-sizing: content-box;
+  margin: 0; padding: 3px 2px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: #fff; outline: none; text-align: center;
+  font: inherit; line-height: 1; letter-spacing: inherit; font-variant-numeric: tabular-nums;
+  appearance: none; -webkit-appearance: none;
+  transition: border-color .12s ease, background .12s ease;
+}
+.deck-ui .deck-controls .indicator .cur:hover {
+  border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.08);
+}
+.deck-ui .deck-controls .indicator .cur:focus {
+  border-color: #3a86ff; background: rgba(58,134,255,.24);
+}
 .deck-ui .deck-controls .indicator .sep { color: var(--fs-text-40); margin: 0 2px; }
 .deck-ui .deck-controls .indicator .total { color: var(--fs-text-48); font-weight: 500; }
 .deck-ui .deck-controls .ctl.fs .i-exit { display: none; }
@@ -474,6 +488,7 @@ body {
 .deck-ui.is-idle .deck-progress { opacity: .35; }
 /* Hovering chrome cancels idle fade visually (the JS mousemove also fires) */
 .deck-ui .deck-controls:hover { opacity: 1 !important; }
+.deck-ui .deck-controls:focus-within { opacity: 1 !important; }
 /* Kiosk / projection mode (URL hash #proj | #bare | #clean | #kiosk):
    force-hide ALL chrome — page bar, controls, hint — and stay hidden
    (unlike .is-idle, hover/mousemove never wakes it). For projection,
@@ -4036,7 +4051,25 @@ body {
 .fs-presenter .pv-btn:hover { background: rgba(255,255,255,.2); }
 .fs-presenter .pv-proj { background: #3a86ff; }
 .fs-presenter .pv-proj:hover { background: #2f74e6; }
-.fs-presenter .pv-pos { font-size: 15px; color: #cfe0ff; min-width: 70px; text-align: center; }
+.fs-presenter .pv-pos {
+  display: inline-flex; align-items: baseline; justify-content: center;
+  font-size: 15px; color: #cfe0ff; min-width: 82px; text-align: center;
+}
+.fs-presenter .pv-page-input {
+  width: 2.6ch; min-width: 22px; box-sizing: content-box;
+  margin: 0; padding: 4px 3px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: #fff; outline: none; text-align: center;
+  font: inherit; line-height: 1; font-variant-numeric: tabular-nums;
+  appearance: none; -webkit-appearance: none;
+  transition: border-color .12s ease, background .12s ease;
+}
+.fs-presenter .pv-page-input:hover {
+  border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.08);
+}
+.fs-presenter .pv-page-input:focus {
+  border-color: #3a86ff; background: rgba(58,134,255,.24);
+}
+.fs-presenter .pv-page-sep { color: #8b93ad; margin: 0 3px; }
 .fs-presenter .pv-timer {
   font-size: 22px; font-variant-numeric: tabular-nums; color: #fff;
   margin-left: 8px; min-width: 64px; text-align: center;
