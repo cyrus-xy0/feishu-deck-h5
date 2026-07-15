@@ -73,6 +73,8 @@ DIFF_PIXEL_DELTA = 24       # per-cell grayscale delta (0..255) to count a cell 
 DEFAULT_DIFF_THRESHOLD = 0.06   # >=6% combined per-slide diff → red card (publish drift)
 DEFAULT_PAGES = 3           # how many leading slides to verify (cheap, catches the worst)
 IFRAME_SETTLE_MS = 1200     # give visible iframe demos time to leave about:blank before screenshot
+DECK_RESOURCE_SETTLE_MS = 30_000  # Magic shell may attach the inner deck frame several seconds late
+DECK_SCOPE_POLL_COUNT = 60        # 60 × 250ms = 15s to discover that late iframe
 REMOTE_REPROBE_TIMEOUT = 8  # seconds; used only to de-noise transient script/document aborts
 
 # Generic CSS font families: if the remote's *effective* font resolves to one of
@@ -338,6 +340,7 @@ async def _capture_side_with_browser(
     *,
     pages: int,
     collect_requests: bool,
+    page_indices: list[int] | None = None,
 ) -> dict[str, Any]:
     """Capture one side inside its own isolated browser context.
 
@@ -388,7 +391,7 @@ async def _capture_side_with_browser(
             except Exception:
                 pass
         scope = page
-        for _ in range(20):
+        for _ in range(DECK_SCOPE_POLL_COUNT):
             scope = await _deck_scope(page)
             try:
                 if await scope.query_selector(".slide-frame"):
@@ -396,13 +399,33 @@ async def _capture_side_with_browser(
             except Exception:
                 pass
             await page.wait_for_timeout(250)
+        # Magic Page's outer document can reach `load` before its sandboxed deck
+        # iframe is even attached. Waiting only on the outer page produced false
+        # visual red cards: text had painted but image/CSS resources in the inner
+        # document were still pending. Once the deck scope is found, wait on that
+        # document's own load completion and every <img>. Request failures remain
+        # red-carded separately, so a genuinely broken image cannot hide here.
+        try:
+            await scope.wait_for_function(
+                "() => document.readyState === 'complete' && "
+                "(!document.fonts || document.fonts.status === 'loaded') && "
+                "[...document.images].every(img => img.complete) && "
+                "(!document.querySelector('.deck') || document.querySelector('.deck[data-js-ready]'))",
+                timeout=DECK_RESOURCE_SETTLE_MS,
+            )
+        except Exception:
+            pass
         try:
             await scope.evaluate("() => { const d=document.querySelector('.deck'); if(d) d.setAttribute('data-mode','present'); }")
         except Exception:
             pass
         await page.wait_for_timeout(300)
         meta = await scope.evaluate(_SLIDE_META_JS)
-        meta = meta[: max(0, pages)] if pages is not None else meta
+        if page_indices:
+            selected = {int(index) for index in page_indices if int(index) > 0}
+            meta = [row for row in meta if int(row.get("idx") or 0) in selected]
+        else:
+            meta = meta[: max(0, pages)] if pages is not None else meta
         for m in meta:
             try:
                 await scope.evaluate(_SHOW_SLIDE_JS, m["idx"] - 1)
@@ -467,13 +490,21 @@ def _capture_many(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return asyncio.run(_run())
 
 
-def capture_side(uri: str, out_dir: Path, *, pages: int, collect_requests: bool) -> dict[str, Any]:
+def capture_side(
+    uri: str,
+    out_dir: Path,
+    *,
+    pages: int,
+    collect_requests: bool,
+    page_indices: list[int] | None = None,
+) -> dict[str, Any]:
     """Backward-compatible single-side capture using the shared-browser core."""
     return _capture_many([{
         "uri": uri,
         "out_dir": out_dir,
         "pages": pages,
         "collect_requests": collect_requests,
+        "page_indices": page_indices,
     }])[0]
 
 
@@ -484,6 +515,7 @@ def capture_pair(
     remote_out: Path,
     *,
     pages: int,
+    page_indices: list[int] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Capture local and remote concurrently in two isolated contexts."""
     captures = _capture_many([
@@ -492,12 +524,14 @@ def capture_pair(
             "out_dir": local_out,
             "pages": pages,
             "collect_requests": False,
+            "page_indices": page_indices,
         },
         {
             "uri": remote_uri,
             "out_dir": remote_out,
             "pages": pages,
             "collect_requests": True,
+            "page_indices": page_indices,
         },
     ])
     return captures[0], captures[1]
@@ -702,6 +736,7 @@ def write_report(out_dir: Path, payload: dict[str, Any]) -> tuple[Path, Path]:
         f"- local: `{payload.get('local')}`",
         f"- remote: {payload.get('remote')}",
         f"- pages_checked: {payload.get('pages')}",
+        f"- page_indices: {payload.get('page_indices') or 'leading'}",
         f"- method: {verdict.get('method')}",
         f"- threshold: {verdict.get('threshold')}",
         "",
@@ -751,8 +786,10 @@ def run_self_check(
     out_dir: Path,
     pages: int = DEFAULT_PAGES,
     threshold: float = DEFAULT_DIFF_THRESHOLD,
+    page_indices: list[int] | None = None,
 ) -> dict[str, Any]:
     """End-to-end self-check. Returns the payload (also written to out_dir)."""
+    checked_pages = len(page_indices) if page_indices else pages
     local_html = resolve_local_html(local)
     remote_uri = normalize_remote(remote)
     out_dir = out_dir.expanduser().resolve()
@@ -763,6 +800,7 @@ def run_self_check(
         remote_uri,
         out_dir / "self-check" / "remote",
         pages=pages,
+        page_indices=page_indices,
     )
 
     if not local_cap.get("ok") or not remote_cap.get("ok"):
@@ -772,7 +810,8 @@ def run_self_check(
             "skipped": True,
             "local": str(local_html),
             "remote": remote_uri,
-            "pages": pages,
+            "pages": checked_pages,
+            "page_indices": page_indices or [],
             "reason": f"self-check could not run a browser ({reason}); "
                       "install playwright + chromium to enable post-publish verification",
             "verdict": {"method": "n/a", "threshold": threshold,
@@ -788,7 +827,8 @@ def run_self_check(
         "skipped": False,
         "local": str(local_html),
         "remote": remote_uri,
-        "pages": pages,
+        "pages": checked_pages,
+        "page_indices": page_indices or [],
         "verdict": verdict,
     }
     write_report(out_dir, payload)
@@ -807,6 +847,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"how many leading slides to verify (default {DEFAULT_PAGES})")
     ap.add_argument("--threshold", type=float, default=DEFAULT_DIFF_THRESHOLD,
                     help=f"per-slide combined diff ratio that red-cards a page (default {DEFAULT_DIFF_THRESHOLD})")
+    ap.add_argument(
+        "--page",
+        dest="page_indices",
+        action="append",
+        type=int,
+        default=[],
+        help="1-based page to verify; repeat for an incremental page set (default: leading --pages)",
+    )
     ap.add_argument("--allow-skip", action="store_true",
                     help="exit 0 even if a browser is unavailable (self-check could not run); "
                          "default treats an un-runnable check as a non-zero soft red card")
@@ -821,6 +869,7 @@ def main(argv: list[str] | None = None) -> int:
         out_dir=args.out,
         pages=args.pages,
         threshold=args.threshold,
+        page_indices=args.page_indices or None,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
     if payload.get("skipped"):

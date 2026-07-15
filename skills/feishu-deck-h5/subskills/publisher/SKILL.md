@@ -97,6 +97,30 @@ publish metadata.
   key、SHA-256 和返回 URL。不支持该协议的旧自定义 uploader 不会自动
   降级；只能在用户确认兼容需求后显式传 `--legacy-magic-asset-uploader`。
 
+## 速度、幂等与恢复契约
+
+- **普通发布不进入全仓门禁**:`PUBLISH` 只运行资源完整性、Magic API 与发布后自检。
+  发布器/runtime 故障在同一未改包上最多复现一次,随后转 `PUBLISH_RECOVERY`:
+  只跑 publisher 定向测试 + 当前 artifact replay,先交付 URL。1200+ 全仓测试只属于后续
+  `MAINTENANCE` repository release,不得阻塞当前 Deck 交付。
+- **冻结输入**:asset preparation 后、任何真实上传前,写
+  `publish-snapshot.json` 和 `publish-snapshots/<content-id>/`;HTML、页面哈希和本地资源闭包
+  进入内容寻址快照。发布中途 live run 发生变化也不得改变本次上传字节。
+- **稳定发布工作区**:`--html` 默认使用 `publisher/<slug>-<source-path-hash>`,不再每次创建
+  时间戳目录;同一来源会复用上次 manifest、FaaS record 和 Magic app 更新状态。
+- **增量上传/断点续传**:默认使用 `runs/publisher/.magic-asset-cache-v1.json`,按
+  `Magic base URL + MIME + SHA-256` 复用已上传 URL。批次部分失败时先 checkpoint 成功行;
+  重跑只补 misses。自定义 uploader 默认禁用共享缓存,避免测试/第三方 URL 污染正式缓存。
+- **FaaS 分片复用**:`magic-asset-faas.py` 按代码 SHA-256 复用未变分片;需要更新的分片最多
+  4 路并发。FaaS 仍是 TOS attachment 的兼容兜底;上传服务若能直接返回
+  `Content-Disposition:inline`,应优先跳过这一层。
+- **增量自检**:首次发布检查前 N 页;已有成功 manifest 时自动检查封面、末页、变化页和相邻页
+  (默认最多 5 页)。页面等待内层 deck `data-js-ready`、fonts loaded、images complete,不用固定
+  sleep 猜加载完成。`--self-check-page N` 可显式覆盖。
+- **SLO**:默认总预算 600 秒(`--publish-time-budget`);普通重复发布目标 ≤3 分钟,首次发布目标
+  ≤5 分钟。每个子阶段写入 `publish-timing.json` / `PUBLISH_TIMING.md`;预算耗尽不再启动新上传
+  子进程,而是报告慢阶段并路由 `PUBLISH_RECOVERY`。
+
 ## 标准命令
 
 对一个 run 的确认产物发布:
@@ -190,6 +214,10 @@ publish-self-check.json      # F-285 发布后自检机读结果 (self_check.ok 
 PUBLISH_SELF_CHECK.md        # F-285 发布后自检红牌报告
 self-check/local|remote/*.png  # 本地 vs 远程逐页截图
 PUBLISH_SIZE_REPORT.md      # Magic Page 正文字数门禁与自动外置代码记录
+publish-snapshot.json       # 本次不可变发布输入、资源闭包、页面哈希
+publish-snapshots/<id>/     # 内容寻址发布快照
+publish-timing.json         # 分阶段耗时与 600s SLO
+PUBLISH_TIMING.md           # 人读耗时报告
 publisher-*.log
 ```
 
@@ -203,4 +231,6 @@ publisher-*.log
 - 不在聊天或日志里泄露 GitHub / 飞书 / Magic token。
 - 发布成功后必须跑发布后自检(F-285):有登录态时对**最终 URL** 验断链 / 字体 / 视觉;自检红牌
   不算发布完成,要修源重发。`--skip-self-check` 只在已人工确认远程无误时用。
+- PUBLISH / PUBLISH_RECOVERY 不得同步运行 `REPOSITORY_CHANGE` 全仓门禁;正式提交/发布技能代码时
+  再进入独立 MAINTENANCE 生命周期完成它。
 - 发布完成后的准确话术是“已发布到 Magic Page”。如用户还要求入库,交给 importer。

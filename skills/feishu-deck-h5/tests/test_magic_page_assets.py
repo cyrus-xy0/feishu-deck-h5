@@ -17,6 +17,14 @@ MAGIC_PAGE_ASSETS = ROOT / "assets" / "magic-page-assets.py"
 INLINE_ASSETS = ROOT / "assets" / "inline-assets.py"
 MAGIC_UPLOAD = ROOT / "assets" / "magic-upload.js"
 
+
+def _load_module():
+    spec = importlib.util.spec_from_file_location("magic_page_assets_under_test", MAGIC_PAGE_ASSETS)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 BATCH_UPLOADER_JS = r'''
 const fs=require("fs");const readline=require("readline");const args=process.argv.slice(2);
 const mi=args.indexOf("--batch-manifest");
@@ -46,6 +54,84 @@ main().catch((e)=>{console.error(e.message);process.exit(9);});
 
 
 class MagicPageAssetsTest(unittest.TestCase):
+    def test_content_cache_reuses_identical_bytes_across_different_keys(self) -> None:
+        module = _load_module()
+        with tempfile.TemporaryDirectory(prefix="magic-content-cache-") as td:
+            tmp = Path(td)
+            asset = tmp / "logo.png"
+            asset.write_bytes(b"same-image-bytes")
+            cache_path = tmp / "cache.json"
+            first = module._upload_spec(
+                asset,
+                key="deck/first/logo.png",
+                base_url="https://magic.example.test",
+            )
+            second = module._upload_spec(
+                asset,
+                key="deck/renamed/logo.png",
+                base_url="https://magic.example.test",
+            )
+            self.assertNotEqual(first["cache_key"], second["cache_key"])
+            self.assertEqual(first["content_id"], second["content_id"])
+            cache = module.PersistentUploadCache(cache_path, base_url="https://magic.example.test")
+            cache.record(first, "https://tos.example.test/content/logo.png")
+            cache.flush()
+            reloaded = module.PersistentUploadCache(cache_path, base_url="https://magic.example.test")
+            self.assertEqual(
+                reloaded.lookup(second),
+                "https://tos.example.test/content/logo.png",
+            )
+
+    def test_partial_batch_successes_checkpoint_and_resume_only_the_failure(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node not available")
+        with tempfile.TemporaryDirectory(prefix="magic-resume-") as td:
+            tmp = Path(td)
+            uploader = tmp / "batch.js"
+            uploader.write_text(BATCH_UPLOADER_JS, encoding="utf-8")
+            (tmp / "one.png").write_bytes(b"one")
+            (tmp / "two.png").write_bytes(b"two")
+            html = tmp / "index.html"
+            html.write_text('<img src="one.png"><img src="two.png">', encoding="utf-8")
+            out = tmp / "out.html"
+            cache = tmp / "cache.json"
+            process_log = tmp / "process.log"
+            cmd = [
+                sys.executable,
+                str(MAGIC_PAGE_ASSETS),
+                str(html),
+                "--out", str(out),
+                "--uploader", str(uploader),
+                "--base-url", "https://magic.example.test",
+                "--key-prefix", "deck/resume",
+                "--cache-manifest", str(cache),
+                "--keep-inline-code",
+            ]
+            failed_env = dict(os.environ, BATCH_FAIL_KEY="two.png", BATCH_PROCESS_LOG=str(process_log))
+            first = subprocess.run(cmd, text=True, capture_output=True, env=failed_env)
+            self.assertNotEqual(first.returncode, 0)
+            payload = json.loads(cache.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["entries"]), 1)
+
+            second_env = dict(os.environ, BATCH_PROCESS_LOG=str(process_log))
+            second = subprocess.run(cmd, text=True, capture_output=True, env=second_env)
+            self.assertEqual(second.returncode, 0, second.stderr or second.stdout)
+            requests = [line for line in process_log.read_text(encoding="utf-8").splitlines() if line.startswith("REQUEST:")]
+            self.assertEqual(requests, ["REQUEST:2", "REQUEST:1"])
+            self.assertIn("cache hits   : 1", second.stdout)
+
+    def test_magic_hosted_resources_are_not_downloaded_and_reuploaded(self) -> None:
+        module = _load_module()
+        self.assertTrue(module.is_already_magic_hosted_ref(
+            "https://magic-builder.tos-cn-beijing.volces.com/deck/logo.png"
+        ))
+        self.assertTrue(module.is_already_magic_hosted_ref(
+            "https://magic.solutionsuite.cn/api/faas/example?a=logo"
+        ))
+        self.assertFalse(module.is_already_magic_hosted_ref(
+            "https://cdn.example.test/logo.png"
+        ))
+
     def test_magic_page_uploads_local_and_base64_images(self) -> None:
         if not shutil.which("node"):
             self.skipTest("node not available")

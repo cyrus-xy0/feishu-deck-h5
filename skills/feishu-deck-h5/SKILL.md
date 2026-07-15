@@ -25,7 +25,8 @@ Before touching files, state:
 
 `references/workflow.yaml` is the mode source of truth. Use the route command
 first; read `references/request-router.md` only when the mode/artifact boundary
-is ambiguous. Check contracts with:
+is ambiguous. The route packet's `execution_policy` is binding, not advisory.
+Check contracts with:
 
 ```bash
 python3 assets/skill-contract.py validate
@@ -38,6 +39,10 @@ Important routing guards:
 - 入库 / submit / archive / slide library → `IMPORT`, never Magic publish.
 - Review, repair, performance work, packaging, install, tests, or changes to this
   repository/skill → `MAINTENANCE`.
+- A publisher/runtime defect discovered while delivering one already-confirmed
+  Magic artifact → `PUBLISH_RECOVERY` first. It may run only publisher-focused
+  tests plus one artifact replay; the repository-wide release gate remains a
+  separate `MAINTENANCE` obligation and must not block handing back a working URL.
 - Uploaded HTML to imitate/remake → `GENERATION_FROM_SOURCE_HTML`; uploaded HTML
   to edit in place → `EDIT_IMPORTED_HTML`.
 - Uploaded PPTX to reuse as the visual template for future decks →
@@ -70,10 +75,39 @@ Important routing guards:
 Never weaken `assets/audits.js`, add an opt-out, or bypass a red gate to make an
 artifact pass. Fix the artifact or implementation.
 
+### Stop discipline
+
+The machine-owned stop rules live in `references/gate-policy.yaml` and are
+returned by every `skill-contract.py route` call:
+
+- A formal PASS plus the required visual review closes authoring. Reopen it only
+  for a user-requested change, a blocking authoring gate, or a visible defect
+  reproduced in the authoring artifact.
+- An advisory-only finding, optional polish, or packaging/runtime failure does
+  not reopen DeckJSON/CSS authoring. Preserve the last good source artifact.
+- After a failed formal render, make at most the policy's one targeted
+  fix-render. If it still blocks, report the named blocker instead of looping.
+- Single-slide budget: one preview, at most one targeted correction, then the
+  required lifecycle gate. Do not use repeated preview passes as open-ended
+  visual exploration.
+- Choose one delivery shape from the user's destination and verify only that
+  shape. Do not proactively build inline + zip + library variants.
+- A Magic publisher/runtime failure gets at most one reproduction attempt, then
+  routes to `PUBLISH_RECOVERY`; other package/runtime failures keep their normal
+  `MAINTENANCE` route. Do not mutate page content to compensate for a harness
+  bug. `PUBLISH_RECOVERY` never runs the repository-wide test suite in the live
+  Magic delivery path.
+
 For `MAINTENANCE`, do not guess a test runner. Run focused pytest selections
 while iterating, then execute the exact `REPOSITORY_CHANGE` command returned by
 `python3 assets/skill-contract.py route MAINTENANCE`. Use preflight profile
 `core` unless the change explicitly exercises a stronger runtime capability.
+
+For `PUBLISH_RECOVERY`, run the exact focused command returned by
+`python3 assets/skill-contract.py route PUBLISH_RECOVERY`, replay the current
+artifact once, deliver the URL, and stop. If the fix will be committed or
+released as repository code, open/continue a separate `MAINTENANCE` lifecycle
+and run its consolidated gate there.
 
 ## 3. Scope and edit discipline
 
@@ -121,7 +155,7 @@ The authoritative owner for every mode is in `references/workflow.yaml`.
 - Publisher: confirmed Magic Page artifact only.
 - Importer: confirmed slide-library ingest only.
 - Simulator: post-validation rehearsal only.
-- Controller: `MAINTENANCE`, integration, and final verification.
+- Controller: `PUBLISH_RECOVERY`, `MAINTENANCE`, integration, and final verification.
 
 For a new/re-authored deck: Parser when sources exist → Designer → Renderer →
 Validator at the appropriate checkpoint. Pure import follows the conversion

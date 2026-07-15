@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,14 @@ RUNS = REPO / "runs"
 MAGIC_PAGE_ASSETS = REPO / "assets/magic-page-assets.py"
 MAGIC_PAGE_PREFLIGHT = REPO / "assets/magic-page-preflight.py"
 MAGIC_IFRAME_FAAS = REPO / "assets/magic-iframe-faas.py"
+MAGIC_ASSET_FAAS = REPO / "assets/magic-asset-faas.py"
 INLINE_ASSETS = REPO / "assets/inline-assets.py"
 DEFAULT_MAGIC_PAGE_PUBLISHER = REPO / "assets/magic-page-publish.js"
 DEFAULT_MAGIC_ASSET_UPLOADER = REPO / "assets/magic-upload.js"
+DEFAULT_MAGIC_ASSET_CACHE = RUNS / "publisher" / ".magic-asset-cache-v1.json"
 DEFAULT_MAGIC_BASE_URL = "https://magic.solutionsuite.cn"
 DEFAULT_MAGIC_MAX_HTML_CHARS = 900_000
+DEFAULT_PUBLISH_TIME_BUDGET_SECONDS = 600
 MAGIC_TOKEN_FILES = (
     Path.home() / ".magic-token",
     REPO / ".magic-token",
@@ -73,6 +77,13 @@ def repo_rel(path: Path) -> str:
 def slugify(value: str, fallback: str = "deck") -> str:
     slug = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
     return slug or fallback
+
+
+def stable_publisher_task_id(html_path: Path) -> str:
+    """Stable per-source workspace so retries can reuse cache/FaaS/app state."""
+    resolved = html_path.expanduser().resolve()
+    path_id = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:12]
+    return f"publisher/{slugify(resolved.stem, 'html')}-{path_id}"
 
 
 def optional_path(value: str) -> Path | None:
@@ -136,6 +147,8 @@ def resolve_html(args: argparse.Namespace, output_dir: Path | None) -> Path | No
 # cannot hang the whole publish with no bound (subskill-5).
 DEFAULT_SUBPROCESS_TIMEOUT = 300
 NETWORK_SUBPROCESS_TIMEOUT = 600
+STAGE_EVENTS: list[dict[str, Any]] = []
+PUBLISH_DEADLINE: float | None = None
 
 
 def subprocess_record(
@@ -146,13 +159,36 @@ def subprocess_record(
     env: dict[str, str] | None = None,
     timeout: int | None = DEFAULT_SUBPROCESS_TIMEOUT,
 ) -> dict[str, Any]:
+    started = time.monotonic()
+    effective_timeout = timeout
+    if PUBLISH_DEADLINE is not None:
+        remaining = PUBLISH_DEADLINE - started
+        if remaining <= 0:
+            result = {
+                "cmd": cmd,
+                "ok": False,
+                "returncode": 124,
+                "stdout": "",
+                "stderr": "publish time budget exhausted before stage start",
+                "json": None,
+                "duration_seconds": 0.0,
+            }
+            STAGE_EVENTS.append({
+                "stage": Path(cmd[1]).name if len(cmd) > 1 else Path(cmd[0]).name,
+                "ok": False,
+                "duration_seconds": 0.0,
+                "reason": "time-budget-exhausted",
+            })
+            return result
+        remaining_seconds = max(1, int(remaining))
+        effective_timeout = remaining_seconds if timeout is None else min(timeout, remaining_seconds)
     try:
         proc = subprocess.run(
-            cmd, cwd=cwd, text=True, capture_output=True, env=env, timeout=timeout
+            cmd, cwd=cwd, text=True, capture_output=True, env=env, timeout=effective_timeout
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
-        stderr = (exc.stderr or "") + f"\nTIMEOUT after {timeout}s: {' '.join(cmd)}"
+        stderr = (exc.stderr or "") + f"\nTIMEOUT after {effective_timeout}s: {' '.join(cmd)}"
         if isinstance(stdout, bytes):
             stdout = stdout.decode("utf-8", errors="ignore")
         if isinstance(stderr, bytes):
@@ -163,14 +199,21 @@ def subprocess_record(
                 "$ " + " ".join(cmd) + "\n\nSTDOUT\n" + stdout + "\nSTDERR\n" + stderr,
                 encoding="utf-8",
             )
-        return {
+        result = {
             "cmd": cmd,
             "ok": False,
             "returncode": 124,
             "stdout": stdout.strip(),
             "stderr": stderr.strip(),
             "json": None,
+            "duration_seconds": round(time.monotonic() - started, 3),
         }
+        STAGE_EVENTS.append({
+            "stage": Path(cmd[1]).name if len(cmd) > 1 else Path(cmd[0]).name,
+            "ok": False,
+            "duration_seconds": result["duration_seconds"],
+        })
+        return result
     if log_path:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
@@ -183,14 +226,21 @@ def subprocess_record(
             parsed = json.loads(proc.stdout)
         except json.JSONDecodeError:
             parsed = None
-    return {
+    result = {
         "cmd": cmd,
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,
         "stdout": proc.stdout.strip(),
         "stderr": proc.stderr.strip(),
         "json": parsed,
+        "duration_seconds": round(time.monotonic() - started, 3),
     }
+    STAGE_EVENTS.append({
+        "stage": Path(cmd[1]).name if len(cmd) > 1 else Path(cmd[0]).name,
+        "ok": result["ok"],
+        "duration_seconds": result["duration_seconds"],
+    })
+    return result
 
 
 def parse_magic_stdout(stdout: str) -> dict[str, Any]:
@@ -431,6 +481,7 @@ def make_magic_assets_cmd(
     upload_workers: int,
     keep_inline_code: bool,
     legacy_uploader: bool = False,
+    cache_manifest: Path | None = None,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -453,6 +504,8 @@ def make_magic_assets_cmd(
         cmd.append("--keep-inline-code")
     if legacy_uploader:
         cmd.append("--legacy-uploader")
+    if cache_manifest:
+        cmd += ["--cache-manifest", str(cache_manifest)]
     return cmd
 
 
@@ -534,6 +587,7 @@ def _run_magic_assets(
     output_dir: Path,
     log_name: str,
     legacy_uploader: bool = False,
+    cache_manifest: Path | None = None,
 ) -> dict[str, Any]:
     """Run one Magic asset-packaging pass.
 
@@ -552,10 +606,162 @@ def _run_magic_assets(
             upload_workers=upload_workers,
             keep_inline_code=keep_inline_code,
             legacy_uploader=legacy_uploader,
+            cache_manifest=cache_manifest,
         ),
         cwd=REPO,
         log_path=output_dir / log_name,
     )
+
+
+def _load_magic_page_assets_module():
+    spec = importlib.util.spec_from_file_location("publisher_magic_page_assets", MAGIC_PAGE_ASSETS)
+    if not spec or not spec.loader:
+        raise RuntimeError(f"cannot load Magic asset helper: {MAGIC_PAGE_ASSETS}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def extract_page_hashes(html: str) -> list[dict[str, Any]]:
+    """Return stable page hashes for incremental post-publish verification."""
+    marker = '<div class="slide-frame">'
+    parts = html.split(marker)[1:]
+    pages: list[dict[str, Any]] = []
+    for index, part in enumerate(parts, 1):
+        key_match = re.search(r'\bdata-slide-key=["\']([^"\']+)', part)
+        key = key_match.group(1) if key_match else f"page-{index}"
+        pages.append({
+            "index": index,
+            "key": key,
+            "sha256": hashlib.sha256(part.encode("utf-8")).hexdigest(),
+        })
+    return pages
+
+
+def select_incremental_self_check_pages(
+    current_pages: list[dict[str, Any]],
+    prior_pages: list[dict[str, Any]],
+    *,
+    leading_pages: int,
+    max_pages: int,
+) -> list[int]:
+    """Select cover/last plus changed pages and their immediate neighbours."""
+    count = len(current_pages)
+    if count <= 0:
+        return []
+    if not prior_pages:
+        return list(range(1, min(count, max(1, leading_pages)) + 1))
+
+    prior_by_key = {str(row.get("key")): row for row in prior_pages}
+    current_by_key = {str(row.get("key")): row for row in current_pages}
+    changed: set[int] = set()
+    for row in current_pages:
+        prior = prior_by_key.get(str(row.get("key")))
+        if not prior or prior.get("sha256") != row.get("sha256"):
+            changed.add(int(row["index"]))
+    for key, prior in prior_by_key.items():
+        if key not in current_by_key:
+            old_index = int(prior.get("index") or 1)
+            changed.add(max(1, min(count, old_index)))
+
+    selected: set[int] = {1, count}
+    if not changed:
+        return sorted(selected)
+    for index in sorted(changed):
+        selected.update({max(1, index - 1), index, min(count, index + 1)})
+    ordered = sorted(selected)
+    limit = max(2, int(max_pages or 5))
+    if len(ordered) <= limit:
+        return ordered
+    # Preserve the bookends, then spend the remaining budget on changed pages
+    # before their neighbours.
+    priority = [1, count]
+    priority.extend(index for index in sorted(changed) if index not in priority)
+    priority.extend(index for index in ordered if index not in priority)
+    return sorted(dict.fromkeys(priority[:limit]))
+
+
+def freeze_publish_snapshot(
+    *,
+    package_source: Path,
+    asset_base_dir: Path,
+    source_html: Path,
+    output_dir: Path,
+) -> tuple[Path, dict[str, Any]]:
+    """Copy the exact publish-bound HTML and local resource closure.
+
+    The snapshot is immutable and content-addressed. Later edits to the live run
+    cannot silently change bytes halfway through upload or force the publisher
+    to chase a moving target.
+    """
+    module = _load_magic_page_assets_module()
+    html = package_source.read_text(encoding="utf-8", errors="replace")
+    rows: list[dict[str, Any]] = []
+    replacements: dict[str, str] = {}
+    for ref in module.collect_resource_refs(html):
+        try:
+            asset = module.resolve_asset(package_source, ref, base_dir=asset_base_dir)
+        except Exception:
+            asset = None
+        if asset is None:
+            continue
+        resolved = asset.resolve()
+        sha256 = _sha256_file(resolved)
+        suffix = resolved.suffix.lower()[:16] or ".bin"
+        snapshot_ref = f"assets/{sha256[:24]}{suffix}"
+        replacements[ref] = snapshot_ref
+        rows.append({
+            "ref": ref,
+            "source": str(resolved),
+            "snapshot_ref": snapshot_ref,
+            "sha256": sha256,
+            "bytes": resolved.stat().st_size,
+        })
+
+    identity = hashlib.sha256(html.encode("utf-8"))
+    for row in sorted(rows, key=lambda item: (item["ref"], item["sha256"])):
+        identity.update(b"\0")
+        identity.update(row["ref"].encode("utf-8"))
+        identity.update(b"\0")
+        identity.update(row["sha256"].encode("ascii"))
+    snapshot_id = identity.hexdigest()[:20]
+    snapshot_dir = output_dir / "publish-snapshots" / snapshot_id
+    assets_dir = snapshot_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    for row in rows:
+        target = snapshot_dir / row["snapshot_ref"]
+        if not target.exists() or _sha256_file(target) != row["sha256"]:
+            shutil.copy2(Path(row["source"]), target)
+
+    frozen_html = html
+    # Longest refs first avoids a short path replacing a prefix of another ref.
+    for ref, snapshot_ref in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        frozen_html = frozen_html.replace(ref, snapshot_ref)
+    snapshot_html = snapshot_dir / "index.html"
+    snapshot_html.write_text(frozen_html, encoding="utf-8")
+    manifest = {
+        "version": 1,
+        "snapshot_id": snapshot_id,
+        "created_at": now_iso(),
+        "source_html": str(source_html.resolve()),
+        "package_source": str(package_source.resolve()),
+        "snapshot_html": str(snapshot_html.resolve()),
+        "html_sha256": hashlib.sha256(frozen_html.encode("utf-8")).hexdigest(),
+        "assets": rows,
+        "pages": extract_page_hashes(frozen_html),
+    }
+    write_json(snapshot_dir / "publish-snapshot.json", manifest)
+    write_json(output_dir / "publish-snapshot.json", manifest)
+    return snapshot_html, manifest
 
 
 def publish_magic_page(
@@ -682,6 +888,25 @@ def publish_magic_page(
                 return payload
             if iframe_ready.exists():
                 package_source = iframe_ready
+        try:
+            package_source, _snapshot = freeze_publish_snapshot(
+                package_source=package_source,
+                asset_base_dir=source_html.parent,
+                source_html=html_path,
+                output_dir=output_dir,
+            )
+            # Every later packaging pass resolves only against immutable bytes.
+            source_html = package_source
+        except Exception as exc:
+            payload = magic_failure(
+                f"publish snapshot freeze failed: {exc}",
+                package_source,
+                base_url,
+                None,
+                dry_run=dry_run,
+            )
+            write_publish_reports(output_dir, payload)
+            return payload
         packaged = output_dir / "magic-page-ready.html"
         # delivery-9 / P1#4: keep the framework runtime + per-slide CSS INLINE by
         # default. Externalizing them turns feishu-deck.js into a hash-named hosted
@@ -711,6 +936,7 @@ def publish_magic_page(
             output_dir=output_dir,
             log_name="publisher-magic-assets-preview.log",
             legacy_uploader=False,
+            cache_manifest=None,
         )
         if not preview["ok"]:
             payload = magic_failure(
@@ -750,6 +976,7 @@ def publish_magic_page(
                 output_dir=output_dir,
                 log_name="publisher-magic-assets-externalized-preview.log",
                 legacy_uploader=False,
+                cache_manifest=None,
             )
             if not externalized["ok"]:
                 payload = magic_failure(
@@ -832,6 +1059,12 @@ def publish_magic_page(
                 output_dir=output_dir,
                 log_name="publisher-magic-assets.log",
                 legacy_uploader=bool(args.legacy_magic_asset_uploader),
+                cache_manifest=(
+                    args.magic_asset_cache
+                    if not args.no_magic_asset_cache
+                    and uploader.resolve() == DEFAULT_MAGIC_ASSET_UPLOADER.resolve()
+                    else None
+                ),
             )
             if not package["ok"]:
                 payload = magic_failure(
@@ -878,6 +1111,76 @@ def publish_magic_page(
             write_publish_reports(output_dir, payload)
             return payload
         working_html = packaged
+        if not args.skip_magic_asset_faas:
+            asset_report = output_dir / "magic-asset-faas.json"
+            asset_faas_record_id = args.magic_asset_faas_record_id
+            if not asset_faas_record_id and asset_report.exists():
+                try:
+                    prior_asset_report = read_json(asset_report)
+                    prior_shards = prior_asset_report.get("faas_shards") or []
+                    if prior_shards:
+                        asset_faas_record_id = ",".join(
+                            str(row.get("record_id") or "") for row in prior_shards if row.get("record_id")
+                        )
+                    else:
+                        asset_faas_record_id = str((prior_asset_report.get("faas") or {}).get("record_id") or "")
+                except Exception:
+                    asset_faas_record_id = ""
+            asset_faas_name = "feishu_deck_h5_" + slugify(task_id.replace("/", "-"), "deck")[:40] + "_assets"
+            asset_cmd = [
+                sys.executable,
+                str(MAGIC_ASSET_FAAS),
+                str(packaged),
+                "--out",
+                str(packaged),
+                "--report",
+                str(asset_report),
+                "--base-url",
+                base_url,
+                "--faas-name",
+                asset_faas_name,
+            ]
+            if asset_faas_record_id:
+                asset_cmd += ["--faas-record-id", asset_faas_record_id]
+            if dry_run or args.magic_asset_faas_dry_run:
+                asset_cmd.append("--dry-run")
+            asset_proxy = subprocess_record(
+                asset_cmd,
+                cwd=REPO,
+                log_path=output_dir / "publisher-magic-asset-faas.log",
+                timeout=NETWORK_SUBPROCESS_TIMEOUT,
+            )
+            if not asset_proxy["ok"]:
+                payload = magic_failure(
+                    "Magic TOS asset FaaS preparation failed",
+                    packaged,
+                    base_url,
+                    asset_proxy,
+                    dry_run=dry_run,
+                )
+                write_publish_reports(output_dir, payload)
+                return payload
+            if packaged.exists():
+                working_html = packaged
+
+    if args.skip_magic_asset_prepare:
+        try:
+            working_html, _snapshot = freeze_publish_snapshot(
+                package_source=html_path,
+                asset_base_dir=html_path.parent,
+                source_html=html_path,
+                output_dir=output_dir,
+            )
+        except Exception as exc:
+            payload = magic_failure(
+                f"publish snapshot freeze failed: {exc}",
+                html_path,
+                base_url,
+                None,
+                dry_run=dry_run,
+            )
+            write_publish_reports(output_dir, payload)
+            return payload
 
     integrity = audit_publish_integrity(working_html, output_dir)
     if not integrity["ok"]:
@@ -979,6 +1282,31 @@ def write_publish_reports(output_dir: Path, payload: dict[str, Any]) -> None:
     (output_dir / report_name).write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_timing_report(output_dir: Path, timing: dict[str, Any]) -> None:
+    lines = [
+        "# Publish Timing",
+        "",
+        f"- total_seconds: {timing.get('total_seconds')}",
+        f"- budget_seconds: {timing.get('budget_seconds')}",
+        f"- within_budget: {timing.get('within_budget')}",
+        "",
+        "## Stages",
+        "",
+    ]
+    for row in timing.get("stages") or []:
+        lines.append(
+            f"- `{row.get('stage')}` · {row.get('duration_seconds')}s · "
+            + ("ok" if row.get("ok") else "failed")
+        )
+    if not timing.get("within_budget"):
+        lines.extend([
+            "",
+            "Publisher exceeded its delivery SLO. Stop retrying this artifact in the",
+            "PUBLISH lane and route the named slow/failed stage to PUBLISH_RECOVERY.",
+        ])
+    (output_dir / "PUBLISH_TIMING.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
 def _load_self_check():
     """Load subskills/publisher/self_check.py by path (sibling module)."""
     spec = importlib.util.spec_from_file_location("publisher_self_check", SELF_CHECK)
@@ -1021,6 +1349,7 @@ def post_publish_self_check(
             out_dir=output_dir,
             pages=args.self_check_pages,
             threshold=args.self_check_threshold,
+            page_indices=getattr(args, "_self_check_page_indices", None),
         )
     except SystemExit as exc:
         return {"enabled": True, "ok": True if args.self_check_soft else False,
@@ -1047,6 +1376,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="deprecated no-op; publisher now runs resource-integrity checks instead of deck-validator",
     )
     ap.add_argument("--dry-run", action="store_true", help="simulate publishing without external writes")
+    ap.add_argument(
+        "--publish-time-budget",
+        type=int,
+        default=DEFAULT_PUBLISH_TIME_BUDGET_SECONDS,
+        help="maximum wall-clock seconds available to publisher child stages (default 600)",
+    )
 
     ap.add_argument("--magic-page-script", type=Path)
     ap.add_argument("--magic-asset-uploader", type=Path)
@@ -1068,8 +1403,22 @@ def build_parser() -> argparse.ArgumentParser:
                     help="existing Magic FaaS record id to update for local iframe HTML proxying")
     ap.add_argument("--magic-iframe-faas-dry-run", action="store_true",
                     help="rewrite local iframe HTML through a deterministic fake FaaS URL for tests")
+    ap.add_argument("--skip-magic-asset-faas", action="store_true",
+                    help="do not proxy Magic TOS assets that are served with attachment disposition")
+    ap.add_argument("--magic-asset-faas-record-id", default="",
+                    help="comma-separated existing Magic FaaS record ids to update for binary asset proxying")
+    ap.add_argument("--magic-asset-faas-dry-run", action="store_true",
+                    help="rewrite Magic TOS assets through a deterministic fake FaaS URL for tests")
     ap.add_argument("--magic-upload-workers", type=int, default=6,
                     help="parallel upload workers for Magic Page asset and iframe preparation")
+    ap.add_argument(
+        "--magic-asset-cache",
+        type=Path,
+        default=DEFAULT_MAGIC_ASSET_CACHE,
+        help="persistent content-addressed upload cache shared across publisher runs",
+    )
+    ap.add_argument("--no-magic-asset-cache", action="store_true",
+                    help="disable persistent Magic asset URL reuse for this invocation")
     # delivery-8: oversized-resource pre-flight (run before the upload API).
     ap.add_argument("--no-compress-oversized", action="store_true",
                     help="do NOT auto-compress oversized videos; instead fail the publish with a "
@@ -1092,6 +1441,16 @@ def build_parser() -> argparse.ArgumentParser:
                     help="a self-check red card warns instead of failing the publish")
     ap.add_argument("--self-check-pages", type=int, default=3,
                     help="how many leading slides the post-publish self-check verifies (default 3)")
+    ap.add_argument(
+        "--self-check-page",
+        dest="self_check_page_indices",
+        action="append",
+        type=int,
+        default=[],
+        help="1-based page to verify; repeat to override automatic incremental selection",
+    )
+    ap.add_argument("--self-check-max-pages", type=int, default=5,
+                    help="maximum automatic incremental screenshots after a prior successful publish (default 5)")
     ap.add_argument("--self-check-threshold", type=float, default=0.06,
                     help="per-slide diff ratio that red-cards a page in the post-publish self-check (default 0.06)")
 
@@ -1099,11 +1458,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global PUBLISH_DEADLINE
+    STAGE_EVENTS.clear()
+    invocation_started = time.monotonic()
     args = build_parser().parse_args(argv)
+    args.magic_asset_cache = args.magic_asset_cache.expanduser().resolve()
+    budget_seconds = max(30, int(args.publish_time_budget or DEFAULT_PUBLISH_TIME_BUDGET_SECONDS))
+    PUBLISH_DEADLINE = invocation_started + budget_seconds
     if not args.task_id and not args.html:
         raise SystemExit("publisher: --html or --task-id is required")
 
-    task_id = args.task_id or f"publisher/{slugify(Path(args.html).stem if args.html else 'html')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    task_id = args.task_id or stable_publisher_task_id(Path(args.html))
     _task_dir: Path | None = None
     output_dir: Path
     if args.task_id:
@@ -1113,6 +1478,15 @@ def main(argv: list[str] | None = None) -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     html_path = resolve_html(args, output_dir)
+    prior_manifest: dict[str, Any] = {}
+    prior_manifest_path = output_dir / "publish-manifest.json"
+    if prior_manifest_path.is_file():
+        try:
+            candidate = read_json(prior_manifest_path)
+            if (candidate.get("publication") or {}).get("ok") and (candidate.get("self_check") or {}).get("ok"):
+                prior_manifest = candidate
+        except (OSError, json.JSONDecodeError, TypeError):
+            prior_manifest = {}
 
     title = args.title or (read_json(output_dir / "deck.json").get("title") if (output_dir / "deck.json").exists() else "") or (html_path.stem if html_path else task_id)
 
@@ -1121,12 +1495,53 @@ def main(argv: list[str] | None = None) -> int:
     else:
         publication = publish_magic_page(html_path=html_path, output_dir=output_dir, title=title, task_id=task_id, args=args)
 
+    snapshot: dict[str, Any] = {}
+    snapshot_path = output_dir / "publish-snapshot.json"
+    if snapshot_path.is_file():
+        try:
+            snapshot = read_json(snapshot_path)
+        except (OSError, json.JSONDecodeError, TypeError):
+            snapshot = {}
+    if args.self_check_page_indices:
+        args._self_check_page_indices = sorted({index for index in args.self_check_page_indices if index > 0})
+    else:
+        args._self_check_page_indices = select_incremental_self_check_pages(
+            snapshot.get("pages") or [],
+            (prior_manifest.get("snapshot") or {}).get("pages") or [],
+            leading_pages=args.self_check_pages,
+            max_pages=args.self_check_max_pages,
+        ) or None
+
+    self_check_started = time.monotonic()
     self_check = post_publish_self_check(
         html_path=html_path,
         publication=publication,
         output_dir=output_dir,
         args=args,
     )
+    STAGE_EVENTS.append({
+        "stage": "post-publish-self-check",
+        "ok": bool(self_check.get("ok")),
+        "duration_seconds": round(time.monotonic() - self_check_started, 3),
+    })
+
+    total_seconds = round(time.monotonic() - invocation_started, 3)
+    timing = {
+        "total_seconds": total_seconds,
+        "budget_seconds": budget_seconds,
+        "within_budget": total_seconds <= budget_seconds,
+        "stages": list(STAGE_EVENTS),
+    }
+    write_json(output_dir / "publish-timing.json", timing)
+    write_timing_report(output_dir, timing)
+    snapshot_summary = {
+        "version": snapshot.get("version"),
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "html_sha256": snapshot.get("html_sha256"),
+        "asset_count": len(snapshot.get("assets") or []),
+        "pages": snapshot.get("pages") or [],
+        "manifest": repo_rel(snapshot_path) if snapshot else "",
+    }
 
     manifest = {
         "task_id": task_id,
@@ -1134,6 +1549,8 @@ def main(argv: list[str] | None = None) -> int:
         "dry_run": args.dry_run,
         "publication": publication,
         "self_check": self_check,
+        "snapshot": snapshot_summary,
+        "timing": timing,
         "skipped": [{"type": "library_ingest", "reason": "publisher only publishes to Magic Page; use subskills/importer/ingest.py for library ingest"}],
     }
     manifest_path = output_dir / "publish-manifest.json"

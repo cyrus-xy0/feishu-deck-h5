@@ -29,10 +29,82 @@ def active_docs() -> list[Path]:
 def test_machine_contracts_validate() -> None:
     contract = load_module("skill_contract", ROOT / "assets" / "skill-contract.py")
     result = contract.validate()
-    assert result == {"ok": True, "modes": 14, "formats": 5, "gates": 9, "profiles": 7}
+    assert result == {"ok": True, "modes": 15, "formats": 5, "gates": 10, "profiles": 7}
     packet = contract.route_packet("MAINTENANCE")
     assert "python3 -m pytest" in packet["gate_contract"]["command"]
     assert "unittest" not in packet["gate_contract"]["command"]
+    recovery = contract.route_packet("PUBLISH_RECOVERY")
+    assert recovery["gate_contract"]["requires_repository_release_gate"] is False
+    assert "tests/test_publish_self_check.py" in recovery["gate_contract"]["command"]
+    assert "deck-json/tests" not in recovery["gate_contract"]["command"]
+
+
+def test_execution_policy_closes_passed_authoring_and_bounds_delivery() -> None:
+    contract = load_module("skill_contract_execution", ROOT / "assets" / "skill-contract.py")
+    policy = contract.load_contract("gate")["execution_policy"]
+    authoring = policy["authoring"]
+    delivery = policy["delivery"]
+
+    assert authoring["pass_closes_authoring"] is True
+    assert authoring["formal_fix_renders_max"] == 1
+    assert {
+        "advisory_only",
+        "optional_polish",
+        "packaging_runtime_failure",
+    } <= set(authoring["do_not_reopen_on"])
+    assert delivery["one_shape_per_request"] is True
+    assert delivery["verify_only_selected_shape"] is True
+    assert delivery["package_repro_attempts_max"] == 1
+    assert delivery["package_failure_mode"] == "MAINTENANCE"
+    assert delivery["publish_failure_mode"] == "PUBLISH_RECOVERY"
+    assert delivery["preserve_last_good_authoring_artifact"] is True
+
+    for mode in contract.load_contract("workflow")["modes"]:
+        assert contract.route_packet(mode)["execution_policy"] == policy
+
+
+def test_stop_policy_is_visible_in_controller_and_delivery_docs() -> None:
+    controller = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    renderer = (ROOT / "subskills" / "renderer" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    delivery = (ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+    quickstart = (ROOT / "references" / "raw-page-quickstart.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "A formal PASS plus the required visual review closes authoring" in controller
+    assert "Single-slide budget: one preview, at most one targeted correction" in controller
+    assert "Choose one delivery shape" in controller
+    assert "Loop: iterate with preview" not in renderer
+    assert "Single-slide budget: run one preview" in renderer
+    assert "One shape, one verification path, one stop" in delivery
+    assert "`PUBLISH_RECOVERY` task" in delivery
+    assert "publisher-focused tests plus one artifact" in delivery
+    assert (
+        "`python3 deck-json/render-deck.py <output>/deck.json <output> --inline`"
+        in delivery
+    )
+    assert "PASS 关闭作者循环" in quickstart
+    assert "交付形态只选一个" in quickstart
+
+
+def test_finalize_inline_hint_uses_the_required_render_arguments() -> None:
+    finalize = (ROOT / "assets" / "finalize.sh").read_text(encoding="utf-8")
+    assert "render-deck.py <deck.json> <output-dir> --inline" in finalize
+    assert "render-deck.py runs/<ts>/output --inline" not in finalize
+
+
+def test_finalize_emits_a_terminal_receipt_without_linked_named_copy() -> None:
+    finalize = (ROOT / "assets" / "finalize.sh").read_text(encoding="utf-8")
+    assert 'cp "$HTML" "$NAMED_HTML"' not in finalize
+    assert "local mode does not accept --name" in finalize
+    assert "slide-library 入库门禁" not in finalize
+    assert "FAIL_DOMAIN=page DO_NOT_EDIT_DECK=0" in finalize
+    assert "FAIL_DOMAIN=delivery DO_NOT_EDIT_DECK=1" in finalize
+    for shape in ("local", "remote", "library"):
+        assert f"FINALIZE_RESULT status=pass shape={shape}" in finalize
+    assert finalize.count("stop=true") == 3
 
 
 def test_router_table_matches_workflow_manifest() -> None:

@@ -13,6 +13,7 @@ proving that a normal small deck still publishes through the new wiring:
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -66,6 +67,79 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
         if not shutil.which("node"):
             self.skipTest("node not available")
 
+    def test_publish_snapshot_freezes_local_asset_bytes_and_page_hashes(self) -> None:
+        spec = importlib.util.spec_from_file_location("publisher_snapshot_test", PUBLISH)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        publisher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(publisher)
+        with tempfile.TemporaryDirectory(prefix="publish-snapshot-") as td:
+            tmp = Path(td)
+            source = tmp / "source"
+            output = tmp / "output"
+            source.mkdir()
+            output.mkdir()
+            logo = source / "logo.png"
+            logo.write_bytes(b"first-logo")
+            html = source / "index.html"
+            html.write_text(
+                '<div class="slide-frame"><div class="slide" data-slide-key="cover"><img src="logo.png"></div></div>',
+                encoding="utf-8",
+            )
+            snapshot_html, manifest = publisher.freeze_publish_snapshot(
+                package_source=html,
+                asset_base_dir=source,
+                source_html=html,
+                output_dir=output,
+            )
+            frozen_ref = manifest["assets"][0]["snapshot_ref"]
+            frozen_asset = snapshot_html.parent / frozen_ref
+            self.assertEqual(frozen_asset.read_bytes(), b"first-logo")
+            self.assertEqual(manifest["pages"][0]["key"], "cover")
+
+            logo.write_bytes(b"second-logo")
+            self.assertEqual(frozen_asset.read_bytes(), b"first-logo")
+            snapshot_two, manifest_two = publisher.freeze_publish_snapshot(
+                package_source=html,
+                asset_base_dir=source,
+                source_html=html,
+                output_dir=output,
+            )
+            self.assertNotEqual(snapshot_two.parent, snapshot_html.parent)
+            self.assertNotEqual(manifest_two["snapshot_id"], manifest["snapshot_id"])
+
+    def test_incremental_self_check_selection_prioritizes_changed_pages_and_bookends(self) -> None:
+        spec = importlib.util.spec_from_file_location("publisher_selection_test", PUBLISH)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        publisher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(publisher)
+        prior = [
+            {"index": index, "key": f"s{index}", "sha256": f"old-{index}"}
+            for index in range(1, 7)
+        ]
+        current = [dict(row) for row in prior]
+        current[2] = {"index": 3, "key": "s3", "sha256": "new-3"}
+        selected = publisher.select_incremental_self_check_pages(
+            current,
+            prior,
+            leading_pages=3,
+            max_pages=5,
+        )
+        self.assertEqual(selected, [1, 2, 3, 4, 6])
+
+    def test_html_publish_workspace_is_stable_per_source_path(self) -> None:
+        spec = importlib.util.spec_from_file_location("publisher_task_id_test", PUBLISH)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        publisher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(publisher)
+        first = publisher.stable_publisher_task_id(Path("/tmp/a/index.html"))
+        repeated = publisher.stable_publisher_task_id(Path("/tmp/a/index.html"))
+        other = publisher.stable_publisher_task_id(Path("/tmp/b/index.html"))
+        self.assertEqual(first, repeated)
+        self.assertNotEqual(first, other)
+
     def test_normal_deck_publishes_through_preflight_keeping_runtime_inline(self) -> None:
         run_dir: Path | None = None
         try:
@@ -104,9 +178,15 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
                 self.assertEqual(pub["app_url"], "https://magic.example.test/html-box/test123")
 
                 # locate the exact run output dir from the manifest's task_id
-                task_id = manifest["task_id"]                       # e.g. publisher/<slug>-<ts>
-                run_dir = REPO / "runs" / task_id.split("/")[0]
+                task_id = manifest["task_id"]                       # stable publisher/<slug>-<path-hash>
+                run_dir = REPO / "runs" / task_id
                 out_dir = REPO / "runs" / task_id / "output"
+
+                self.assertTrue(manifest["snapshot"]["snapshot_id"])
+                self.assertTrue((out_dir / "publish-snapshot.json").exists())
+                self.assertTrue(manifest["timing"]["within_budget"])
+                self.assertTrue((out_dir / "publish-timing.json").exists())
+                self.assertTrue((out_dir / "PUBLISH_TIMING.md").exists())
 
                 self.assertTrue((out_dir / "MAGIC_PAGE_PREFLIGHT.md").exists(),
                                 "pre-flight report MAGIC_PAGE_PREFLIGHT.md was not written")
@@ -151,7 +231,7 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
                 )
                 self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
                 manifest = json.loads(proc.stdout)
-                run_dir = REPO / "runs" / manifest["task_id"].split("/")[0]
+                run_dir = REPO / "runs" / manifest["task_id"]
                 out_dir = REPO / "runs" / manifest["task_id"] / "output"
                 pub = manifest["publication"]
 
@@ -194,7 +274,7 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
                 )
                 self.assertEqual(proc.returncode, 1, proc.stderr or proc.stdout)
                 manifest = json.loads(proc.stdout)
-                run_dir = REPO / "runs" / manifest["task_id"].split("/")[0]
+                run_dir = REPO / "runs" / manifest["task_id"]
                 out_dir = REPO / "runs" / manifest["task_id"] / "output"
                 pub = manifest["publication"]
 
@@ -245,7 +325,7 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
                 )
                 self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
                 manifest = json.loads(proc.stdout)
-                run_dir = REPO / "runs" / manifest["task_id"].split("/")[0]
+                run_dir = REPO / "runs" / manifest["task_id"]
                 out_dir = REPO / "runs" / manifest["task_id"] / "output"
 
                 ready = (out_dir / "magic-page-ready.html").read_text(encoding="utf-8")
@@ -327,7 +407,7 @@ main().catch((e)=>{console.error(e.message);process.exit(1);});
                 )
                 self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
                 manifest = json.loads(proc.stdout)
-                run_dir = REPO / "runs" / manifest["task_id"].split("/")[0]
+                run_dir = REPO / "runs" / manifest["task_id"]
                 out_dir = REPO / "runs" / manifest["task_id"] / "output"
 
                 pub = manifest["publication"]
@@ -347,8 +427,11 @@ main().catch((e)=>{console.error(e.message);process.exit(1);});
                 # selected externalized mode performs one real package/upload
                 # pass, so shared assets are never uploaded twice.
                 uploaded_keys = upload_log.read_text(encoding="utf-8").splitlines()
-                logo_uploads = [key for key in uploaded_keys if key.endswith("logo.png")]
-                self.assertEqual(len(logo_uploads), 1, uploaded_keys)
+                image_uploads = [
+                    key for key in uploaded_keys
+                    if "/assets/" in key and key.endswith(".png")
+                ]
+                self.assertEqual(len(image_uploads), 1, uploaded_keys)
                 self.assertEqual(uploaded_keys.count("BATCH_PROCESS"), 1, uploaded_keys)
         finally:
             if run_dir and run_dir.exists():

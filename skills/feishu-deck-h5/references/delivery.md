@@ -26,7 +26,7 @@ with the deck:
 | User intent | shape | command | artifact |
 |---|---|---|---|
 | 自己/客户改文字 · 便携可编辑 (**默认 for a bare "打包"**) | **B** | `finalize.sh <slug> remote [--name lark-<cust>-<YYYY-MM-DD>]` | `deck-editable.zip` (or `<name>.zip`) |
-| 看一眼 / IM 转发 / 单文件 | **A** | `bash build.sh --inline` → ship the inline `.html` | one self-contained `.html` |
+| 看一眼 / IM 转发 / 单文件 | **A** | `python3 deck-json/render-deck.py <output>/deck.json <output> --inline` | one self-contained `.html` |
 | 入库素材库 / slide-library ingest | **D** | `finalize.sh <slug> library --deck-id lark-<cust>-<date>` | `deck.zip` |
 | 已部署到 Pages / CDN | **C** | ship the URL string | — |
 
@@ -38,6 +38,32 @@ must follow `lark-<customer>-<YYYY-MM-DD>`; omit it for a quick
 `verify-portable.py` preflight and **refuses** a non-self-contained output
 (self-contain with `finalize.sh` or `copy-assets --shared=copy` first;
 `--skip-portable-check` overrides).
+
+### One shape, one verification path, one stop
+
+`references/gate-policy.yaml.execution_policy` is the machine source of truth:
+
+1. Pick the single shape implied by the destination before running a delivery
+   command. Do not generate or validate inline HTML, editable zip, and library
+   zip in the same request unless the user explicitly asked for each one.
+2. Once the authoring gate passes and the required screenshot review is clean,
+   freeze `deck.json` and page CSS. Advisory-only findings and optional polish
+   do not reopen authoring.
+3. `finalize.sh` already performs the selected shape's copy, validation, and
+   portability checks. Do not add a second hand-rolled copy/zip/unzip chain just
+   to feel safer.
+4. If the selected inline/package artifact renders incorrectly, reproduce it
+   once against the unchanged package and compare it with the last-good authoring
+   screenshot. If the defect exists only in Magic publishing/runtime, route a
+   separate `PUBLISH_RECOVERY` task; other package defects route `MAINTENANCE`.
+   Preserve the good deck source and never tweak page content to chase a harness
+   race. The Magic recovery task runs publisher-focused tests plus one artifact
+   replay and hands back the URL; repository-wide tests belong to a later
+   `MAINTENANCE` release gate.
+5. Reopen authoring only when the same visible defect is reproduced in the
+   authoring artifact, a blocking authoring gate fires, or the user changes the
+   brief. Otherwise surface the passed checkpoint and state the delivery-layer
+   blocker.
 
 > Why this section exists (F-343): a bare "打包" once took ~8 min — a broad
 > filesystem `find` to locate the run, an agent re-deriving the portability
@@ -108,9 +134,11 @@ at delivery)" a **default stage**, not an afterthought. This complements the pre
 `font-size` px, see `check-only` / `validator-rules`): font sizes you
 **measure**, but composition / title position / hollowness you **look at**.
 
-### 🔒 Delivery contract — NEVER hand back a single linked HTML file
+### 🔒 Delivery contract — NEVER transport a single linked HTML file
 
-This is a **hard rule, no exceptions**. Before any artifact crosses
+This is a **hard transport rule**. A Mode 1 same-workspace checkpoint may
+surface the linked `index.html` path because no file crosses a boundary; it is
+not a portable deliverable. Before any artifact crosses
 the agent → user boundary (chat reply attachment, remote-codex
 transport-back, harness "download to user" hook, manual file-pick),
 verify the artifact form. Pick exactly **one** valid shape for the destination:
@@ -225,13 +253,11 @@ The script:
 
 **`--shared` mode (when to use which)**:
 
-- `--shared=link` *(default)* — replace `output/assets/shared/` with a single
-  symlink (absolute path) to the skill's canonical `assets/shared/`. HTML refs
-  are rewritten to local-looking `assets/shared/foo.png` and resolve through
-  the symlink. `zip -r`, Finder "Compress", and IM-upload tools all follow the
-  symlink and embed the real files into the zip — so "send the folder" workflows
-  still produce a self-contained deliverable for the recipient. Saves ~5–30 MB
-  per run vs. copy mode. Auto-migrates a real `shared/` directory from a prior
+- `--shared=link` *(default)* — local in-place iteration only. It replaces
+  `output/assets/shared/` with an absolute symlink to the canonical shared pool.
+  Do not feed this form to the packager or an arbitrary zip/IM tool; transport
+  shapes must use `--shared=copy`. Saves ~5–30 MB per run while the output stays
+  beside the skill. Auto-migrates a real `shared/` directory from a prior
   copy-mode run into a symlink on first re-run.
 - `--shared=copy` — full self-contained copy: every referenced shared file is
   duplicated into `output/assets/shared/`. Required for library mode
@@ -245,9 +271,8 @@ The script:
   pool. Do not use this for new material-library uploads; library mode now
   requires `--shared=copy` and packages `deck.zip`.
 
-After running with link or copy mode, `runs/<ts>/output/` is **send-friendly**:
-cut/copy the folder anywhere on disk (link mode keeps symlinks intact on the
-same machine) or zip and send (both modes produce a self-contained zip).
+After copy mode, `runs/<ts>/output/` is transport-safe. Link mode remains a
+same-machine working checkpoint; use `finalize.sh ... remote` before transport.
 
 **Migrating existing runs to link mode**:
 
@@ -315,11 +340,10 @@ a folder; `git log` shows the customer + date at a glance; matches
 the slide-library's `deck_id` pattern (`lark-<customer>-<date>`)
 so 1 deck → 1 deck_id without rename surgery.
 
-`finalize.sh` accepts `--name <slug>` to emit the named copy
-alongside `index.html` automatically. Pass it whenever you're
-delivering HTML preview/public-site artifacts — the working `index.html`
-stays in place for further edits, and the named copy goes out to the
-recipient. For slide-library ingest, keep the generated file name
+`finalize.sh ... remote` accepts `--name <slug>` to name the editable zip.
+Single-file HTML naming belongs to `render-deck.py --inline` or
+`inline-assets.py`; `finalize.sh local` deliberately emits no renamed linked
+HTML. For slide-library ingest, keep the generated file name
 `runs/<ts>/output/deck.zip` and carry the same identity through
 `--deck-id <deck-id>`.
 

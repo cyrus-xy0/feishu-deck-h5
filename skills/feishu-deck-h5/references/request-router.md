@@ -34,6 +34,7 @@ changes, update the manifest first and run `python3 assets/skill-contract.py val
 | `IMPORT` | Quality-gate and ingest a confirmed deck into the slide library | `subskills/importer/SKILL.md` | `LIBRARY_INGEST` |
 | `SIMULATE` | Rehearse stakeholder reactions to a validated deck | `subskills/simulator/SKILL.md` | `PRESENTATION_CHECKPOINT` |
 | `PUBLISH` | Publish a confirmed HTML artifact to Magic Page | `subskills/publisher/SKILL.md` | `MAGIC_PUBLISH` |
+| `PUBLISH_RECOVERY` | Repair a publisher/runtime blocker for the current confirmed Magic Page artifact without reopening deck authoring | `controller` | `PUBLISH_RECOVERY` |
 | `MAINTENANCE` | Review, test, repair, optimize, package, or maintain the feishu-deck-h5 codebase or skill itself | `controller` | `REPOSITORY_CHANGE` |
 <!-- END GENERATED WORKFLOW TABLE -->
 
@@ -321,10 +322,11 @@ open a new run. A beyond-default design on an edited page still passes the desig
 gate, but the work is an edit of the existing artifact. `RESKIN`, `LIFT+SWAP`, and
 `EDIT_IMPORTED_HTML` are the specialized EDIT-family modes documented above.
 
-### TRANSLATE / PARSE / IMPORT / SIMULATE / PUBLISH / MAINTENANCE
+### TRANSLATE / PARSE / IMPORT / SIMULATE / PUBLISH / PUBLISH_RECOVERY / MAINTENANCE
 
 These map 1:1 to their owning subskills (Translator / Parser / Importer /
-Simulator / Publisher), while `MAINTENANCE` stays with the controller and uses
-repository tests rather than a deck gate. Their detailed
+Simulator / Publisher). `PUBLISH_RECOVERY` stays with the controller but uses
+only the focused publisher recovery gate; `MAINTENANCE` uses repository tests
+rather than a deck gate. Their detailed
 workflows live in those subskills and in the root `SKILL.md` Canonical Workflow;
 this router only fixes the vocabulary and the routing target.

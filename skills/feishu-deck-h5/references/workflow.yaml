@@ -93,6 +93,13 @@
       "gate": "MAGIC_PUBLISH",
       "references": []
     },
+    "PUBLISH_RECOVERY": {
+      "family": "DELIVERY_RECOVERY",
+      "owner": "controller",
+      "trigger": "Repair a publisher/runtime blocker for the current confirmed Magic Page artifact without reopening deck authoring",
+      "gate": "PUBLISH_RECOVERY",
+      "references": ["references/delivery.md"]
+    },
     "MAINTENANCE": {
       "family": "REPOSITORY",
       "owner": "controller",

@@ -261,6 +261,13 @@ python3 deck-json/render-deck.py <deck.json> . --renumber --quick
   `❌ BLOCKING` 几何(R-VIS-CARD-OVERFLOW/R-OVERLAP/R-OVERFLOW/band-collide——已替你量好、
   点名元素)→只修那个元素,**只准 1 次** fix-render,还红就交人,别盲目迭代。
   deck-wide rollup(R20 字阶/配色/圆角漂移)是别页既存噪声,绝不重渲去「诊断」它。
+- **PASS 关闭作者循环**:正式门禁通过 + 整图审稿通过后,页面作者阶段结束。advisory-only、
+  可选润色、打包器 / 截图器 / runtime 异常都不能成为继续改 DeckJSON/CSS 的理由;
+  只有用户改 brief、作者产物本身复现可见缺陷、或作者门禁 BLOCK 才重开。
+- **交付形态只选一个**:按用户目的只做 inline / editable zip / library zip 其中一个,只验这个形态。
+  妙笔发布层异常对同一未改包最多复现 1 次,随后转 `PUBLISH_RECOVERY`;恢复链只跑 publisher
+  定向测试 + 当前发布物复放,全仓测试留给后续 `MAINTENANCE` release gate;别在一个单页任务里连续
+  inline→zip→解包→多轮 shoot,更别拿页面微调去掩盖 runtime 竞态。
 - **distribution advisory 有三分法**:`PASS` 但有非阻塞布局提示时,若明显可修(左右中线 /
   卡片下内距)就修 1 轮;若是有意构图,在 slide `allow:["imbalance"]` 或交付说明中留痕;
   不要无声忽略,也不要绿灯后无限追 advisory。

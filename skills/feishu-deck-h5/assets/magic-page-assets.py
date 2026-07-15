@@ -23,6 +23,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import unquote, unquote_to_bytes, urlparse
@@ -106,6 +107,23 @@ def normalize_http_ref(ref: str) -> str:
     if raw.startswith("//"):
         return "https:" + raw
     return raw
+
+
+def is_already_magic_hosted_ref(ref: str) -> bool:
+    """True for resources already on Magic's public asset/FaaS delivery path.
+
+    Re-downloading and re-uploading these URLs is redundant and can fail in
+    corp-network environments where the public hostname resolves through a
+    non-public proxy range. The downstream asset FaaS step owns any required
+    Content-Disposition normalization for Magic TOS objects.
+    """
+    if not is_http_ref(ref):
+        return False
+    parsed = urlparse(normalize_http_ref(ref))
+    host = (parsed.hostname or "").lower()
+    if host == "magic-builder.tos-cn-beijing.volces.com":
+        return True
+    return host == "magic.solutionsuite.cn" and parsed.path.startswith("/api/faas/")
 
 
 def is_probable_resource_attr(tag: str, attr: str, ref: str) -> bool:
@@ -235,6 +253,12 @@ def _upload_spec(asset: Path, *, key: str, base_url: str) -> dict[str, str]:
         f"{normalized_base}\0{key}\0{sha256}".encode("utf-8")
     ).hexdigest()
     content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    # cache_key remains request/key-specific and is validated by the Node
+    # uploader. content_id is deliberately key-independent so the same bytes
+    # can be reused across retries, renamed files, and later deck runs.
+    content_id = hashlib.sha256(
+        f"{normalized_base}\0{content_type}\0{sha256}".encode("utf-8")
+    ).hexdigest()
     return {
         "id": cache_key,
         "file": str(resolved),
@@ -242,7 +266,110 @@ def _upload_spec(asset: Path, *, key: str, base_url: str) -> dict[str, str]:
         "content_type": content_type,
         "sha256": sha256,
         "cache_key": cache_key,
+        "content_id": content_id,
     }
+
+
+class PersistentUploadCache:
+    """Content-addressed URL cache with partial-batch checkpointing.
+
+    The upload service can time out one asset after other rows already
+    succeeded. Recording each successful row before raising on the failed row
+    lets the next invocation resume only the misses instead of re-uploading the
+    whole deck.
+    """
+
+    VERSION = 1
+
+    def __init__(self, path: Path | None, *, base_url: str) -> None:
+        self.path = path.resolve() if path else None
+        self.base_url = _normalized_base_url(base_url)
+        self.entries: dict[str, dict[str, object]] = {}
+        self.hits = 0
+        self.writes = 0
+        self._dirty = False
+        if self.path and self.path.is_file():
+            try:
+                payload = json.loads(self.path.read_text(encoding="utf-8"))
+                if payload.get("version") == self.VERSION and isinstance(payload.get("entries"), dict):
+                    self.entries = dict(payload["entries"])
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                # A cache is an optimization, never a publish blocker.
+                self.entries = {}
+
+    def lookup(self, spec: dict[str, str]) -> str | None:
+        row = self.entries.get(spec.get("content_id") or "")
+        if not isinstance(row, dict):
+            return None
+        url = str(row.get("url") or "")
+        if (
+            row.get("base_url") != self.base_url
+            or row.get("sha256") != spec.get("sha256")
+            or row.get("content_type") != spec.get("content_type")
+            or not url.startswith(("http://", "https://"))
+        ):
+            return None
+        self.hits += 1
+        return url
+
+    def record(self, spec: dict[str, str], url: str) -> None:
+        content_id = spec.get("content_id") or ""
+        if not content_id or not url.startswith(("http://", "https://")):
+            return
+        row = {
+            "base_url": self.base_url,
+            "sha256": spec.get("sha256") or "",
+            "content_type": spec.get("content_type") or "application/octet-stream",
+            "url": url,
+            "updated_at_unix": int(time.time()),
+        }
+        if self.entries.get(content_id) != row:
+            self.entries[content_id] = row
+            self.writes += 1
+            self._dirty = True
+
+    def record_payload(self, payload: object, specs: list[dict[str, str]]) -> None:
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            return
+        by_id = {spec["id"]: spec for spec in specs}
+        for row in payload["items"]:
+            if not isinstance(row, dict) or not row.get("ok"):
+                continue
+            spec = by_id.get(str(row.get("id") or ""))
+            url = str(row.get("url") or "")
+            if spec:
+                self.record(spec, url)
+        # Checkpoint successful rows even when another row in the same response
+        # failed and validation is about to raise.
+        self.flush()
+
+    def split(self, specs: list[dict[str, str]]) -> tuple[dict[str, str], list[dict[str, str]]]:
+        hits: dict[str, str] = {}
+        misses: list[dict[str, str]] = []
+        for spec in specs:
+            cached = self.lookup(spec)
+            if cached:
+                hits[spec["id"]] = cached
+            else:
+                misses.append(spec)
+        return hits, misses
+
+    def flush(self) -> None:
+        if not self.path or not self._dirty:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(
+            json.dumps(
+                {"version": self.VERSION, "entries": self.entries},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(self.path)
+        self._dirty = False
 
 
 def _validate_batch_payload(
@@ -312,6 +439,7 @@ def upload_batch(
     workers: int,
     temp_dir: Path,
     legacy_uploader: bool = False,
+    upload_cache: PersistentUploadCache | None = None,
 ) -> dict[str, str]:
     """Upload unique staged specs and return cache_key/id -> public URL.
 
@@ -328,6 +456,11 @@ def upload_batch(
     ordered = list(unique.values())
     if not ordered:
         return {}
+    cached: dict[str, str] = {}
+    if upload_cache is not None:
+        cached, ordered = upload_cache.split(ordered)
+        if not ordered:
+            return cached
     bounded_workers = max(1, min(MAX_UPLOAD_WORKERS, int(workers or 1)))
     if legacy_uploader:
         def _one(spec: dict[str, str]) -> tuple[str, str]:
@@ -340,12 +473,19 @@ def upload_batch(
                 key=spec["key"],
             )
 
-        urls: dict[str, str] = {}
-        with ThreadPoolExecutor(max_workers=bounded_workers) as pool:
-            futures = [pool.submit(_one, spec) for spec in ordered]
-            for future in as_completed(futures):
-                item_id, url = future.result()
-                urls[item_id] = url
+        urls: dict[str, str] = dict(cached)
+        try:
+            with ThreadPoolExecutor(max_workers=bounded_workers) as pool:
+                future_to_spec = {pool.submit(_one, spec): spec for spec in ordered}
+                for future in as_completed(future_to_spec):
+                    spec = future_to_spec[future]
+                    item_id, url = future.result()
+                    urls[item_id] = url
+                    if upload_cache is not None:
+                        upload_cache.record(spec, url)
+        finally:
+            if upload_cache is not None:
+                upload_cache.flush()
         return urls
 
     manifest = temp_dir / "magic-upload-manifest.json"
@@ -380,12 +520,15 @@ def upload_batch(
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
         payload = None
-    return _validate_batch_payload(
+    if upload_cache is not None:
+        upload_cache.record_payload(payload, ordered)
+    uploaded = _validate_batch_payload(
         payload,
         ordered,
         returncode=proc.returncode,
         stderr=proc.stderr,
     )
+    return {**cached, **uploaded}
 
 
 class BatchUploadSession:
@@ -399,12 +542,14 @@ class BatchUploadSession:
         workers: int,
         temp_dir: Path,
         legacy_uploader: bool = False,
+        cache_manifest: Path | None = None,
     ) -> None:
         self.uploader = uploader
         self.base_url = _normalized_base_url(base_url)
         self.workers = max(1, min(MAX_UPLOAD_WORKERS, int(workers or 1)))
         self.temp_dir = temp_dir
         self.legacy_uploader = legacy_uploader
+        self.upload_cache = PersistentUploadCache(cache_manifest, base_url=self.base_url)
         self._proc = None
         self._stderr_file = None
         self._request_no = 0
@@ -450,6 +595,7 @@ class BatchUploadSession:
                 workers=self.workers,
                 temp_dir=temp_dir,
                 legacy_uploader=True,
+                upload_cache=self.upload_cache,
             )
         unique: dict[str, dict[str, str]] = {}
         for spec in specs:
@@ -460,6 +606,9 @@ class BatchUploadSession:
         ordered = list(unique.values())
         if not ordered:
             return {}
+        cached, ordered = self.upload_cache.split(ordered)
+        if not ordered:
+            return cached
         self._start()
         if self._proc is None or self._proc.stdin is None or self._proc.stdout is None:
             raise RuntimeError("batch uploader session is not running")
@@ -500,13 +649,15 @@ class BatchUploadSession:
                 "batch uploader returned invalid NDJSON: " + line[:300]
                 + "; custom legacy uploaders require explicit --legacy-uploader"
             ) from exc
-        return _validate_batch_payload(
+        self.upload_cache.record_payload(payload, ordered)
+        uploaded = _validate_batch_payload(
             payload,
             ordered,
             returncode=0,
             stderr=self._stderr(),
             expected_request_id=request_id,
         )
+        return {**cached, **uploaded}
 
     def __exit__(self, exc_type, exc, tb):
         exit_code = 0
@@ -528,6 +679,7 @@ class BatchUploadSession:
             stderr = self._stderr()
         if self._stderr_file is not None:
             self._stderr_file.close()
+        self.upload_cache.flush()
         if exc_type is None and exit_code != 0:
             raise RuntimeError(
                 f"batch uploader session exited {exit_code}: {stderr.strip()}"
@@ -722,7 +874,12 @@ def _rewrite_refs_batched(
 
         uploadable = [
             ref for ref in collect_resource_refs(html)
-            if ref.strip().startswith("data:") or is_http_ref(ref) or resolve_asset(html_path, ref, base_dir=base_dir)
+            if not is_already_magic_hosted_ref(ref)
+            and (
+                ref.strip().startswith("data:")
+                or is_http_ref(ref)
+                or resolve_asset(html_path, ref, base_dir=base_dir)
+            )
         ]
         workers = max(1, min(MAX_UPLOAD_WORKERS, int(upload_workers or 1)))
         staged_by_ref: dict[str, tuple[dict[str, str] | None, str]] = {}
@@ -980,6 +1137,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--keep-inline-code", action="store_true", help="do not externalize inline <style>/<script> blocks")
     parser.add_argument("--upload-workers", type=int, default=DEFAULT_UPLOAD_WORKERS, help="parallel asset upload workers")
     parser.add_argument(
+        "--cache-manifest",
+        default="",
+        help="persistent content-addressed upload cache; successful rows checkpoint before partial failures raise",
+    )
+    parser.add_argument(
         "--legacy-uploader",
         action="store_true",
         help=(
@@ -1014,6 +1176,7 @@ def main(argv: list[str] | None = None) -> int:
                 workers=args.upload_workers,
                 temp_dir=Path(session_tmp),
                 legacy_uploader=args.legacy_uploader,
+                cache_manifest=Path(args.cache_manifest).expanduser() if args.cache_manifest else None,
             ) as upload_session:
                 # Resources first, so CSS that contains local/data/remote url()
                 # is rewritten before its final bytes are hashed and uploaded.
@@ -1055,6 +1218,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  css blocks   : {css_uploaded}")
     print(f"  js blocks    : {js_uploaded}")
     print(f"  uploader mode: {'legacy-explicit' if args.legacy_uploader else 'batch-ndjson'}")
+    print(f"  cache hits   : {upload_session.upload_cache.hits}")
+    print(f"  cache writes : {upload_session.upload_cache.writes}")
     print(f"  key prefix   : {shlex.quote(args.key_prefix)}")
     return 0
 

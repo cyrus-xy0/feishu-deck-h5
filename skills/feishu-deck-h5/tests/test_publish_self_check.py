@@ -297,6 +297,29 @@ def test_run_self_check_degrades_when_no_browser(tmp_path, monkeypatch):
     assert (out / "PUBLISH_SELF_CHECK.md").exists()
 
 
+def test_run_self_check_passes_incremental_page_indices(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("<html><body></body></html>", encoding="utf-8")
+    unavailable = {"ok": False, "reason": "playwright not installed",
+                   "slides": [], "failed_requests": []}
+    seen = {}
+
+    def fake_capture(*args, **kwargs):
+        seen.update(kwargs)
+        return dict(unavailable), dict(unavailable)
+
+    monkeypatch.setattr(SC, "capture_pair", fake_capture)
+    payload = SC.run_self_check(
+        local=tmp_path,
+        remote=str(tmp_path),
+        out_dir=tmp_path / "out-pages",
+        pages=3,
+        page_indices=[2, 5],
+    )
+    assert seen["page_indices"] == [2, 5]
+    assert payload["pages"] == 2
+    assert payload["page_indices"] == [2, 5]
+
+
 def test_capture_pair_reuses_one_browser_with_parallel_isolated_contexts():
     """Structural performance contract: one launch, concurrent sides, one
     independent context per side. This stays deterministic in browser-less CI."""
@@ -333,7 +356,10 @@ def test_end_to_end_local_vs_local_copy_and_404(tmp_path):
 
     def _serve(directory):
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
-        httpd = socketserver.TCPServer(("127.0.0.1", 0), handler)
+        try:
+            httpd = socketserver.TCPServer(("127.0.0.1", 0), handler)
+        except PermissionError:
+            pytest.skip("local socket binding is blocked in this environment")
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         return httpd, httpd.server_address[1]
 
