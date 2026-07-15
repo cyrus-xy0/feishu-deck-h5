@@ -127,18 +127,40 @@ deterministic fixes. Do not redesign content during a reskin.
 ## Lift and swap
 
 Resolve source and target against their current DOM/DeckJSON order. Never infer
-`#N` from old labels or chat memory. Pass absolute paths.
+`#N` from old labels or chat memory. Pass absolute paths. Lock and display both
+resolved endpoints before writing:
+
+```text
+SOURCE [READ-ONLY] deck-a/index.html#6 · 《source title》
+                      ↓ replace; preserve source layout
+TARGET [WRITABLE]  deck-b/index.html#3 · 《target title》
+```
+
+If one endpoint is missing, the same URL is repeated for a cross-deck request,
+or the direction is ambiguous, stop. Do not reinterpret "复用现在 #3 页" as a
+target locator without an exact target artifact. A repair after lift preserves
+the lifted visual/prototype by default; fixing loading, assets, or runtime does
+not authorize a redesign.
 
 ### Replace one existing slot
 
 ```bash
-python3 deck-json/lift-swap.py SRC#index DST#index
-python3 deck-json/render-deck.py <target>/deck.json <target> \
-  --scope <target-index> --shoot
+# 1) mandatory read-only plan (default); review titles + arrow
+python3 deck-json/lift-swap.py \
+  --source SRC#index --target DST#index
+
+# 2) copy the exact token printed by step 1
+python3 deck-json/lift-swap.py \
+  --source SRC#index --target DST#index \
+  --apply --confirm <PLAN_TOKEN>
 ```
 
-The target key/order/page count must remain unchanged. Do not delete+paste or
-renumber for a same-slot replacement.
+`--apply` always performs the lift, scoped render, visual gate, and screenshot in
+a staged destination and commits atomically only after they pass. The source
+control files must remain byte-identical; the target key/order/page count must
+remain unchanged. Legacy positional `SRC DST` is plan-only and can never write.
+Same-deck source/target trees are rejected unless `--allow-same-deck` is explicit.
+Do not delete+paste or renumber for a same-slot replacement.
 
 ### Insert DeckJSON-native pages after an anchor
 

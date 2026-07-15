@@ -23,6 +23,14 @@ Before touching files, state:
    for `MAINTENANCE`. Use the smallest scope the user authorized.
 3. **Target** — the exact run/artifact/destination/repository files.
 
+For `LIFT+SWAP`, the lock is a two-endpoint invariant, not a generic target
+sentence. State the exact read-only source page and writable target page with a
+visible arrow: `SOURCE deck#N → TARGET deck#M`. Include both resolved titles and
+what must remain visually unchanged. If the request supplies only one distinct
+artifact, repeats one URL, or leaves either endpoint ambiguous, fail closed and
+ask for the missing endpoint; never infer it from chat memory. The source is
+read-only unless the user explicitly requests a same-deck operation.
+
 `references/workflow.yaml` is the mode source of truth. Use the route command
 first; read `references/request-router.md` only when the mode/artifact boundary
 is ambiguous. The route packet's `execution_policy` is binding, not advisory.
@@ -209,6 +217,19 @@ workers hand back fragments; the controller remains the sole `deck.json` writer.
   default layouts when no pack is selected.
 - Final delivery must be portable/self-contained; do not hand off a fragile
   repo-linked HTML file.
+- For `deck-open` / repo-linked local preview, serve from the repository root
+  (the directory containing both `runs/` and `skills/`), never from the run
+  directory. Open `http://127.0.0.1:<port>/runs/<run>/index.html`; verify the
+  page plus its shared `skills/feishu-deck-h5/assets/*.css` and `*.js` requests
+  return HTTP 200. A text-only page means those shared resources are 404 because
+  the server root is wrong; restart the server from the repository root instead
+  of editing or rerendering the deck.
+- Local deck runtime assets must use portable relative references. `http(s)://`,
+  protocol-relative, `file://`, OS-absolute, and custom-scheme static asset refs
+  are a hard `R-LOCAL-ASSET-REF` validation error; materialize them under
+  `assets/` or `input/` and store the relative path in DeckJSON before rendering.
+  Ordinary navigation links are not assets; intentional online iframes retain
+  the separate `R-IFRAME-REMOTE` policy.
 
 ## 8. Preflight and capability profiles
 

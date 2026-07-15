@@ -270,6 +270,10 @@ Action: default toward preserving the source layout. If ambiguous, ask once:
   `deck.mode` enum / missing render args / forgotten CSS rekey.
 - **Add a page to an EXISTING deck.json**: `deck-cli.py <dest> paste --from SRC
   --key K [--new-key NK]` (DeckJSON-native sources).
+- **Replace one existing slot from another deck**: run the plan-first
+  `deck-json/lift-swap.py --source SRC#index --target DST#index`, review its
+  resolved titles/direction, then rerun with `--apply --confirm <PLAN_TOKEN>`.
+  Positional refs are read-only and same-deck trees fail closed by default.
 - **Legacy / foreign HTML source** (no deck.json): `assets/lift-slides.py --shake`.
 - **Deterministic copy swap** after the lift: `deck-json/apply-text-pairs.py`.
 
