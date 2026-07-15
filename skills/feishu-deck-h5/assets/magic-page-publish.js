@@ -29,7 +29,7 @@ function optionValue(args, index, name) {
 function parseArgs(argv) {
   const [commandOrFile, ...rest] = argv;
   const args = commandOrFile === "publish" ? rest : [commandOrFile, ...rest].filter(Boolean);
-  const options = { title: "", baseUrl: "", openSource: false };
+  const options = { title: "", baseUrl: "", openSource: false, remoteId: "" };
   let filePath = "";
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -45,6 +45,13 @@ function parseArgs(argv) {
       options.baseUrl = arg.slice("--base-url=".length);
     } else if (arg.startsWith("--magic-base-url=")) {
       options.baseUrl = arg.slice("--magic-base-url=".length);
+    } else if (arg === "--remote-id" || arg === "--app-id") {
+      options.remoteId = optionValue(args, i, arg);
+      i++;
+    } else if (arg.startsWith("--remote-id=")) {
+      options.remoteId = arg.slice("--remote-id=".length);
+    } else if (arg.startsWith("--app-id=")) {
+      options.remoteId = arg.slice("--app-id=".length);
     } else if (arg === "--open-source") {
       options.openSource = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -100,7 +107,7 @@ async function publish(filePath, options) {
   const config = loadConfig();
   const relPath = path.relative(process.cwd(), absPath);
   const remoteInfo = config[relPath] || {};
-  const remoteId = remoteInfo.remoteId || "";
+  const remoteId = options.remoteId || remoteInfo.remoteId || "";
   const title = options.title || path.basename(absPath);
   const payload = {
     html,
@@ -139,10 +146,10 @@ async function publish(filePath, options) {
   const result = data.data || {};
   const appId = result.record_id || result.id || remoteId;
   const urls = {
-    html_box: result.html_box_url || "",
-    dashboard: result.dashboard_url || "",
-    panel: result.panel_url || "",
-    tab: result.tab_url || "",
+    html_box: result.html_box_url || (remoteInfo.urls && remoteInfo.urls.html_box) || (appId ? `${baseUrl}/html-box/${appId}` : ""),
+    dashboard: result.dashboard_url || (remoteInfo.urls && remoteInfo.urls.dashboard) || "",
+    panel: result.panel_url || (remoteInfo.urls && remoteInfo.urls.panel) || "",
+    tab: result.tab_url || (remoteInfo.urls && remoteInfo.urls.tab) || "",
   };
   config[relPath] = {
     remoteId: appId,
@@ -167,7 +174,7 @@ async function publish(filePath, options) {
 async function main() {
   const { filePath, options } = parseArgs(process.argv.slice(2));
   if (options.help || !filePath) {
-    console.log("Usage: node assets/magic-page-publish.js publish <file> [--title <title>] [--base-url <url>] [--open-source]");
+    console.log("Usage: node assets/magic-page-publish.js publish <file> [--title <title>] [--base-url <url>] [--remote-id <id>] [--open-source]");
     return;
   }
   await publish(filePath, options);

@@ -470,6 +470,40 @@ def write_publish_size_report(output_dir: Path, payload: dict[str, Any]) -> None
     report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
+def _clean_magic_app_id(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return raw.removeprefix("rec")
+
+
+def _publication_from_manifest(payload: dict[str, Any]) -> dict[str, Any]:
+    publication = payload.get("publication")
+    return publication if isinstance(publication, dict) else payload
+
+
+def resolve_existing_magic_app_id(output_dir: Path, args: argparse.Namespace) -> str:
+    explicit = _clean_magic_app_id(args.magic_page_app_id or os.environ.get("MAGIC_PAGE_APP_ID", ""))
+    if explicit:
+        return explicit
+    for name in ("magic-page-publish.json", "cloud-publish.json", "publish-manifest.json"):
+        path = output_dir / name
+        if not path.exists():
+            continue
+        try:
+            payload = _publication_from_manifest(read_json(path))
+        except Exception:
+            continue
+        app_id = _clean_magic_app_id(payload.get("app_id") or payload.get("id"))
+        if app_id:
+            return app_id
+        app_url = str(payload.get("app_url") or payload.get("url") or "")
+        match = re.search(r"/html-box/([^/?#]+)", app_url)
+        if match:
+            return _clean_magic_app_id(match.group(1))
+    return ""
+
+
 def make_magic_assets_cmd(
     *,
     package_source: Path,
@@ -1217,7 +1251,10 @@ def publish_magic_page(
         payload = magic_failure(f"Magic Page publisher not found: {script}", working_html, base_url, None)
         write_publish_reports(output_dir, payload)
         return payload
+    existing_app_id = resolve_existing_magic_app_id(output_dir, args)
     cmd = ["node", str(script), "publish", str(working_html), "--title", title, "--base-url", base_url]
+    if existing_app_id:
+        cmd += ["--remote-id", existing_app_id]
     if args.magic_page_open_source:
         cmd.append("--open-source")
     proc = subprocess_record(cmd, cwd=REPO, log_path=output_dir / "publisher-magic-page.log", timeout=NETWORK_SUBPROCESS_TIMEOUT)
@@ -1233,6 +1270,7 @@ def publish_magic_page(
         "base_url": base_url,
         "urls": parsed["urls"],
         "html": repo_rel(working_html),
+        "reused_app_id": existing_app_id,
         "reason": "" if ok else (proc["stderr"] or proc["stdout"] or "publish failed"),
     }
     write_publish_reports(output_dir, payload)
@@ -1394,6 +1432,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     ap.add_argument("--magic-base-url", default="")
+    ap.add_argument("--magic-page-app-id", default="",
+                    help="existing Magic Page html-box id to update; otherwise publisher reuses prior run publish metadata")
     ap.add_argument("--magic-page-dry-run", action="store_true")
     ap.add_argument("--magic-page-open-source", action="store_true")
     ap.add_argument("--skip-magic-asset-prepare", action="store_true")

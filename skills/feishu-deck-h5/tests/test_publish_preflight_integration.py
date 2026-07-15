@@ -60,6 +60,14 @@ PUBLISHER_LIMIT_JS = (
     'console.log(JSON.stringify({app_url:"https://magic.example.test/html-box/limited",'
     'app_id:"limited",chars}));'
 )
+PUBLISHER_UPDATE_JS = (
+    'const args=process.argv.slice(2);'
+    'const i=args.indexOf("--remote-id");'
+    'const id=i>=0?args[i+1]:"";'
+    'if(id!=="stable123"){console.error("missing remote id: "+id);process.exit(17);}'
+    'console.log(JSON.stringify({app_url:"https://magic.example.test/html-box/"+id,'
+    'app_id:id,remote_id:id}));'
+)
 
 
 class PublishPreflightIntegrationTest(unittest.TestCase):
@@ -285,6 +293,58 @@ class PublishPreflightIntegrationTest(unittest.TestCase):
                 self.assertIn("demo.html", report)
         finally:
             if run_dir and run_dir.exists():
+                shutil.rmtree(run_dir, ignore_errors=True)
+
+    def test_republish_reuses_prior_magic_app_id_for_stable_link(self) -> None:
+        task_id = "publisher-stable-link-test"
+        run_dir = REPO / "runs" / task_id
+        if run_dir.exists():
+            shutil.rmtree(run_dir, ignore_errors=True)
+        try:
+            with tempfile.TemporaryDirectory(prefix="pub-stable-") as td:
+                t = Path(td)
+                uploader = t / "up.js"
+                uploader.write_text(UPLOADER_JS, encoding="utf-8")
+                publisher = t / "pub-update.js"
+                publisher.write_text(PUBLISHER_UPDATE_JS, encoding="utf-8")
+
+                out_dir = run_dir / "output"
+                out_dir.mkdir(parents=True)
+                (out_dir / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 64)
+                (out_dir / "index.html").write_text(
+                    '<html><body><div class="slide" data-slide-key="s1">'
+                    '<img src="logo.png"><p>republish</p>'
+                    '</div></body></html>',
+                    encoding="utf-8",
+                )
+                (out_dir / "magic-page-publish.json").write_text(
+                    json.dumps({
+                        "ok": True,
+                        "app_id": "stable123",
+                        "app_url": "https://magic.example.test/html-box/stable123",
+                    }),
+                    encoding="utf-8",
+                )
+
+                env = dict(os.environ, MAGIC_TOKEN="dummy-token-for-test")
+                proc = subprocess.run(
+                    [sys.executable, str(PUBLISH),
+                     "--task-id", task_id, "--title", "Stable Link",
+                     "--skip-self-check",
+                     "--magic-base-url", "https://magic.example.test",
+                     "--magic-asset-uploader", str(uploader),
+                     "--magic-page-script", str(publisher)],
+                    text=True, capture_output=True, env=env,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+                manifest = json.loads(proc.stdout)
+                pub = manifest["publication"]
+                self.assertTrue(pub["ok"], pub.get("reason"))
+                self.assertEqual(pub["app_id"], "stable123")
+                self.assertEqual(pub["app_url"], "https://magic.example.test/html-box/stable123")
+                self.assertEqual(pub["reused_app_id"], "stable123")
+        finally:
+            if run_dir.exists():
                 shutil.rmtree(run_dir, ignore_errors=True)
 
     def test_local_iframe_html_is_proxied_before_publish(self) -> None:

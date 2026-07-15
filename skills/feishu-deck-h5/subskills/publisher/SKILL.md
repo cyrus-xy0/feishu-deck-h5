@@ -96,6 +96,10 @@ publish metadata.
   进程内有界并发上传资源与重写后的 CSS/JS，并校验每个资源的
   key、SHA-256 和返回 URL。不支持该协议的旧自定义 uploader 不会自动
   降级；只能在用户确认兼容需求后显式传 `--legacy-magic-asset-uploader`。
+- 同一个 run 后续再次发布必须优先复用上一次
+  `magic-page-publish.json` / `cloud-publish.json` / `publish-manifest.json`
+  里的 `app_id`,走 Magic Page PUT 更新,保持 `html-box/<id>` 链接稳定;也可用
+  `--magic-page-app-id` 显式指定要更新的已有链接。
 
 ## 速度、幂等与恢复契约
 
