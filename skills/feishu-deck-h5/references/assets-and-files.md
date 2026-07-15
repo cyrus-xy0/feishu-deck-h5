@@ -59,6 +59,74 @@ The slide library reads this manifest on ingest:
 - `framework` → leave alone; deck stays self-contained.
 - `deck-local` → copy into `decks/<id>/assets/` (deck-unique covers, photos).
 
+Local authoring keeps `runs/<run>/{,output/}assets/shared` as a relative symlink
+to this canonical pool. To audit or migrate older copied directories, use:
+
+```bash
+# report only (default; no writes)
+python3 assets/compact-runs.py
+
+# replace only byte-identical directories; conflicts are preserved and reported
+python3 assets/compact-runs.py --apply
+```
+
+Library delivery remains self-contained: `package-ingest.sh` follows only the
+verified runtime closure and writes those referenced shared files as regular ZIP
+members. It does not expand the authoring run or package the entire shared pool.
+
+### APFS COW compaction for other byte-identical run files
+
+`compact-runs.py` above is the semantic migration for the known
+`assets/shared` namespace: it replaces a verified copied directory with a
+relative link to the canonical shared pool. A separate conservative tool can
+compact other byte-identical files without changing any pathname. PNG and ZIP
+are the default extensions:
+
+```bash
+# report only (default; no writes)
+python3 assets/cow-dedupe-runs.py
+
+# macOS/APFS only; install verified clonefile(2) COW clones
+python3 assets/cow-dedupe-runs.py --apply
+```
+
+To limit a broader media/runtime pass to only the immediate run-level asset
+trees (never `input/`, `grafts/`, or arbitrary staging directories), use:
+
+```bash
+python3 assets/cow-dedupe-runs.py \
+  --scope run-assets \
+  --extensions png,zip,jpg,jpeg,gif,webp,svg,woff,woff2,ttf,otf,eot,css,js,html
+
+# install only the candidates reported by the dry-run above
+python3 assets/cow-dedupe-runs.py \
+  --scope run-assets \
+  --extensions png,zip,jpg,jpeg,gif,webp,svg,woff,woff2,ttf,otf,eot,css,js,html \
+  --apply
+```
+
+The COW tool groups by size and then SHA-256, keeps each file as an independent
+inode, and uses native `clonefile(2)` with no byte-copy fallback. Every target is
+revalidated, moved to a same-directory rollback backup, and installed with an
+exclusive atomic rename. Unsupported filesystems, cross-volume pairs, uid/gid
+mismatches, hardlinks, file flags, extended ACLs, and xattrs are skipped. State
+is recorded in `runs/.feishu-deck-cow-dedupe.json`; target and source
+inode/dev/ctime/size/hash identities must still match before a later run may say
+`ALREADY`.
+
+The reported reclaimable number is only a **logical upper bound**. File sizes
+and `du` logical totals do not shrink; `df` may show less physical allocation,
+and APFS snapshots can delay visible free-space recovery. A later write to
+either independent file allocates private blocks again, so a nearly full disk
+can still hit `ENOSPC`. Mode, uid/gid, atime, and mtime are preserved, but inode
+replacement necessarily changes birth time and ctime.
+
+This optimization is local to authoring `runs/`. It does not change ZIP
+contents or existing Slide Library records: packaged/downloaded decks still
+contain regular, self-contained files. A future Library-wide migration should
+be a separate content-addressed/shared-pool migration with its own compatibility
+and rollback gate, not a dependency on a developer's local `runs/` tree.
+
 **Back-compat**: pre-reorg references like `assets/clientlogo/foo.png` (no
 `shared/` prefix) still work — `copy-assets.py` auto-redirects to
 `assets/shared/clientlogo/foo.png`. New authoring should use the canonical
@@ -470,4 +538,3 @@ almost always wins. If the source is a 2000×1200 dashboard packed
 with data, just use the screenshot — `<img>` it with `max-width: native`.
 
 ---
-

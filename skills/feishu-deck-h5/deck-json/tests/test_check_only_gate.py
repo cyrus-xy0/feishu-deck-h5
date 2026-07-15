@@ -198,6 +198,34 @@ def test_visual_defaults_on_parity_with_validate():
         "validate.py --visual must stay BooleanOptionalAction default-on"
 
 
+def test_resource_only_parser_and_html_gate_skip_visual_rules(tmp_path):
+    """The library gate must be resource-only, even for a visually poor page."""
+    args = CO.build_parser().parse_args([str(tmp_path / "index.html"), "--resource-only"])
+    assert args.resource_only is True
+
+    html = tmp_path / "index.html"
+    html.write_text(
+        '<!doctype html><html><body><div style="position:absolute;left:0;top:0">'
+        'deliberately ugly but self-contained</div></body></html>',
+        encoding="utf-8",
+    )
+    rc, report = CO.run_resource_check(html)
+    assert rc == 0
+    assert "资源闭包通过" in report
+    assert "视觉、排版和跨页一致性未纳入" in report
+
+
+def test_resource_only_html_gate_blocks_missing_local_asset(tmp_path):
+    html = tmp_path / "index.html"
+    html.write_text(
+        '<!doctype html><html><body><img src="assets/missing.png"></body></html>',
+        encoding="utf-8",
+    )
+    rc, report = CO.run_resource_check(html)
+    assert rc == 1
+    assert "LOCAL_REF_MISSING" in report
+
+
 def _write_library_zip(path, members):
     with zipfile.ZipFile(path, "w") as zf:
         for name, data in members.items():

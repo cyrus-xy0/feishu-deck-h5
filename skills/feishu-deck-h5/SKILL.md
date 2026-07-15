@@ -63,7 +63,8 @@ Important routing guards:
 4. **Use the lifecycle gate, not a generic heavy gate.** The machine source is
    `references/gate-policy.yaml`:
    - intermediate edit → scoped render/audit/screenshot;
-   - local handoff, presentation checkpoint, or library ingest → whole deck;
+   - local handoff or presentation checkpoint → whole deck;
+   - library ingest → resource-only package/candidate gate; whole-deck visual review is optional unless explicitly requested;
    - Magic Page publish → publisher resource/reference integrity gate;
    - repository maintenance → targeted tests, then consolidated repository tests.
 5. **Template activation is explicit.** PPTX Template extraction produces a

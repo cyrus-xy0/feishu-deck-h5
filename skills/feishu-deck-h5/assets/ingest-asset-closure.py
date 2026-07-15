@@ -16,6 +16,8 @@ from typing import Optional
 from urllib.parse import unquote, urlparse
 
 
+CANONICAL_SHARED_ROOT = (Path(__file__).resolve().parent / "shared").resolve()
+
 HTML_EXTENSIONS = {".html", ".htm"}
 CSS_EXTENSIONS = {".css"}
 JAVASCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs"}
@@ -274,6 +276,30 @@ class ClosureScanner:
         self.primary_html = primary_html.resolve()
         self.manifest_path = manifest_path.resolve()
 
+    def _logical_relative(self, path: Path) -> Optional[str]:
+        """Map a physical file to its logical package path.
+
+        The one intentional package escape is output/assets/shared -> the
+        skill's canonical shared pool. Local authoring keeps this as a symlink;
+        package-ingest later dereferences only the reachable files into deck.zip.
+        Every other escape remains blocked.
+        """
+        resolved = path.resolve()
+        try:
+            return resolved.relative_to(self.package_root).as_posix()
+        except (OSError, ValueError):
+            pass
+        shared_link = self.package_root / "assets" / "shared"
+        if not shared_link.is_symlink():
+            return None
+        try:
+            if shared_link.resolve(strict=True) != CANONICAL_SHARED_ROOT:
+                return None
+            relative = resolved.relative_to(CANONICAL_SHARED_ROOT)
+        except (OSError, ValueError):
+            return None
+        return (Path("assets") / "shared" / relative).as_posix()
+
     def inspect(self) -> ClosureReport:
         issues: dict[tuple[str, str, str], ClosureIssue] = {}
         reachable: dict[str, Path] = {}
@@ -282,10 +308,10 @@ class ClosureScanner:
 
         while queue:
             current = queue.pop(0).resolve()
-            if current in visited or not current.is_file() or not is_relative_to(current, self.package_root):
+            current_rel = self._logical_relative(current)
+            if current in visited or not current.is_file() or current_rel is None:
                 continue
             visited.add(current)
-            current_rel = current.relative_to(self.package_root).as_posix()
             reachable[current_rel] = current
             for reference in sorted(set(file_references(current))):
                 if should_ignore_reference(reference):
@@ -298,7 +324,7 @@ class ClosureScanner:
                     source_dir=current.parent,
                     package_root=self.package_root,
                 )
-                safe_candidates = [candidate for candidate in candidates if is_relative_to(candidate, self.package_root)]
+                safe_candidates = [candidate for candidate in candidates if self._logical_relative(candidate) is not None]
                 if not safe_candidates:
                     self._add_issue(issues, "LOCAL_REF_ESCAPE", current_rel, reference)
                     continue
@@ -307,7 +333,8 @@ class ClosureScanner:
                     if looks_like_asset_reference(reference):
                         self._add_issue(issues, "LOCAL_REF_MISSING", current_rel, reference)
                     continue
-                resolved_rel = resolved.relative_to(self.package_root).as_posix()
+                resolved_rel = self._logical_relative(resolved)
+                assert resolved_rel is not None
                 reachable[resolved_rel] = resolved
                 if resolved.stat().st_size == 0:
                     self._add_issue(issues, "LOCAL_ASSET_EMPTY", current_rel, reference)
@@ -328,12 +355,13 @@ class ClosureScanner:
                     source_dir=self.package_root,
                     package_root=self.package_root,
                 )
-                safe_candidates = [candidate for candidate in candidates if is_relative_to(candidate, self.package_root)]
+                safe_candidates = [candidate for candidate in candidates if self._logical_relative(candidate) is not None]
                 resolved = next((candidate for candidate in safe_candidates if candidate.is_file()), None)
                 if resolved is None:
                     self._add_issue(issues, "MANIFEST_REF_MISSING", "assets-manifest.yaml", reference)
                     continue
-                rel = resolved.relative_to(self.package_root).as_posix()
+                rel = self._logical_relative(resolved)
+                assert rel is not None
                 manifest_files[rel] = resolved
                 if resolved.stat().st_size == 0:
                     self._add_issue(issues, "MANIFEST_ASSET_EMPTY", "assets-manifest.yaml", reference)

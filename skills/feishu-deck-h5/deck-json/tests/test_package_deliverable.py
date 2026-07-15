@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -148,6 +149,16 @@ class PackageDeliverableTest(unittest.TestCase):
         assets = self.output / "assets"
         assets.mkdir()
         (assets / "local.png").write_bytes(b"fake-png")
+        (self.output / "slide-index.json").write_text(
+            json.dumps({"slides": []}), encoding="utf-8"
+        )
+        # These are useful in the authoring run but are not runtime/provenance
+        # inputs. deck.zip must not recursively absorb them.
+        (self.output / "older-delivery.zip").write_bytes(b"old-transport")
+        (self.output / "page-01.png").write_bytes(b"debug-screenshot")
+        staging = self.output / "feishu-slide-library-ingest" / "candidate"
+        staging.mkdir(parents=True)
+        (staging / "debug.txt").write_text("derived staging", encoding="utf-8")
 
         proc = subprocess.run(
             ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "lark-demo-2026-06-11"],
@@ -175,6 +186,10 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertIn("ingestion-manifest.json", names)
         self.assertIn("README.md", names)
         self.assertIn("assets/local.png", names)
+        self.assertIn("slide-index.json", names)
+        self.assertNotIn("older-delivery.zip", names)
+        self.assertNotIn("page-01.png", names)
+        self.assertFalse(any(name.startswith("feishu-slide-library-ingest/") for name in names))
         self.assertNotIn(".slide-hashes.json", names)
         self.assertFalse(any(name.startswith("output/") for name in names))
         self.assertFalse(any("\\" in name for name in names))
@@ -222,6 +237,76 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertNotIn("deck.html", names)
         self.assertIn('data-slide-key="cover"', packaged_index)
         self.assertNotIn("http-equiv=\"refresh\"", packaged_index)
+
+    def test_package_ingest_dereferences_only_reachable_canonical_shared_files(self):
+        shared_relative = Path("bytedance-products/doubao.png")
+        canonical_shared = SKILL_ROOT / "assets" / "shared"
+        canonical_file = canonical_shared / shared_relative
+        self.assertTrue(canonical_file.is_file(), canonical_file)
+        (self.output / "index.html").write_text(
+            '<!doctype html><html><body><img src="assets/shared/'
+            + shared_relative.as_posix()
+            + '"></body></html>',
+            encoding="utf-8",
+        )
+        (self.output / "deck.json").write_text(
+            json.dumps({"schema_version": "1.0", "slides": []}),
+            encoding="utf-8",
+        )
+        (self.output / "assets-manifest.yaml").write_text(
+            "shared:\n  - assets/shared/" + shared_relative.as_posix() + "\n"
+            "framework: []\ndeck-local: []\n",
+            encoding="utf-8",
+        )
+        assets = self.output / "assets"
+        assets.mkdir()
+        relative_target = Path(os.path.relpath(canonical_shared, start=assets.resolve()))
+        (assets / "shared").symlink_to(relative_target, target_is_directory=True)
+
+        proc = subprocess.run(
+            ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "shared-link-demo"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue((assets / "shared").is_symlink())
+        with zipfile.ZipFile(self.output / "deck.zip") as zf:
+            name = "assets/shared/" + shared_relative.as_posix()
+            self.assertEqual(zf.read(name), canonical_file.read_bytes())
+            shared_members = [item for item in zf.namelist() if item.startswith("assets/shared/")]
+        self.assertEqual(shared_members, [name])
+
+    def test_package_ingest_rejects_noncanonical_shared_symlink(self):
+        external_shared = self.tmp / "untrusted-shared"
+        external_file = external_shared / "logos" / "demo.png"
+        external_file.parent.mkdir(parents=True)
+        external_file.write_bytes(b"untrusted")
+        (self.output / "index.html").write_text(
+            '<!doctype html><img src="assets/shared/logos/demo.png">',
+            encoding="utf-8",
+        )
+        (self.output / "deck.json").write_text(
+            json.dumps({"schema_version": "1.0", "slides": []}),
+            encoding="utf-8",
+        )
+        (self.output / "assets-manifest.yaml").write_text(
+            "shared:\n  - assets/shared/logos/demo.png\n",
+            encoding="utf-8",
+        )
+        assets = self.output / "assets"
+        assets.mkdir()
+        (assets / "shared").symlink_to(external_shared, target_is_directory=True)
+
+        proc = subprocess.run(
+            ["bash", str(PACKAGE_INGEST), str(self.output), "--deck-id", "bad-shared-link"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("LOCAL_REF_ESCAPE", proc.stderr)
+        self.assertFalse((self.output / "deck.zip").exists())
 
     def test_package_ingest_rejects_loopback_background_image(self):
         with remote_image_server() as base_url:

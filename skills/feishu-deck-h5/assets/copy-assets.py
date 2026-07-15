@@ -19,7 +19,7 @@ USAGE:
     python3 assets/copy-assets.py runs/<timestamp>/output/ [--shared=MODE]
 
     --shared=link    (default) create a single symlink at output/assets/shared
-                     pointing at skill's assets/shared/ (absolute path) instead
+                     pointing at skill's assets/shared/ (repo-relative path) instead
                      of copying files. Output uses local-looking refs
                      (assets/shared/foo.png) that resolve through the symlink.
                      zip / Finder-compress / IM-upload follow the symlink and
@@ -41,7 +41,7 @@ Exits 0 on success. Idempotent: running twice is fine. Prints a summary
 of bytes copied and HTML files patched.
 """
 
-import os, re, sys, shutil
+import hashlib, os, re, sys, shutil, uuid
 from pathlib import Path
 
 # Match any reference of form:
@@ -158,26 +158,82 @@ def find_run_root(out_dir: Path) -> Path:
             return parent.parent
     raise SystemExit(f"Cannot find run root from {out_dir}; expected runs/<ts>/output/.")
 
+def _same_file_content(left: Path, right: Path) -> bool:
+    """Return True only when two regular files have identical bytes."""
+    if not left.is_file() or not right.is_file():
+        return False
+    if left.stat().st_size != right.stat().st_size:
+        return False
+    with left.open("rb") as left_fh, right.open("rb") as right_fh:
+        return (
+            hashlib.file_digest(left_fh, "sha256").digest()
+            == hashlib.file_digest(right_fh, "sha256").digest()
+        )
+
+
+def _noncanonical_shared_entries(local_shared: Path, canonical: Path) -> list[str]:
+    """List entries that cannot be losslessly replaced by the canonical pool."""
+    conflicts: list[str] = []
+    for entry in sorted(local_shared.rglob("*")):
+        if entry.is_dir() and not entry.is_symlink():
+            continue
+        relative = entry.relative_to(local_shared)
+        canonical_entry = canonical / relative
+        if entry.is_symlink() or not _same_file_content(entry, canonical_entry):
+            conflicts.append(relative.as_posix())
+    return conflicts
+
+
 def ensure_shared_symlink(local_assets: Path, skill_root: Path) -> Path:
     """Ensure output/assets/shared is a symlink to the canonical assets/shared/.
 
     Idempotent. Auto-migrates a real directory (left over from a prior
-    --shared=copy run) by removing it and replacing with a symlink. Uses an
-    absolute path so moving the output/ folder elsewhere on the same machine
-    doesn't break the link. Returns the symlink path."""
+    --shared=copy run) only when every file is byte-identical to the canonical
+    pool. A divergent file is a classification error and fails closed instead
+    of being deleted. The link is relative so moving the whole repository keeps
+    it valid. Returns the symlink path."""
     target = local_assets / "shared"
     canonical = (skill_root / "assets" / "shared").resolve()
     local_assets.mkdir(parents=True, exist_ok=True)
     if target.is_symlink():
-        if Path(os.readlink(target)) == canonical:
+        try:
+            resolves_to_canonical = target.resolve(strict=True) == canonical
+        except OSError:
+            resolves_to_canonical = False
+        if resolves_to_canonical:
             return target
-        target.unlink()
     elif target.exists():
         if target.is_dir():
-            shutil.rmtree(target)
+            conflicts = _noncanonical_shared_entries(target, canonical)
+            if conflicts:
+                preview = ", ".join(conflicts[:5])
+                if len(conflicts) > 5:
+                    preview += f", ... (+{len(conflicts) - 5})"
+                raise SystemExit(
+                    "Refusing to replace output/assets/shared: files differ from "
+                    f"the canonical shared pool: {preview}"
+                )
         else:
-            target.unlink()
-    target.symlink_to(canonical)
+            raise SystemExit(
+                f"Refusing to replace non-directory shared path: {target}"
+            )
+
+    relative_target = os.path.relpath(canonical, start=target.parent.resolve())
+    temporary_link = target.with_name(f".{target.name}.link-{uuid.uuid4().hex}")
+    temporary_link.symlink_to(relative_target, target_is_directory=True)
+    if target.exists() and target.is_dir() and not target.is_symlink():
+        backup = target.with_name(f".{target.name}.backup-{uuid.uuid4().hex}")
+        target.rename(backup)
+        try:
+            os.replace(temporary_link, target)
+        except BaseException:
+            if temporary_link.is_symlink():
+                temporary_link.unlink()
+            backup.rename(target)
+            raise
+        shutil.rmtree(backup)
+    else:
+        os.replace(temporary_link, target)
     return target
 
 def main():

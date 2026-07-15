@@ -6,7 +6,8 @@ confirmed an HTML deck and explicitly asked to 入库/提交/上传:
 
 - run or reuse the ingest quality gate before any library write;
 - hand the confirmed HTML to FuQiang/feishu-slide-library's PR-based ingest flow:
-  bootstrap-library.py -> ingest-package.py -> ingest-assets.py -> confirm-ingest.py;
+  package-ingest.sh -> bootstrap-library.py -> ingest-package.py ->
+  verify candidate assets -> confirm-ingest.py;
 - record PR/confirm and Cloudflare-hosted viewer sync context for controller
   handoff.
 
@@ -17,6 +18,7 @@ This wrapper only coordinates inputs, reports, and the feishu-deck-h5 manifest.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -33,6 +35,8 @@ DEFAULT_SLIDE_LIBRARY_ROOT = REPO.parents[1] / "tmp/feishu-slide-library"
 LEGACY_SLIDE_LIBRARY_ROOT = REPO / "tmp/feishu-slide-library"
 SLIDE_LIBRARY_REPO = "https://github.com/FuQiang/feishu-slide-library.git"
 CHECK_ONLY = REPO / "assets/check-only.py"
+COPY_ASSETS = REPO / "assets/copy-assets.py"
+PACKAGE_INGEST = REPO / "assets/package-ingest.sh"
 UNREWRITTEN_FRAMEWORK_REFS = (
     'href="assets/feishu-deck.css"',
     "href='assets/feishu-deck.css'",
@@ -44,6 +48,10 @@ UNREWRITTEN_FRAMEWORK_REFS = (
     "href='assets/edit-mode/",
     'src="assets/edit-mode/',
     "src='assets/edit-mode/",
+)
+UNREWRITTEN_FRAMEWORK_PATTERN = re.compile(
+    r'''(?:href|src)\s*=\s*["'](?:\./)?assets/(?:feishu-deck\.(?:css|js)|deck-json/templates/extra-layouts\.css|edit-mode/)''',
+    re.IGNORECASE,
 )
 
 sys.path.insert(0, str(REPO / "server"))
@@ -111,7 +119,13 @@ def audit_passed(output_dir: Path) -> bool:
 
 
 def ensure_quality_gate(html_path: Path, output_dir: Path, args: argparse.Namespace) -> dict[str, Any]:
-    """Run or reuse the ingest-quality gate before slide-library writes."""
+    """Run the resource-only gate before slide-library writes.
+
+    Library ingest is intentionally not coupled to the full visual/business
+    review gate.  The package and candidate paths below still enforce resource
+    closure, while ``check-only --gate ingest`` remains available as an
+    explicit strict review command.
+    """
     report_path = output_dir / "IMPORT_QUALITY_REPORT.md"
     if args.allow_unaudited:
         return {
@@ -119,28 +133,13 @@ def ensure_quality_gate(html_path: Path, output_dir: Path, args: argparse.Namesp
             "reused": False,
             "bypassed": True,
             "report": "",
-            "reason": "--allow-unaudited set; quality gate bypassed for local/debug use",
-        }
-    # Only reuse output_dir's audit verdict when html_path IS the run's own
-    # index.html — that report pertains to that file. An external --html (even
-    # under --task-id) does NOT match output_dir's audit-report.json, so reusing
-    # it would stamp a stale/unrelated PASS onto a different artifact (subskill-6).
-    own_index = (output_dir / "index.html").resolve()
-    is_run_index = html_path.resolve() == own_index
-    if is_run_index and audit_passed(output_dir):
-        return {
-            "ok": True,
-            "reused": True,
-            "bypassed": False,
-            "report": repo_rel(output_dir / "AUDIT_REPORT.md") if (output_dir / "AUDIT_REPORT.md").exists() else repo_rel(output_dir / "audit-report.json"),
-            "reason": "existing validator PASS evidence reused",
+            "reason": "--allow-unaudited set; local resource precheck bypassed for debug use; downstream package/resource checks still apply",
         }
     cmd = [
         sys.executable,
         str(CHECK_ONLY),
         str(html_path),
-        "--gate",
-        "ingest",
+        "--resource-only",
         "--report",
         str(report_path),
     ]
@@ -259,7 +258,6 @@ def has_slide_library_scripts(root: Path) -> bool:
     required = (
         skill_dir / "assets/bootstrap-library.py",
         skill_dir / "assets/ingest-package.py",
-        skill_dir / "assets/ingest-assets.py",
         skill_dir / "assets/confirm-ingest.py",
     )
     return all(path.exists() for path in required)
@@ -304,58 +302,290 @@ def runtime_preflight(output_dir: Path, library_root: Path) -> dict[str, Any]:
     return {"name": "runtime-preflight", **summarize_step(step)}
 
 
-def deck_h5_output_for_assets(html_path: Path, output_dir: Path) -> Path | None:
-    for candidate in (html_path.parent, output_dir):
-        if (candidate / "assets-manifest.yaml").exists():
-            return candidate
-    return None
-
-
 def has_unrewritten_framework_refs(source_html: Path) -> bool:
     try:
         html = source_html.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
-    return any(ref in html for ref in UNREWRITTEN_FRAMEWORK_REFS)
+    return any(ref in html for ref in UNREWRITTEN_FRAMEWORK_REFS) or bool(
+        UNREWRITTEN_FRAMEWORK_PATTERN.search(html)
+    )
 
 
-def rewrite_library_assets(
+def canonical_run_output(html_path: Path) -> Path | None:
+    """Return the canonical runs/<id>/output directory for its index.html."""
+    resolved = html_path.resolve()
+    if resolved.name != "index.html" or resolved.parent.name != "output":
+        return None
+    try:
+        resolved.parent.relative_to(RUNS.resolve())
+    except ValueError:
+        return None
+    return resolved.parent
+
+
+def prepare_ingest_artifact(
     *,
     html_path: Path,
-    output_dir: Path,
+    deck_id: str,
+    report_output_dir: Path,
+) -> dict[str, Any]:
+    """Build a fresh ZIP for a canonical run; keep isolated HTML compatible.
+
+    The run output keeps shared assets as one canonical symlink. package-ingest
+    materializes only the reachable shared bytes into deck.zip, so the upload is
+    portable without expanding the authoring directory again.
+    """
+    run_output = canonical_run_output(html_path)
+    if run_output is None:
+        return {
+            "ok": True,
+            "artifact_path": str(html_path),
+            "asset_manifest_path": "",
+            "steps": [],
+            "reason": "isolated HTML; package preparation not applicable",
+        }
+
+    copy_step = subprocess_record(
+        [sys.executable, str(COPY_ASSETS), str(run_output), "--shared=link"],
+        cwd=REPO,
+        log_path=report_output_dir / "importer-prepare-copy-assets.log",
+    )
+    steps = [{"name": "copy-assets-shared-link", **summarize_step(copy_step)}]
+    if not copy_step["ok"]:
+        return {
+            "ok": False,
+            "artifact_path": "",
+            "asset_manifest_path": "",
+            "steps": steps,
+            "reason": copy_step["stderr"] or copy_step["stdout"] or "copy-assets failed",
+        }
+
+    package_step = subprocess_record(
+        ["bash", str(PACKAGE_INGEST), str(run_output), "--deck-id", deck_id],
+        cwd=REPO,
+        log_path=report_output_dir / "importer-prepare-package-ingest.log",
+    )
+    steps.append({"name": "package-ingest", **summarize_step(package_step)})
+    deck_zip = run_output / "deck.zip"
+    if not package_step["ok"] or not deck_zip.is_file():
+        reason = package_step["stderr"] or package_step["stdout"] or "package-ingest failed"
+        if package_step["ok"] and not deck_zip.is_file():
+            reason = f"package-ingest did not produce {deck_zip}"
+        return {
+            "ok": False,
+            "artifact_path": "",
+            "asset_manifest_path": "",
+            "steps": steps,
+            "reason": reason,
+        }
+    return {
+        "ok": True,
+        "artifact_path": str(deck_zip),
+        "asset_manifest_path": str(run_output / "assets-manifest.yaml"),
+        "steps": steps,
+        "reason": "fresh self-contained deck.zip prepared from canonical run output",
+    }
+
+
+def read_asset_manifest(path: Path | None) -> dict[str, list[str]]:
+    if path is None:
+        return {"shared": [], "framework": [], "deck-local": []}
+    if not path.is_file():
+        raise ValueError(f"assets-manifest.yaml is missing: {path}")
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ValueError(f"cannot read assets-manifest.yaml without PyYAML: {exc}") from exc
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"invalid assets-manifest.yaml: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("invalid assets-manifest.yaml: expected a mapping")
+    result: dict[str, list[str]] = {}
+    for category in ("shared", "framework", "deck-local"):
+        raw = payload.get(category) or []
+        if not isinstance(raw, list):
+            raise ValueError(f"invalid assets-manifest.yaml: {category} must be a list")
+        normalized: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                value = item.strip()
+            elif isinstance(item, dict):
+                value = str(item.get("path") or "").strip()
+            else:
+                raise ValueError(
+                    f"invalid assets-manifest.yaml: {category} entries require a path"
+                )
+            while value.startswith("./"):
+                value = value[2:]
+            if value:
+                normalized.append(value)
+        result[category] = normalized
+    return result
+
+
+def sha256_file(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def _safe_manifest_asset(entry: str, prefix: str) -> Path | None:
+    relative = Path(entry)
+    if (
+        not entry.startswith(prefix)
+        or "\\" in entry
+        or relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        return None
+    return relative
+
+
+def resolve_candidate_root(ingest_result_path: Path, payload: dict[str, Any]) -> Path | None:
+    raw = str(payload.get("candidate_root") or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = ingest_result_path.resolve().parent / candidate
+    return candidate.resolve()
+
+
+ACTIVE_CANDIDATE_TEXT_SUFFIXES = {".html", ".htm", ".css", ".js", ".mjs", ".svg"}
+
+
+def active_candidate_text_files(deck_dir: Path) -> list[tuple[Path, str]]:
+    """Read runtime-bearing candidate files, excluding provenance snapshots."""
+    files: list[tuple[Path, str]] = []
+    for path in sorted(deck_dir.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in ACTIVE_CANDIDATE_TEXT_SUFFIXES:
+            continue
+        relative = path.relative_to(deck_dir)
+        if "source_package" in relative.parts:
+            continue
+        files.append((path, path.read_text(encoding="utf-8", errors="ignore")))
+    return files
+
+
+def candidate_pool_reference(path: Path, pool_file: Path) -> str:
+    return os.path.relpath(pool_file, path.parent).replace(os.sep, "/")
+
+
+def verify_candidate_assets(
+    *,
+    ingest_result_path: Path,
     deck_id: str,
     library_root: Path,
-    skill_dir: Path,
+    asset_manifest_path: Path | None,
 ) -> dict[str, Any]:
-    source_html = library_root / "decks" / deck_id / "source.html"
-    deck_output = deck_h5_output_for_assets(html_path, output_dir)
-    if not deck_output:
-        if has_unrewritten_framework_refs(source_html):
-            return {
-                "name": "ingest-assets",
-                "ok": False,
-                "returncode": 1,
-                "stdout": "",
-                "stderr": "assets-manifest.yaml not found; cannot rewrite local deck framework references before confirm-ingest",
-            }
-        return {"name": "ingest-assets", "ok": True, "returncode": 0, "stdout": "skipped; no deck-h5 asset manifest needed", "stderr": ""}
-    ingest_assets = skill_dir / "assets/ingest-assets.py"
-    step = subprocess_record(
-        [sys.executable, str(ingest_assets), str(deck_output), deck_id],
-        cwd=library_root,
-        log_path=output_dir / "importer-slide-library-assets.log",
-        env=child_env(library_root),
-    )
-    summary = {"name": "ingest-assets", **summarize_step(step)}
-    if step["ok"] and has_unrewritten_framework_refs(source_html):
-        summary.update(
-            {
-                "ok": False,
-                "returncode": 1,
-                "stderr": "library source.html still references local assets/* framework files after ingest-assets.py",
-            }
-        )
-    return summary
+    """Verify the transactional candidate without mutating the live library."""
+    issues: list[str] = []
+    try:
+        ingest_payload = read_json(ingest_result_path)
+    except (OSError, json.JSONDecodeError) as exc:
+        issues.append(f"cannot read ingest_result.json: {exc}")
+        ingest_payload = {}
+    candidate_root = resolve_candidate_root(ingest_result_path, ingest_payload)
+    if candidate_root is None or not candidate_root.is_dir():
+        issues.append(f"candidate_root is missing or unreadable: {candidate_root or ''}")
+        return {
+            "name": "verify-candidate-assets",
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "; ".join(issues),
+        }
+
+    deck_dir = candidate_root / "decks" / deck_id
+    source_html = deck_dir / "source.html"
+    if not source_html.is_file():
+        issues.append(f"candidate source.html is missing: {source_html}")
+    active_texts = active_candidate_text_files(deck_dir) if deck_dir.is_dir() else []
+
+    deck_shared = deck_dir / "assets" / "shared"
+    if deck_shared.exists() or deck_shared.is_symlink():
+        issues.append(f"candidate contains forbidden deck-local shared pool: {deck_shared}")
+
+    try:
+        manifest = read_asset_manifest(asset_manifest_path)
+    except ValueError as exc:
+        manifest = {"shared": [], "framework": [], "deck-local": []}
+        issues.append(str(exc))
+
+    manifest_root = asset_manifest_path.parent if asset_manifest_path else None
+    for entry in manifest["shared"]:
+        relative = _safe_manifest_asset(entry, "assets/shared/")
+        if relative is None:
+            issues.append(f"unsafe or misclassified shared manifest entry: {entry}")
+            continue
+        pool_target = candidate_root / relative
+        matched_reference = False
+        for active_path, active_text in active_texts:
+            expected_ref = candidate_pool_reference(active_path, pool_target)
+            if relative.as_posix() not in active_text and expected_ref not in active_text:
+                continue
+            matched_reference = True
+            if expected_ref not in active_text:
+                issues.append(
+                    f"shared reference in {active_path.relative_to(deck_dir)} was not rewritten to {expected_ref}"
+                )
+            elif relative.as_posix() in active_text.replace(expected_ref, ""):
+                issues.append(
+                    f"legacy deck-local shared reference remains in {active_path.relative_to(deck_dir)}: {relative.as_posix()}"
+                )
+        if not matched_reference:
+            issues.append(f"manifest shared asset has no active candidate reference: {relative.as_posix()}")
+        candidate_pool_file = candidate_root / relative
+        live_pool_file = library_root / relative
+        pool_file = candidate_pool_file if candidate_pool_file.is_file() else live_pool_file
+        if not pool_file.is_file():
+            issues.append(f"shared pool file is missing from candidate and library: {relative.as_posix()}")
+            continue
+        package_file = manifest_root / relative if manifest_root else None
+        if package_file and package_file.is_file():
+            try:
+                hash_matches = sha256_file(package_file) == sha256_file(pool_file)
+            except OSError as exc:
+                issues.append(f"cannot hash shared asset {relative.as_posix()}: {exc}")
+            else:
+                if not hash_matches:
+                    issues.append(f"shared pool hash differs from packaged asset: {relative.as_posix()}")
+
+    for entry in manifest["framework"]:
+        relative = _safe_manifest_asset(entry, "assets/")
+        if relative is None:
+            issues.append(f"unsafe framework manifest entry: {entry}")
+            continue
+        old_ref = relative.as_posix()
+        framework_target = candidate_root / "assets" / "framework" / relative.name
+        for active_path, active_text in active_texts:
+            expected_ref = candidate_pool_reference(active_path, framework_target)
+            if old_ref not in active_text and expected_ref not in active_text:
+                continue
+            if expected_ref not in active_text:
+                issues.append(
+                    f"framework reference in {active_path.relative_to(deck_dir)} was not rewritten to {expected_ref}"
+                )
+            elif old_ref in active_text.replace(expected_ref, ""):
+                issues.append(
+                    f"legacy framework reference remains in {active_path.relative_to(deck_dir)}: {old_ref}"
+                )
+
+    for active_path, _active_text in active_texts:
+        if has_unrewritten_framework_refs(active_path):
+            issues.append(
+                f"active candidate file still contains legacy local framework references: {active_path.relative_to(deck_dir)}"
+            )
+
+    return {
+        "name": "verify-candidate-assets",
+        "ok": not issues,
+        "returncode": 0 if not issues else 1,
+        "stdout": "candidate source and shared-pool handoff verified" if not issues else "",
+        "stderr": "; ".join(issues),
+    }
 
 
 def ingest_with_slide_library(
@@ -372,9 +602,8 @@ def ingest_with_slide_library(
     staging_root = (args.staging_root or output_dir / "feishu-slide-library-ingest").expanduser().resolve()
     bootstrap = skill_dir / "assets/bootstrap-library.py"
     ingest_package = skill_dir / "assets/ingest-package.py"
-    ingest_assets = skill_dir / "assets/ingest-assets.py"
     confirm_ingest = skill_dir / "assets/confirm-ingest.py"
-    required = [bootstrap, ingest_package, ingest_assets, confirm_ingest]
+    required = [bootstrap, ingest_package, confirm_ingest]
     result: dict[str, Any] = {
         "target": "feishu-slide-library",
         "repo": SLIDE_LIBRARY_REPO,
@@ -411,6 +640,20 @@ def ingest_with_slide_library(
     if not preflight["ok"]:
         result["reason"] = preflight["stderr"] or preflight["stdout"] or "runtime preflight failed"
         return result
+
+    prepared = prepare_ingest_artifact(
+        html_path=html_path,
+        deck_id=deck_id,
+        report_output_dir=output_dir,
+    )
+    result["steps"].extend(prepared["steps"])
+    if not prepared["ok"]:
+        result["reason"] = prepared["reason"] or "failed to prepare ingest artifact"
+        return result
+    artifact_path = Path(prepared["artifact_path"])
+    asset_manifest_path = optional_path(prepared.get("asset_manifest_path", ""))
+    result["artifact_path"] = str(artifact_path)
+
     bootstrap_cmd = [
         sys.executable,
         str(bootstrap),
@@ -433,7 +676,7 @@ def ingest_with_slide_library(
     ingest_cmd = [
         sys.executable,
         str(ingest_package),
-        str(html_path),
+        str(artifact_path),
         "--deck-id",
         deck_id,
         "--job-id",
@@ -445,6 +688,8 @@ def ingest_with_slide_library(
         "--submitted-by",
         args.submitted_by or args.contributor or "gtm",
         "--overwrite",
+        "--resource-checks-only",
+        "--no-deck-h5-gate",
     ]
     if args.submitted_by_id:
         ingest_cmd.extend(["--submitted-by-id", args.submitted_by_id])
@@ -462,26 +707,28 @@ def ingest_with_slide_library(
     if not result["ready_for_confirm"]:
         result["reason"] = "ingest-package produced ready_for_confirm=false"
         return result
-    asset_step = rewrite_library_assets(
-        html_path=html_path,
-        output_dir=output_dir,
+
+    ingest_result_path = Path(result["ingest_result_path"])
+    if not ingest_result_path.is_absolute():
+        ingest_result_path = (REPO / ingest_result_path).resolve()
+    if not ingest_result_path.exists():
+        result["reason"] = f"ingest_result.json not found: {ingest_result_path}"
+        return result
+    candidate_step = verify_candidate_assets(
+        ingest_result_path=ingest_result_path,
         deck_id=deck_id,
         library_root=library_root,
-        skill_dir=skill_dir,
+        asset_manifest_path=asset_manifest_path,
     )
-    result["steps"].append(asset_step)
-    if not asset_step["ok"]:
-        result["reason"] = asset_step["stderr"] or asset_step["stdout"] or "ingest-assets failed"
+    result["steps"].append(candidate_step)
+    if not candidate_step["ok"]:
+        result["reason"] = candidate_step["stderr"] or candidate_step["stdout"] or "candidate asset verification failed"
         return result
     if args.no_confirm_ingest:
         result["ok"] = True
         result["reason"] = "ready_for_confirm; confirm-ingest skipped by --no-confirm-ingest"
         return result
 
-    ingest_result_path = Path(result["ingest_result_path"])
-    if not ingest_result_path.exists():
-        result["reason"] = f"ingest_result.json not found: {ingest_result_path}"
-        return result
     confirm_cmd = [
         sys.executable,
         str(confirm_ingest),
@@ -616,7 +863,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--deck-id", default="", help="feishu-slide-library deck_id; defaults to a slug from title/task")
     ap.add_argument("--job-id", default="", help="feishu-slide-library job id; defaults to task/deck id")
     ap.add_argument("--title")
-    ap.add_argument("--allow-unaudited", action="store_true", help="bypass deck-validator pass requirement for local/debug use")
+    ap.add_argument("--allow-unaudited", action="store_true", help="bypass the local resource precheck for debug use; downstream package/resource checks still apply")
     ap.add_argument("--dry-run", action="store_true", help="simulate feishu-slide-library ingest without external writes")
 
     ap.add_argument("--slide-library-root", type=Path)

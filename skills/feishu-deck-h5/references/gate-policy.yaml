@@ -38,10 +38,10 @@
       "delivery_time_budget_seconds": 600
     },
     "LIBRARY_INGEST": {
-      "command": "subskills/importer/importer.py",
-      "scope": "whole deck plus package",
+      "command": "subskills/importer/ingest.py",
+      "scope": "package resources plus candidate contract",
       "blocking": true,
-      "requires_whole_deck_visual_gate": true
+      "requires_whole_deck_visual_gate": false
     },
     "PRESENTATION_CHECKPOINT": {
       "command": "render-deck.py <deck.json> <output-dir> --final",

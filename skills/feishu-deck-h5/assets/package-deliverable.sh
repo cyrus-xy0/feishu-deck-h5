@@ -54,6 +54,10 @@ fi
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+delivery_failure() {
+  echo "FAIL_DOMAIN=delivery DO_NOT_EDIT_DECK=1" >&2
+}
+
 # Portability preflight (F-343): a blind `zip output/` ships broken paths if the
 # output was never self-contained (skill-relative refs, symlink shared/). This
 # gate makes the low-level packager safe even when entered without finalize.sh.
@@ -66,6 +70,7 @@ if [ -z "$SKIP_PORTABLE_CHECK" ]; then
     echo "  self-contain first:  python3 assets/copy-assets.py \"$OUT_DIR\" --shared=copy" >&2
     echo "  or one-shot:         bash assets/finalize.sh \"$OUT_DIR\" remote" >&2
     echo "  (override with --skip-portable-check if you really mean it)" >&2
+    delivery_failure
     exit 2
   fi
 fi
@@ -129,6 +134,7 @@ if [ -L "$OUT_DIR/assets/shared" ]; then
   echo "ERROR: $OUT_DIR/assets/shared is a symlink to the shared pool."
   echo "       Packaging would deref it and leak the WHOLE pool into the zip."
   echo "       Self-contain first:  python3 $(dirname "$0")/copy-assets.py \"$OUT_DIR\" --shared=copy"
+  delivery_failure
   exit 2
 fi
 
@@ -157,16 +163,32 @@ rm -f "$ZIP_PATH"
 # next to index.html, matching the linked HTML references.
 # delivery-1: never ship system metadata (.DS_Store / __MACOSX / AppleDouble ._*)
 # into the customer-facing deliverable.
-( cd "$STAGE" && zip -q -X -r "$ZIP_PATH" "${ZIP_ITEMS[@]}" \
-    -x '*.DS_Store' -x '__MACOSX/*' -x '*/._*' -x '._*' )
+if ! ( cd "$STAGE" && zip -q -X -r "$ZIP_PATH" "${ZIP_ITEMS[@]}" \
+    -x '*.DS_Store' -x '__MACOSX/*' -x '*/._*' -x '._*' ); then
+  echo "ERROR: zip step failed" >&2
+  delivery_failure
+  exit 2
+fi
 
 if [ ! -f "$ZIP_PATH" ]; then
-  echo "ERROR: zip step failed"
+  echo "ERROR: zip step did not produce $ZIP_PATH" >&2
+  delivery_failure
+  exit 2
+fi
+
+# Verify the artifact as a ZIP, without extracting or launching a browser. This
+# is a transport-layer check: archive CRC/path safety, required index.html,
+# referenced members, and byte identity with the selected source HTML.
+if ! python3 "$SKILL_DIR/assets/verify-portable.py" "$ZIP_PATH" \
+    --source-html "$HTML_FILE" --quiet; then
+  rm -f "$ZIP_PATH"
+  delivery_failure
   exit 2
 fi
 
 SIZE_KB=$(( $(stat -f%z "$ZIP_PATH" 2>/dev/null || stat -c%s "$ZIP_PATH") / 1024 ))
 echo "  wrote        : $ZIP_PATH  (${SIZE_KB} KB)"
+echo "PACKAGE_VERIFIED=1 VISUAL_RECHECK_REQUIRED=0 STOP=1"
 echo
 echo "Hand this zip to the user (Feishu attachment, email, OpenClaw return)."
 echo "They unzip, open index.html, press E to edit text in-browser, Cmd/Ctrl+S"

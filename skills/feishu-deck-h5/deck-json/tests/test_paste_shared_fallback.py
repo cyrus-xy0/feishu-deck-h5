@@ -9,6 +9,7 @@ avatars: refs lived in the head — drift — and even once recovered, a source
 without a local copy would have left them missing without this fallback).
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DECK_JSON = HERE.parent
 CLI = DECK_JSON / "deck-cli.py"
+COPY_ASSETS = DECK_JSON.parent / "assets" / "copy-assets.py"
 FRAMEWORK_SHARED = DECK_JSON.parent / "assets" / "shared"
 # a stable, committed framework shared asset used as the fallback probe
 PROBE_REF = "mydigitalemployee/睿睿.png"
@@ -27,8 +29,8 @@ PROBE_REF = "mydigitalemployee/睿睿.png"
 class PasteSharedFallbackTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="paste-shared-fb-"))
-        self.src = self.tmp / "src"
-        self.dst = self.tmp / "dst"
+        self.src = self.tmp / "runs" / "src"
+        self.dst = self.tmp / "runs" / "dst"
         self.src.mkdir(parents=True)
         self.dst.mkdir(parents=True)
         # source slide references a framework shared asset in its custom_css, but
@@ -57,12 +59,74 @@ class PasteSharedFallbackTest(unittest.TestCase):
 
     @unittest.skipUnless((FRAMEWORK_SHARED / PROBE_REF).is_file(),
                          f"framework probe asset missing: {PROBE_REF}")
-    def test_falls_back_to_framework_pool(self):
+    def test_falls_back_to_framework_pool_without_materializing_a_run_copy(self):
         proc = self._paste()
         self.assertEqual(proc.returncode, 0, f"paste failed:\n{proc.stderr}\n{proc.stdout}")
+        shared_root = self.dst / "assets" / "shared"
         landed = self.dst / "assets" / "shared" / PROBE_REF
+        self.assertTrue(shared_root.is_symlink())
+        self.assertFalse(os.path.isabs(os.readlink(shared_root)),
+                         "central shared-pool link must be relative")
+        self.assertEqual(shared_root.resolve(), FRAMEWORK_SHARED.resolve())
         self.assertTrue(landed.is_file(),
-                        "framework shared asset not copied via fallback → broken image in target")
+                        "framework shared ref must still resolve in the target")
+
+    @unittest.skipUnless((FRAMEWORK_SHARED / PROBE_REF).is_file(),
+                         f"framework probe asset missing: {PROBE_REF}")
+    def test_source_local_canonical_bytes_also_use_central_pool(self):
+        local = self.src / "assets" / "shared" / PROBE_REF
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_bytes((FRAMEWORK_SHARED / PROBE_REF).read_bytes())
+        proc = self._paste()
+        self.assertEqual(proc.returncode, 0, f"paste failed:\n{proc.stderr}\n{proc.stdout}")
+        shared_root = self.dst / "assets" / "shared"
+        self.assertTrue(shared_root.is_symlink())
+        self.assertEqual(shared_root.resolve(), FRAMEWORK_SHARED.resolve())
+
+    @unittest.skipUnless((FRAMEWORK_SHARED / PROBE_REF).is_file(),
+                         f"framework probe asset missing: {PROBE_REF}")
+    def test_existing_different_shared_path_is_preserved_and_paste_uses_input_link(self):
+        occupied = self.dst / "assets" / "shared" / PROBE_REF
+        occupied.parent.mkdir(parents=True, exist_ok=True)
+        occupied.write_bytes(b"EXISTING-DECK-CONTENT")
+
+        proc = self._paste()
+        self.assertEqual(proc.returncode, 0, f"paste failed:\n{proc.stderr}\n{proc.stdout}")
+        self.assertEqual(occupied.read_bytes(), b"EXISTING-DECK-CONTENT")
+
+        deck = json.loads((self.dst / "deck.json").read_text(encoding="utf-8"))
+        pasted = next(slide for slide in deck["slides"] if slide["key"] == "p")
+        expected_ref = f"input/shared-pool/{PROBE_REF}"
+        self.assertIn(expected_ref, pasted["custom_css"])
+        linked = self.dst / expected_ref
+        self.assertTrue(linked.is_symlink())
+        self.assertFalse(os.path.isabs(os.readlink(linked)))
+        self.assertEqual(linked.resolve(), (FRAMEWORK_SHARED / PROBE_REF).resolve())
+
+        repeated = self._paste()
+        self.assertEqual(
+            repeated.returncode, 0,
+            f"repeated paste must reuse the input link:\n{repeated.stderr}\n{repeated.stdout}")
+        self.assertTrue(linked.is_symlink())
+
+        # Remote/library finalization materializes input/ links into ordinary
+        # output files, so source-run dedupe never leaks a symlink into delivery.
+        output = self.dst / "output"
+        output.mkdir()
+        (output / "index.html").write_text(
+            f'<img src="{expected_ref}">', encoding="utf-8")
+        portable = subprocess.run(
+            [sys.executable, str(COPY_ASSETS), str(output), "--shared=copy"],
+            capture_output=True, text=True)
+        self.assertEqual(
+            portable.returncode, 0,
+            f"copy-assets failed to materialize input link:\n"
+            f"{portable.stderr}\n{portable.stdout}")
+        materialized = output / expected_ref
+        self.assertTrue(materialized.is_file())
+        self.assertFalse(materialized.is_symlink())
+        self.assertEqual(
+            materialized.read_bytes(), (FRAMEWORK_SHARED / PROBE_REF).read_bytes())
 
     @unittest.skipUnless((FRAMEWORK_SHARED / PROBE_REF).is_file(),
                          f"framework probe asset missing: {PROBE_REF}")
@@ -75,6 +139,7 @@ class PasteSharedFallbackTest(unittest.TestCase):
         proc = self._paste()
         self.assertEqual(proc.returncode, 0, f"paste failed:\n{proc.stderr}\n{proc.stdout}")
         landed = self.dst / "assets" / "shared" / PROBE_REF
+        self.assertFalse((self.dst / "assets" / "shared").is_symlink())
         self.assertEqual(landed.read_bytes(), b"SRCLOCALMARKER",
                          "source-local shared copy must win over the framework pool")
 

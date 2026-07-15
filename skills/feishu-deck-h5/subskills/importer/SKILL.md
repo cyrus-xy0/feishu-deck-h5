@@ -12,7 +12,7 @@ description: |
 
 # importer
 
-目标:把用户做好的、已确认的 HTML deck 先质检,再按
+目标:把用户做好的、已确认的 HTML deck 先做资源准入检查,再按
 `https://github.com/FuQiang/feishu-slide-library` 的标准逻辑通过 PR 入库,随后同步
 Cloudflare 托管的素材库站点。这里的同步是 slide-library viewer / Cloudflare 站点同步,
 不是 Magic Page 链接发布；仅发布 Magic Page 链接仍属于 `subskills/publisher/SKILL.md`。
@@ -35,16 +35,21 @@ state.
 
 ## 职责边界
 
-- **质检 (入库前门禁)**:先复用已有 validator PASS 证据;没有 PASS 证据时对确认 HTML 运行
-  `check-only.py --gate ingest` 并写 `IMPORT_QUALITY_REPORT.md`。质检不过不得入库。
-  入库门会把 warn 升 error,且**覆盖跨页一致性规则**
-  `R-DECK-TITLE-DRIFT` / `R-DECK-PALETTE-DRIFT` / `R-DECK-TYPESCALE-BUDGET`(F-257/F-285):
-  标题跨页漂移、近重复强调色、`allow:typescale` 滥用都会拦在库门外 —— 不一致的 deck 入库后
-  最坑复用(抽到别处拼接接不上)。注意门禁只 block `business-rules.yaml` 里有条目的规则码,
-  这三条已补进字典;新增跨页规则务必同步补 yaml,否则会被门禁静默丢掉(F-18 漂移)。
-- **PR 入库**:调用 `feishu-slide-library` 的权威脚本:
-  `bootstrap-library.py -> ingest-package.py -> confirm-ingest.py`。不要手写
+- **资源-only 入库门禁**:对确认 HTML 运行 `check-only.py --resource-only` 并写
+  `IMPORT_QUALITY_REPORT.md`。它只阻塞包结构、入口 HTML、运行时本地引用、路径安全和
+  `assets-manifest.yaml` 素材闭包问题;不跑视觉、排版或跨页一致性规则。
+  资源检查不过不得入库。`--gate ingest` 仍保留为用户主动要求时的严格业务/视觉评审，
+  不再是默认入库门。
+- **PR 入库**:对 canonical `runs/<task>/output/index.html` 先运行
+  `copy-assets.py --shared=link -> package-ingest.sh --deck-id`,生成新鲜、自包含的
+  `deck.zip`;再调用 `feishu-slide-library` 的权威脚本:
+  `bootstrap-library.py -> ingest-package.py -> confirm-ingest.py`。孤立的外部 HTML
+  仍直接交给 `ingest-package.py` 做兼容入库。不要手写
   fingerprint、判重、候选包、PR、merge 或 viewer index 逻辑。
+- **candidate 资产门禁**:`ingest-package.py` 必须在 candidate 事务内消费
+  `assets-manifest.yaml`,把 shared 改写到 `../../assets/shared/`,并把 framework
+  改写到 `../../assets/framework/`。importer 随后只读校验 candidate;不得再调用
+  legacy `ingest-assets.py` 修改 live library。
 - **Viewer 同步**:真实入库请求默认应让 `confirm-ingest.py` 走 PR/merge/viewer 同步链路,
   并等待 Cloudflare 托管站点同步完成。用 `--auto-merge --wait-viewer` 明确表达这个意图。
 - **上下文记录**:把 PR、Cloudflare viewer 同步结果和 viewer URL/线索记录进
@@ -56,8 +61,9 @@ state.
 ## 前置条件
 
 - 必须有用户明确确认“这就是最终入库物”。
-- 必须有 validator PASS 证据,或 importer 自己运行 `check-only.py --gate ingest` 并通过。
-  只有本地调试/夹具可用 `--allow-unaudited`。
+- importer 必须自己运行 `check-only.py --resource-only` 并通过资源闭包检查。
+  `--allow-unaudited` 只允许本地调试时跳过前置资源预检;后续打包和 slide-library
+  资源门禁仍然生效。
 - 入库目标必须是完整的 `https://github.com/FuQiang/feishu-slide-library`
   checkout,默认读取 `FEISHU_SLIDE_LIBRARY_ROOT`,否则尝试
   `../../tmp/feishu-slide-library` 和旧位置 `tmp/feishu-slide-library`。
@@ -66,7 +72,8 @@ state.
 - 本机已知可用的 slide-library checkout:
   `/Users/bytedance/Documents/import/feishu-deck-h5/tmp/feishu-slide-library`。
   importer 会自动预检 `bootstrap-library.py` / `ingest-package.py` /
-  `ingest-assets.py` / `confirm-ingest.py`,缺失时在写入前停止。
+  `confirm-ingest.py`,缺失时在写入前停止。`ingest-assets.py` 不再是 wrapper
+  依赖;资产归并必须发生在 candidate 生成事务内。
 - 如果私有仓库权限缺失,不要让用户在聊天里贴 token;应由宿主环境注入
   `FEISHU_SLIDE_LIBRARY_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN`。
 
@@ -104,7 +111,7 @@ python3 skills/feishu-deck-h5/subskills/importer/ingest.py \
   --no-confirm-ingest
 ```
 
-全链路 dry run,不调用 slide-library 外部写入:
+全链路 dry run,不调用打包或 slide-library 外部写入,也不改 canonical run:
 
 ```bash
 python3 skills/feishu-deck-h5/subskills/importer/ingest.py \
@@ -118,16 +125,23 @@ python3 skills/feishu-deck-h5/subskills/importer/ingest.py \
 
 importer 必须复用 `FuQiang/feishu-slide-library` 的脚本和判断:
 
-0. 若没有可复用的 validator PASS 证据,先跑
-   `check-only.py <confirmed.html> --gate ingest --report IMPORT_QUALITY_REPORT.md`。
-1. `bootstrap-library.py --library-root <root> --repo-url https://github.com/FuQiang/feishu-slide-library.git --branch main`
-2. `ingest-package.py <confirmed.html> --deck-id <deck_id> --job-id <job_id> --library-root <root> --staging-root <staging> --submitted-by <user> --overwrite`
-3. 若 deck-h5 output 有 `assets-manifest.yaml`,必须先调用
-   `ingest-assets.py <deck-h5-output-dir> <deck_id>`;若 source.html 仍残留
-   `assets/feishu-deck.css` / `assets/feishu-deck.js` 等本地框架引用,必须停止。
-4. 若 `ready_for_confirm=true` 且用户确认已经发生,调用
+0. 先跑
+   `check-only.py <confirmed.html> --resource-only --report IMPORT_QUALITY_REPORT.md`。
+1. canonical run output 先执行
+   `copy-assets.py <output> --shared=link`,让本地 output 收敛到中央 shared pool;
+   再执行 `package-ingest.sh <output> --deck-id <deck_id>`,由 ZIP 只物化实际可达的
+   shared 字节。禁止把单独 `index.html` 交给库而丢失 manifest/assets。
+2. `bootstrap-library.py --library-root <root> --repo-url https://github.com/FuQiang/feishu-slide-library.git --branch main`
+3. `ingest-package.py <deck.zip|isolated.html> --deck-id <deck_id> --job-id <job_id> --library-root <root> --staging-root <staging> --submitted-by <user> --overwrite --no-deck-h5-gate --resource-checks-only`
+   入库只让资源可用性问题阻塞;用户若需要严格业务/视觉评审，单独运行
+   `check-only.py <confirmed.html> --gate ingest`。
+4. 从 `ingest_result.json` 解析 `candidate_root`,只读验证:
+   `decks/<deck_id>/source.html` 存在、没有 deck-local `assets/shared/`,manifest 中
+   shared 引用都已改写为 `../../assets/shared/...`,中央文件存在且与包内文件 hash
+   一致,同时不残留旧 framework 路径。验证失败不得 confirm,也不得事后修改 live library。
+5. 若 `ready_for_confirm=true`、candidate 资产门禁通过且用户确认已经发生,调用
    `confirm-ingest.py <staging>/ingest_result.json --library-root <root>`。
-5. 真实“入库/提交/上传”默认显式传 `--auto-merge --wait-viewer`,让 PR 合并后等待
+6. 真实“入库/提交/上传”默认显式传 `--auto-merge --wait-viewer`,让 PR 合并后等待
    Cloudflare 托管的素材网/viewer 同步。若权限或 CI 阻塞,报告 PR/check 线索。
 
 `ingest-package.py` 产出的 `ingest_result.json`、`ingest_report.md`、
@@ -153,7 +167,7 @@ skills/feishu-deck-h5/schema/ingestion-manifest.schema.json
 
 关键字段:
 
-- `quality_gate`: validator/check-only 入库门禁结果。
+- `quality_gate`: resource-only check-only 入库门禁结果。
 - `library_ingest`: feishu-slide-library deck_id、staging、ingest_result、
   review_candidates、PR/confirm/merge 结果。
 - `viewer_sync`: slide-library Cloudflare viewer 同步结果和 URL/线索。
@@ -167,6 +181,8 @@ skills/feishu-deck-h5/schema/ingestion-manifest.schema.json
 - 不把 Magic Page 或妙搭链接当成 slide-library/Cloudflare 入库或 viewer 同步结果。
 - 不把 simulator 预测、模拟 quote 或成交判断当成真实客户事实入库。
 - 不手工替代 `feishu-slide-library` 的 `ingest-package.py` / `confirm-ingest.py`。
+- 不在 `ingest-package.py` 之后调用 `ingest-assets.py` 修改 live library;shared/framework
+  改写必须在 candidate 事务中完成,wrapper 只做 verify-only。
 - 不在聊天或日志里泄露 GitHub / 飞书 token。
 - 不把“已生成候选包”说成“已入库”;只有 `confirm-ingest.py` 成功后才能说入库动作完成。
 - 若 PR 已合并但 Cloudflare viewer / 素材网未同步,必须说“已入库,素材网暂未同步”,

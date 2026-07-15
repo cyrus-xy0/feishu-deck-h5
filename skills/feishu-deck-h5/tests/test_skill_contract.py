@@ -107,6 +107,13 @@ def test_finalize_emits_a_terminal_receipt_without_linked_named_copy() -> None:
     assert finalize.count("stop=true") == 3
 
 
+def test_finalize_library_mode_is_resource_only() -> None:
+    finalize = (ROOT / "assets" / "finalize.sh").read_text(encoding="utf-8")
+    assert "skip page-quality validator (library resource-only)" in finalize
+    assert "check-only --resource-only (HTML)" in finalize
+    assert "check-only --resource-only (deck.zip)" in finalize
+
+
 def test_router_table_matches_workflow_manifest() -> None:
     workflow = json.loads((ROOT / "references" / "workflow.yaml").read_text(encoding="utf-8"))
     router = (ROOT / "references" / "request-router.md").read_text(encoding="utf-8")

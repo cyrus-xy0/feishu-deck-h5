@@ -80,8 +80,8 @@ schema 形状校验另在 `deck-json/validate-deck.py`:
 - Auto-detects deck mode via heuristics (Replica `.page-replica` /
   inline `fs-deck-mode=inline` / bilingual `fs-language=zh-en`).
 - **`--by-rule`**(工程师视图):按技术规则家族聚合的旧报告,排查框架 bug 时用。
-- **`--gate ingest`**(库准入):按业务关切 A/B/C 分组,slide-library 的
-  `ingest-package.py` 自动调,exit code 语义不同(见下「Gate ingest mode」)。
+- **`--gate ingest`**(严格评审):按业务关切 A/B/C 分组,用于显式严格业务/视觉审阅
+  (见下「Gate ingest mode」)。
 
 ### When to use what flags
 
@@ -101,13 +101,14 @@ schema 形状校验另在 `deck-json/validate-deck.py`:
 - **`--report PATH`** — write the markdown report to a file (stderr prints
   "✓ 报告已写到 …"). Default: stdout. When writing to a file, you can
   forward it on Lark / email as a review note.
-- **`--gate ingest`** — 入库门禁模式 (业务语言, A/B/C 业务关切分组).
-  See "Gate ingest mode" below.
+- **`--gate ingest`** — 严格业务/视觉评审模式 (业务语言, A/B/C 业务关切分组).
+  默认入库请用 `--resource-only`. See "Gate ingest mode" below.
 
 ### ZIP package mode (`deck.zip`)
 
-When the input is `.zip`, `check-only.py` first checks the package contract
-before running the normal HTML gate:
+When the input is `.zip`, `check-only.py` first checks the package contract.
+With `--resource-only` it stops after this resource/package scan; without it,
+the selected HTML review mode runs afterward:
 
 - ZIP root must directly contain `index.html`, `deck.json`, `assets/`,
   `assets-manifest.yaml`, and `ingestion-manifest.json`; a top-level
@@ -120,12 +121,18 @@ before running the normal HTML gate:
 - Remote URLs, `data:`, anchors, `mailto:`, and `tel:` references are ignored
   for ZIP asset existence checks.
 
-The standard library upload flow is:
+The standard library upload flow is resource-only by default:
 
 ```bash
 bash assets/finalize.sh runs/<ts>/output library --deck-id <deck-id>
-python3 assets/check-only.py runs/<ts>/output/deck.zip --gate ingest
+python3 assets/check-only.py runs/<ts>/output/deck.zip --resource-only
 ```
+
+`--resource-only` is the library/package gate. It blocks only package shape,
+entry HTML, unsafe or missing runtime-local references, empty files, and
+`assets-manifest.yaml` closure problems. It deliberately does not run visual,
+typography, style, or cross-page consistency checks. Those checks remain
+available as an explicit authoring/review pass with `--gate ingest`.
 
 ### Gate ingest mode (入库门禁)
 
@@ -146,7 +153,19 @@ Differences from default mode:
 | Report 语言 | 技术语言 (规则名 + 技术描述) | **业务语言** (症状 + 不修后果 + 修改步骤 + 技术代码小字附注) |
 | 数据来源 | 硬编码在 .py | 读 `business-rules.yaml`, 可由非工程师维护 |
 | 出口码 | exit 1 if any error | exit 1 if any 必修违规 |
-| 用途 | review-style 看 deck 卫生 | **库的 ingest-package.py 自动调** |
+| 用途 | review-style 看 deck 卫生 | 显式严格业务/视觉评审; 不是默认入库门 |
+
+### Resource-only mode (资源-only 入库门禁)
+
+```bash
+bash skills/feishu-deck-h5/assets/check-only.sh deck.zip --resource-only
+```
+
+For `deck.zip`, this mode checks the package contract and runtime asset
+closure, then stops. The importer also passes `--no-deck-h5-gate
+--resource-checks-only` to the slide-library `ingest-package.py`, so the
+downstream candidate gate follows the same policy. A visual or cross-page
+review can be requested separately with `--gate ingest`.
 
 #### 21 条必修规则 (按业务关切分组)
 

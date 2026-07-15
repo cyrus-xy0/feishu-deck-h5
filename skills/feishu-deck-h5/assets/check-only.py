@@ -5,7 +5,7 @@
 跳过 PREFLIGHT / new-run / asset-copy / sidecar 生成的整套生成流程,
 直接对单文件跑全套 validate.py 审计, 产出 markdown 报告.
 
-三个模式:
+四个模式:
 
   默认模式 — `bash check-only.sh deck.html`  ← 标准输出, 所有人一致
     逐页业务报告: 从第 1 页到第 N 页全部列出 (干净页标 ✅), 用业务语言
@@ -21,7 +21,13 @@
     只看 业务必修规则 (业务关切 A/B/C 三类), 全部 warn 升 error.
     用 business-rules.yaml 把每条违规渲染成业务语言: 业务症状 / 不修后果 /
     具体修改步骤 + 技术代码做小字附注.
-    适合 ingest-package.py 调来做 slide-library 准入扫描.
+    适合用户主动要求的严格业务/视觉评审.
+
+  资源准入 — `bash check-only.sh deck.zip --resource-only`
+    只检查入库包结构、入口 HTML、运行时本地引用和
+    assets-manifest.yaml 的素材可达性. 不跑视觉、排版或跨页一致性规则.
+    这是 slide-library 入库链路的默认门禁; `--gate ingest` 保留给显式的
+    严格业务/视觉评审.
 """
 
 from __future__ import annotations
@@ -686,7 +692,7 @@ def build_gate_report(html_path: Path, slides_count: int, violations: list,
                  f'"{html_path.name}" --gate ingest')
     lines.append('```')
     lines.append('')
-    lines.append('exit 0 → 准入通过, 可移交库的 ingest-package.py 走入库流程.')
+    lines.append('exit 0 → 严格业务/视觉评审通过; 如需入库, 另跑 --resource-only 资源门禁.')
     return '\n'.join(lines)
 
 
@@ -922,6 +928,52 @@ def closure_issue_message(issue: object) -> str:
     return message
 
 
+def run_resource_check(path: Path) -> tuple[int, str]:
+    """Check only the runtime resource closure of a standalone HTML artifact.
+
+    This intentionally does not call validate.py or Playwright.  A library
+    ingest must reject a broken package/resource reference, but visual quality
+    and cross-page consistency belong to an explicit authoring/review pass.
+    """
+    manifest_path = path.parent / 'assets-manifest.yaml'
+    if manifest_path.is_file():
+        closure = INGEST_ASSET_CLOSURE.inspect_package(
+            path.parent,
+            path,
+            manifest_path,
+        )
+    else:
+        # A direct HTML import may not have a sidecar manifest.  Keep the
+        # resource-only check useful for that compatibility path while still
+        # scanning every runtime-local reference from the HTML.
+        with tempfile.TemporaryDirectory(prefix='feishu-resource-manifest.') as td:
+            empty_manifest = Path(td) / 'assets-manifest.yaml'
+            empty_manifest.write_text('assets: []\n', encoding='utf-8')
+            closure = INGEST_ASSET_CLOSURE.inspect_package(
+                path.parent,
+                path,
+                empty_manifest,
+            )
+
+    errors = [closure_issue_message(issue) for issue in closure.issues]
+    lines = [
+        '# feishu-deck-h5 resource-only 入库检查',
+        '',
+        f'- 文件: `{path}`',
+        '- 检查: 运行时本地引用、素材存在性、素材非空、路径安全',
+        f'- 可达文件: {len(closure.reachable_files)}',
+        f'- manifest 素材: {len(closure.manifest_files)}',
+        '',
+    ]
+    if errors:
+        lines.append('## 🔴 资源阻塞问题')
+        lines.extend(f'- {item}' for item in errors)
+        return 1, '\n'.join(lines)
+    lines.append('## ✅ 资源闭包通过')
+    lines.append('视觉、排版和跨页一致性未纳入本次入库门禁。')
+    return 0, '\n'.join(lines)
+
+
 def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None, list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -1002,13 +1054,21 @@ def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None,
     return primary_html, errors, warnings
 
 
-def build_zip_package_report(path: Path, errors: list[str], warnings: list[str]) -> str:
+def build_zip_package_report(
+    path: Path,
+    errors: list[str],
+    warnings: list[str],
+    *,
+    resource_only: bool = False,
+) -> str:
     lines = [
-        '# feishu-deck-h5 deck.zip 入库包检查',
+        '# feishu-deck-h5 deck.zip ' + ('resource-only 资源检查' if resource_only else '入库包检查'),
         '',
         f'- 文件: `{path}`',
-        '',
     ]
+    if resource_only:
+        lines.append('- 检查: 包结构、入口 HTML、运行时本地引用和素材闭包')
+    lines.append('')
     if errors:
         lines.append('## 🔴 阻塞问题')
         lines.extend(f'- {item}' for item in errors)
@@ -1037,6 +1097,9 @@ def build_parser() -> argparse.ArgumentParser:
   python3 check-only.py /path/to/deck.html --gate ingest
   python3 check-only.py /path/to/deck.zip --gate ingest
 
+  # 资源-only 入库门禁: 只阻塞包结构和运行时资源问题
+  python3 check-only.py /path/to/deck.zip --resource-only
+
   # 写报告到文件 (默认或 gate 模式都可)
   python3 check-only.py /path/to/deck.html --gate ingest --report report.md
 """)
@@ -1050,8 +1113,11 @@ def build_parser() -> argparse.ArgumentParser:
                         '(CI 无 chromium 时); --gate ingest 强制开启. '
                         '未装 playwright/chromium 时自动跳过, 不硬失败')
     p.add_argument('--gate', choices=['ingest'],
-                   help='入库门禁模式. ingest = 业务必修规则, '
-                        '业务语言报告, 库 ingest-package.py 用')
+                   help='严格业务/视觉评审模式. ingest = 业务必修规则和业务语言报告; '
+                        '不是默认的 slide-library 资源入库门')
+    p.add_argument('--resource-only', action='store_true',
+                   help='资源-only 入库门禁: 只检查包结构/运行时本地引用/素材闭包, '
+                        '不跑视觉、排版或跨页一致性规则. 适用于 slide-library 入库')
     p.add_argument('--by-rule', action='store_true',
                    help='工程师视图: 按技术规则家族 (R06 / R-VIS-TIER…) 分组. '
                         '默认是逐页业务报告; 排查 framework bug 时用这个.')
@@ -1179,8 +1245,17 @@ def main() -> int:
             for warning in warnings:
                 print(f'WARNING: {warning}', file=sys.stderr)
             if errors or primary is None:
-                emit_report(build_zip_package_report(path, errors, warnings), args.report)
+                emit_report(
+                    build_zip_package_report(path, errors, warnings, resource_only=args.resource_only),
+                    args.report,
+                )
                 return 1
+            if args.resource_only:
+                # inspect_zip_package already performs the package contract
+                # and runtime asset-closure scan.  Do not fall through to the
+                # full HTML/visual audit in resource-only mode.
+                emit_report(build_zip_package_report(path, errors, warnings, resource_only=True), args.report)
+                return 0
             rc, report = run_html_check(primary, args)
             emit_report(report, args.report)
             return rc
@@ -1189,7 +1264,10 @@ def main() -> int:
         print(f'ERROR: unsupported check-only input: {path.suffix or "<none>"}', file=sys.stderr)
         return 2
 
-    rc, report = run_html_check(path, args)
+    if args.resource_only:
+        rc, report = run_resource_check(path)
+    else:
+        rc, report = run_html_check(path, args)
     emit_report(report, args.report)
     return rc
 

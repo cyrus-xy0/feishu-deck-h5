@@ -50,7 +50,7 @@ python3 "$SCRIPT_DIR/ingest-asset-closure.py" \
   --manifest assets-manifest.yaml \
   --report "$CLOSURE_REPORT" >/dev/null
 
-python3 - "$OUT_DIR" "$DECK_ID" "$CLOSURE_REPORT" <<'PY'
+python3 - "$OUT_DIR" "$DECK_ID" "$CLOSURE_REPORT" "$SCRIPT_DIR/shared" <<'PY'
 from __future__ import annotations
 
 import json
@@ -66,6 +66,7 @@ from urllib.parse import unquote, urlparse
 out_dir = Path(sys.argv[1]).resolve()
 deck_id = sys.argv[2].strip()
 closure_report_path = Path(sys.argv[3]).resolve()
+canonical_shared_root = Path(sys.argv[4]).resolve()
 
 if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", deck_id):
     sys.exit("ERROR: --deck-id must be a stable id using letters, numbers, dot, underscore, or dash")
@@ -162,7 +163,13 @@ for path in out_dir.rglob("*"):
     r = rel(path)
     parts = path.relative_to(out_dir).parts
     if path.is_symlink():
-        fail(f"symlink is not allowed: {r}")
+        allowed_shared_link = (
+            path == out_dir / "assets" / "shared"
+            and canonical_shared_root.is_dir()
+            and path.resolve() == canonical_shared_root
+        )
+        if not allowed_shared_link:
+            fail(f"symlink is not allowed: {r}")
     if path.name == ".DS_Store" or "__MACOSX" in parts or path.name.startswith("._"):
         fail(f"system metadata is not allowed: {r}")
 
@@ -205,6 +212,10 @@ manifest["asset_closure"] = {
     "total_bytes": int(closure_report.get("total_bytes") or 0),
     "digest_sha256": str(closure_report.get("digest_sha256") or ""),
 }
+manifest["package_scope"] = {
+    "policy": "runtime-closure-plus-provenance-metadata-v1",
+    "note": "Derived screenshots, logs, staging trees, and other transport archives are excluded.",
+}
 (out_dir / "ingestion-manifest.json").write_text(
     json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     encoding="utf-8",
@@ -239,23 +250,59 @@ zip_path = out_dir / "deck.zip"
 
 stage = Path(tempfile.mkdtemp(prefix="feishu-deck-ingest-pkg."))
 try:
-    for item in sorted(out_dir.iterdir(), key=lambda p: p.name):
-        if item.name == "deck.zip":
+    # Keep the ingest package deliberately narrow. Historically this loop copied
+    # the entire output/ tree, so old delivery ZIPs, screenshots, logs and even
+    # prior ingest artifacts were recursively embedded in deck.zip. The closure
+    # report is the authoritative runtime set; add only the source/provenance
+    # metadata that the library knows how to preserve.
+    provenance_metadata = {
+        "deck.json",
+        "slide-index.json",
+        "assets-manifest.yaml",
+        "ingestion-manifest.json",
+        "outline.json",
+        "outline.md",
+        "DESIGN-PLAN.md",
+        "texts.md",
+        "PROMPTS.md",
+        "README.md",
+    }
+    included = set(str(item) for item in closure_report.get("reachable_files", []))
+    included.update(name for name in provenance_metadata if (out_dir / name).is_file())
+
+    for relative_text in sorted(included):
+        relative = Path(relative_text)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+        ):
+            fail(f"unsafe closure path: {relative_text}")
+        logical_source = out_dir / relative
+        source = logical_source.resolve()
+        try:
+            source.relative_to(out_dir)
+        except ValueError:
+            shared_link = out_dir / "assets" / "shared"
+            allowed_shared_file = False
+            try:
+                allowed_shared_file = (
+                    relative.parts[:2] == ("assets", "shared")
+                    and shared_link.is_symlink()
+                    and shared_link.resolve(strict=True) == canonical_shared_root
+                    and source.relative_to(canonical_shared_root) is not None
+                )
+            except (OSError, ValueError):
+                allowed_shared_file = False
+            if not allowed_shared_file:
+                fail(f"closure path escapes output: {relative_text}")
+        if not source.is_file():
+            fail(f"closure file disappeared before packaging: {relative_text}")
+        if primary_override is not None and source == primary_override.resolve():
             continue
-        if is_packaged_metadata(item):
-            continue
-        if primary_override is not None and item.resolve() == primary_override:
-            continue
-        target = stage / item.name
-        if item.is_dir():
-            shutil.copytree(
-                item,
-                target,
-                symlinks=False,
-                ignore=lambda _dir, names: [name for name in names if name.startswith(".")],
-            )
-        else:
-            shutil.copy2(item, target)
+        target = stage / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
     if primary_override is not None:
         shutil.copy2(primary_override, stage / "index.html")
 

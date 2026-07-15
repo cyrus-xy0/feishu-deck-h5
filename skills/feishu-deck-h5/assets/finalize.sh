@@ -14,19 +14,20 @@
 #                         as-is, e.g. for zoomable detail). Default: downscale
 #                         any image whose longest edge exceeds 1920 (the canvas)
 #                         so decks open fast, especially on mobile.
-#         --name <slug>   emit a delivery-named copy alongside index.html
+#         --name <slug>   name the remote editable zip (remote mode only)
 #                         convention: lark-<customer>-<presentation-date>
 #                         e.g. --name lark-boyu-starbucks-2026-05-08
 #         --deck-id       required in library mode; stable material-library id
 #
-#     local   = copy-assets + validate (+ named copy if --name)
+#     local   = copy-assets + validate (same-workspace checkpoint)
 #     remote  = local steps + package-deliverable.sh (zip kit, zip name from --name)
-#     library = copy-assets --shared=copy + validate --strict
-#               + check-only gate + package-ingest.sh + deck.zip gate
+#     library = copy-assets --shared=link + validate
+#               + resource-only check + package-ingest.sh (dereference reachable
+#                 shared files into deck.zip) + deck.zip resource check
 #
 # For single-file inline delivery (base64-inlined CSS/JS/images into one
 # .html file for email/IM attachment), inline THE USER'S RUN with
-# `python3 deck-json/render-deck.py runs/<ts>/output --inline` (or
+# `python3 deck-json/render-deck.py <deck.json> <output-dir> --inline` (or
 # `python3 assets/inline-assets.py runs/<ts>/output/index.html --out <file>`).
 # Do NOT use `build.sh --inline` — that rebuilds the skill's bundled SAMPLE deck.
 #
@@ -55,7 +56,7 @@ while [ $# -gt 0 ]; do
         inline)
             echo "✗ 'inline' mode is no longer a finalize.sh subcommand." >&2
             echo "  For single-file inline delivery of THIS run, run:" >&2
-            echo "    python3 deck-json/render-deck.py ${OUT_DIR:-runs/<ts>/output} --inline" >&2
+            echo "    python3 deck-json/render-deck.py <deck.json> <output-dir> --inline" >&2
             echo "  (build.sh --inline rebuilds the bundled SAMPLE deck, not your run.)" >&2
             exit 1
             ;;
@@ -75,6 +76,12 @@ if [ "$MODE" = "library" ]; then
         echo "✗ library mode requires --deck-id <deck-id>" >&2
         exit 1
     fi
+fi
+
+if [ "$MODE" = "local" ] && [ -n "$NAME" ]; then
+    echo "✗ local mode does not accept --name; it does not create a transport artifact" >&2
+    echo "  use remote --name for an editable zip, or render-deck.py --inline for one HTML" >&2
+    exit 1
 fi
 
 # Validate --name against the convention if provided
@@ -136,21 +143,22 @@ run_step() {
 }
 
 # ---------- 1 · copy-assets (make output portable) ----------
-# delivery-1: remote (and library) must SELF-CONTAIN — real-copy only the shared
-# files this deck references. The default --shared=link makes output/assets/shared
-# a symlink to the whole 30 MB skill pool, which package-deliverable.sh's zip then
-# DEREFERENCES, leaking every other customer's logo into the deliverable. Only the
-# in-place `local` mode (kept next to the skill) may use the link.
+# delivery-1: remote must SELF-CONTAIN — real-copy only the shared files this deck
+# references because package-deliverable.sh consumes the output tree directly.
+# Library mode keeps the local shared link: package-ingest.sh dereferences only
+# the verified reachable closure into deck.zip, so the run stays compact without
+# leaking the whole shared pool.
 COPY_ARGS=("$OUT_DIR")
-if [ "$MODE" = "library" ] || [ "$MODE" = "remote" ]; then
+if [ "$MODE" = "remote" ]; then
     COPY_ARGS+=("--shared=copy")
 fi
-if [ "$MODE" = "library" ] || [ "$MODE" = "remote" ]; then
+if [ "$MODE" = "remote" ]; then
     echo "  · copy-assets --shared=copy …"
 else
-    echo "  · copy-assets …"
+    echo "  · copy-assets --shared=link …"
 fi
 if ! run_step "copy-assets" python3 "$SCRIPT_DIR/copy-assets.py" "${COPY_ARGS[@]}"; then
+    echo "FAIL_DOMAIN=delivery DO_NOT_EDIT_DECK=1" >&2
     exit 2
 fi
 
@@ -163,6 +171,7 @@ fi
 if [ "$MODE" = "library" ] || [ "$MODE" = "remote" ]; then
     echo "  · materialize-remote-images …"
     if ! run_step "materialize-remote-images" python3 "$SCRIPT_DIR/materialize-remote-images.py" "$OUT_DIR"; then
+        echo "FAIL_DOMAIN=delivery DO_NOT_EDIT_DECK=1" >&2
         exit 5
     fi
 fi
@@ -185,67 +194,45 @@ if [ "$OPTIMIZE_IMAGES" = "1" ]; then
 fi
 
 # ---------- 2 · validate ----------
-VALIDATE_STRICT="$STRICT"
+# Library ingest is resource-only. Its blocking checks are the resource gate
+# below plus package-ingest.sh and the slide-library candidate gate. Keep the
+# page-quality validator for local/remote delivery, where it is still part of
+# the presentation handoff contract.
 if [ "$MODE" = "library" ]; then
-    VALIDATE_STRICT="--strict"
-fi
-if [ -n "$VALIDATE_STRICT" ]; then
-    echo "  · validate --strict …"
+    echo "  · skip page-quality validator (library resource-only) …"
 else
-    echo "  · validate …"
-fi
-if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $VALIDATE_STRICT; then
+    VALIDATE_STRICT="$STRICT"
     if [ -n "$VALIDATE_STRICT" ]; then
-        echo "✗ validator failed under --strict — fix the warnings/errors above" >&2
+        echo "  · validate --strict …"
     else
-        echo "✗ validator errors — fix above and re-run" >&2
+        echo "  · validate …"
     fi
-    exit 4
-fi
-
-# D-14: a default (non-strict) validate pass can still be REJECTED at
-# slide-library ingest, because the ingest gate (`check-only.py --gate ingest`)
-# forces strict (warn→error) + visual audit. Surface that stricter bar here so a
-# "done" deck doesn't surprise-fail on hand-off. Only nag when not already strict.
-if [ -z "$STRICT" ] && [ "$MODE" != "library" ]; then
-    echo ""
-    echo "  ℹ️  slide-library 入库门禁更严:strict(warn→error) + 视觉审计。"
-    echo "      入库前想按同一档门槛预检,任选其一:"
-    echo "        bash $(basename "$0") \"$OUT_DIR\" $MODE --strict"
-    echo "        python3 \"$SCRIPT_DIR/check-only.py\" \"$HTML\" --gate ingest"
+    if ! python3 "$SCRIPT_DIR/validate.py" "$HTML" $VALIDATE_STRICT; then
+        if [ -n "$VALIDATE_STRICT" ]; then
+            echo "✗ validator failed under --strict — fix the warnings/errors above" >&2
+        else
+            echo "✗ validator errors — fix above and re-run" >&2
+        fi
+        echo "FAIL_DOMAIN=page DO_NOT_EDIT_DECK=0" >&2
+        exit 4
+    fi
 fi
 
 if [ "$MODE" = "library" ]; then
-    echo "  · check-only --gate ingest (HTML) …"
-    if ! run_step "check-only HTML gate" python3 "$SCRIPT_DIR/check-only.py" "$HTML" --gate ingest; then
+    echo "  · check-only --resource-only (HTML) …"
+    if ! run_step "check-only HTML resource gate" python3 "$SCRIPT_DIR/check-only.py" "$HTML" --resource-only; then
+        echo "FAIL_DOMAIN=page DO_NOT_EDIT_DECK=0" >&2
         exit 6
     fi
 fi
 
-# ---------- 3 · delivery-named copy (if --name provided) ----------
-NAMED_HTML=""
-if [ -n "$NAME" ]; then
-    NAMED_HTML="$OUT_DIR/$NAME.html"
-    cp "$HTML" "$NAMED_HTML"
-    echo "  · copied → $NAME.html"
-fi
-
-# ---------- 4 · mode-specific packaging ----------
+# ---------- 3 · mode-specific packaging ----------
 case "$MODE" in
     local)
         echo ""
-        if [ -n "$NAMED_HTML" ]; then
-            echo "✓ ready (local) — deliver this file:"
-            echo "    $NAMED_HTML"
-            echo "  (working copy still at $HTML for further edits)"
-        else
-            echo "✓ ready (local) — open in browser:"
-            echo "    open $HTML"
-            echo ""
-            echo "  TIP: when delivering, re-run with --name lark-<customer>-<YYYY-MM-DD>"
-            echo "       to emit a properly-named copy (convention for site sync /"
-            echo "       slide-library inbox / customer hand-off)."
-        fi
+        echo "✓ ready (local) — same-workspace checkpoint:"
+        echo "    $HTML"
+        echo "FINALIZE_RESULT status=pass shape=local artifact=$HTML stop=true"
         ;;
     remote)
         echo "  · package-deliverable …"
@@ -254,6 +241,7 @@ case "$MODE" in
             ZIP_ARGS+=("--name" "$NAME")
         fi
         if ! run_step "package-deliverable" bash "$SCRIPT_DIR/package-deliverable.sh" "${ZIP_ARGS[@]}"; then
+            echo "FAIL_DOMAIN=delivery DO_NOT_EDIT_DECK=1" >&2
             exit 5
         fi
         ZIP_NAME="${NAME:-deck-editable}"
@@ -261,24 +249,23 @@ case "$MODE" in
         echo ""
         echo "✓ ready (remote) — attach this zip to your delivery:"
         echo "    $ZIP"
-        if [ -z "$NAME" ]; then
-            echo ""
-            echo "  TIP: pass --name lark-<customer>-<YYYY-MM-DD> for a named zip"
-            echo "       instead of the generic deck-editable.zip."
-        fi
+        echo "FINALIZE_RESULT status=pass shape=remote artifact=$ZIP stop=true"
         ;;
     library)
         echo "  · package-ingest …"
         if ! run_step "package-ingest" bash "$SCRIPT_DIR/package-ingest.sh" "$OUT_DIR" --deck-id "$DECK_ID"; then
+            echo "FAIL_DOMAIN=delivery DO_NOT_EDIT_DECK=1" >&2
             exit 5
         fi
         ZIP="$OUT_DIR/deck.zip"
-        echo "  · check-only --gate ingest (deck.zip) …"
-        if ! run_step "check-only ZIP gate" python3 "$SCRIPT_DIR/check-only.py" "$ZIP" --gate ingest; then
+        echo "  · check-only --resource-only (deck.zip) …"
+        if ! run_step "check-only ZIP resource gate" python3 "$SCRIPT_DIR/check-only.py" "$ZIP" --resource-only; then
+            echo "FAIL_DOMAIN=delivery DO_NOT_EDIT_DECK=1" >&2
             exit 6
         fi
         echo ""
         echo "✓ ready (library) — upload this zip to feishu-slide-library:"
         echo "    $ZIP"
+        echo "FINALIZE_RESULT status=pass shape=library artifact=$ZIP stop=true"
         ;;
 esac

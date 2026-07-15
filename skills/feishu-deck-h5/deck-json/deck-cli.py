@@ -1326,6 +1326,135 @@ def _copy_file_by_identity(src: Path, dst_root: Path, desired_rel: str) -> str:
     return alternate_rel
 
 
+def _path_lexists(path: Path) -> bool:
+    """True for regular paths and broken symlinks (Path.exists follows links)."""
+    return os.path.lexists(path)
+
+
+def _same_filesystem_entry(left: Path, right: Path) -> bool:
+    """Identity check that also handles case-insensitive path spellings."""
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return left.resolve() == right.resolve()
+
+
+def _relative_symlink(target: Path, link: Path, *, directory: bool = False) -> None:
+    """Create a relocatable relative symlink without replacing existing data."""
+    if _path_lexists(link):
+        raise FileExistsError(link)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    relative = os.path.relpath(target.resolve(), start=link.parent.resolve())
+    link.symlink_to(relative, target_is_directory=directory)
+
+
+def _link_file_by_identity(src: Path, dst_root: Path, desired_rel: str) -> str:
+    """Reference ``src`` through a relative symlink, isolating path conflicts.
+
+    This is the central-pool counterpart of :func:`_copy_file_by_identity`.
+    It never materializes a second copy in the run, while the deterministic
+    hash-suffix rule still prevents a different existing destination from being
+    overwritten.  ``copy-assets.py`` later follows ``input/`` links and writes
+    regular files for portable delivery.
+    """
+    digest = _sha256_file(src)
+    rel_path = Path(desired_rel)
+    if rel_path.is_absolute() or not rel_path.parts or any(
+            part in ("", ".", "..") for part in rel_path.parts):
+        raise ValueError(f"asset destination escapes deck root: {desired_rel}")
+    desired = dst_root.joinpath(*rel_path.parts)
+    if desired.is_file() and _sha256_file(desired) == digest:
+        return desired_rel
+    if not _path_lexists(desired):
+        desired.parent.mkdir(parents=True, exist_ok=True)
+        root = dst_root.resolve()
+        parent = desired.parent.resolve()
+        if parent != root and root not in parent.parents:
+            raise ValueError(f"asset destination escapes deck root: {desired_rel}")
+        _relative_symlink(src, desired)
+        return desired_rel
+
+    alternate_rel = _hash_suffixed_relpath(desired_rel, digest)
+    alternate_path = Path(alternate_rel)
+    alternate = dst_root.joinpath(*alternate_path.parts)
+    if alternate_path.is_absolute() or any(
+            part in ("", ".", "..") for part in alternate_path.parts):
+        raise ValueError(f"asset destination escapes deck root: {alternate_rel}")
+    if alternate.is_file():
+        if _sha256_file(alternate) != digest:
+            raise RuntimeError(f"content-hash asset collision: {alternate_rel}")
+        return alternate_rel
+    if _path_lexists(alternate):
+        raise RuntimeError(f"asset collision path is not a file: {alternate}")
+    alternate.parent.mkdir(parents=True, exist_ok=True)
+    root = dst_root.resolve()
+    parent = alternate.parent.resolve()
+    if parent != root and root not in parent.parents:
+        raise ValueError(f"asset destination escapes deck root: {alternate_rel}")
+    _relative_symlink(src, alternate)
+    return alternate_rel
+
+
+def _reference_canonical_shared_asset(
+        canonical_file: Path, canonical_root: Path, dst_root: Path, ref: str) -> str:
+    """Keep a canonical ``assets/shared`` ref usable without copying its bytes.
+
+    Prefer one run-level ``assets/shared`` link to the canonical pool.  A run
+    can still contain a legacy real shared directory, so in that case create a
+    per-file relative link.  If the requested path is already occupied by
+    different content, preserve it for existing slides and rewrite only the
+    pasted slide to an ``input/shared-pool`` link.  The latter is deliberately
+    under ``input/``: portable finalize already materializes input refs as real
+    files, so source-run dedupe never weakens the delivery contract.
+    """
+    rel_path = Path(ref)
+    if rel_path.is_absolute() or not rel_path.parts or any(
+            part in ("", ".", "..") for part in rel_path.parts):
+        raise ValueError(f"shared asset destination escapes pool: {ref}")
+
+    canonical_root = canonical_root.resolve()
+    canonical_file = canonical_file.resolve()
+    if canonical_file.parent != canonical_root and canonical_root not in canonical_file.parents:
+        raise ValueError(f"canonical shared asset escapes pool: {canonical_file}")
+
+    old_rel = f"assets/shared/{ref}"
+    shared_root = dst_root / "assets" / "shared"
+
+    if shared_root.is_symlink():
+        try:
+            if _same_filesystem_entry(shared_root, canonical_root):
+                return old_rel
+        except OSError:
+            pass
+        # A foreign/broken shared link is existing user state. Do not replace it.
+    elif not _path_lexists(shared_root):
+        assets_dir = shared_root.parent
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        resolved_assets = assets_dir.resolve()
+        resolved_dst = dst_root.resolve()
+        if resolved_assets == resolved_dst or resolved_dst in resolved_assets.parents:
+            _relative_symlink(canonical_root, shared_root, directory=True)
+            return old_rel
+    elif shared_root.is_dir():
+        desired = shared_root.joinpath(*rel_path.parts)
+        if _path_lexists(desired):
+            if desired.is_file() and _sha256_file(desired) == _sha256_file(canonical_file):
+                return old_rel
+        else:
+            desired.parent.mkdir(parents=True, exist_ok=True)
+            resolved_parent = desired.parent.resolve()
+            resolved_shared = shared_root.resolve()
+            if resolved_parent == resolved_shared or resolved_shared in resolved_parent.parents:
+                _relative_symlink(canonical_file, desired)
+                return old_rel
+
+    # The logical shared path is occupied by different content (or its parent
+    # is unsafe). Keep the existing deck untouched and give this pasted slide a
+    # canonical, non-materialized input ref instead.
+    return _link_file_by_identity(
+        canonical_file, dst_root, f"input/shared-pool/{ref}")
+
+
 def _copy_tree_by_identity(src: Path, dst_root: Path, desired_rel: str) -> str:
     """Copy a prototype tree by content identity, isolating collisions."""
     desired = contained_dest(dst_root, desired_rel)
@@ -1399,9 +1528,11 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
     deck-local media) are preserved only when absent or byte-identical. A
     different destination at the same path is never overwritten: source content
     lands at a deterministic hash-suffixed sibling and this pasted slide's refs
-    are recursively rewritten. Shared-pool refs ARE copied from the source's local
-    copy, or (when the source never localized it: linked-mode / hand-assembled
-    source) from the framework shared pool `<skill>/assets/shared/`. Only
+    are recursively rewritten. Shared-pool refs whose bytes match the canonical
+    framework pool are referenced through relative symlinks instead of copied
+    into every run. A source-local override still wins; if a canonical shared
+    link already occupies the target namespace, that override moves to
+    deck-local ``input/shared-conflicts`` and only the pasted slide is rewritten. Only
     skill-relative (`../../../skills/...`), framework `assets/lark-*`, http(s) and
     `data:` refs need no copy (they resolve identically or are external). Returns
     a report dict {input, prototypes, shared, local, missing}.
@@ -1482,18 +1613,36 @@ def _copy_slide_assets(slide: dict, src_dir: Path, dst_dir: Path) -> dict:
         # the canonical copy from the framework pool `<skill>/assets/shared/` instead
         # of flagging a real asset `missing` → broken image (the target rarely pre-
         # populates the pool). The dst containment guard below still bounds the write.
-        if not s.is_file():
-            fb = framework_shared / ref
-            if fb.is_file():
-                s = fb
+        canonical = framework_shared / ref
+        if not s.is_file() and canonical.is_file():
+            s = canonical
         # mutation-2: containment guard — skip + flag any ref that escapes the
-        # destination assets/shared/ dir via ../.
-        d = contained_dest(dst_dir / "assets" / "shared", ref)
-        if s.is_file() and d is not None:
+        # destination assets/shared/ dir via ../. This check is lexical here:
+        # a valid run-level shared symlink deliberately resolves outside the
+        # deck root, so contained_dest() would incorrectly reject it.
+        ref_path = Path(ref)
+        safe_ref = (not ref_path.is_absolute() and bool(ref_path.parts) and
+                    all(part not in ("", ".", "..") for part in ref_path.parts))
+        if s.is_file() and safe_ref:
             old_rel = f"assets/shared/{ref}"
-            new_rel = _copy_file_by_identity(s, dst_dir, old_rel)
+            if (canonical.is_file() and
+                    _sha256_file(s) == _sha256_file(canonical)):
+                new_rel = _reference_canonical_shared_asset(
+                    canonical, framework_shared, dst_dir, ref)
+            elif (dst_dir / "assets" / "shared").is_symlink():
+                # Never write a source-local override through the canonical
+                # pool link. It is deck-local content despite its source path.
+                new_rel = _copy_file_by_identity(
+                    s, dst_dir, f"input/shared-conflicts/{ref}")
+            else:
+                d = contained_dest(dst_dir / "assets" / "shared", ref)
+                if d is None:
+                    copied["missing"].append(old_rel)
+                    continue
+                new_rel = _copy_file_by_identity(s, dst_dir, old_rel)
             exact_rewrites[old_rel] = new_rel
-            shown = new_rel.removeprefix("assets/shared/")
+            shown = (new_rel.removeprefix("assets/shared/")
+                     if new_rel.startswith("assets/shared/") else new_rel)
             copied["shared"].append(
                 ref if new_rel == old_rel else f"{ref} -> {shown}")
         else:

@@ -123,14 +123,16 @@ because there is nothing to measure):
 **How to apply — scope the look to the work (F-335):** for an
 `INTERMEDIATE_EDIT` scoped edit, render `--iter` and eyeball ONLY the changed
 page(s) (auto-scope already re-shot just those — don't re-walk all N
-pages). For a `LOCAL_HANDOFF`, `PRESENTATION_CHECKPOINT`, or `LIBRARY_INGEST`
-checkpoint, **look at EVERY page's screenshot** and
+pages). For a `LOCAL_HANDOFF` or `PRESENTATION_CHECKPOINT` checkpoint, **look
+at EVERY page's screenshot** and
 walk it through 「标题位 / 饱满度 / 一致性 / 焦点」 before you trust the
 green light. `MAGIC_PUBLISH` uses the publisher integrity gate and does not
 implicitly add another whole-deck visual pass. If a required gate fails, fix and
 re-render. In multi-agent runs, make
 "post-render visual self-review (changed page(s) intermediate, whole deck
-at delivery)" a **default stage**, not an afterthought. This complements the precise-measurement gate (computed
+at delivery)" a **default stage**, not an afterthought. Library ingest uses the
+resource-only package/candidate gate; visual review is available separately
+when the request calls for it. This complements the precise-measurement gate (computed
 `font-size` px, see `check-only` / `validator-rules`): font sizes you
 **measure**, but composition / title position / hollowness you **look at**.
 

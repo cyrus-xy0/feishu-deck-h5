@@ -109,10 +109,14 @@ python3 skills/feishu-deck-h5/deck-json/render-deck.py \
    so it SUPPRESSES framework / present-mode / whole-deck rules (wordmark, present
    chrome, every-layout centering, CSS-var source scan, deck-wide drift) — those run
    only at the real render; preview shows NATIVE severity (no baseline demotion).
-   `--no-gate` = screenshot only. Loop: iterate with preview `--key`, then commit +
-   run the FULL gate once via `render-deck.py --scope <key> --final`. Caveat: JS
-   motion / iframe-embed content / fitText do NOT run here — an iframe demo page
-   (e.g. a feishu-prototype) still needs the real render.
+   `--no-gate` = screenshot only. Single-slide budget: run one preview; if it
+   exposes a blocking or plainly visible defect, make at most one targeted
+   correction and preview once more. Then commit and run the FULL gate once via
+   `render-deck.py --scope <key> --final`. A passing gate plus its visual review
+   closes authoring; follow the controller's `execution_policy` instead of
+   starting another polish loop. Caveat: JS motion / iframe-embed content /
+   fitText do NOT run here — an iframe demo page (e.g. a feishu-prototype) still
+   needs the real render.
 
 6. Confirm the render actually updated `index.html` by checking renderer output,
    mtime, or expected slide key/content.
