@@ -171,6 +171,11 @@
           "pattern": "^[a-z][a-z0-9-]*$",
           "description": "Deck-internal unique semantic slug. NOT positional. Stable across reorders. (R-KEY)"
         },
+        "source_slide_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Internal provenance locator for HTML backfill when the rendered source used a non-schema or duplicate data-slide-key. key remains the valid DeckJSON identity; reverse-sync may use source_slide_key to find the historical DOM node."
+        },
         "layout": { "$ref": "#/$defs/layout_enum" },
         "variant": {
           "type": "string",

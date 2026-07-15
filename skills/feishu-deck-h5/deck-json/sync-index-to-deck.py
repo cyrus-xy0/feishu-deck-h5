@@ -239,31 +239,53 @@ def sanitize_runtime_traces(html: str) -> str:
     return out
 
 
+def _html_attr(open_tag: str, name: str) -> str | None:
+    match = re.search(rf'\b{re.escape(name)}\s*=\s*(["\'])(.*?)\1', open_tag, re.S | re.I)
+    return match.group(2) if match else None
+
+
+def _is_slide_open_tag(open_tag: str) -> bool:
+    classes = (_html_attr(open_tag, "class") or "").split()
+    return "slide" in classes and bool(_html_attr(open_tag, "data-slide-key"))
+
+
+def _iter_native_slide_opens(html: str):
+    for match in re.finditer(r'<(?P<tag>div|section|article|main)\b[^>]*>', html, re.I):
+        if _is_slide_open_tag(match.group(0)):
+            yield match
+
+
+def _find_native_slide_open(html: str, slide_key: str):
+    for match in _iter_native_slide_opens(html):
+        if _html_attr(match.group(0), "data-slide-key") == slide_key:
+            return match
+    return None
+
+
+def _depth_extract_tag_inner(html: str, start: int, tag: str) -> str | None:
+    depth = 1
+    j = start
+    while depth > 0 and j < len(html):
+        match = re.search(rf"<{re.escape(tag)}\b[^>]*>|</{re.escape(tag)}>", html[j:], re.I)
+        if not match:
+            return None
+        depth += -1 if match.group(0).startswith("</") else 1
+        j += match.end()
+    return html[start:j - len(f"</{tag}>")]
+
+
 def extract_slide_inner(html: str, slide_key: str) -> str | None:
-    """Find <div class="slide" ... data-slide-key="K" ...>INNER</div> and
-    return INNER minus the leading wordmark div, by depth-counting <div>/</div>.
+    """Find any block element carrying class=slide + data-slide-key=K and
+    return INNER minus the leading wordmark, depth-counting its actual tag.
 
     Returns None if the slide isn't found in html.
     """
-    pat = rf'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="{re.escape(slide_key)}"[^>]*>'
-    m = re.search(pat, html)
+    m = _find_native_slide_open(html, slide_key)
     if not m:
         return None
-
-    i = m.end()
-    depth = 1
-    j = i
-    while depth > 0 and j < len(html):
-        nm = re.search(r"<div\b[^>]*>|</div>", html[j:])
-        if not nm:
-            return None
-        if nm.group(0).startswith("</"):
-            depth -= 1
-        else:
-            depth += 1
-        j += nm.end()
-
-    inner_full = html[i : j - len("</div>")]
+    inner_full = _depth_extract_tag_inner(html, m.end(), m.group("tag").lower())
+    if inner_full is None:
+        return None
     # strip the leading per-slide custom_css block (render-deck.py injects it as
     # the FIRST child of .slide, marked data-fs-custom-css). It is sourced from
     # the deck.json `custom_css` field, NOT data.html, so it must NOT be folded
@@ -541,36 +563,18 @@ def _html_unescape(s: str) -> str:
 # commit 1fb1f6e).
 # ---------------------------------------------------------------------------
 
-_SLIDE_OPEN_RE = re.compile(
-    r'<div class="slide(?:\s[^"]*)?"[^>]*\bdata-slide-key="([^"]+)"[^>]*>')
-
-
 def _slide_keys_in_dom_order(html: str) -> list:
-    """Every `.slide` data-slide-key in DOM order (self-rendered feishu deck)."""
-    return _SLIDE_OPEN_RE.findall(html)
+    """Every `.slide` data-slide-key in DOM order (self-rendered feishu deck).
+
+    The slide class may appear anywhere in class= and the container may be div,
+    section, article, or main. Older importers emitted all of these forms.
+    """
+    return [_html_attr(match.group(0), "data-slide-key") for match in _iter_native_slide_opens(html)]
 
 
 def _screen_label_in_tag(open_tag: str) -> str | None:
     """data-screen-label off ONE slide open tag (positional, not by-key)."""
-    m = re.search(r'\bdata-screen-label="([^"]*)"', open_tag)
-    return m.group(1) if m else None
-
-
-def _depth_extract_div_inner(html: str, start: int) -> str | None:
-    """Inner HTML of the `.slide` div whose open tag ENDS at `start`, by
-    depth-counting `<div>`/`</div>`. Positional (anchored at `start`, not a
-    by-key re.search), so duplicate-keyed slides each get their OWN body. None if
-    the div never closes."""
-    i = start
-    depth = 1
-    j = i
-    while depth > 0 and j < len(html):
-        nm = re.search(r"<div\b[^>]*>|</div>", html[j:])
-        if not nm:
-            return None
-        depth += -1 if nm.group(0).startswith("</") else 1
-        j += nm.end()
-    return html[i: j - len("</div>")]
+    return _html_attr(open_tag, "data-screen-label")
 
 
 def _slides_in_dom_order(html: str) -> "list[tuple[str, str, str | None, str]]":
@@ -584,9 +588,9 @@ def _slides_in_dom_order(html: str) -> "list[tuple[str, str, str | None, str]]":
     custom_css <style> + wordmark stripped, rstripped) so a subsequent sync on the
     same index.html is a no-op; `custom_css` is that stripped block's body."""
     out = []
-    for om in _SLIDE_OPEN_RE.finditer(html):
-        key = om.group(1)
-        inner_full = _depth_extract_div_inner(html, om.end())
+    for om in _iter_native_slide_opens(html):
+        key = _html_attr(om.group(0), "data-slide-key") or ""
+        inner_full = _depth_extract_tag_inner(html, om.end(), om.group("tag").lower())
         if inner_full is None:
             continue
         # strip the leading per-slide custom_css block (render-deck injects it as
@@ -609,14 +613,8 @@ def _slides_in_dom_order(html: str) -> "list[tuple[str, str, str | None, str]]":
 
 def _screen_label_for(html: str, slide_key: str) -> str | None:
     """The data-screen-label attr on the slide open tag, if any."""
-    pat = (rf'<div class="slide(?:\s[^"]*)?"[^>]*'
-           rf'data-screen-label="([^"]*)"[^>]*data-slide-key="{re.escape(slide_key)}"'
-           rf'|<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="{re.escape(slide_key)}"'
-           rf'[^>]*data-screen-label="([^"]*)"')
-    m = re.search(pat, html)
-    if not m:
-        return None
-    return m.group(1) if m.group(1) is not None else m.group(2)
+    match = _find_native_slide_open(html, slide_key)
+    return _html_attr(match.group(0), "data-screen-label") if match else None
 
 
 def _extract_slide_custom_css(html: str, slide_key: str) -> str:
@@ -628,8 +626,7 @@ def _extract_slide_custom_css(html: str, slide_key: str) -> str:
     is idempotent on already-scoped selectors, so storing it verbatim back into
     `custom_css` round-trips (re-render re-scopes → no change). Empty if none.
     """
-    pat = rf'<div class="slide(?:\s[^"]*)?"[^>]*data-slide-key="{re.escape(slide_key)}"[^>]*>'
-    m = re.search(pat, html)
+    m = _find_native_slide_open(html, slide_key)
     if not m:
         return ""
     cc = re.match(
@@ -661,6 +658,15 @@ def _strip_leading_wordmark(inner: str) -> str:
     it; foreign HTML usually won't). Mirrors extract_slide_inner."""
     wm = re.match(r'\s*<div class="wordmark"[^>]*>.*?</div>\s*', inner, re.S)
     return inner[wm.end():] if wm else inner
+
+
+def _schema_safe_backfill_html(inner: str) -> tuple[str, bool]:
+    """Keep short/empty legacy slides visible-identical while satisfying the
+    raw layout schema's data.html minLength. The inert comment is renderer-safe
+    and carries no model-visible text."""
+    if len(inner) >= 10:
+        return inner, False
+    return inner + "<!-- backfill-empty -->", True
 
 
 def _depth_extract_inner(html: str, open_match: re.Match, tag: str) -> str:
@@ -763,20 +769,31 @@ def backfill_deck(index_html: str, html_stem: str) -> "tuple[dict, list]":
             # de-dupe collided keys (a malformed deck could repeat one); the
             # schema needs unique keys for a clean sync round-trip. Bodies are now
             # distinct (positional extraction above), so this is a pure key rename.
+            source_key = key
             ukey = key
-            if ukey in used:
+            if not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", ukey):
+                ukey = _make_key(key, used, n)
+                warnings.append(f"non-schema data-slide-key {key!r} → normalized "
+                                f"to {ukey!r}; source_slide_key preserves the locator")
+            elif ukey in used:
                 ukey = _make_key(key, used, n)
                 warnings.append(f"duplicate data-slide-key {key!r} → renamed "
                                 f"{ukey!r} for uniqueness (its own distinct body "
                                 f"is preserved)")
             else:
                 used.add(ukey)
+            inner, padded = _schema_safe_backfill_html(inner)
+            if padded:
+                warnings.append(f"slide {key!r} had <10 chars of raw HTML; added "
+                                "an inert backfill comment for schema validity")
             slide = {
                 "key": ukey,
                 "layout": "raw",
                 "lifted": f"backfill:{html_stem}#{n}",
                 "data": {"html": inner},
             }
+            if ukey != source_key:
+                slide["source_slide_key"] = source_key
             if label:
                 slide["screen_label"] = label
             if cc:
@@ -796,6 +813,10 @@ def backfill_deck(index_html: str, html_stem: str) -> "tuple[dict, list]":
             inner = _strip_leading_wordmark(inner).rstrip()
             if not inner.strip():
                 continue
+            inner, padded = _schema_safe_backfill_html(inner)
+            if padded:
+                warnings.append(f"foreign slide {n} had <10 chars of raw HTML; "
+                                "added an inert backfill comment for schema validity")
             key = _make_key(seed, used, n)
             slides.append({
                 "key": key,
@@ -1216,7 +1237,8 @@ def main() -> int:
         if args.slide_key and key != args.slide_key:
             continue
 
-        inner = extract_slide_inner(index_html, key)
+        source_key = slide.get("source_slide_key") or key
+        inner = extract_slide_inner(index_html, source_key)
         if inner is None:
             skipped_missing.append(key)
             continue
@@ -1231,7 +1253,7 @@ def main() -> int:
         # rendered body when there is no drift) and write back on mismatch. The
         # stored value is the already-scoped body, which round-trips (re-render
         # re-scopes → no change), matching _extract_slide_custom_css's contract.
-        html_css = _extract_slide_custom_css(index_html, key)
+        html_css = _extract_slide_custom_css(index_html, source_key)
         cur_css = slide.get("custom_css") or ""
         if html_css.strip() != _scope_selectors(cur_css, key).strip():
             drift_count += 1

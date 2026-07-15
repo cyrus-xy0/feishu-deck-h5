@@ -110,6 +110,27 @@ def test_backfill_native_exact_keys_and_lifted():
     assert warnings == []  # native = clean
 
 
+def test_backfill_native_accepts_class_token_order_section_and_preserves_malformed_locator():
+    html = (
+        '<html><body>'
+        '<section class="page hero slide" data-screen-label="01 Legacy" '
+        'data-slide-key="01-slide"><h2>Legacy section</h2></section>'
+        '<div class="wall slide featured" data-slide-key="content-02-slide">'
+        '<p>Second page</p></div>'
+        '</body></html>')
+
+    deck, warnings = _sync.backfill_deck(html, "legacy")
+
+    assert len(deck["slides"]) == 2
+    assert deck["slides"][0]["key"] == "slide-1"
+    assert deck["slides"][0]["source_slide_key"] == "01-slide"
+    assert deck["slides"][0]["screen_label"] == "01 Legacy"
+    assert "Legacy section" in deck["slides"][0]["data"]["html"]
+    assert deck["slides"][1]["key"] == "content-02-slide"
+    assert "Second page" in deck["slides"][1]["data"]["html"]
+    assert any("non-schema" in warning for warning in warnings)
+
+
 def test_backfill_captures_custom_css_scoped():
     # the rendered shape of a slide's leading data-fs-custom-css block: backfill
     # must capture it into custom_css and keep it OUT of data.html
@@ -183,6 +204,22 @@ def test_backfill_never_crashes_on_empty_body():
     # one last-resort slide of an empty body would be empty → dropped → 0 slides
     assert isinstance(deck["slides"], list)
     assert any("reconstructed" in w or "unrecognizable" in w for w in warnings)
+
+
+def test_backfill_native_short_or_empty_slide_is_schema_safe_without_visible_copy():
+    html = (
+        '<html><body>'
+        '<div class="slide" data-slide-key="short">短文</div>'
+        '<div class="slide" data-slide-key="empty"></div>'
+        '</body></html>')
+
+    deck, warnings = _sync.backfill_deck(html, "short")
+
+    assert len(deck["slides"]) == 2
+    assert deck["slides"][0]["data"]["html"].startswith("短文")
+    assert "backfill-empty" in deck["slides"][0]["data"]["html"]
+    assert deck["slides"][1]["data"]["html"] == "<!-- backfill-empty -->"
+    assert len([warning for warning in warnings if "schema validity" in warning]) == 2
 
 
 # ---------------------------------------------------------------------------
