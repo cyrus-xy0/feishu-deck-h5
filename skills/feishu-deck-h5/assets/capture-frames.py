@@ -18,11 +18,15 @@
       [--mid-ms N]             # 中间帧时刻,默认 900
       [--assert-class NAME]    # 落定断言的入场 hook class,默认 reveal
       [--transient-class NAME] # 必须退场的瞬态 class,默认 fly
+      [--click-selector CSS]   # 落定后点击当前页元素,并抓 *_clicked.png
+      [--close-selector CSS]   # 可选:点击关闭元素,并抓 *_closed.png
+      [--click-wait-ms N]      # 点击后等待,默认 250
       [--allow-remote]         # 不拦外部 http(s) 请求(默认拦:deck 资产应本地化,
                                # 远程 iframe/字体会把 load/fonts.ready 永久挂死,F-311)
 
 退出码:0 = 全部 key 通过断言;1 = 任一 key 不通过(详情在 stdout JSON);2 = 环境问题。
-截图命名:<out-dir>/<key>_mid.png / <key>_settled.png。
+截图命名:<out-dir>/<key>_mid.png / <key>_settled.png；启用交互时另有
+<key>_clicked.png，指定关闭元素时另有 <key>_closed.png。
 
 只读不写 deck;需要 playwright + chromium(与 validate.py --visual 同环境)。
 """
@@ -50,7 +54,7 @@ def _canvas_dimensions(html: Path) -> tuple[int, int]:
     return 1920, 1080
 
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="capture mid+settled frames and assert settle state")
     ap.add_argument("html", help="rendered index.html path")
     ap.add_argument("keys", nargs="+", help="data-slide-key(s) to verify")
@@ -59,10 +63,29 @@ def main() -> int:
     ap.add_argument("--mid-ms", type=int, default=900)
     ap.add_argument("--assert-class", default="reveal")
     ap.add_argument("--transient-class", default="fly")
+    ap.add_argument("--click-selector",
+                    help="after settle, click this CSS selector inside the current slide "
+                         "and capture <key>_clicked.png")
+    ap.add_argument("--close-selector",
+                    help="after the clicked frame, click this CSS selector inside the "
+                         "current slide and capture <key>_closed.png")
+    ap.add_argument("--click-wait-ms", type=int, default=250,
+                    help="wait after interaction clicks (default: 250)")
     ap.add_argument("--allow-remote", action="store_true",
                     help="don't abort external http(s) requests (default aborts them: "
                          "remote iframes/fonts hang load+fonts.ready forever offline, F-311)")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+
+    if args.close_selector and not args.click_selector:
+        print("✗ --close-selector requires --click-selector", file=sys.stderr)
+        return 2
+    if args.click_wait_ms < 0:
+        print("✗ --click-wait-ms must be >= 0", file=sys.stderr)
+        return 2
 
     html = Path(args.html).resolve()
     if not html.exists():
@@ -134,7 +157,11 @@ def main() -> int:
     failed = False
     report = {}
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            print(f"✗ browser unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 2
         ctx = browser.new_context(viewport={"width": canvas_w, "height": canvas_h})
         if not args.allow_remote:
             # F-311: deck 资产应当本地化(R-SELF-CONTAINED);外部请求只会拖慢/挂死
@@ -161,12 +188,51 @@ def main() -> int:
             page.wait_for_timeout(max(0, args.settle_ms - args.mid_ms))
             _shot(page, out_dir / f"{key}_settled.png")
             res = page.evaluate(assert_js, [key, args.assert_class, args.transient_class])
+            if args.click_selector:
+                interaction = {
+                    "clickSelector": args.click_selector,
+                    "closeSelector": args.close_selector,
+                    "clickedScreenshot": None,
+                    "closedScreenshot": None,
+                    "error": None,
+                }
+                try:
+                    current = page.locator(".slide-frame.is-current .slide")
+                    trigger = current.locator(args.click_selector).first
+                    if trigger.count() == 0:
+                        raise RuntimeError(
+                            f"click selector not found in current slide: {args.click_selector}")
+                    trigger.click(timeout=5000)
+                    page.wait_for_timeout(args.click_wait_ms)
+                    clicked_path = out_dir / f"{key}_clicked.png"
+                    _shot(page, clicked_path)
+                    interaction["clickedScreenshot"] = str(clicked_path)
+                    if args.close_selector:
+                        closer = current.locator(args.close_selector).first
+                        if closer.count() == 0:
+                            raise RuntimeError(
+                                "close selector not found in current slide: "
+                                f"{args.close_selector}")
+                        closer.click(timeout=5000)
+                        page.wait_for_timeout(args.click_wait_ms)
+                        closed_path = out_dir / f"{key}_closed.png"
+                        _shot(page, closed_path)
+                        interaction["closedScreenshot"] = str(closed_path)
+                except Exception as exc:  # interaction failures are page failures, not env failures
+                    interaction["error"] = str(exc)
+                res["interaction"] = interaction
             report[key] = res
             ok = (not res.get("error") and not res.get("notSettled")
-                  and not res.get("transientVisible") and not res.get("overflow"))
+                  and not res.get("transientVisible") and not res.get("overflow")
+                  and not (res.get("interaction") or {}).get("error"))
             if not ok:
                 failed = True
-            print(f"{'✓' if ok else '✗'} {key}  →  {out_dir}/{key}_mid.png  {key}_settled.png")
+            paths = [f"{key}_mid.png", f"{key}_settled.png"]
+            if args.click_selector:
+                paths.append(f"{key}_clicked.png")
+            if args.close_selector:
+                paths.append(f"{key}_closed.png")
+            print(f"{'✓' if ok else '✗'} {key}  →  {out_dir}/" + "  ".join(paths))
         browser.close()
 
     print(json.dumps(report, ensure_ascii=False, indent=1))

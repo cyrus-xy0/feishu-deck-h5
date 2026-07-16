@@ -38,6 +38,41 @@ import sys
 from pathlib import Path
 
 
+def _extract_local_assets(*texts: str) -> list[str]:
+    """Extract local asset references from raw HTML/CSS fragments.
+
+    DeckJSON raw slides keep their markup in ``data.html`` and page styles in
+    ``custom_css``.  The rendered ``slide-index.json`` already carries assets,
+    but the DeckJSON fallback historically returned an empty list.  Keep one
+    parser for both fallback paths so ``locate-slide.py -v`` remains useful
+    before a render too.
+    """
+    refs: list[str] = []
+    for text in texts:
+        if not text:
+            continue
+        refs.extend(m.group(2).strip() for m in re.finditer(
+            r"url\s*\(\s*(['\"]?)(.*?)\1\s*\)", text, re.I | re.S))
+        refs.extend(m.group(3).strip() for m in re.finditer(
+            r"\b(src|href|poster|data-src)\s*=\s*(['\"])(.*?)\2",
+            text, re.I | re.S))
+        for m in re.finditer(
+                r"\bsrcset\s*=\s*(['\"])(.*?)\1", text, re.I | re.S):
+            for candidate in m.group(2).split(","):
+                ref = candidate.strip().split()[0] if candidate.strip() else ""
+                if ref:
+                    refs.append(ref)
+
+    assets = set()
+    for ref in refs:
+        ref = ref.strip().strip("'\"")
+        if (not ref or ref.startswith(("#", "//", "/", ".."))
+                or re.match(r"^[a-z][a-z0-9+.-]*:", ref, re.I)):
+            continue
+        assets.add(ref)
+    return sorted(assets)
+
+
 def _derive_label(s: dict) -> str:
     """Mirror render-deck.py:_derive_screen_label for the deck.json fallback."""
     t = s.get("data", {}).get("title", "")
@@ -65,10 +100,7 @@ def _load_index_from_html(src: Path):
             mm = re.search(name + r'="([^"]*)"', _tag)
             return mm.group(1) if mm else None
 
-        refs = (re.findall(r"url\(['\"]?([^)'\"]+)", f)
-                + re.findall(r'(?:src|href)="([^"]+)"', f))
-        assets = sorted({a for a in refs
-                         if not a.startswith(("http", "data:", "#", "..", "/"))})
+        assets = _extract_local_assets(f)
         key = attr("data-slide-key")
         # data-hidden may sit before OR after data-slide-key in the .slide tag;
         # a bare boolean attribute (no `="..."`) so test for its presence.
@@ -119,6 +151,8 @@ def _load_index(src: Path):
         if s.get("_disabled"):   # hidden slides ARE rendered (skipped only in nav)
             continue
         fi += 1
+        body = (s.get("data") or {}).get("html") or ""
+        css = s.get("custom_css") or ""
         entries.append({
             "key":         s.get("key"),
             "frame_index": fi,
@@ -126,7 +160,7 @@ def _load_index(src: Path):
             "variant":     s.get("variant"),
             "label":       s.get("screen_label") or _derive_label(s),
             "title":       s.get("data", {}).get("title", ""),
-            "assets":      [],
+            "assets":      _extract_local_assets(body, css),
             "hidden":      bool(s.get("hidden")),
         })
     return entries, (data.get("deck") or {}).get("title", "")

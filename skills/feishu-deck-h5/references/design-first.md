@@ -451,7 +451,7 @@ R-WHITE-TEXT 等。**每条警告都给 3 个选项**,典型形态:
 → 生成。
 
 方案一旦 lock,生成时直接照走,**不需要再问一遍**。生成后发现某页 layout
-设计错了,先跟用户对齐切换(走 SLIDE DELETION POLICY 的双确认 + 备份规则),
+设计错了,先跟用户对齐切换(走 SLIDE DELETION POLICY 的确认包 + 默认备份规则),
 不要静悄悄改设计;偏离 DESIGN-PLAN.md 也先回来改 plan。
 
 ---

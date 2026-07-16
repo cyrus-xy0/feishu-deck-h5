@@ -199,7 +199,9 @@ Read `../../references/conversion-policy.yaml` and
 
 ## Deletion, reorder, and identity
 
-- Deletion requires explicit confirmation and backup; use the guarded CLI.
+- Deletion requires one surfaced confirmation packet containing the exact page
+  list and the default paired-backup plan; one "确认" accepts both. Use the
+  guarded CLI and `../../references/slide-deletion.md`.
 - `page N = URL #N = frame index N`; stable keys are preferred.
 - Renumber stale `screen_label` prefixes only at an explicit cleanup checkpoint.
 - Every lifted/hand-authored page keeps a stable semantic key; namespace generic
@@ -225,6 +227,7 @@ scope, screenshot/report paths, and any intentionally retained baseline warning.
 - Reskin: `../../references/reskin.md`
 - Conversion: `../../references/converting-existing-material.md`
 - Deletion: `../../references/slide-deletion.md`
+- Interactive QR zoom: `../../references/interactive-qr-zoom.md`
 - Prototype/iframe: `../../references/prototype-embed.md`
 - Delivery: `../../references/gate-policy.yaml`, `../../references/delivery.md`
 

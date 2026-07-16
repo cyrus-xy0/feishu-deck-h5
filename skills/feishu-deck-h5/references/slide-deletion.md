@@ -1,7 +1,7 @@
 # slide-deletion — feishu-deck-h5 reference
 > 从 SKILL.md 拆出(F-30 瘦身)· 何时读:net-delete 触发判定细节 + 备份命名
 
-## SLIDE DELETION POLICY (mandatory) — double-confirm + backup before any net delete
+## SLIDE DELETION POLICY (mandatory) — explicit confirmation packet + backup before any net delete
 
 Deleting a slide is **irreversible** without a backup. The deck is the user's
 real work product — a 30-slide pitch reduced to 27 slides has lost 3 slides
@@ -20,20 +20,29 @@ Before ANY operation that **net-removes** a slide from a deck:
      (e.g. `workbench-portal`) so the user can identify it without opening
      the file
    - 1-line "why" the agent is removing each one
-3. **Ask for explicit confirmation.** Wait for the user to type back "yes
-   delete" / "ok" / "go ahead" / equivalent. **Implicit consent does NOT
-   count** — if the user said "trim the deck" earlier, that's not approval
-   to delete a specific slide; surface the list and ask again.
-4. **Once confirmed, offer a backup.** Default is to copy the deck file
-   (and its `deck.json` if present) to a `.bak-pre-delete-<YYYYMMDD-HHMMSS>`
-   sibling beside the original. The user can decline ("no backup, just go")
-   or pick a different option (git commit, separate folder, etc.). The
-   agent's default phrasing:
+3. **Send one explicit confirmation packet.** The packet combines the exact
+   deletion list from step 2 with the backup decision, so the user resolves
+   both branches in one reply. The default is to back up `index.html` and
+   `deck.json` (when present) beside the originals with
+   `.bak-pre-delete-<YYYYMMDD-HHMMSS>` naming and log the change. Suggested
+   phrasing:
 
-   > "我备份到 `index.html.bak-pre-delete-20260518-160000`(就在 output/ 里)。
-   > 同意?如果你想换地方或不要备份,告诉我。"
+   > "将删除 3 页：#16 `...`、#21 `...`、#28 `...`。默认先配对备份
+   > `index.html` + `deck.json` 到原目录并写入 CHANGES.md。回复‘确认’即按
+   > 上述列表删除并采用默认备份；如不要备份或要换目录，请在同一条回复里说明。"
 
-5. **Only THEN proceed.** Apply the deletion.
+   Wait for the user to type "确认" / "yes delete" / "ok" / equivalent.
+   **Implicit consent does NOT count** — if the user said "trim the deck"
+   earlier, that is not approval to delete a surfaced list. A reply such as
+   "确认删除，不备份" explicitly selects the no-backup branch; do not ask a
+   second question.
+4. **Only THEN proceed.** Run the default paired backup unless the confirmation
+   selected another backup option, then apply the deletion.
+
+This preserves the requested double-confirm safety without creating two extra
+chat round trips: the user's original delete instruction is the first signal;
+the surfaced confirmation packet is the second, explicit confirmation and also
+settles the backup choice.
 
 ### What counts as a "net-removing operation"
 
@@ -121,4 +130,3 @@ Without the helper you don't get the CHANGES.md entry or pruning —
 which is how the historical 53-bak pile-up happened. Use the helper.
 
 ---
-
