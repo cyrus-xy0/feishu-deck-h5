@@ -74,7 +74,10 @@ jobs:
 
       - name: Build (linked + inlined)
         run: |
-          bash build.sh --inline
+          # Core preflight already ran above. This browser-free job intentionally
+          # does not install Playwright; the dedicated Chromium smoke job below
+          # owns generate-profile/browser validation.
+          bash build.sh --inline --skip-preflight
 
       - name: Validate linked deck (default)
         run: python3 assets/validate.py examples/sample-deck.html

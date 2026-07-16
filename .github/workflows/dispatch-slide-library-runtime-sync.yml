@@ -8,8 +8,13 @@ on:
     paths:
       - skills/feishu-deck-h5/assets/feishu-deck.css
       - skills/feishu-deck-h5/assets/feishu-deck.js
+      - skills/feishu-deck-h5/assets/feishu-deck-motion.js
+      - skills/feishu-deck-h5/assets/gsap/CustomEase.min.js
+      - skills/feishu-deck-h5/assets/gsap/SplitText.min.js
+      - skills/feishu-deck-h5/assets/gsap/gsap.min.js
       - skills/feishu-deck-h5/assets/edit-mode/deck-edit-mode.css
       - skills/feishu-deck-h5/assets/edit-mode/deck-edit-mode.js
+      - skills/feishu-deck-h5/deck-json/templates/extra-layouts.css
   workflow_dispatch:
     inputs:
       deck_h5_ref:
