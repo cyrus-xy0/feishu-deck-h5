@@ -172,9 +172,8 @@ if ! ( touch "$PROBE" 2>/dev/null && rm -f "$PROBE" 2>/dev/null ); then
   # it). This removes the old hard dependency on rsync. Excludes keep the
   # mirror lean: runs/ (user outputs, preserved if already there), VCS/cache
   # cruft, editor noise, and *.bak snapshots — none are needed to RENDER a deck.
-  # (The heavy pptx example corpus is no longer here to exclude: it moved to the
-  # sibling skills/pptx-to-deck/, which lives OUTSIDE SKILL_ROOT and is never
-  # mirrored, so the old corpus-exclude was dropped.)
+  # The active pptx-to-deck sibling is mirrored separately for pptx/template
+  # profiles so readonly suite packages keep their dependency topology.
   MIRROR_OK=0
   MIRROR_TOOL=""
   if command -v rsync >/dev/null 2>&1; then
@@ -214,14 +213,63 @@ PY
     echo "  Install python3 (or rsync), or mount the skill RW."
     exit 2
   fi
+
+  PPTX_WORKSPACE=""
+  PPTX_MIRROR_TOOL=""
+  case "$PROFILE" in
+    pptx|template)
+      PPTX_SOURCE="$(cd "$SKILL_ROOT/../pptx-to-deck" 2>/dev/null && pwd || true)"
+      if [ -n "$PPTX_SOURCE" ] && [ -f "$PPTX_SOURCE/SKILL.md" ]; then
+        PPTX_WORKSPACE="$WORKSPACE_PARENT/pptx-to-deck"
+        if [ -e "$PPTX_WORKSPACE" ] && [ ! -f "$PPTX_WORKSPACE/SKILL.md" ]; then
+          echo "PREFLIGHT FAIL · exit 2 · sibling workspace path already contains unrelated data"
+          echo "  Refusing to overwrite: $PPTX_WORKSPACE"
+          echo "  Set FS_DECK_WORKSPACE so its parent can safely contain pptx-to-deck."
+          exit 2
+        fi
+        mkdir -p "$PPTX_WORKSPACE"
+        if command -v rsync >/dev/null 2>&1 && \
+           rsync -a \
+             --exclude='.venv/' --exclude='venv/' --exclude='__pycache__' \
+             --exclude='.pytest_cache' --exclude='.DS_Store' --exclude='*.bak*' \
+             --exclude='example/**/assets/' --exclude='example/**/sweep/' \
+             "$PPTX_SOURCE/" "$PPTX_WORKSPACE/" 2>/dev/null; then
+          PPTX_MIRROR_TOOL="rsync"
+        elif SRC="$PPTX_SOURCE" DST="$PPTX_WORKSPACE" python3 - <<'PY'
+import os, shutil, sys
+src, dst = os.environ["SRC"], os.environ["DST"]
+NAMES = {".venv", "venv", "__pycache__", ".pytest_cache", ".DS_Store"}
+def ignore(dirpath, names):
+    rel = os.path.relpath(dirpath, src)
+    skip = {n for n in names if n in NAMES or ".bak" in n}
+    if rel.startswith("example"):
+        skip.update({n for n in names if n in {"assets", "sweep"}})
+    return skip
+try:
+    shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True, symlinks=True)
+except Exception as exc:
+    print(f"pptx-sibling-mirror-failed: {exc}", file=sys.stderr); sys.exit(1)
+PY
+        then
+          PPTX_MIRROR_TOOL="python3"
+        else
+          echo "PREFLIGHT FAIL · exit 2 · could not mirror pptx-to-deck sibling"
+          exit 2
+        fi
+      fi
+      ;;
+  esac
   # The mirror may inherit the source's RO perm bits (rsync -a preserves them;
   # copytree copies file modes too). Restore owner write/exec so the workspace
   # can accept runs/<ts>/ creation, edits, and validate-pass writes.
-  chmod -R u+w "$WORKSPACE" 2>/dev/null || true
+  chmod -R u+w "$WORKSPACE" ${PPTX_WORKSPACE:+"$PPTX_WORKSPACE"} 2>/dev/null || true
   echo "PREFLIGHT BOOTSTRAPPED"
   echo "  source (RO)    : $SKILL_ROOT"
   echo "  workspace (RW) : $WORKSPACE"
   echo "  mirrored via   : $MIRROR_TOOL"
+  if [ -n "$PPTX_WORKSPACE" ]; then
+    echo "  pptx sibling   : $PPTX_WORKSPACE (via $PPTX_MIRROR_TOOL)"
+  fi
   echo "  ephemeral      : no"
   echo "  bootstrap      : ${#REQUIRED[@]}/${#REQUIRED[@]} files present (mirrored)"
   echo
@@ -229,6 +277,9 @@ PY
   echo "  any further skill commands (new-run.sh, render.py, build.sh, etc.):"
   echo
   echo "    cd \"$WORKSPACE\""
+  if [ -n "$PPTX_WORKSPACE" ]; then
+    echo "    bash \"$PPTX_WORKSPACE/assets/bootstrap.sh\""
+  fi
   echo
   echo "  All paths in SKILL.md become relative to the workspace once you cd."
   echo "  The runs/<ts>/output/ artifact will land in the workspace, where"

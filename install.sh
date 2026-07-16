@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # feishu-deck-h5 · install script
 #
-# Installs this skill into Claude Code (or any compatible harness that follows
-# the ~/.claude/skills/ convention) by:
+# Installs this skill suite into Claude Code (or any compatible harness that
+# follows the ~/.claude/skills/ convention) by:
 #   1. Cloning to $INSTALL_DIR (default: ~/Projects/feishu-deck-h5)
-#   2. Symlinking skills/feishu-deck-h5 into $CLAUDE_DIR/skills/feishu-deck-h5
-#   3. Running preflight to verify
+#   2. Symlinking the active feishu-deck-h5 and pptx-to-deck sibling skills
+#   3. Bootstrapping PPTX dependencies when the selected profile needs them
+#   4. Running preflight to verify
 #
 # Usage:
 #   bash install.sh                              # clone/update + safe link
@@ -16,7 +17,7 @@
 #   INSTALL_DIR   where to keep the working clone (default: ~/Projects/feishu-deck-h5)
 #   CLAUDE_DIR    skill registration root (default: ~/.claude — use ~/.openclaw etc. for other harnesses)
 #   REPO_URL      override the git remote (default: git@github.com:FuQiang/feishu-deck-h5.git)
-#   PREFLIGHT_PROFILE capability verified after linking (default: generate)
+#   PREFLIGHT_PROFILE capability verified after linking (default: pptx)
 
 set -e
 
@@ -45,13 +46,14 @@ REPO_URL="${REPO_URL:-git@github.com:FuQiang/feishu-deck-h5.git}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/Projects/feishu-deck-h5}"
 CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
 SKILLS_DIR="$CLAUDE_DIR/skills"
-LINK_PATH="$SKILLS_DIR/feishu-deck-h5"
-PREFLIGHT_PROFILE="${PREFLIGHT_PROFILE:-generate}"
+PREFLIGHT_PROFILE="${PREFLIGHT_PROFILE:-pptx}"
+SKILL_NAMES=("feishu-deck-h5" "pptx-to-deck")
 
 echo "==> feishu-deck-h5 install"
 echo "    repo:    $REPO_URL"
 echo "    target:  $INSTALL_DIR"
-echo "    symlink: $LINK_PATH"
+echo "    skills:  ${SKILL_NAMES[*]}"
+echo "    profile: $PREFLIGHT_PROFILE"
 echo
 
 if [ "$LINK_ONLY" -eq 0 ]; then
@@ -91,10 +93,12 @@ fi
 
 # 1. clone (or update if exists)
 if [ "$LINK_ONLY" -eq 1 ]; then
-  if [ ! -f "$INSTALL_DIR/skills/feishu-deck-h5/SKILL.md" ]; then
-    echo "ERROR — --link-only requires a complete clone at $INSTALL_DIR" >&2
-    exit 1
-  fi
+  for skill_name in "${SKILL_NAMES[@]}"; do
+    if [ ! -f "$INSTALL_DIR/skills/$skill_name/SKILL.md" ]; then
+      echo "ERROR — --link-only requires skills/$skill_name at $INSTALL_DIR" >&2
+      exit 1
+    fi
+  done
   echo "==> link-only: using existing clone at $INSTALL_DIR"
 elif [ -d "$INSTALL_DIR/.git" ]; then
   echo "==> existing clone found at $INSTALL_DIR, pulling latest..."
@@ -105,43 +109,91 @@ else
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-# 2. symlink into $CLAUDE_DIR/skills/
+# 2. symlink active sibling skills into $CLAUDE_DIR/skills/
 mkdir -p "$SKILLS_DIR"
-TARGET_PATH="$INSTALL_DIR/skills/feishu-deck-h5"
-LINK_NEEDED=1
-if [ -L "$LINK_PATH" ]; then
-  TARGET_PHYSICAL="$(cd "$TARGET_PATH" && pwd -P)"
-  LINK_PHYSICAL="$(cd "$LINK_PATH" 2>/dev/null && pwd -P || true)"
-  if [ -n "$LINK_PHYSICAL" ] && [ "$LINK_PHYSICAL" = "$TARGET_PHYSICAL" ]; then
-    echo "==> symlink already correct; leaving it unchanged"
-    LINK_NEEDED=0
-  fi
-fi
+link_skill() {
+  local skill_name="$1"
+  local target_path="$INSTALL_DIR/skills/$skill_name"
+  local link_path="$SKILLS_DIR/$skill_name"
+  local link_needed=1
 
-if [ "$LINK_NEEDED" -eq 1 ] && { [ -L "$LINK_PATH" ] || [ -e "$LINK_PATH" ]; }; then
-  if [ "$FORCE" -ne 1 ] || [ "$BACKUP" -ne 1 ]; then
-    echo "ERROR — refusing to replace existing skill path: $LINK_PATH" >&2
-    if [ -L "$LINK_PATH" ]; then
-      echo "  current symlink -> $(readlink "$LINK_PATH")" >&2
-    else
-      echo "  current path is a real file/directory and may contain local work" >&2
+  if [ -L "$link_path" ]; then
+    local target_physical link_physical
+    target_physical="$(cd "$target_path" && pwd -P)"
+    link_physical="$(cd "$link_path" 2>/dev/null && pwd -P || true)"
+    if [ -n "$link_physical" ] && [ "$link_physical" = "$target_physical" ]; then
+      echo "==> $skill_name symlink already correct; leaving it unchanged"
+      link_needed=0
     fi
-    echo "  Re-run with --force --backup to preserve it before replacement." >&2
-    exit 3
   fi
-  BACKUP_PATH="$LINK_PATH.backup-$(date +%Y%m%d-%H%M%S)"
-  mv "$LINK_PATH" "$BACKUP_PATH"
-  echo "==> backed up existing path: $BACKUP_PATH"
-fi
-if [ "$LINK_NEEDED" -eq 1 ]; then
-  ln -s "$TARGET_PATH" "$LINK_PATH"
-  echo "==> symlinked: $LINK_PATH -> $TARGET_PATH"
-fi
 
-# 3. verify
+  if [ "$link_needed" -eq 1 ] && { [ -L "$link_path" ] || [ -e "$link_path" ]; }; then
+    if [ "$FORCE" -ne 1 ] || [ "$BACKUP" -ne 1 ]; then
+      echo "ERROR — refusing to replace existing skill path: $link_path" >&2
+      if [ -L "$link_path" ]; then
+        echo "  current symlink -> $(readlink "$link_path")" >&2
+      else
+        echo "  current path is a real file/directory and may contain local work" >&2
+      fi
+      echo "  Re-run with --force --backup to preserve it before replacement." >&2
+      exit 3
+    fi
+    local backup_path
+    backup_path="$link_path.backup-$(date +%Y%m%d-%H%M%S)"
+    mv "$link_path" "$backup_path"
+    echo "==> backed up existing path: $backup_path"
+  fi
+
+  if [ "$link_needed" -eq 1 ]; then
+    ln -s "$target_path" "$link_path"
+    echo "==> symlinked: $link_path -> $target_path"
+  fi
+}
+
+# Fail closed before creating any link so a conflict in the second sibling does
+# not leave a partially-installed skill set.
+for skill_name in "${SKILL_NAMES[@]}"; do
+  target_path="$INSTALL_DIR/skills/$skill_name"
+  link_path="$SKILLS_DIR/$skill_name"
+  link_matches=0
+  if [ -L "$link_path" ]; then
+    target_physical="$(cd "$target_path" && pwd -P)"
+    link_physical="$(cd "$link_path" 2>/dev/null && pwd -P || true)"
+    if [ -n "$link_physical" ] && [ "$link_physical" = "$target_physical" ]; then
+      link_matches=1
+    fi
+  fi
+  if [ "$link_matches" -eq 0 ] && { [ -L "$link_path" ] || [ -e "$link_path" ]; }; then
+    if [ "$FORCE" -ne 1 ] || [ "$BACKUP" -ne 1 ]; then
+      echo "ERROR — refusing to replace existing skill path: $link_path" >&2
+      if [ -L "$link_path" ]; then
+        echo "  current symlink -> $(readlink "$link_path")" >&2
+      else
+        echo "  current path is a real file/directory and may contain local work" >&2
+      fi
+      echo "  No links were changed. Re-run with --force --backup to preserve conflicts." >&2
+      exit 3
+    fi
+  fi
+done
+
+for skill_name in "${SKILL_NAMES[@]}"; do
+  link_skill "$skill_name"
+done
+
+# 3. bootstrap the optional PPTX runtime only when that capability is requested.
+case "$PREFLIGHT_PROFILE" in
+  pptx|template)
+    echo
+    echo "==> bootstrapping pptx-to-deck Python runtime..."
+    bash "$INSTALL_DIR/skills/pptx-to-deck/assets/bootstrap.sh"
+    ;;
+esac
+
+# 4. verify
 echo
 echo "==> running preflight..."
-if bash "$LINK_PATH/assets/preflight.sh" --profile "$PREFLIGHT_PROFILE"; then
+if bash "$SKILLS_DIR/feishu-deck-h5/assets/preflight.sh" --profile "$PREFLIGHT_PROFILE"; then
   echo
   echo "==> DONE. Restart your Claude Code / harness session to pick up the new skill."
 else

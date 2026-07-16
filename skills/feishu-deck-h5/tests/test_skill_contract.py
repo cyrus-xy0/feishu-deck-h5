@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -29,7 +30,7 @@ def active_docs() -> list[Path]:
 def test_machine_contracts_validate() -> None:
     contract = load_module("skill_contract", ROOT / "assets" / "skill-contract.py")
     result = contract.validate()
-    assert result == {"ok": True, "modes": 15, "formats": 5, "gates": 10, "profiles": 7}
+    assert result == {"ok": True, "modes": 15, "formats": 4, "gates": 10, "profiles": 7}
     packet = contract.route_packet("MAINTENANCE")
     assert "python3 -m pytest" in packet["gate_contract"]["command"]
     assert "unittest" not in packet["gate_contract"]["command"]
@@ -126,7 +127,7 @@ def test_router_table_matches_workflow_manifest() -> None:
     assert generated == contract.render_workflow_table()
 
 
-def test_dependency_profiles_are_complete_and_checkable() -> None:
+def test_dependency_profiles_are_complete_and_checkable(tmp_path: Path, monkeypatch) -> None:
     checker = load_module("check_profile", ROOT / "assets" / "check-profile.py")
     policy = checker.load_policy()
     assert set(policy["profiles"]) == {
@@ -136,14 +137,24 @@ def test_dependency_profiles_are_complete_and_checkable() -> None:
     assert {"deck-json/render-deck.py", "deck-json/deck-cli.py", "deck-json/deck-schema.json"} <= core_files
     assert {"assets/audits.js", "assets/skill-contract.py"} <= core_files
     assert checker.check("core")["ok"]
+    fake_python = tmp_path / "pptx-python"
+    fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    monkeypatch.setenv("FS_DECK_PPTX_PYTHON", str(fake_python))
     assert checker.check("template")["ok"]
 
 
-def test_preflight_profiles_emit_machine_status() -> None:
+def test_preflight_profiles_emit_machine_status(tmp_path: Path) -> None:
+    fake_python = tmp_path / "pptx-python"
+    fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    env = os.environ.copy()
+    env["FS_DECK_PPTX_PYTHON"] = str(fake_python)
     for profile in ("core", "template"):
         proc = subprocess.run(
             ["bash", str(ROOT / "assets" / "preflight.sh"), "--profile", profile, "--json"],
             cwd=REPO,
+            env=env,
             text=True,
             capture_output=True,
         )
@@ -166,6 +177,7 @@ def test_active_docs_do_not_teach_retired_contracts() -> None:
         "render-deck.py runs/<ts>/output --inline": "invalid render signature",
         "10,11,12,13,14": "retired type ladder",
         "10, 11, 12, 13, 14": "retired type ladder",
+        "keynote-to-html": "retired Keynote backend",
     }
     offenders: list[str] = []
     for path in active_docs():
@@ -209,8 +221,21 @@ def test_render_cli_requires_deck_and_output_dir() -> None:
 
 def test_install_script_never_deletes_existing_skill_path() -> None:
     text = (REPO / "install.sh").read_text(encoding="utf-8")
-    assert 'rm -rf "$LINK_PATH"' not in text
+    assert "rm -rf" not in text
     assert "--force --backup" in text
+
+
+def test_retired_keynote_skill_is_absent() -> None:
+    assert not (REPO / "skills" / "keynote-to-html").exists()
+    policy = json.loads((ROOT / "references" / "conversion-policy.yaml").read_text(encoding="utf-8"))
+    assert ".key" not in policy["formats"]
+
+
+def test_lean_package_contains_only_active_conversion_sibling() -> None:
+    text = (ROOT / "assets" / "package-skill.sh").read_text(encoding="utf-8")
+    assert 'PPTX_STAGE_NAME="pptx-to-deck"' in text
+    assert '"$STAGE_NAME" "$PPTX_STAGE_NAME"' in text
+    assert "keynote-to-html" not in text
 
 
 def test_preflight_discovers_repository_from_skill_subdirectory() -> None:

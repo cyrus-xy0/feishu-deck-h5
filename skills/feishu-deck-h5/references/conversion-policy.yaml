@@ -40,24 +40,6 @@
         "missing_backend": "hard_fail"
       }
     },
-    ".key": {
-      "pure_import": {
-        "route": ["PARSE", "EDIT"],
-        "backend": "keynote-to-html/assets/run.sh",
-        "output_layout": "canvas-or-raw",
-        "page_images_allowed": false,
-        "designer_required": false,
-        "missing_backend": "hard_fail"
-      },
-      "rewrite": {
-        "route": ["PARSE", "GENERATION"],
-        "backend": "keynote-to-html/assets/run.sh",
-        "output_layout": "raw-first",
-        "page_images_allowed": false,
-        "designer_required": true,
-        "missing_backend": "hard_fail"
-      }
-    },
     ".pdf": {
       "replica": {
         "route": ["PARSE", "EDIT"],

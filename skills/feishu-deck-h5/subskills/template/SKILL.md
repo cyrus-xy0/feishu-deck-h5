@@ -119,11 +119,13 @@ background media. It must never turn an entire slide into a bitmap.
 
 ## CLI
 
-Run with the sibling `pptx-to-deck` virtualenv because it owns `python-pptx`
-and `lxml`:
+Bootstrap the sibling runtime, then use its interpreter (or an explicitly
+provided `FS_DECK_PPTX_PYTHON`) because it owns `python-pptx` and `lxml`:
 
 ```bash
-skills/pptx-to-deck/.venv/bin/python3 \
+bash skills/pptx-to-deck/assets/bootstrap.sh
+PPTX_PYTHON="${FS_DECK_PPTX_PYTHON:-skills/pptx-to-deck/.venv/bin/python3}"
+"$PPTX_PYTHON" \
   skills/pptx-to-deck/assets/extract_template.py \
   path/to/template.pptx \
   runs/<task-id>/input/runtime-library/template-pack
@@ -136,7 +138,8 @@ candidates, confidence, fixed-element counts, and slot counts.
 Explicit source mappings use 1-based selectors:
 
 ```bash
-skills/pptx-to-deck/.venv/bin/python3 \
+PPTX_PYTHON="${FS_DECK_PPTX_PYTHON:-skills/pptx-to-deck/.venv/bin/python3}"
+"$PPTX_PYTHON" \
   skills/pptx-to-deck/assets/extract_template.py \
   path/to/template.pptx \
   runs/<task-id>/input/runtime-library/template-pack \

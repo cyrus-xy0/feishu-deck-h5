@@ -80,8 +80,7 @@ flowchart TB
   %% ===================== 兄弟技能 =====================
   subgraph SIB["兄弟技能 Sibling Skills"]
     direction TB
-    P2D["pptx-to-deck<br/>build_pptx / build_pptx_hybrid<br/>(.pptx → canvas deck.json)"]
-    K2H["keynote-to-html"]
+    P2D["pptx-to-deck<br/>build_pptx<br/>(.pptx → canvas deck.json)"]
   end
 
   %% ===================== 飞书云 =====================
@@ -148,8 +147,9 @@ Lark 背景与品牌素材。交付脚本（copy-assets、inline-assets、packag
 的 source-dossier.json 与归一化资产）、`output/`（outline.json、DESIGN-PLAN.md、deck.json、
 index.html）、以及 `log/` 与 PROMPTS.md。
 
-**兄弟技能** 包括 `pptx-to-deck`（`build_pptx` / `build_pptx_hybrid` 把 .pptx 重建为可编辑的
-canvas deck.json，以本技能为渲染后端，Parser 会委派给它）和 `keynote-to-html`。
+**兄弟技能** 只保留 `pptx-to-deck`（`build_pptx` 把 .pptx 重建为可编辑的
+canvas deck.json，以本技能为渲染后端，Parser 会委派给它）。原生 `.key` 转换已退役，
+需要用户提供 `.pptx` 或 `.pdf`。
 
 **飞书云** 层：Feishu Base 作为共享知识与资产库供设计/渲染/解析/发布按需查询；Publisher 在用户
 确认后通过 magic-page 系列脚本发布到飞书托管，并把发布记录写回 Base；云操作经 `lark-base` 技能的

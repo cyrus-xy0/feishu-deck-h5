@@ -192,7 +192,8 @@ Read `../../references/conversion-policy.yaml` and
 `../../references/converting-existing-material.md`.
 
 - PPTX pure import arrives as editable canvas DeckJSON from `pptx-to-deck`.
-- Keynote delegates to `keynote-to-html`.
+- Native `.key` conversion is retired; request an editable `.pptx` export or a
+  `.pdf` replica source.
 - PDF replica uses DeckJSON `replica`; rewrite runs Designer.
 - Preserve page count unless the user explicitly requests condensation.
 

@@ -38,7 +38,13 @@ Run these checks **in order**, stop at the first match:
 
 Then restart the session. (Slash commands cannot be invoked by an agent — the user has to type them.)
 
-**Verify:** after restart, `bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh --profile generate` should print `PREFLIGHT OK`.
+**Verify:** after restart, confirm both active skills are registered, bootstrap
+the PPTX runtime, and run the PPTX profile:
+
+```bash
+bash ~/.claude/skills/pptx-to-deck/assets/bootstrap.sh
+bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh --profile pptx
+```
 
 ### 2. install.sh path (any harness with `~/.claude/skills/` convention)
 
@@ -52,13 +58,16 @@ bash /tmp/feishu-deck-h5-installer/install.sh
 rm -rf /tmp/feishu-deck-h5-installer
 ```
 
-For non-Claude-Code harnesses (e.g. openclaw if it uses a different skill root), set `CLAUDE_DIR` first:
+For Codex or other harnesses, set `CLAUDE_DIR` to that harness's skill root:
 
 ```bash
+CLAUDE_DIR=~/.codex bash install.sh
 CLAUDE_DIR=~/.openclaw bash install.sh
 ```
 
-**Verify:** the script auto-runs `preflight.sh` at the end. Look for `PREFLIGHT OK`.
+**Verify:** the script links both `feishu-deck-h5` and `pptx-to-deck`, bootstraps
+the PPTX runtime for the default `pptx` profile, then runs preflight. Look for
+`PPTX RUNTIME OK` and `PREFLIGHT OK`.
 
 The installer never deletes an existing skill path. A correct symlink is left
 unchanged; a different symlink or real directory is refused so local work is
@@ -71,7 +80,9 @@ moved to a timestamped backup before the new link is created.
 git clone git@github.com:FuQiang/feishu-deck-h5.git ~/Projects/feishu-deck-h5
 mkdir -p ~/.claude/skills
 ln -s ~/Projects/feishu-deck-h5/skills/feishu-deck-h5 ~/.claude/skills/feishu-deck-h5
-bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh --profile generate
+ln -s ~/Projects/feishu-deck-h5/skills/pptx-to-deck ~/.claude/skills/pptx-to-deck
+bash ~/.claude/skills/pptx-to-deck/assets/bootstrap.sh
+bash ~/.claude/skills/feishu-deck-h5/assets/preflight.sh --profile pptx
 ```
 
 ---
@@ -109,7 +120,8 @@ Do **not** try to add them as a collaborator via `gh api` — only the repo owne
 ```
 .claude-plugin/marketplace.json   ← present means: plugin path supported
 .claude-plugin/plugin.json
-skills/feishu-deck-h5/SKILL.md    ← present means: manual/install.sh path supported
+skills/feishu-deck-h5/SKILL.md    ← controller skill
+skills/pptx-to-deck/SKILL.md      ← active PPTX conversion sibling
 install.sh                        ← present means: install.sh path supported
 INSTALL.md                        ← this file
 README.md                         ← human-facing docs

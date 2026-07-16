@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 
@@ -47,6 +49,73 @@ def merged_profile(name: str, policy: dict, seen: set[str] | None = None) -> dic
     return merged
 
 
+def sibling_candidates(spec: dict) -> list[Path]:
+    name = spec["name"]
+    candidates: list[Path] = []
+    root_env = str(spec.get("root_env") or "").strip()
+    if root_env and os.environ.get(root_env):
+        candidates.append(Path(os.environ[root_env]).expanduser())
+    if os.environ.get("FS_DECK_SKILLS_DIR"):
+        candidates.append(Path(os.environ["FS_DECK_SKILLS_DIR"]).expanduser() / name)
+    candidates.append(ROOT.parent / name)
+    if os.environ.get("CODEX_HOME"):
+        candidates.append(Path(os.environ["CODEX_HOME"]).expanduser() / "skills" / name)
+    candidates.extend(
+        [
+            Path.home() / ".codex" / "skills" / name,
+            Path.home() / ".claude" / "skills" / name,
+            Path.home() / ".agents" / "skills" / name,
+        ]
+    )
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        marker = str(candidate.resolve(strict=False))
+        if marker not in seen:
+            seen.add(marker)
+            deduped.append(candidate)
+    return deduped
+
+
+def sibling_python(root: Path, runtime: dict) -> tuple[Path | None, list[str]]:
+    candidates: list[Path] = []
+    env_name = str(runtime.get("env") or "").strip()
+    if env_name and os.environ.get(env_name):
+        candidates.append(Path(os.environ[env_name]).expanduser())
+    candidates.extend(root / rel for rel in runtime.get("candidates", []))
+    if runtime.get("allow_current"):
+        candidates.append(Path(sys.executable))
+    for command in runtime.get("commands", []):
+        found = shutil.which(command)
+        if found:
+            candidates.append(Path(found))
+
+    modules = list(runtime.get("modules", []))
+    probe = "; ".join(f"import {module}" for module in modules)
+    tried: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        marker = str(candidate.resolve(strict=False))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        tried.append(str(candidate))
+        if not candidate.is_file():
+            continue
+        try:
+            proc = subprocess.run(
+                [str(candidate), "-c", probe],
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode == 0:
+            return candidate, tried
+    return None, tried
+
+
 def check(name: str) -> dict:
     policy = load_policy()
     profile = merged_profile(name, policy)
@@ -61,11 +130,29 @@ def check(name: str) -> dict:
         if importlib.util.find_spec(module) is None:
             errors.append(f"missing python module: {module}")
     for sibling in profile["siblings"]:
-        sibling_root = ROOT.parent / sibling["name"]
-        for rel in sibling.get("required_files", []):
-            path = sibling_root / rel
-            if not path.is_file():
+        required = list(sibling.get("required_files", []))
+        roots = sibling_candidates(sibling)
+        complete_roots = [
+            root for root in roots if all((root / rel).is_file() for rel in required)
+        ]
+        if not complete_roots:
+            for rel in required:
                 errors.append(f"missing sibling file: {sibling['name']}/{rel}")
+            continue
+        runtime = sibling.get("python_runtime")
+        if runtime:
+            all_tried: list[str] = []
+            for sibling_root in complete_roots:
+                interpreter, tried = sibling_python(sibling_root, runtime)
+                all_tried.extend(tried)
+                if interpreter is not None:
+                    break
+            else:
+                modules = ", ".join(runtime.get("modules", []))
+                errors.append(
+                    f"missing sibling Python runtime: {sibling['name']} needs {modules}; "
+                    f"tried {', '.join(dict.fromkeys(all_tried)) or 'no candidates'}"
+                )
     if profile["chromium_launch"] and not errors:
         try:
             from playwright.sync_api import sync_playwright

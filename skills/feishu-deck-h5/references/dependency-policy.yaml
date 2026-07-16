@@ -56,7 +56,15 @@
       "siblings": [
         {
           "name": "pptx-to-deck",
-          "required_files": [".venv/bin/python3", "assets/build_pptx.py"]
+          "root_env": "FS_DECK_PPTX_SKILL",
+          "required_files": ["assets/build_pptx.py", "assets/bootstrap.sh", "requirements.txt"],
+          "python_runtime": {
+            "env": "FS_DECK_PPTX_PYTHON",
+            "candidates": [".venv/bin/python3", ".venv/bin/python"],
+            "commands": ["python3"],
+            "allow_current": true,
+            "modules": ["pptx", "lxml"]
+          }
         }
       ]
     },
@@ -75,7 +83,15 @@
       "siblings": [
         {
           "name": "pptx-to-deck",
-          "required_files": [".venv/bin/python3", "assets/extract_template.py"]
+          "root_env": "FS_DECK_PPTX_SKILL",
+          "required_files": ["assets/extract_template.py", "assets/bootstrap.sh", "requirements.txt"],
+          "python_runtime": {
+            "env": "FS_DECK_PPTX_PYTHON",
+            "candidates": [".venv/bin/python3", ".venv/bin/python"],
+            "commands": ["python3"],
+            "allow_current": true,
+            "modules": ["pptx", "lxml"]
+          }
         }
       ]
     },

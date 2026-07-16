@@ -9,9 +9,9 @@ description: |
 
   Triggers: "把 PPT/PPTX 转成 deck/HTML/H5", "import pptx", ".pptx 转 deck",
   "把这份 PowerPoint 还原成网页/可编辑 deck", or when the user hands over a .pptx
-  and wants it as an editable deck. Do NOT use for `.key` Keynote (use
-  keynote-to-html), a from-scratch redesign (use feishu-deck-h5 directly), or
-  producing a real .pptx.
+  and wants it as an editable deck. Do NOT use for `.key` Keynote (native `.key`
+  conversion is retired; ask for `.pptx` or `.pdf`), a from-scratch redesign
+  (use feishu-deck-h5 directly), or producing a real .pptx.
 
   ONE pipeline: build_pptx.py = PURE CODE RECONSTRUCTION (python-pptx) → a
   `layout:"canvas"` deck.json of fully editable typed elements, rendered by
@@ -34,8 +34,9 @@ Trigger when the user has a `.pptx` and wants a structured, editable deck that:
   - Carries feishu-deck-h5's present-mode chrome (←/→ nav, F fullscreen,
     progress bar, mobile scroll mode)
 
-Do NOT use for: `.key` (use keynote-to-html), or a from-scratch redesign
-(use feishu-deck-h5 directly with a hand-authored deck.json).
+Do NOT use for: `.key` (native conversion is retired; ask for `.pptx` or `.pdf`),
+or a from-scratch redesign (use feishu-deck-h5 directly with a hand-authored
+deck.json).
 
 ## 管线：纯代码重建（唯一）
 
@@ -55,13 +56,14 @@ LibreOffice / PyMuPDF**，只要 `python-pptx` + `lxml`。
 `rerender-deck.py` 共用）。
 
 ```bash
-skills/pptx-to-deck/.venv/bin/python3 \
-  skills/pptx-to-deck/assets/build_pptx.py \
+bash skills/pptx-to-deck/assets/bootstrap.sh
+bash skills/pptx-to-deck/assets/run.sh \
   <in.pptx>  skills/feishu-deck-h5/runs/<deck-name> \
   [--renderer DIR] [--title TEXT] [--limit N] [--no-render]
 ```
 
-依赖：`python-pptx`、`lxml`（skill 根的 `.venv` 里）。
+依赖：`python-pptx`、`lxml`。`bootstrap.sh` 默认安装到 skill 根的 `.venv`,
+也可通过 `FS_DECK_PPTX_PYTHON` 使用已具备依赖的解释器。
 
 > **fitText 超框自适配的边界**：`post_process` 注入的 fitText 在浏览器侧把**真正单行**
 > 却超框的文本框 nowrap+scaleX 贴合（PPT autofit「溢出缩字」的确定性等价物，量真实
@@ -72,13 +74,12 @@ skills/pptx-to-deck/.venv/bin/python3 \
 ## Preflight
 
 1. Verify the `.pptx` exists. If only a name was given, `mdfind "<name>.pptx"`.
-2. Python deps: `python-pptx`, `lxml`. A venv at this skill's root is used
-   if present:
+2. Python deps: `python-pptx`, `lxml`. Bootstrap the isolated runtime once:
    ```bash
-   python3 -m venv skills/pptx-to-deck/.venv
-   skills/pptx-to-deck/.venv/bin/pip install python-pptx
+   bash skills/pptx-to-deck/assets/bootstrap.sh
    ```
-   (Or install on the system python; run.sh falls back to `python3`.)
+   Or set `FS_DECK_PPTX_PYTHON` to an interpreter with both modules. `run.sh`
+   still falls back to `python3` when no skill-local venv exists.
    No LibreOffice / Pillow / PyMuPDF needed — rasterization is retired.
 3. The renderer is the **sibling feishu-deck-h5** skill (auto-located as the
    sibling `<skills>/feishu-deck-h5/` dir, else `~/.claude/skills/feishu-deck-h5`).
@@ -134,6 +135,7 @@ it as a defect.
 
 | File | Role |
 |---|---|
+| `assets/bootstrap.sh` | create/verify the isolated python-pptx + lxml runtime |
 | `assets/build_pptx.py` | python-pptx → positioned HTML → deck.json → 渲染 → canvas_finish 收尾（唯一管线） |
 | `assets/canvas_finish.py` | 渲染层收尾（纯 stdlib）：make_portable 自包含打包 + post_process letterbox/fitText；build 与 rerender 共用 |
 | `assets/rerender-deck.py` | 重渲已存在的 canvas deck.json（翻译/编辑后），render + canvas_finish 收尾 |

@@ -425,39 +425,96 @@ def xml_texts(raw: bytes) -> list[str]:
 # .pptx is the ONLY native-PowerPoint entry. It is converted to a structured
 # `canvas` deck.json (code reconstruction of every element — text runs, embedded
 # images, shapes — NO screenshots) by build_pptx.py, which lives in the
-# `pptx-to-deck` skill and runs in ITS OWN venv (python-pptx is not in the
-# parser's stdlib world). Un-reconstructable pages (live chart / SmartArt / OLE)
+# `pptx-to-deck` skill and runs with a probed interpreter that can import
+# python-pptx + lxml. Un-reconstructable pages (live chart / SmartArt / OLE)
 # become text placeholders and are reported back as `unreconstructed slides` for
 # the user to redo. The image / dual-background path (pptx-to-editable-html) is
 # RETIRED per the 不要图 decision — we never produce screenshots here.
 #
 # `pptx-to-deck` was promoted out of feishu-deck-h5 into a TOP-LEVEL sibling skill
 # (it uses feishu-deck-h5 as its render backend). Resolve it as a sibling, with
-# fallbacks to the legacy nested location and the registered ~/.claude symlink so
-# the parser keeps working across layouts.
+# fallbacks to registered Codex/Claude/Agents skill roots so the parser keeps
+# working across harness layouts.
 _PPTX_SKILL_OVERRIDE = os.environ.get("FS_DECK_PPTX_SKILL", "").strip()
+_CODEX_HOME = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex")).expanduser()
 _PPTX_SKILL_CANDIDATES = (
     [Path(_PPTX_SKILL_OVERRIDE).expanduser()]
     if _PPTX_SKILL_OVERRIDE
     else [
         REPO.parent / "pptx-to-deck",                 # sibling (new layout)
         REPO / "pptx-to-html",                        # legacy nested
+        _CODEX_HOME / "skills" / "pptx-to-deck",
+        Path.home() / ".codex" / "skills" / "pptx-to-deck",
         Path.home() / ".claude" / "skills" / "pptx-to-deck",  # registered symlink
+        Path.home() / ".agents" / "skills" / "pptx-to-deck",
     ]
 )
-PPTX_SKILL_DIR = next(
-    (d for d in _PPTX_SKILL_CANDIDATES
-     if (d / "assets" / "build_pptx.py").is_file()),
-    _PPTX_SKILL_CANDIDATES[0],
-)
-PPTX_VENV_PY = PPTX_SKILL_DIR / ".venv" / "bin" / "python3"
-BUILD_PPTX = PPTX_SKILL_DIR / "assets" / "build_pptx.py"
 UNRECONSTRUCTED_RE = re.compile(r"unreconstructed slides:\s*\[([^\]]*)\]")
+
+
+def _resolve_pptx_python(skill_dir: Path) -> tuple[Path | None, list[str]]:
+    candidates: list[Path] = []
+    override = os.environ.get("FS_DECK_PPTX_PYTHON", "").strip()
+    if override:
+        candidates.append(Path(override).expanduser())
+    candidates.extend(
+        [
+            skill_dir / ".venv" / "bin" / "python3",
+            skill_dir / ".venv" / "bin" / "python",
+            Path(sys.executable),
+        ]
+    )
+    system_python = shutil.which("python3")
+    if system_python:
+        candidates.append(Path(system_python))
+
+    tried: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        marker = str(candidate.resolve(strict=False))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        tried.append(str(candidate))
+        if not candidate.is_file():
+            continue
+        try:
+            probe = subprocess.run(
+                [str(candidate), "-c", "import pptx, lxml"],
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if probe.returncode == 0:
+            return candidate, tried
+    return None, tried
+
+
+def _resolve_pptx_backend() -> tuple[Path, Path | None, list[str]]:
+    roots = [
+        root for root in _PPTX_SKILL_CANDIDATES
+        if (root / "assets" / "build_pptx.py").is_file()
+    ]
+    if not roots:
+        roots = [_PPTX_SKILL_CANDIDATES[0]]
+    all_tried: list[str] = []
+    for root in roots:
+        interpreter, tried = _resolve_pptx_python(root)
+        all_tried.extend(tried)
+        if interpreter is not None:
+            return root, interpreter, list(dict.fromkeys(all_tried))
+    return roots[0], None, list(dict.fromkeys(all_tried))
+
+
+PPTX_SKILL_DIR, PPTX_PYTHON, PPTX_PYTHON_TRIED = _resolve_pptx_backend()
+BUILD_PPTX = PPTX_SKILL_DIR / "assets" / "build_pptx.py"
 
 
 def build_pptx_canvas(pptx_path: Path, out_dir: Path, title: str = "") -> dict[str, Any]:
     """Convert a .pptx to a structured `canvas` deck.json via build_pptx.py
-    (run in the pptx-to-deck venv). Emits deck.json + extracted images under
+    (run with a probed pptx-to-deck interpreter). Emits deck.json + extracted images under
     `out_dir`, then renders index.html. Returns a structured result record for
     the source-dossier: deck.json path, slide count, the `unreconstructed`
     page-number report, and any warnings. The caller writes the dossier for
@@ -473,20 +530,23 @@ def build_pptx_canvas(pptx_path: Path, out_dir: Path, title: str = "") -> dict[s
         "unreconstructed_slides": [],
         "warnings": [],
     }
-    if not PPTX_VENV_PY.is_file():
-        result["warnings"].append(
-            f"pptx-to-deck venv python not found at {repo_rel(PPTX_VENV_PY)}; "
-            "PPTX was preserved but not converted to canvas deck.json."
-        )
-        return result
     if not BUILD_PPTX.is_file():
         result["warnings"].append(
-            f"build_pptx.py not found at {repo_rel(BUILD_PPTX)}; PPTX not converted."
+            f"build_pptx.py not found at {repo_rel(BUILD_PPTX)}; install/register "
+            "the pptx-to-deck sibling skill before converting PPTX."
+        )
+        return result
+    if PPTX_PYTHON is None:
+        result["warnings"].append(
+            "pptx-to-deck has no usable Python runtime with python-pptx + lxml; "
+            f"tried {', '.join(PPTX_PYTHON_TRIED) or 'no candidates'}. "
+            "Run pptx-to-deck/assets/bootstrap.sh or set FS_DECK_PPTX_PYTHON. "
+            "PPTX was preserved but not converted to canvas deck.json."
         )
         return result
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
-        str(PPTX_VENV_PY),
+        str(PPTX_PYTHON),
         str(BUILD_PPTX),
         str(pptx_path),
         str(out_dir),
@@ -1241,15 +1301,14 @@ def inventory_path(path: Path) -> dict[str, Any]:
     if suffix == ".key":
         return {
             **base,
-            "processing_status": "needs_keynote_to_html",
+            "processing_status": "unsupported",
             "slides": [],
-            "recommended_reuse": {
-                "skill": "keynote-to-html",
-                "command": "bash skills/keynote-to-html/assets/run.sh <key-file> <input/runtime-library/assets/keynote-html/<stem>>",
-                "outputs_to_register": ["deck.json", "index.html", "assets/slide-NN/*"],
+            "required_source": {
+                "editable": ".pptx",
+                "page_replica": ".pdf",
             },
             "warnings": [
-                "Keynote files require keynote-to-html for page-level text, image, and video extraction; this stdlib parser only preserved the source file.",
+                "Native .key conversion is retired; the source was preserved only. Provide .pptx for editable reconstruction or .pdf for a page replica.",
             ],
         }
     if suffix == ".pdf":
@@ -1343,7 +1402,7 @@ def build_layers(inventory: list[dict[str, Any]], brief: str) -> dict[str, Any]:
             needs_confirmation.append(f"source not found: {source_path}")
         for warning in src.get("warnings") or []:
             needs_confirmation.append(f"{source_path}: {warning}")
-        if src.get("processing_status") in {"needs_conversion", "needs_keynote_to_html", "metadata-only"}:
+        if src.get("processing_status") in {"needs_conversion", "unsupported", "metadata-only"}:
             needs_confirmation.append(f"{source_path}: {src.get('processing_status')}")
         for idx, slide in enumerate(src.get("slides") or [], 1):
             text = str(slide.get("text") or "")
@@ -1647,6 +1706,7 @@ def main(argv: list[str] | None = None) -> int:
     prepared_sources = [prepare_runtime_source(source, library_dir) for source in args.sources]
     inventory = []
     conversion_failures: list[str] = []
+    unsupported_sources: list[str] = []
     for prepared in prepared_sources:
         item = inventory_source(str(prepared["runtime_source"]))
         item["original_source"] = prepared["original_source"]
@@ -1676,7 +1736,7 @@ def main(argv: list[str] | None = None) -> int:
                     "deckjson_strategy": "preserve slides/data-slide-key when detected; otherwise wrap page or major sections as raw slides",
                 }
         # PPTX → structured `canvas` deck.json (single .pptx entry point). Run
-        # build_pptx via the pptx-to-deck venv; record the canvas deck.json + the
+        # build_pptx via the resolved pptx-to-deck interpreter; record the canvas deck.json + the
         # `unreconstructed slides` report on this inventory item. Multiple .pptx
         # sources get per-source output dirs so they don't clobber each other.
         if item.get("type") == "pptx" and item.get("exists", True):
@@ -1696,6 +1756,8 @@ def main(argv: list[str] | None = None) -> int:
             warnings.extend(conv.get("warnings") or [])
             if warnings:
                 item["warnings"] = list(dict.fromkeys(warnings))
+        if item.get("processing_status") == "unsupported":
+            unsupported_sources.append(str(item.get("original_source") or item.get("path")))
         inventory.append(item)
     materialize_html_assets(inventory, out_dir)
     layers = build_layers(inventory, args.brief)
@@ -1798,6 +1860,13 @@ def main(argv: list[str] | None = None) -> int:
     if conversion_failures:
         print(
             "PPTX conversion failed for: " + ", ".join(conversion_failures),
+            file=sys.stderr,
+        )
+        return 3
+    if unsupported_sources:
+        print(
+            "Unsupported source format; provide .pptx or .pdf instead: "
+            + ", ".join(unsupported_sources),
             file=sys.stderr,
         )
         return 3

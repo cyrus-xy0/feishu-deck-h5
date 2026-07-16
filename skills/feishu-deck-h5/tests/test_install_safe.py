@@ -7,6 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[1]
+PPTX_ROOT = REPO / "skills" / "pptx-to-deck"
 INSTALL = REPO / "install.sh"
 
 
@@ -29,15 +30,27 @@ def run_install(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_correct_symlink_is_idempotent(tmp_path: Path) -> None:
-    link = tmp_path / "harness" / "skills" / "feishu-deck-h5"
-    link.parent.mkdir(parents=True)
-    link.symlink_to(ROOT)
-    before = os.lstat(link).st_ino
+    main_link = tmp_path / "harness" / "skills" / "feishu-deck-h5"
+    pptx_link = tmp_path / "harness" / "skills" / "pptx-to-deck"
+    main_link.parent.mkdir(parents=True)
+    main_link.symlink_to(ROOT)
+    pptx_link.symlink_to(PPTX_ROOT)
+    before = {link.name: os.lstat(link).st_ino for link in (main_link, pptx_link)}
     proc = run_install(tmp_path)
     assert proc.returncode == 0, proc.stderr or proc.stdout
-    assert link.is_symlink()
-    assert link.resolve() == ROOT.resolve()
-    assert os.lstat(link).st_ino == before
+    for link, target in ((main_link, ROOT), (pptx_link, PPTX_ROOT)):
+        assert link.is_symlink()
+        assert link.resolve() == target.resolve()
+        assert os.lstat(link).st_ino == before[link.name]
+
+
+def test_fresh_install_links_only_active_skills(tmp_path: Path) -> None:
+    proc = run_install(tmp_path)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    skills = tmp_path / "harness" / "skills"
+    assert (skills / "feishu-deck-h5").resolve() == ROOT.resolve()
+    assert (skills / "pptx-to-deck").resolve() == PPTX_ROOT.resolve()
+    assert not (skills / "keynote-to-html").exists()
 
 
 def test_real_directory_is_refused_and_preserved(tmp_path: Path) -> None:
@@ -61,6 +74,19 @@ def test_different_symlink_is_refused_and_preserved(tmp_path: Path) -> None:
     assert proc.returncode == 3
     assert link.is_symlink()
     assert link.resolve() == other.resolve()
+
+
+def test_pptx_conflict_refuses_before_creating_main_link(tmp_path: Path) -> None:
+    other = tmp_path / "other-skill"
+    other.mkdir()
+    skills = tmp_path / "harness" / "skills"
+    skills.mkdir(parents=True)
+    pptx_link = skills / "pptx-to-deck"
+    pptx_link.symlink_to(other)
+    proc = run_install(tmp_path)
+    assert proc.returncode == 3
+    assert not (skills / "feishu-deck-h5").exists()
+    assert pptx_link.resolve() == other.resolve()
 
 
 def test_force_requires_backup_and_preserves_old_directory(tmp_path: Path) -> None:

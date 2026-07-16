@@ -58,10 +58,11 @@ Profiles are defined in `references/dependency-policy.yaml` and checked by
 - `core`: static repository/DeckJSON tooling; no browser promise.
 - `generate`: renderer/validator plus a successful Chromium launch.
 - `edit`: generation requirements plus Editor.
-- `pptx`: generation requirements plus sibling `pptx-to-deck`, its venv, and
-  `assets/build_pptx.py`.
-- `template`: Template Pack schemas/runtime plus sibling `pptx-to-deck`, its
-  venv, and `assets/extract_template.py`; extraction itself does not require Chromium.
+- `pptx`: generation requirements plus sibling `pptx-to-deck`, a probed Python
+  runtime with `python-pptx` + `lxml`, and `assets/build_pptx.py`.
+- `template`: Template Pack schemas/runtime plus sibling `pptx-to-deck`, the
+  same probed Python runtime, and `assets/extract_template.py`; extraction itself
+  does not require Chromium.
 - `publish`: publisher, Node uploader, and Chromium self-check.
 - `import`: importer, `gh`, and Chromium quality gate.
 
@@ -78,9 +79,11 @@ When it prints `PREFLIGHT BOOTSTRAPPED`:
 2. Run the same profile again there.
 3. Continue only after `PREFLIGHT OK`.
 
-The mirror intentionally excludes `runs/`, VCS data, caches, and backups. Sibling
-skills are not silently copied; profiles such as `pptx` fail until their declared
-dependencies are installed beside the mirrored skill.
+The mirror intentionally excludes `runs/`, VCS data, caches, backups, and
+virtualenvs. For `pptx`/`template`, an adjacent packaged `pptx-to-deck` sibling
+is also copied beside the writable controller workspace; preflight prints the
+exact bootstrap command. If the source package did not contain that sibling,
+the profile still fails rather than claiming conversion succeeded.
 
 ## Lean packages
 
@@ -90,9 +93,12 @@ Build the skill package with:
 bash assets/package-skill.sh --verify
 ```
 
-The archive carries `dependency-policy.yaml`; it does not vendor the separate
-`pptx-to-deck` or `keynote-to-html` skills. Install those siblings explicitly
-when their conversion profile is required, then run the corresponding preflight.
+The archive contains both active sibling directories, `feishu-deck-h5/` and
+`pptx-to-deck/`, so extracting it directly into the harness skill root makes the
+PPTX backend discoverable without repository access. It deliberately excludes
+machine-specific virtualenvs: run `pptx-to-deck/assets/bootstrap.sh` on the
+target, then run the `pptx` profile. Native Keynote conversion is retired;
+request `.pptx` or `.pdf`.
 
 ## Post-install verification
 

@@ -143,7 +143,8 @@ Read `references/conversion-policy.yaml` and
 - `.pptx` reusable template → Parser registers the source, then
   `TEMPLATE_EXTRACT` builds `template-dossier.json`, a draft
   `template-pack.json`, assets, and review preview. It does not generate pages.
-- `.key` → sibling `keynote-to-html`; missing backend is a hard failure.
+- Native `.key` conversion is retired. Ask for an editable `.pptx` export or a
+  `.pdf` replica source; never route to a removed Keynote backend.
 - `.pdf` replica may use one page image per `replica` DeckJSON slide; PDF rewrite
   runs Designer.
 - Preserve page count unless the user explicitly asks to condense.

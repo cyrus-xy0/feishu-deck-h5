@@ -25,9 +25,10 @@ Use the `template` dependency profile before extraction:
 bash assets/preflight.sh --profile template
 ```
 
-The profile requires the local Template Pack schemas/runtime and the sibling
-`pptx-to-deck/.venv/bin/python3` plus
-`pptx-to-deck/assets/extract_template.py`. A missing extractor is a hard failure.
+The profile requires the local Template Pack schemas/runtime, the sibling
+`pptx-to-deck/assets/extract_template.py`, and a probed Python runtime that can
+import `pptx` + `lxml`. Run `pptx-to-deck/assets/bootstrap.sh` when no suitable
+interpreter exists. A missing extractor or runtime is a hard failure.
 
 ## Existing layouts stay unchanged
 

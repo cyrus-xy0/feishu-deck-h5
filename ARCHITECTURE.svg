@@ -176,10 +176,7 @@
   <text class="lbl" x="1028" y="834">兄弟技能 Sibling Skills</text>
   <rect class="node" x="1028" y="848" width="394" height="50" fill="#243447" stroke="#5a7a9a" stroke-width="1.2"/>
   <text class="nt" x="1042" y="870">pptx-to-deck</text>
-  <text class="ns" x="1042" y="888">build_pptx / hybrid → canvas deck.json（本技能为渲染后端）</text>
-  <rect class="node" x="1028" y="904" width="394" height="44" fill="#243447" stroke="#5a7a9a" stroke-width="1.2"/>
-  <text class="nt" x="1042" y="926">keynote-to-html</text>
-  <text class="ns" x="1042" y="941">Keynote → HTML 转换</text>
+  <text class="ns" x="1042" y="888">build_pptx → canvas deck.json（本技能为渲染后端）</text>
 
   <rect class="band" x="1010" y="978" width="430" height="164" fill="#0f1f17" stroke="#2f6e4a" stroke-width="1.5"/>
   <text class="lbl" x="1028" y="1000">飞书云 Feishu Cloud</text>

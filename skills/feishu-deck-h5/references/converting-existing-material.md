@@ -42,8 +42,9 @@ PPTX is reconstructed by the sibling `pptx-to-deck` skill into an editable
 
 - Pure import: `PARSE -> EDIT`; Designer is skipped.
 - Rewrite: `PARSE -> GENERATION`; Designer is required.
-- Missing `pptx-to-deck`, its venv, or `build_pptx.py`: fail the requested PPTX
-  conversion. Do not return a success dossier that merely preserved the file.
+- Missing `pptx-to-deck`, a Python runtime that imports `pptx` + `lxml`, or
+  `build_pptx.py`: fail the requested PPTX conversion. Do not return a success
+  dossier that merely preserved the file.
 
 ### Legacy PPT
 
@@ -52,9 +53,13 @@ it as a substitute for editable reconstruction.
 
 ### Keynote
 
-Delegate `.key` to the sibling `keynote-to-html` skill. Pure import skips
-Designer; rewrite runs Designer. Missing Keynote conversion capability is a hard
-failure for a requested `.key` conversion.
+Native `.key` conversion is retired and has no backend. Preserve the submitted
+file as provenance, then stop with an actionable source request:
+
+- ask for `.pptx` when editability matters;
+- ask for `.pdf` when page-faithful replica is acceptable.
+
+Do not claim that `.key` was converted, and do not route to a removed backend.
 
 ### PDF
 

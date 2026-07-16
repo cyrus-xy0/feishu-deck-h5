@@ -66,7 +66,31 @@ class UploadParserContractTest(unittest.TestCase):
             dossier = json.loads((out / "source-dossier.json").read_text(encoding="utf-8"))
             conversion = dossier["source_inventory"][0]["canvas_conversion"]
             self.assertFalse(conversion["ok"])
-            self.assertIn("venv python not found", " ".join(conversion["warnings"]))
+            warning = " ".join(conversion["warnings"])
+            self.assertTrue(
+                "no usable Python runtime" in warning or "build_pptx.py not found" in warning,
+                warning,
+            )
+
+    def test_keynote_is_preserved_but_returns_unsupported(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="upload-parser-keynote-retired-") as td:
+            root = Path(td)
+            source = root / "source.key"
+            source.write_bytes(b"retired-keynote-fixture")
+            out = root / "out"
+            proc = subprocess.run(
+                [sys.executable, str(PARSER), str(source), "--output-dir", str(out)],
+                cwd=REPO,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 3, proc.stderr or proc.stdout)
+            dossier = json.loads((out / "source-dossier.json").read_text(encoding="utf-8"))
+            item = dossier["source_inventory"][0]
+            self.assertEqual(item["processing_status"], "unsupported")
+            self.assertNotIn("recommended_reuse", item)
+            self.assertEqual(item["required_source"], {"editable": ".pptx", "page_replica": ".pdf"})
+            self.assertIn("Native .key conversion is retired", " ".join(item["warnings"]))
 
     def test_html_dossier_validates_and_preserves_dependencies(self) -> None:
         with tempfile.TemporaryDirectory(prefix="upload-parser-html-") as td:

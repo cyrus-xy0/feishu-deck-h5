@@ -14,7 +14,7 @@ The extractor is intentionally different from ``build_pptx.py``:
 
 Run with the sibling skill interpreter (python-pptx + lxml):
 
-    skills/pptx-to-deck/.venv/bin/python3 \
+    ${FS_DECK_PPTX_PYTHON:-skills/pptx-to-deck/.venv/bin/python3} \
       skills/pptx-to-deck/assets/extract_template.py template.pptx out/ \
       --role cover=slide:1 --role raw=slide:2 \
       --alias agenda=raw --alias end=cover
