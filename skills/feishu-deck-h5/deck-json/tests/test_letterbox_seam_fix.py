@@ -37,8 +37,10 @@ import sys
 import tempfile
 
 ASSETS = pathlib.Path(__file__).resolve().parents[2] / "assets"
+EXTRA_LAYOUTS = pathlib.Path(__file__).resolve().parents[1] / "templates" / "extra-layouts.css"
 JS = (ASSETS / "feishu-deck.js").read_text(encoding="utf-8")
 CSS = (ASSETS / "feishu-deck.css").read_text(encoding="utf-8")
+EXTRA_CSS = EXTRA_LAYOUTS.read_text(encoding="utf-8")
 _FW_CSS = (ASSETS / "feishu-deck.css").as_uri()
 _FW_JS = (ASSETS / "feishu-deck.js").as_uri()
 
@@ -67,6 +69,19 @@ def test_css_carries_present_gated_frame_mirror_rule():
         ".fs-bleed-host frame mirror must be present-mode gated"
     assert re.search(r'\.fs-bleed-promoted[^{]*::before', CSS), \
         ".fs-bleed-promoted::before vignette-zero rule missing"
+
+
+def test_present_mode_preserves_full_page_replica_backgrounds():
+    assert '.slide-frame:has(> .slide.page-replica)' in CSS
+    assert '.slide-frame > .slide:not(.page-replica)' in CSS
+    assert re.search(
+        r"\.slide\.page-replica::before,\s*"
+        r"\.slide\.page-replica::after\s*\{[^}]*"
+        r"content:\s*none\s*!important;[^}]*"
+        r"display:\s*none\s*!important;",
+        EXTRA_CSS,
+        re.S,
+    )
 
 
 def test_js_carries_f345_promote_logic():

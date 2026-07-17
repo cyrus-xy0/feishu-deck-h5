@@ -250,8 +250,13 @@ body {
    letterbox seamlessly) and keeps it on the slide for scroll. BEFORE F-364 a
    slide-root bg silently TIED this rule's specificity (0,4,0) and — emitted after
    the framework sheet — won the cascade, regrowing the very seam below; authors
-   had to hand-target `.slide-frame`. No longer. */
-.deck[data-mode="present"] .slide-frame > .slide {
+   had to hand-target `.slide-frame`. No longer.
+   Full-page replicas are the exception: their contain-fitted image must remain
+   on the slide, while the surrounding frame stays black. */
+.deck[data-mode="present"] .slide-frame:has(> .slide.page-replica) {
+  background: #000 !important;
+}
+.deck[data-mode="present"] .slide-frame > .slide:not(.page-replica) {
   background-image: none !important;
   background-color: transparent !important;
 }

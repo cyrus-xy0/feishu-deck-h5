@@ -417,6 +417,11 @@
   background-size: contain !important;
   background-repeat: no-repeat !important;
 }
+.slide.page-replica::before,
+.slide.page-replica::after {
+  content: none !important;
+  display: none !important;
+}
 .slide.page-replica .wordmark { display: none; }
 
 
