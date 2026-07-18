@@ -26,9 +26,33 @@ def _load_tool_module():
     return module
 
 
+def _portable_test_rename_exclusive(cow, source: Path, destination: Path) -> None:
+    """Move a test file without overwriting an existing destination.
+
+    The production tool deliberately uses Darwin ``renamex_np(RENAME_EXCL)``.
+    Transaction tests already inject a byte-copy clone in place of APFS
+    ``clonefile``; on non-Darwin CI they need an equivalent test seam for the
+    second platform-specific primitive too.  A hard-link followed by unlink
+    gives these same-directory regular-file tests an atomic no-overwrite
+    destination create without weakening the production implementation.
+    """
+    try:
+        os.link(source, destination, follow_symlinks=False)
+    except FileExistsError as exc:
+        raise cow.RaceDetected(
+            f"exclusive rename destination appeared: {destination}") from exc
+    source.unlink()
+
+
 @pytest.fixture
 def cow():
-    return _load_tool_module()
+    module = _load_tool_module()
+    if sys.platform != "darwin":
+        module._rename_exclusive = (
+            lambda source, destination: _portable_test_rename_exclusive(
+                module, source, destination)
+        )
+    return module
 
 
 def _copy_clone(source: Path, destination: Path) -> None:
@@ -573,6 +597,8 @@ def test_clonefile_uses_no_follow_flags_and_original_path(tmp_path, cow, monkeyp
     source = tmp_path / "source.png"
     destination = tmp_path / "destination.png"
     source.write_bytes(b"x")
+    # Exercise the Darwin adapter contract against a fake libc on every CI OS.
+    monkeypatch.setattr(cow.sys, "platform", "darwin")
     monkeypatch.setattr(cow, "_LIBC", FakeLibc())
     cow._clonefile_cow(source, destination)
 

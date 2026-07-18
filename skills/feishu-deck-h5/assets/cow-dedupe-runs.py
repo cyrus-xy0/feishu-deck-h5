@@ -202,7 +202,23 @@ def _stable_sha256(path: Path, expected: Snapshot | None = None) -> tuple[str, S
         raise RaceDetected(f"stat changed before hash: {path}")
 
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags)
+    noatime = getattr(os, "O_NOATIME", 0)
+    try:
+        fd = os.open(path, flags | noatime)
+    except OSError as exc:
+        # Linux exposes O_NOATIME, but may reject it when the caller does not
+        # own the inode or the filesystem does not support it. Production runs
+        # on macOS, where the flag is absent; keep the portable test seam and
+        # read-only audit usable on other Unix filesystems.
+        unsupported = {
+            errno.EPERM,
+            errno.EINVAL,
+            getattr(errno, "ENOTSUP", errno.EINVAL),
+            getattr(errno, "EOPNOTSUPP", errno.EINVAL),
+        }
+        if not noatime or exc.errno not in unsupported:
+            raise
+        fd = os.open(path, flags)
     try:
         fd_before = Snapshot.from_stat(os.fstat(fd))
         if fd_before.guard() != before.guard():

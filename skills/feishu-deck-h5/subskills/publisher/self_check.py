@@ -435,6 +435,8 @@ async def _capture_side_with_browser(
                 await page.screenshot(
                     path=str(fn),
                     clip={"x": 0, "y": 0, "width": DESIGN_W, "height": DESIGN_H},
+                    animations="disabled",
+                    caret="hide",
                 )
                 m["png"] = str(fn)
             except Exception as exc:

@@ -329,6 +329,7 @@ def test_capture_pair_reuses_one_browser_with_parallel_isolated_contexts():
     assert many_src.count("chromium.launch(") == 1
     assert "asyncio.gather" in many_src
     assert "browser.new_context" in side_src
+    assert 'animations="disabled"' in side_src
     assert pair_src.count('"collect_requests":') == 2
 
 

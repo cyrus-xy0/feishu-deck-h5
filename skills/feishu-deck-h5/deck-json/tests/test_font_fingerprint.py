@@ -171,7 +171,10 @@ def test_json_payload_visual_reports_a_real_cascade_member():
 def test_preflight_emits_cjk_font_capability_and_stays_zero():
     """preflight.sh must print a `CAPABILITY cjk-font:` line and NOT change its
     exit code because of the font probe (it is diagnostic, non-fatal)."""
-    proc = subprocess.run(["bash", str(PREFLIGHT)],
+    # This test belongs to the browser-free repository suite. The dedicated
+    # Chromium job separately exercises the generate profile, so requiring its
+    # Playwright dependency here would contradict the CI job boundary.
+    proc = subprocess.run(["bash", str(PREFLIGHT), "--profile", "core"],
                           capture_output=True, text=True, timeout=120)
     assert "CAPABILITY cjk-font:" in proc.stdout, \
         f"preflight.sh did not emit the cjk-font capability line:\n{proc.stdout}"
