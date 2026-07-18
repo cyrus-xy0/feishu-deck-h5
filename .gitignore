@@ -83,3 +83,6 @@ env/
 skills/pptx-to-deck/out/
 skills/pptx-to-deck/example/**/assets/
 skills/pptx-to-deck/example/**/sweep/
+
+# Claude Code local worktrees (never track; they broke CI checkouts as phantom submodules)
+.claude/
