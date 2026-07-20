@@ -55,6 +55,7 @@ STAGE_NAME="feishu-deck-h5"
 STAGE="$OUTDIR/$STAGE_NAME"
 PPTX_STAGE_NAME="pptx-to-deck"
 PPTX_STAGE="$OUTDIR/$PPTX_STAGE_NAME"
+RUNTIME_PROVENANCE="runtime/runtime-provenance.json"
 
 # du on an absolute path can report 0B under some sandboxes (macOS Seatbelt);
 # `du -sh .` from inside the dir is reliable. Use a cd-relative helper.
@@ -66,7 +67,7 @@ dirsize() { ( cd "$1" 2>/dev/null && du -sh . 2>/dev/null | cut -f1 | tr -d ' ' 
 #  preflight scan cache.)
 EXCLUDE_NAMES=(
   ".git" "__pycache__" ".pytest_cache" ".DS_Store" "runs" "dist"
-  ".feishu-deck-h5-workspace" ".venv" "venv"
+  ".feishu-deck-h5-workspace" ".venv" "venv" "runtime-provenance.json"
 )
 # rsync --exclude patterns (path/glob aware)
 RSYNC_EXCLUDES=(
@@ -82,6 +83,7 @@ RSYNC_EXCLUDES=(
   --exclude='.venv/'
   --exclude='venv/'
   --exclude='*.pyc'
+  --exclude='runtime/runtime-provenance.json'
 )
 
 echo "=== feishu-deck-h5 · packaging the lean active skill suite ==="
@@ -166,6 +168,15 @@ if [ -z "$PPTX_MIRROR_TOOL" ]; then
 fi
 # Restore owner write/exec so the install target can run + accept runs/.
 chmod -R u+w "$STAGE" "$PPTX_STAGE" 2>/dev/null || true
+
+# Emit machine-owned provenance from the trusted Git checkout into the staged
+# no-Git skill. runtime-lock.py re-verifies the manifest and every runtime blob.
+python3 "$SKILL_ROOT/assets/runtime-lock.py" \
+  --skill-root "$SKILL_ROOT" \
+  --provenance-output "$STAGE/$RUNTIME_PROVENANCE"
+python3 "$STAGE/assets/runtime-lock.py" \
+  --skill-root "$STAGE" \
+  --print-commit >/dev/null
 
 STAGE_SIZE="$(dirsize "$STAGE")"
 PPTX_STAGE_SIZE="$(dirsize "$PPTX_STAGE")"

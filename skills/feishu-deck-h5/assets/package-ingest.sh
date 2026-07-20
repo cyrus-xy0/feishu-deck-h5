@@ -36,14 +36,17 @@ if [ -z "$DECK_ID" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-python3 "$SCRIPT_DIR/materialize-remote-images.py" "$OUT_DIR"
 
 # Fail closed before writing a new package. Removing a previous package first
 # prevents a failed rerun from leaving a stale deck.zip that looks successful.
 ZIP_PATH="$OUT_DIR/deck.zip"
 CLOSURE_REPORT="$OUT_DIR/.asset-closure.json"
-rm -f "$ZIP_PATH" "$CLOSURE_REPORT"
+rm -f "$ZIP_PATH" "$CLOSURE_REPORT" "$OUT_DIR/runtime-lock.json"
 trap 'rm -f "$CLOSURE_REPORT"' EXIT
+python3 "$SCRIPT_DIR/materialize-remote-images.py" "$OUT_DIR"
+python3 "$SCRIPT_DIR/runtime-lock.py" \
+  --output-dir "$OUT_DIR" \
+  --output "$OUT_DIR/runtime-lock.json"
 python3 "$SCRIPT_DIR/ingest-asset-closure.py" \
   "$OUT_DIR" \
   --primary-html index.html \
@@ -77,6 +80,7 @@ hard_required = (
     "assets",
     "assets-manifest.yaml",
     "ingestion-manifest.json",
+    "runtime-lock.json",
 )
 soft_required = (
     "outline.json",
@@ -260,6 +264,7 @@ try:
         "slide-index.json",
         "assets-manifest.yaml",
         "ingestion-manifest.json",
+        "runtime-lock.json",
         "outline.json",
         "outline.md",
         "DESIGN-PLAN.md",

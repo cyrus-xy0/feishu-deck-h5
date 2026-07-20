@@ -5,6 +5,7 @@ warns (never blocks) and stays silent on clean code (all yaml codes covered).
 Also a light guard that the shared V.inline_linked (F-14) is importable.
 """
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -253,6 +254,26 @@ def _base_zip_members(html=None):
     }
 
 
+def _runtime_lock_for(package_path, data):
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    files = [
+        {
+            "source_path": package_path,
+            "package_path": package_path,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
+        }
+    ]
+    return {
+        "schema_version": 1,
+        "runtime_id": CO.runtime_lock_content_id(files),
+        "snapshot_id": "sha256-" + "b" * 64,
+        "deck_h5_commit": "c" * 40,
+        "files": files,
+    }
+
+
 def test_zip_package_contract_accepts_top_level_deck_zip():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
@@ -262,6 +283,58 @@ def test_zip_package_contract_accepts_top_level_deck_zip():
         assert errors == []
         assert primary.name == "index.html"
         assert "缺软必需文件: README.md" in warnings
+
+
+def test_zip_package_contract_accepts_valid_runtime_lock():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members()
+        manifest = json.loads(members["ingestion-manifest.json"])
+        manifest["hard_required"] = ["runtime-lock.json"]
+        members["ingestion-manifest.json"] = json.dumps(manifest)
+        members["runtime-lock.json"] = json.dumps(
+            _runtime_lock_for("assets/style.css", members["assets/style.css"])
+        )
+        _write_library_zip(archive, members)
+
+        primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert primary is not None
+        assert errors == []
+
+
+def test_zip_package_contract_rejects_missing_declared_runtime_lock():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members()
+        manifest = json.loads(members["ingestion-manifest.json"])
+        manifest["hard_required"] = ["runtime-lock.json"]
+        members["ingestion-manifest.json"] = json.dumps(manifest)
+        _write_library_zip(archive, members)
+
+        _primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert "缺硬必需文件: runtime-lock.json" in errors
+
+
+def test_zip_package_contract_rejects_runtime_lock_byte_drift():
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        archive = td / "deck.zip"
+        members = _base_zip_members()
+        members["runtime-lock.json"] = json.dumps(
+            _runtime_lock_for("assets/style.css", members["assets/style.css"])
+        )
+        members["assets/style.css"] = members["assets/style.css"].replace(
+            "body", "xody", 1
+        )
+        _write_library_zip(archive, members)
+
+        _primary, errors, _warnings = CO.inspect_zip_package(archive, td / "extract")
+
+        assert any("runtime-lock.json 文件哈希不匹配" in item for item in errors)
 
 
 def test_zip_package_contract_rejects_output_wrapper():

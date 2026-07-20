@@ -164,11 +164,14 @@ def _same_file_content(left: Path, right: Path) -> bool:
         return False
     if left.stat().st_size != right.stat().st_size:
         return False
-    with left.open("rb") as left_fh, right.open("rb") as right_fh:
-        return (
-            hashlib.file_digest(left_fh, "sha256").digest()
-            == hashlib.file_digest(right_fh, "sha256").digest()
-        )
+    digests = []
+    for path in (left, right):
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        digests.append(digest.digest())
+    return digests[0] == digests[1]
 
 
 def _noncanonical_shared_entries(local_shared: Path, canonical: Path) -> list[str]:
@@ -342,7 +345,7 @@ def main():
             referenced.add(str(target.relative_to(out_dir)))
             if origin.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
-                if not target.exists() or target.stat().st_size != origin.stat().st_size:
+                if not _same_file_content(target, origin):
                     shutil.copy2(origin, target)
                     bytes_copied += origin.stat().st_size
                     files_copied.add(str(target.relative_to(out_dir)))
@@ -380,7 +383,7 @@ def main():
             for candidate in candidates:
                 if candidate.exists():
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    if not target.exists() or target.stat().st_size != candidate.stat().st_size:
+                    if not _same_file_content(target, candidate):
                         shutil.copy2(candidate, target)
                         bytes_copied += candidate.stat().st_size
                         files_copied.add(str(target.relative_to(out_dir)))
@@ -639,7 +642,7 @@ def main():
                 target = css_dir / origin.name
                 new_ref = origin.name
             target.parent.mkdir(parents=True, exist_ok=True)
-            if not target.exists() or target.stat().st_size != origin.stat().st_size:
+            if not _same_file_content(target, origin):
                 shutil.copy2(origin, target)
                 bytes_copied += origin.stat().st_size
                 files_copied.add(str(target.relative_to(out_dir)))

@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html as html_lib
 import importlib.util
 import json
@@ -777,6 +778,115 @@ def safe_manifest_path(value: object) -> str | None:
     return '/'.join(parts)
 
 
+def runtime_lock_content_id(files: list[dict[str, object]]) -> str:
+    identities = [
+        {
+            'source_path': str(item['source_path']),
+            'package_path': str(item['package_path']),
+            'sha256': str(item['sha256']),
+        }
+        for item in sorted(files, key=lambda value: str(value['package_path']))
+    ]
+    canonical = json.dumps(
+        {'schema_version': 1, 'files': identities},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')
+    return 'sha256-' + hashlib.sha256(canonical).hexdigest()
+
+
+def inspect_runtime_lock(package_root: Path) -> list[str]:
+    lock_path = package_root / 'runtime-lock.json'
+    if not lock_path.is_file():
+        return []
+    try:
+        payload = json.loads(lock_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f'runtime-lock.json 不是有效 JSON: {exc}']
+    if not isinstance(payload, dict) or payload.get('schema_version') != 1:
+        return ['runtime-lock.json schema_version 必须为 1']
+    if set(payload) != {
+        'schema_version',
+        'runtime_id',
+        'snapshot_id',
+        'deck_h5_commit',
+        'files',
+    }:
+        return ['runtime-lock.json 顶层字段不符合 schema v1']
+
+    errors: list[str] = []
+    runtime_id = str(payload.get('runtime_id') or '')
+    snapshot_id = str(payload.get('snapshot_id') or '')
+    deck_h5_commit = str(payload.get('deck_h5_commit') or '')
+    if not re.fullmatch(r'sha256-[0-9a-f]{64}', runtime_id):
+        errors.append('runtime-lock.json.runtime_id 不是完整 sha256 标识')
+    if not re.fullmatch(r'sha256-[0-9a-f]{64}', snapshot_id):
+        errors.append('runtime-lock.json.snapshot_id 不是完整 sha256 标识')
+    if not re.fullmatch(r'[0-9a-f]{40}', deck_h5_commit):
+        errors.append('runtime-lock.json.deck_h5_commit 不是完整 Git commit')
+
+    raw_files = payload.get('files')
+    if not isinstance(raw_files, list):
+        return errors + ['runtime-lock.json.files 必须为数组']
+    files: list[dict[str, object]] = []
+    seen_sources: set[str] = set()
+    seen_packages: set[str] = set()
+    for index, item in enumerate(raw_files):
+        if not isinstance(item, dict) or set(item) != {
+            'source_path',
+            'package_path',
+            'sha256',
+            'size',
+        }:
+            errors.append(f'runtime-lock.json.files[{index}] 字段不符合 schema v1')
+            continue
+        source_path = safe_manifest_path(item.get('source_path'))
+        package_path = safe_manifest_path(item.get('package_path'))
+        digest = str(item.get('sha256') or '')
+        size = item.get('size')
+        if not source_path or not package_path:
+            errors.append(f'runtime-lock.json.files[{index}] 包含不安全路径')
+            continue
+        if source_path in seen_sources or package_path in seen_packages:
+            errors.append(f'runtime-lock.json.files[{index}] 路径重复')
+            continue
+        seen_sources.add(source_path)
+        seen_packages.add(package_path)
+        if not re.fullmatch(r'[0-9a-f]{64}', digest):
+            errors.append(f'runtime-lock.json.files[{index}].sha256 无效')
+            continue
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            errors.append(f'runtime-lock.json.files[{index}].size 无效')
+            continue
+        target = package_root / package_path
+        if not target.is_file():
+            errors.append(f'runtime-lock.json 引用文件缺失: {package_path}')
+            continue
+        actual_size = target.stat().st_size
+        if actual_size != size:
+            errors.append(
+                f'runtime-lock.json 文件大小不匹配: {package_path} '
+                f'({actual_size} != {size})'
+            )
+            continue
+        actual_digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        if actual_digest != digest:
+            errors.append(f'runtime-lock.json 文件哈希不匹配: {package_path}')
+            continue
+        files.append(
+            {
+                'source_path': source_path,
+                'package_path': package_path,
+                'sha256': digest,
+                'size': size,
+            }
+        )
+    if len(files) == len(raw_files) and runtime_lock_content_id(files) != runtime_id:
+        errors.append('runtime-lock.json.runtime_id 与 files 内容不一致')
+    return errors
+
+
 def is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
@@ -1020,6 +1130,7 @@ def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None,
 
     manifest_path = extract_dir / 'ingestion-manifest.json'
     primary_html: Path | None = None
+    requires_runtime_lock = False
     if manifest_path.is_file():
         try:
             manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -1031,6 +1142,11 @@ def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None,
             errors.append('ingestion-manifest.json.deck_id 缺失；library 入库无法继承稳定素材 ID')
         elif not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,95}', deck_id):
             errors.append(f'ingestion-manifest.json.deck_id 不是安全 ID: {deck_id}')
+        hard_required = manifest.get('hard_required') if isinstance(manifest, dict) else None
+        requires_runtime_lock = (
+            isinstance(hard_required, list)
+            and 'runtime-lock.json' in hard_required
+        )
         primary = safe_manifest_path(manifest.get('primary_html')) if isinstance(manifest, dict) else None
         if not primary:
             errors.append('ingestion-manifest.json.primary_html 缺失或不是安全相对路径')
@@ -1040,6 +1156,12 @@ def inspect_zip_package(zip_path: Path, extract_dir: Path) -> tuple[Path | None,
                 errors.append(f'primary_html 不存在: {primary}')
             elif primary_html.suffix.lower() not in HTML_SUFFIXES:
                 errors.append(f'primary_html 不是 HTML 文件: {primary}')
+
+    runtime_lock_path = extract_dir / 'runtime-lock.json'
+    if requires_runtime_lock and not runtime_lock_path.is_file():
+        errors.append('缺硬必需文件: runtime-lock.json')
+    if runtime_lock_path.is_file():
+        errors.extend(inspect_runtime_lock(extract_dir))
 
     if primary_html and primary_html.is_file():
         try:

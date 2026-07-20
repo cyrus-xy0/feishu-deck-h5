@@ -36,27 +36,9 @@
   display: block;
 }
 
-/* --- Present-mode slide-frame background: dark ambient gradient --- */
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="content-before-after"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="matrix-2x2"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="issue-tree"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="flow-swim"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="waterfall"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="arch-stack"]),
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="logo-wall"]) {
-  background: #000 url("../../assets/lark-content-bg.jpg") center/cover no-repeat;
-}
-
-/* --- Scroll-mode slide background: same dark gradient --- */
-.slide[data-layout="content-before-after"],
-.slide[data-layout="matrix-2x2"],
-.slide[data-layout="issue-tree"],
-.slide[data-layout="flow-swim"],
-.slide[data-layout="waterfall"],
-.slide[data-layout="arch-stack"],
-.slide[data-layout="logo-wall"] {
-  background: #000 url("../../assets/lark-content-bg.jpg") center/cover no-repeat;
-}
+/* Background ownership lives in assets/feishu-deck.css, beside
+   lark-content-bg.jpg. A url() hidden in a cross-file custom property resolves
+   relative to this stylesheet in Chromium and would request the wrong path. */
 
 /* ===== content/matrix — data-layout="matrix-2x2" ===== */
 .slide[data-layout="matrix-2x2"] .stage {
@@ -1037,12 +1019,6 @@
 .slide[data-layout="chart"] .header {
   position: absolute; top: 61px; left: 73px; right: 320px;
   padding-bottom: 0; border-bottom: 0; display: block;
-}
-.deck[data-mode="present"] .slide-frame:has(> .slide[data-layout="chart"]) {
-  background: #000 url("../../assets/lark-content-bg.jpg") center/cover no-repeat;
-}
-.slide[data-layout="chart"] {
-  background: #000 url("../../assets/lark-content-bg.jpg") center/cover no-repeat;
 }
 .slide[data-layout="chart"] .stage {
   position: absolute; top: 290px; left: 96px; right: 96px; bottom: 124px;

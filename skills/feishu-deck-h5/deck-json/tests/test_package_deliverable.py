@@ -184,6 +184,7 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertIn("deck.json", names)
         self.assertIn("assets-manifest.yaml", names)
         self.assertIn("ingestion-manifest.json", names)
+        self.assertIn("runtime-lock.json", names)
         self.assertIn("README.md", names)
         self.assertIn("assets/local.png", names)
         self.assertIn("slide-index.json", names)
@@ -193,6 +194,13 @@ class PackageDeliverableTest(unittest.TestCase):
         self.assertNotIn(".slide-hashes.json", names)
         self.assertFalse(any(name.startswith("output/") for name in names))
         self.assertFalse(any("\\" in name for name in names))
+        runtime_lock = json.loads(
+            (self.output / "runtime-lock.json").read_text(encoding="utf-8")
+        )
+        self.assertRegex(runtime_lock["runtime_id"], r"^sha256-[0-9a-f]{64}$")
+        self.assertRegex(runtime_lock["snapshot_id"], r"^sha256-[0-9a-f]{64}$")
+        self.assertRegex(runtime_lock["deck_h5_commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(runtime_lock["files"], [])
 
     def test_package_ingest_promotes_redirect_shell_index(self):
         (self.output / "index.html").write_text(

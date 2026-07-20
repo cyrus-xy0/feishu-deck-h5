@@ -24,6 +24,7 @@ class CopyAssetsDeckJsonTest(unittest.TestCase):
     def test_deck_json_template_assets_are_bundled(self):
         html = (
             "<!doctype html><html><head>"
+            '<link rel="stylesheet" href="../../../skills/feishu-deck-h5/assets/feishu-deck.css">'
             '<link rel="stylesheet" href="../../../skills/feishu-deck-h5/deck-json/templates/extra-layouts.css">'
             "</head><body></body></html>"
         )
@@ -44,15 +45,85 @@ class CopyAssetsDeckJsonTest(unittest.TestCase):
         self.assertTrue(copied_css.is_file())
         copied_css_text = copied_css.read_text(encoding="utf-8")
         self.assertNotIn("../", copied_css_text)
-        self.assertIn('url("lark-content-bg.jpg")', copied_css_text)
-        self.assertTrue((self.output / "assets" / "deck-json" / "templates" / "lark-content-bg.jpg").is_file())
+        self.assertNotIn(
+            "background: #000 var(--fs-asset-content-bg)",
+            copied_css_text,
+        )
+        self.assertNotIn(
+            'url("../../assets/lark-content-bg.jpg")',
+            copied_css_text,
+        )
+        framework_css = (self.output / "assets" / "feishu-deck.css").read_text(
+            encoding="utf-8"
+        )
+        for layout in (
+            "content-before-after",
+            "matrix-2x2",
+            "issue-tree",
+            "flow-swim",
+            "waterfall",
+            "arch-stack",
+            "logo-wall",
+            "chart",
+        ):
+            self.assertIn(f'.slide[data-layout="{layout}"],', framework_css)
+        self.assertIn("var(--fs-asset-content-bg)", framework_css)
         manifest = (self.output / "assets-manifest.yaml").read_text(encoding="utf-8")
         self.assertIn("  - assets/deck-json/templates/extra-layouts.css", manifest)
-        self.assertIn("  - assets/deck-json/templates/lark-content-bg.jpg", manifest)
+        self.assertIn("  - assets/lark-content-bg.jpg", manifest)
         self.assertNotIn("assets/assets/lark-content-bg.jpg", manifest)
         for line in manifest.splitlines():
             if line.startswith("  - "):
                 self.assertTrue((self.output / line[4:]).is_file(), line)
+
+    def test_extra_layout_background_resolves_from_framework_asset_directory(self):
+        index = self.output / "index.html"
+        index.write_text(
+            "<!doctype html><html><head>"
+            '<link rel="stylesheet" href="../../../skills/feishu-deck-h5/assets/feishu-deck.css">'
+            '<link rel="stylesheet" href="../../../skills/feishu-deck-h5/deck-json/templates/extra-layouts.css">'
+            "</head><body><div class=\"deck\">"
+            '<div class="slide" data-layout="chart"></div>'
+            "</div></body></html>",
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [sys.executable, str(COPY_ASSETS), str(self.output), "--shared=copy"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        copied_extra = (
+            self.output / "assets" / "deck-json" / "templates" / "extra-layouts.css"
+        )
+        self.assertEqual(
+            copied_extra.read_bytes(),
+            (SKILL_ROOT / "deck-json" / "templates" / "extra-layouts.css").read_bytes(),
+        )
+        self.assertNotIn(
+            "--fs-asset-content-bg",
+            copied_extra.read_text(encoding="utf-8"),
+        )
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:
+            self.skipTest(f"playwright unavailable: {exc}")
+        with sync_playwright() as playwright:
+            try:
+                browser = playwright.chromium.launch(headless=True)
+            except Exception as exc:
+                self.skipTest(f"chromium unavailable: {exc}")
+            page = browser.new_page()
+            page.goto(index.as_uri(), wait_until="domcontentloaded")
+            background = page.locator(".slide").evaluate(
+                "(element) => getComputedStyle(element).backgroundImage"
+            )
+            browser.close()
+
+        expected = (self.output / "assets" / "lark-content-bg.jpg").absolute().as_uri()
+        self.assertIn(expected, background)
 
     def test_inside_skill_deck_json_template_assets_are_bundled(self):
         skill_root = SKILL_ROOT
@@ -82,7 +153,6 @@ class CopyAssetsDeckJsonTest(unittest.TestCase):
         copied_css = tmp_run / "assets" / "deck-json" / "templates" / "extra-layouts.css"
         self.assertTrue(copied_css.is_file())
         self.assertNotIn("../", copied_css.read_text(encoding="utf-8"))
-        self.assertTrue((tmp_run / "assets" / "deck-json" / "templates" / "lark-content-bg.jpg").is_file())
         manifest = (tmp_run / "assets-manifest.yaml").read_text(encoding="utf-8")
         self.assertIn("  - assets/deck-json/templates/extra-layouts.css", manifest)
 

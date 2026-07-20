@@ -79,3 +79,18 @@ def test_unknown_shared_file_fails_closed(tmp_path: Path):
         copy_assets.ensure_shared_symlink(local_assets, skill_root)
 
     assert unknown.is_file()
+
+
+def test_same_size_different_runtime_bytes_are_not_treated_as_current(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    copy_assets = load_copy_assets()
+    monkeypatch.delattr(copy_assets.hashlib, "file_digest", raising=False)
+    current = tmp_path / "current.js"
+    source = tmp_path / "source.js"
+    current.write_bytes(b"runtime-a")
+    source.write_bytes(b"runtime-b")
+
+    assert current.stat().st_size == source.stat().st_size
+    assert copy_assets._same_file_content(current, source) is False

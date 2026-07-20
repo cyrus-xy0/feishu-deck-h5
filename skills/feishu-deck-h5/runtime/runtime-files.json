@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "source_path": "assets/edit-mode/deck-edit-mode.css",
+      "package_path": "assets/edit-mode/deck-edit-mode.css"
+    },
+    {
+      "source_path": "assets/edit-mode/deck-edit-mode.js",
+      "package_path": "assets/edit-mode/deck-edit-mode.js"
+    },
+    {
+      "source_path": "assets/feishu-deck-motion.js",
+      "package_path": "assets/feishu-deck-motion.js"
+    },
+    {
+      "source_path": "assets/feishu-deck-patterns.css",
+      "package_path": "assets/feishu-deck-patterns.css"
+    },
+    {
+      "source_path": "assets/feishu-deck.css",
+      "package_path": "assets/feishu-deck.css"
+    },
+    {
+      "source_path": "assets/feishu-deck.js",
+      "package_path": "assets/feishu-deck.js"
+    },
+    {
+      "source_path": "assets/gsap/CustomEase.min.js",
+      "package_path": "assets/gsap/CustomEase.min.js"
+    },
+    {
+      "source_path": "assets/gsap/SplitText.min.js",
+      "package_path": "assets/gsap/SplitText.min.js"
+    },
+    {
+      "source_path": "assets/gsap/gsap.min.js",
+      "package_path": "assets/gsap/gsap.min.js"
+    },
+    {
+      "source_path": "assets/lark-content-bg.jpg",
+      "package_path": "assets/lark-content-bg.jpg"
+    },
+    {
+      "source_path": "assets/lark-cover-bg.jpg",
+      "package_path": "assets/lark-cover-bg.jpg"
+    },
+    {
+      "source_path": "assets/lark-logo-mono-white.png",
+      "package_path": "assets/lark-logo-mono-white.png"
+    },
+    {
+      "source_path": "assets/lark-logo.png",
+      "package_path": "assets/lark-logo.png"
+    },
+    {
+      "source_path": "assets/lark-section-bg.jpg",
+      "package_path": "assets/lark-section-bg.jpg"
+    },
+    {
+      "source_path": "assets/lark-slogan.png",
+      "package_path": "assets/lark-slogan.png"
+    },
+    {
+      "source_path": "deck-json/templates/extra-layouts.css",
+      "package_path": "assets/deck-json/templates/extra-layouts.css"
+    }
+  ]
+}

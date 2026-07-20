@@ -15,6 +15,7 @@
         "assets/lark-logo.png",
         "assets/lark-cover-bg.jpg",
         "assets/check-profile.py",
+        "assets/runtime-lock.py",
         "assets/skill-contract.py",
         "deck-json/render-deck.py",
         "deck-json/template-pack.py",
@@ -24,7 +25,8 @@
         "references/workflow.yaml",
         "references/conversion-policy.yaml",
         "references/gate-policy.yaml",
-        "references/dependency-policy.yaml"
+        "references/dependency-policy.yaml",
+        "runtime/runtime-files.json"
       ],
       "commands": [],
       "python_modules": [],

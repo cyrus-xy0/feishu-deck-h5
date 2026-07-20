@@ -19,6 +19,7 @@ set -euo pipefail
 
 SKILL_NAME="feishu-deck-h5"
 SKILL_SRC="skills/$SKILL_NAME"
+RUNTIME_PROVENANCE="runtime/runtime-provenance.json"
 
 if [ ! -d "$SKILL_SRC" ]; then
   echo "package-skill: must run from repo root (no $SKILL_SRC/ found)" >&2
@@ -49,7 +50,17 @@ rsync -a \
   --exclude='*.bak' \
   --exclude='*.orig' \
   --exclude='runs/' \
+  --exclude="$RUNTIME_PROVENANCE" \
   "$SKILL_SRC/" "$TMP/$SKILL_NAME/"
+
+# Emit machine-owned provenance from the trusted Git checkout into the staged
+# no-Git skill. runtime-lock.py re-verifies the manifest and every runtime blob.
+python3 "$SKILL_SRC/assets/runtime-lock.py" \
+  --skill-root "$SKILL_SRC" \
+  --provenance-output "$TMP/$SKILL_NAME/$RUNTIME_PROVENANCE"
+python3 "$TMP/$SKILL_NAME/assets/runtime-lock.py" \
+  --skill-root "$TMP/$SKILL_NAME" \
+  --print-commit >/dev/null
 
 # Drop a short install README at the zip root.
 BUILT_AT="$(date '+%Y-%m-%d %H:%M:%S %Z')"

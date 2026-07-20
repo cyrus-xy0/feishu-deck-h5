@@ -9,12 +9,20 @@ on:
       - skills/feishu-deck-h5/assets/feishu-deck.css
       - skills/feishu-deck-h5/assets/feishu-deck.js
       - skills/feishu-deck-h5/assets/feishu-deck-motion.js
+      - skills/feishu-deck-h5/assets/feishu-deck-patterns.css
       - skills/feishu-deck-h5/assets/gsap/CustomEase.min.js
       - skills/feishu-deck-h5/assets/gsap/SplitText.min.js
       - skills/feishu-deck-h5/assets/gsap/gsap.min.js
       - skills/feishu-deck-h5/assets/edit-mode/deck-edit-mode.css
       - skills/feishu-deck-h5/assets/edit-mode/deck-edit-mode.js
+      - skills/feishu-deck-h5/assets/lark-content-bg.jpg
+      - skills/feishu-deck-h5/assets/lark-cover-bg.jpg
+      - skills/feishu-deck-h5/assets/lark-logo-mono-white.png
+      - skills/feishu-deck-h5/assets/lark-logo.png
+      - skills/feishu-deck-h5/assets/lark-section-bg.jpg
+      - skills/feishu-deck-h5/assets/lark-slogan.png
       - skills/feishu-deck-h5/deck-json/templates/extra-layouts.css
+      - skills/feishu-deck-h5/runtime/runtime-files.json
   workflow_dispatch:
     inputs:
       deck_h5_ref:
@@ -29,23 +37,35 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      SLIDE_LIBRARY_SYNC_TOKEN: ${{ secrets.SLIDE_LIBRARY_SYNC_TOKEN }}
     steps:
+      - name: Checkout requested deck-h5 ref
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.event.inputs.deck_h5_ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve requested deck-h5 commit
+        id: source
+        run: |
+          commit="$(
+            python3 skills/feishu-deck-h5/assets/runtime-lock.py \
+              --skill-root skills/feishu-deck-h5 \
+              --print-commit
+          )"
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+
       - name: Request slide-library runtime sync
+        if: env.SLIDE_LIBRARY_SYNC_TOKEN != ''
         env:
-          SLIDE_LIBRARY_SYNC_TOKEN: ${{ secrets.SLIDE_LIBRARY_SYNC_TOKEN }}
-          DECK_H5_REF_INPUT: ${{ github.event.inputs.deck_h5_ref }}
-          DEFAULT_DECK_H5_REF: ${{ github.sha }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
           SOURCE_REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.sha }}
-          SOURCE_REF: ${{ github.ref_name }}
+          SOURCE_REF: ${{ github.event.inputs.deck_h5_ref || github.ref_name }}
           SOURCE_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          if [ -z "${SLIDE_LIBRARY_SYNC_TOKEN:-}" ]; then
-            echo "::error::Missing SLIDE_LIBRARY_SYNC_TOKEN. Configure a PAT or GitHub App token that can dispatch workflows in FuQiang/feishu-slide-library."
-            exit 1
-          fi
-          export DECK_H5_REF="${DECK_H5_REF_INPUT:-$DEFAULT_DECK_H5_REF}"
           python3 - <<'PY' > /tmp/deck-h5-runtime-dispatch.json
           import json
           import os
@@ -53,9 +73,9 @@ jobs:
           payload = {
               "event_type": "deck_h5_runtime_changed",
               "client_payload": {
-                  "deck_h5_ref": os.environ["DECK_H5_REF"],
+                  "deck_h5_ref": os.environ["SOURCE_COMMIT"],
                   "source_repository": os.environ["SOURCE_REPOSITORY"],
-                  "source_sha": os.environ["SOURCE_SHA"],
+                  "source_sha": os.environ["SOURCE_COMMIT"],
                   "source_ref": os.environ["SOURCE_REF"],
                   "source_run_url": os.environ["SOURCE_RUN_URL"],
               },
@@ -68,3 +88,8 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             --data-binary @/tmp/deck-h5-runtime-dispatch.json \
             https://api.github.com/repos/FuQiang/feishu-slide-library/dispatches
+
+      - name: Report scheduled sync fallback
+        if: env.SLIDE_LIBRARY_SYNC_TOKEN == ''
+        run: |
+          echo "::notice::SLIDE_LIBRARY_SYNC_TOKEN is not configured; the slide-library scheduled pull will register this runtime."
