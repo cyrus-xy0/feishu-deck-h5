@@ -6635,7 +6635,9 @@
       // audit_dom_integrity)。原版用 stdlib html.parser 扫 <body> 源,逐 <div> 维护栈,
       // 查三条不变量:
       //   ① 每个 .slide-frame 必须是 .deck 的【直接子】(没被嵌进另一 frame);
-      //   ② 每个 .slide-frame 内须恰好一个 .slide 直接子;
+      //   ② 每个 .slide-frame 内须恰好一个 slide payload:普通 deck 是
+      //      .slide 直接子;data-lazy-frames deck 可暂存为一个 direct-child
+      //      <template data-fs-lazy-slide>,其 content 内仍须恰好一个 .slide;
       //   ③ <body> 内 <div> 开/闭计数须平衡(剥 comment/script/style 后)。
       // opt-out:<body> 内含 `allow:dom-integrity`。
       //
@@ -6674,10 +6676,21 @@
           if (elHasClass(fr.parentElement, 'deck')) framesUnderDeck += 1;
           if (ancestorHasClass(fr, 'slide-frame')) framesNestedInFrame.push(i + 1);
         });
-        // Invariant 2: 每个 frame 恰好一个 .slide 直接子(对应原版 frame_inner_slide_count;
-        //   原版只数"栈顶是 slide-frame 时压入的 .slide"= 直接子,这里用 :scope>.slide 等价)。
-        const frameInnerSlideCount = frames.map(
-          (fr) => fr.querySelectorAll(':scope > .slide').length);
+        // Invariant 2: every frame owns exactly one slide payload. Lazy frames
+        // are an explicit renderer/runtime contract, not an arbitrary wrapper:
+        // the template itself must be a direct child and its inert content must
+        // still contain exactly one direct .slide. Once hydrated, the template
+        // is gone and the ordinary direct-child path applies again.
+        const frameInnerSlideCount = frames.map((fr) => {
+          let n = fr.querySelectorAll(':scope > .slide').length;
+          [...fr.children].forEach((child) => {
+            if (child.tagName !== 'TEMPLATE'
+                || !child.hasAttribute('data-fs-lazy-slide')) return;
+            const payload = child.content ? [...child.content.children] : [];
+            n += payload.filter((el) => el.classList.contains('slide')).length;
+          });
+          return n;
+        });
 
         // Invariant 1: 每个 slide-frame 是 .deck 直接子。
         const orphanFrames = framesSeen - framesUnderDeck;
@@ -6707,14 +6720,15 @@
               + 'frames are perma-hidden. Fix the unclosed div above.',
           });
         }
-        // Invariant 2: 每个 frame 恰好一个 .slide 直接子。
+        // Invariant 2: 每个 frame 恰好一个 direct/eager 或 inert/lazy slide payload。
         frameInnerSlideCount.forEach((n, i0) => {
           if (n !== 1) {
             findings.push({
               rule: 'R-DOM', severity: 'error', slide_idx,
               message:
-                `slide-frame #${i0 + 1} contains ${n} direct .slide children `
-                + '(expected exactly 1). Either the markup template is broken '
+                `slide-frame #${i0 + 1} contains ${n} slide payloads `
+                + '(expected exactly 1 direct .slide or one valid lazy template). '
+                + 'Either the markup template is broken '
                 + 'or two slides got concatenated into one frame.',
             });
           }

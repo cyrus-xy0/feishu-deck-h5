@@ -268,6 +268,11 @@ try:
         "README.md",
     }
     included = set(str(item) for item in closure_report.get("reachable_files", []))
+    # Manifest entries are part of the package contract even when a file is
+    # not reachable from index.html (for example a deck-local asset retained
+    # for downstream slide-library reuse).  The resource-only gate validates
+    # both closure sets, so package both or the ZIP will fail its own gate.
+    included.update(str(item) for item in closure_report.get("manifest_files", []))
     included.update(name for name in provenance_metadata if (out_dir / name).is_file())
 
     for relative_text in sorted(included):

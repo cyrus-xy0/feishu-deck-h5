@@ -62,10 +62,10 @@ from pathlib import Path
 # literal-'&' filenames intact.
 _NE = r"(?!&(?:quot|apos|#34|#39);)"   # neg-lookahead: not at the start of a quote-entity
 RX_SKILL = re.compile(
-    rf'((?:\.\./)+)(?:skills/feishu-deck-h5/)?(assets|examples|templates|deck-json/templates)/((?:{_NE}[^\'")\s?#])+)'
+    rf'((?:\.\./)+)(?:skills/feishu-deck-h5/)?(assets|examples|templates|deck-json/templates)/((?:{_NE}[^\'")?#])+)'
 )
 RX_INPUT = re.compile(
-    rf'((?:\.\./)*)input/((?:{_NE}[^\'")\s?#])+)'
+    rf'((?:\.\./)*)input/((?:{_NE}[^\'")?#])+)'
 )
 # AFTER first rewrite, HTMLs use assets/<file> or ../assets/<file>
 # (no skills/feishu-deck-h5 prefix). Both bare and ../-prefixed refs must
@@ -79,10 +79,10 @@ RX_INPUT = re.compile(
 # left unchanged in --shared=skip mode and shouldn't be classified as
 # already-local refs.
 RX_LOCAL_ASSET = re.compile(
-    rf'((?:url\(\s*[\'"]?|(?:src|href|poster|data-src|data-poster)=["\']?))((?:\.\./)*)assets/((?:{_NE}[^\'")\s?#<])+)'
+    rf'((?:url\(\s*[\'"]?|(?:src|href|poster|data-src|data-poster)=["\']?))((?:\.\./)*)assets/((?:{_NE}[^\'")?#<])+)'
 )
 RX_LOCAL_INPUT = re.compile(
-    rf'(?<!skills/feishu-deck-h5/)((?:\.\./)*)input/((?:{_NE}[^\'")\s?#])+)'
+    rf'(?<!skills/feishu-deck-h5/)((?:\.\./)*)input/((?:{_NE}[^\'")?#])+)'
 )
 
 def find_skill_root() -> Path:
@@ -273,10 +273,25 @@ def main():
     files_copied = set()
     htmls_patched = 0
     referenced = set()      # files that exist (or should exist) in output/ — protects from prune
+    deck_local_asset_refs = set()  # run-owned assets/ refs; keep out of framework manifest
     shared_refs = set()     # all assets/shared/* logical refs (for manifest, regardless of mode)
     shared_skipped = 0      # count of shared/* refs left as skill-relative under --shared=skip
     css_origins = {}        # copied CSS path -> original skill CSS path, for internal url(...) rewrites
     missing_sources = set() # 被 HTML/CSS 引用、但打包时找不到源文件的资源（打包结尾汇总，左移到打包阶段暴露）
+
+    def mark_deck_local_asset(rel: str) -> None:
+        """Remember run-owned assets/ refs for manifest classification."""
+        parts = Path(rel).parts
+        if len(parts) < 2 or parts[0] != "assets" or parts[1] == "shared":
+            return
+        asset_rel = Path(*parts[1:])
+        if asset_rel.parts[:1] in {("imported-root",), ("embed",), ("source-media",)}:
+            deck_local_asset_refs.add(rel)
+            return
+        run_asset = (run_root / "assets" / asset_rel).resolve()
+        skill_asset = (skill_root / "assets" / asset_rel).resolve()
+        if run_asset.is_file() and not skill_asset.is_file():
+            deck_local_asset_refs.add(rel)
 
     for html_path in out_dir.rglob("*.html"):
         # Prototype bundles are self-contained worlds (R-SELF-CONTAINED):
@@ -393,6 +408,7 @@ def main():
             dst_path = out_dir / rel
             # Track so the end-of-run prune doesn't delete it.
             referenced.add(rel)
+            mark_deck_local_asset(rel)
             # already in place (e.g. shared/ symlink)
             if dst_path.exists() or dst_path.is_symlink():
                 return m.group(0)
@@ -401,7 +417,7 @@ def main():
             os.symlink(src_path.resolve(), dst_path)
             return m.group(0)
 
-        re.sub(rf"""(?:url\(|src=)['"]?\./((?:{_NE}[^'")\s?#])+)""", link_deck_local, src)
+        re.sub(rf"""(?:url\(|src=)['"]?\./((?:{_NE}[^'")?#])+)""", link_deck_local, src)
 
         # Process already-local refs (second+ runs OR pre-reorg legacy outputs):
         #  - track for prune so existing files aren't deleted
@@ -478,7 +494,9 @@ def main():
                 new_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(old_target), str(new_target))
 
-            referenced.add(str(new_target.relative_to(out_dir)))
+            rel_target = str(new_target.relative_to(out_dir))
+            referenced.add(rel_target)
+            mark_deck_local_asset(rel_target)
             if not new_target.exists():
                 origin = skill_root / "assets" / new_rest
                 if origin.exists():
@@ -501,7 +519,9 @@ def main():
             target = (out_dir / "input" / rest).resolve()
             if not target.is_relative_to(out_dir):
                 continue
-            referenced.add(str(target.relative_to(out_dir)))
+            rel_target = str(target.relative_to(out_dir))
+            referenced.add(rel_target)
+            mark_deck_local_asset(rel_target)
             if not target.exists():
                 origin = input_root / rest if input_root.exists() else None
                 if origin is not None and origin.exists():
@@ -525,7 +545,9 @@ def main():
     # first. This matters for CSS copied from non-assets trees such as
     # deck-json/templates: `../../assets/foo` is correct in the skill tree but
     # would become `output/assets/assets/foo` after the CSS is bundled.
-    rx_css_url = re.compile(r'url\(["\']?([^"\')\s]+)["\']?\)')
+    rx_css_url = re.compile(
+        r'''url\(\s*(?:"([^"]+)"|'([^']+)'|([^)]+?))\s*\)'''
+    )
     css_files = []
     for dirpath, _dirnames, filenames in os.walk(local_assets, followlinks=False):
         for name in filenames:
@@ -570,7 +592,7 @@ def main():
 
         def replace_css_url(m):
             nonlocal bytes_copied
-            ref = m.group(1)
+            ref = next((group for group in m.groups() if group is not None), "")
             # Skip data: URIs, absolute URLs, SVG fragment ids (#…), and bare punctuation
             if ref.startswith(("data:", "http:", "https:", "//", "#", "%23")):
                 return m.group(0)
@@ -581,7 +603,9 @@ def main():
             # Resolve target relative to CSS location
             target = (css_dir / ref).resolve()
             if target.is_relative_to(out_dir) and target.exists():
-                referenced.add(str(target.relative_to(out_dir)))
+                rel_target = str(target.relative_to(out_dir))
+                referenced.add(rel_target)
+                mark_deck_local_asset(rel_target)
                 return m.group(0)
 
             # Find the source: assume CSS lives at output/assets/* and the
@@ -619,7 +643,9 @@ def main():
                 shutil.copy2(origin, target)
                 bytes_copied += origin.stat().st_size
                 files_copied.add(str(target.relative_to(out_dir)))
-            referenced.add(str(target.relative_to(out_dir)))
+            rel_target = str(target.relative_to(out_dir))
+            referenced.add(rel_target)
+            mark_deck_local_asset(rel_target)
             if new_ref != ref:
                 return f'url("{new_ref}")'
             return m.group(0)
@@ -669,6 +695,8 @@ def main():
             deck_local_files.append(rel)
         elif rel.startswith(f"assets/{SHARED_PREFIX}"):
             continue  # captured via shared_refs
+        elif rel in deck_local_asset_refs:
+            deck_local_files.append(rel)
         else:
             framework_files.append(rel)
 

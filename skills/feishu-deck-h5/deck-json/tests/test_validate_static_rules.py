@@ -427,6 +427,14 @@ def test_dom_two_slides_in_frame_fires():
     assert "R-DOM" in _err_codes(R_DOM, html)
 
 
+def test_dom_one_lazy_template_payload_is_valid():
+    html = ('<html><body><div class="deck" data-lazy-frames>'
+            '<div class="slide-frame" data-fs-lazy-frame>'
+            '<template data-fs-lazy-slide><div class="slide">a</div></template>'
+            '</div></div></body></html>')
+    assert "R-DOM" not in _err_codes(R_DOM, html)
+
+
 def test_dom_unbalanced_divs_fires():
     # A missing </div> (deck never closed) -> div open/close imbalance.
     # MORE-CORRECT divergence (step 4b): the div open/close-BALANCE invariant was

@@ -2288,6 +2288,54 @@ def render_slide(slide: dict, slide_index: int, asset_path: str,
     return rendered
 
 
+def _defer_slide_frame(slide_html: str, slide: dict) -> str:
+    """Park one rendered slide in an inert template for opt-in lazy mounting.
+
+    The canonical layout fragments all have one outer ``.slide-frame`` and one
+    inner ``.slide``.  We preserve that frame as the lightweight navigation
+    record, mirror the metadata the runtime needs before hydration, and move the
+    complete authored slide (including its co-located custom_css) into a direct
+    child ``template``.  Assets and styles inside a template are parsed but do
+    not load/apply/layout until feishu-deck.js moves the payload into the frame.
+
+    This helper is intentionally strict: a future template-shape regression
+    must fail the render rather than silently produce a frame that can never be
+    hydrated.
+    """
+    frame_match = re.search(r'<div class="slide-frame"[^>]*>', slide_html)
+    slide_match = re.search(r'<div class="slide(?:\s[^"]*)?"[^>]*>', slide_html)
+    if not frame_match or not slide_match or slide_match.start() <= frame_match.end():
+        raise ValueError("lazy_frames requires one canonical .slide-frame > .slide payload")
+
+    frame_close = slide_html.rfind("</div>")
+    slide_close = slide_html.rfind("</div>", 0, frame_close)
+    if frame_close < 0 or slide_close < slide_match.end():
+        raise ValueError("lazy_frames could not locate canonical slide/frame closing tags")
+    if slide_html[slide_close + 6:frame_close].strip():
+        raise ValueError("lazy_frames found unexpected markup after the inner .slide")
+    if slide_html[frame_close + 6:].strip():
+        raise ValueError("lazy_frames found unexpected markup after .slide-frame")
+
+    key = html.escape(str(slide.get("key") or ""), quote=True)
+    layout = html.escape(str(slide.get("layout") or ""), quote=True)
+    label = html.escape(
+        str(slide.get("screen_label") or _derive_screen_label(slide)), quote=True)
+    hidden = ' data-slide-hidden=""' if slide.get("hidden") else ""
+    frame_open = (
+        frame_match.group(0)[:-1]
+        + ' data-fs-lazy-frame=""'
+        + f' data-slide-key="{key}" data-layout="{layout}"'
+        + f' data-screen-label="{label}"{hidden}>'
+    )
+    full_slide = slide_html[slide_match.start():slide_close + 6]
+    return (
+        slide_html[:frame_match.start()] + frame_open
+        + slide_html[frame_match.end():slide_match.start()]
+        + '<template data-fs-lazy-slide>\n' + full_slide + '\n</template>'
+        + slide_html[slide_close + 6:]
+    )
+
+
 def _inject_custom_css(slide_html: str, slide_key: str, custom_css: str,
                        layout: str = None) -> str:
     """Insert a `<style data-slide-key=K data-fs-custom-css>` block (selectors
@@ -3366,6 +3414,12 @@ def main(argv=None) -> int:
                     pack=template_context["pack"],
                     web_prefix=template_context["web_prefix"],
                 )
+            # Large-deck startup optimization is explicit and progressive.
+            # Keep page 1 eager so the pre-JS CSS fallback still paints; defer
+            # pages 2..N until the runtime resolves the URL hash and mounts the
+            # current page plus neighbors. Default decks never enter this path.
+            if deck["deck"].get("lazy_frames") and new_idx > 0:
+                slide_html = _defer_slide_frame(slide_html, slide)
         except TemplateRenderError as e:
             print(
                 f"render-deck: Template Pack render failed on slide[{orig_idx + 1}] "
@@ -3492,6 +3546,11 @@ def main(argv=None) -> int:
         # For formal client decks where the thin brand-gradient keyline reads as an
         # unwanted top border.
         deck_data_attrs_parts.append(' data-hide-progress=""')
+    if deck["deck"].get("lazy_frames"):
+        # OPT-IN large-deck startup optimization. feishu-deck.js progressively
+        # mounts inert slide templates in present mode and expands all of them
+        # for scroll/edit mode. Page 1 stays eager as the no-JS paint fallback.
+        deck_data_attrs_parts.append(' data-lazy-frames=""')
     deck_data_attrs = "".join(deck_data_attrs_parts)
 
     # Speaker notes island: a hidden JSON map {slide-key → notes} the presenter

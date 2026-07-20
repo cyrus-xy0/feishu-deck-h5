@@ -113,7 +113,8 @@ FAMILIES = [
                               'R-EMPTY-HEADER-ZONE', 'R-VIS-LIFT-STYLE-LOST',
                               'R-LIFT-CSS-BUDGET',
                               'R-CSS-INLINE-BUDGET', 'R-CSS-CROSS-PAGE',
-                              'R-SELF-CONTAINED', 'R-AUTOBALANCE-PRESENT',
+                              'R-SELF-CONTAINED', 'R-LOCAL-ASSET-REF',
+                              'R-AUTOBALANCE-PRESENT',
                               'R-LAYOUT-DEPRECATED', 'R-IFRAME-REMOTE',
                               'R-DEMO-IFRAME', 'R-EMBED-OPAQUE-BG']),
     ('UI 仿真 / slide-key',  ['UI1', 'R-KEY']),
@@ -148,6 +149,9 @@ CONTEXT_NOTES = {
     'R-SELF-CONTAINED': '老 deck 把每页 CSS 放在 head <style> 里很常见; 这条只是 '
                         '提醒「该页 CSS 没跟着 slide 走, lift/republish 会丢」. '
                         '非阻塞 (warn_soft); 迁到 deck.json 的 custom_css 即可消除.',
+    'R-LOCAL-ASSET-REF': '本地 deck 的运行时静态资源必须落在 assets/ 或 input/ 并用相对 '
+                         '路径引用. http(s) / file:// / 本机绝对路径会让冷启动等待网络、离线 '
+                         '失效且不可移植,因此在 DeckJSON 生成前门禁与最终 HTML 兜底都硬拦.',
     'R-FOREIGN-SCRIPT': '注入面最低防线: 非框架来源的 <script> / on* 内联事件. 严重度按来源 '
                         '分级 —— lifted/imported 页 = error(外来脚本经入库会跨 deck 传染、'
                         '发布到带飞书登录的 CF viewer = XSS), 普通生成页 = warn. 框架自注入脚本 '

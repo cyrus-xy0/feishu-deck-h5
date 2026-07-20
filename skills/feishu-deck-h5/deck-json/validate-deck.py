@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -237,9 +238,122 @@ def is_variant(slide: dict, layout: str, variant: str) -> bool:
     return slide.get("layout") == layout and slide.get("variant") == variant
 
 
-def check_business_rules(deck: dict, result: Result, strict: bool) -> None:
+_LOCAL_ASSET_AUDIT = None
+
+
+def _local_asset_audit_module():
+    """Load the source-byte asset classifier shared with the rendered-HTML gate.
+
+    `run-audits.py` has a hyphenated filename, so it cannot be imported with a
+    normal statement. Loading it here keeps the DeckJSON pre-render gate and the
+    rendered-output backstop on one implementation instead of maintaining two
+    URL classifiers that can drift.
+    """
+    global _LOCAL_ASSET_AUDIT
+    if _LOCAL_ASSET_AUDIT is not None:
+        return _LOCAL_ASSET_AUDIT
+    checker = HERE.parent / "assets" / "run-audits.py"
+    spec = importlib.util.spec_from_file_location("feishu_deck_run_audits", checker)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load local-asset checker: {checker}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _LOCAL_ASSET_AUDIT = module
+    return module
+
+
+def _check_deck_local_asset_refs(deck: dict, result: Result, deck_dir: Path) -> None:
+    """R-LOCAL-ASSET-REF — fail during DeckJSON validation, before rendering.
+
+    Raw-page HTML/CSS is scanned with the exact classifier used on final HTML.
+    Structured `src`/`srcset`/`poster`/`background` fields are checked directly,
+    because the renderer may turn those values into runtime-loading attributes.
+    The final rendered-HTML rule remains as a defense for framework/template
+    resources that do not originate inside an individual slide.
+    """
+    try:
+        audit = _local_asset_audit_module()
+    except Exception as exc:
+        result.err("$", f"local-asset generation checker unavailable: {exc} "
+                   "(R-LOCAL-ASSET-REF)")
+        return
+
+    slides = deck.get("slides", [])
+    if not isinstance(slides, list):
+        return
+
+    direct_asset_keys = {"src", "srcset", "poster", "background"}
+
+    def _direct_values(value, key):
+        if not isinstance(value, str):
+            return []
+        if key == "srcset":
+            return [item.strip().split()[0] for item in value.split(",")
+                    if item.strip()]
+        return [value]
+
+    for i, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            continue
+        sp = f"$.slides[{i}]"
+        data = slide.get("data") if isinstance(slide.get("data"), dict) else {}
+        html_text = data.get("html") if isinstance(data.get("html"), str) else ""
+        css_text = slide.get("custom_css") \
+            if isinstance(slide.get("custom_css"), str) else ""
+        authored = f"<style>{css_text}</style>{html_text}"
+        for finding in audit.audit_local_asset_refs_bytes(authored, deck_dir):
+            ref = finding.get("reference", "")
+            context = finding.get("context", "runtime asset")
+            field = "custom_css" if context in {"inline <style>"} else "data.html"
+            result.err(
+                f"{sp}.{field}",
+                f"non-portable runtime asset {context} -> {ref!r}; materialize it "
+                "under assets/ or input/, write a relative path to deck.json, then "
+                "render again (R-LOCAL-ASSET-REF)",
+            )
+
+        # Structured layouts can hold resource refs outside data.html. Scan only
+        # resource-bearing field names, so prose/source citations containing an
+        # https URL remain legal. `iframe-embed.data.src` keeps the dedicated
+        # R-IFRAME-REMOTE policy for an intentional online document.
+        def _walk(value, path):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    child_path = f"{path}.{key}"
+                    if str(key).lower() in direct_asset_keys:
+                        for ref in _direct_values(child, str(key).lower()):
+                            problem = audit._local_asset_ref_problem(ref)
+                            if not problem:
+                                continue
+                            if (slide.get("layout") == "iframe-embed"
+                                    and str(key).lower() == "src"
+                                    and problem in {"remote URL",
+                                                    "remote protocol-relative URL"}):
+                                continue
+                            result.err(
+                                child_path,
+                                f"non-portable runtime asset through {problem}: "
+                                f"{ref!r}; use a deck-relative assets/ or input/ "
+                                "path (R-LOCAL-ASSET-REF)",
+                            )
+                    if str(key).lower() not in {"html", "custom_css"}:
+                        _walk(child, child_path)
+            elif isinstance(value, list):
+                for j, child in enumerate(value):
+                    _walk(child, f"{path}[{j}]")
+
+        _walk(data, f"{sp}.data")
+
+
+def check_business_rules(deck: dict, result: Result, strict: bool,
+                         deck_dir: Path | None = None) -> None:
     slides = deck.get("slides", [])
     deck_lang = deck.get("deck", {}).get("language", "zh-only")
+
+    # Generation-time portability gate: render-deck always invokes this validator
+    # before loading/rendering the DeckJSON, so bad paths never rely on a browser-
+    # open runtime check to surface.
+    _check_deck_local_asset_refs(deck, result, deck_dir or Path.cwd())
 
     # 1. slide.key uniqueness
     seen_keys: dict[str, int] = {}
@@ -556,7 +670,7 @@ def main(argv=None) -> int:
         print(f"validate-deck: validator crashed: {e}", file=sys.stderr); return 2
 
     if not args.no_business_rules:
-        check_business_rules(deck, result, args.strict)
+        check_business_rules(deck, result, args.strict, args.deck.parent)
         check_family_drift(deck, result)   # SOFT — never blocks; surfaces drift
 
     # Render output

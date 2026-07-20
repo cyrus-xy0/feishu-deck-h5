@@ -595,6 +595,76 @@
     });
   }
 
+  // OPT-IN large-deck startup: renderer parks pages 2..N in direct-child
+  // <template data-fs-lazy-slide> payloads and mirrors navigation metadata onto
+  // the lightweight frame. Templates keep images/iframes/styles inert and avoid
+  // layout/paint until the page is actually needed. Hydration MOVES (does not
+  // clone) the fragment into the frame, preserving exactly one authored .slide.
+  function frameSlide(frame) {
+    if (!frame) return null;
+    for (const child of frame.children) {
+      if (child.classList && child.classList.contains('slide')) return child;
+    }
+    return null;
+  }
+
+  function lazySlideTemplate(frame) {
+    if (!frame) return null;
+    for (const child of frame.children) {
+      if (child.tagName === 'TEMPLATE' && child.hasAttribute('data-fs-lazy-slide')) return child;
+    }
+    return null;
+  }
+
+  function prepareMountedSlide(slide) {
+    if (!slide) return slide;
+    Array.prototype.forEach.call(slide.children, (child, idx) => {
+      child.style.setProperty('--child-i', String(Math.min(idx + 1, 7)));
+    });
+    return slide;
+  }
+
+  function hydrateLazyFrame(frame) {
+    const existing = frameSlide(frame);
+    if (existing) return prepareMountedSlide(existing);
+    const tpl = lazySlideTemplate(frame);
+    if (!tpl) return null;
+    frame.insertBefore(tpl.content, tpl);   // move, don't clone the parsed payload
+    tpl.remove();
+    frame.removeAttribute('data-fs-lazy-frame');
+    return prepareMountedSlide(frameSlide(frame));
+  }
+
+  function frameSlideKey(frame) {
+    const slide = frameSlide(frame);
+    return (slide && slide.dataset.slideKey) || (frame && frame.dataset.slideKey) || '';
+  }
+
+  function hashFrameIndex(frames) {
+    let raw = '';
+    try { raw = decodeURIComponent(location.hash.replace(/^#/, '')); } catch (e) { raw = ''; }
+    if (!raw) return -1;
+    if (/^\d+$/.test(raw)) {
+      return Math.max(0, Math.min(frames.length - 1, parseInt(raw, 10) - 1));
+    }
+    return frames.findIndex((frame) => frameSlideKey(frame) === raw);
+  }
+
+  function hydrateLazyWindow(deck, frames, idx, all) {
+    if (!deck || !deck.hasAttribute('data-lazy-frames')) return;
+    if (all || deck.dataset.mode === 'scroll') {
+      frames.forEach(hydrateLazyFrame);
+      return;
+    }
+    const target = Math.max(0, Math.min(frames.length - 1, idx));
+    const wanted = new Set([target, target - 1, target + 1]);
+    // A hidden page can sit directly next to the target. Mount the previous and
+    // next VISIBLE page too so presenter preview / linear navigation stays live.
+    wanted.add(stepPrev(frames, target));
+    wanted.add(stepNext(frames, target));
+    wanted.forEach((i) => { if (i >= 0 && i < frames.length) hydrateLazyFrame(frames[i]); });
+  }
+
   function init() {
     const deck = document.querySelector('.deck');
     if (!deck) return null;
@@ -625,6 +695,30 @@
 
     // ---- Set up frames + reveal-animation child indices ----
     const frames = Array.from(deck.querySelectorAll('.slide-frame'));
+    if (deck.hasAttribute('data-lazy-frames')) {
+      const initialIdx = hashFrameIndex(frames);
+      hydrateLazyWindow(
+        deck, frames,
+        initialIdx >= 0 ? initialIdx : firstVisible(frames),
+        deck.dataset.mode === 'scroll');
+      // The validator installs __AUDIT_SCOPE__ before any page script. A full
+      // audit (marker present + null) must inspect every authored slide; a scoped
+      // audit only needs its requested frames in addition to the normal landing
+      // window. Regular viewing has no own-property marker and stays progressive.
+      const auditMarker = window.top === window
+        && Object.prototype.hasOwnProperty.call(window, '__AUDIT_SCOPE__');
+      if (auditMarker) {
+        if (Array.isArray(window.__AUDIT_SCOPE__)) {
+          window.__AUDIT_SCOPE__.forEach((n) => {
+            if (Number.isInteger(n) && n >= 1 && n <= frames.length) {
+              hydrateLazyFrame(frames[n - 1]);
+            }
+          });
+        } else {
+          hydrateLazyWindow(deck, frames, currentIdx(frames), true);
+        }
+      }
+    }
     // Audit-only startup scope. run-audits.py injects __AUDIT_SCOPE__ BEFORE
     // this runtime executes; normal decks never define it and keep the exact
     // all-frame initialization path. During a scoped audit, limit the expensive
@@ -682,6 +776,13 @@
     document.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTypingTarget(e.target)) return;
+      // Browser edit mode (E) requires the complete deck DOM. The edit-mode
+      // listener is registered after this runtime, so synchronous expansion
+      // finishes before it enumerates slides/thumbnails.
+      if ((e.key === 'e' || e.key === 'E') && deck.hasAttribute('data-lazy-frames')) {
+        hydrateLazyWindow(deck, frames, currentIdx(frames), true);
+        frames.forEach(scaleFrame);
+      }
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault(); toggleFullscreen(); nudgeIdle(); return;
       }
@@ -812,8 +913,8 @@
       }
       // data-slide-key / id live on the inner .slide, not on .slide-frame
       const idx = frames.findIndex(f => {
-        const slide = f.querySelector('.slide');
-        return slide && (slide.dataset.slideKey === raw || slide.id === raw);
+        const slide = frameSlide(f);
+        return frameSlideKey(f) === raw || (slide && slide.id === raw);
       });
       if (idx >= 0) {
         goTo(deck, frames, idx, false);
@@ -965,7 +1066,10 @@
         if (!storedMode && !queryMode) {
           const want = window.matchMedia('(max-width: ' + MOBILE_BREAKPOINT + 'px)').matches
                          ? 'scroll' : 'present';
-          if (deck.dataset.mode !== want) setMode(deck, want);
+          if (deck.dataset.mode !== want) {
+            if (want === 'scroll') hydrateLazyWindow(deck, frames, currentIdx(frames), true);
+            setMode(deck, want);
+          }
         }
         frames.forEach(scaleFrame);
         updateUI(deck, frames);
@@ -992,7 +1096,10 @@
         clearTimeout(idleTimer);
       },
       goTo: (i) => goTo(deck, frames, i),
-      setMode: (m) => setMode(deck, m),
+      setMode: (m) => {
+        if (m === 'scroll') hydrateLazyWindow(deck, frames, currentIdx(frames), true);
+        setMode(deck, m);
+      },
     };
   }
 
@@ -1039,8 +1146,9 @@
   // present-mode navigation (→ / ← / space / wheel / swipe / prev-next) skips
   // over it, and the page indicator counts only visible slides.
   function isHidden(f) {
-    const s = f.querySelector('.slide');
-    return !!(s && s.hasAttribute('data-hidden'));
+    const s = frameSlide(f);
+    return !!((s && s.hasAttribute('data-hidden'))
+      || (f && f.hasAttribute('data-slide-hidden')));
   }
   function stepNext(frames, cur) {            // next visible after cur (else stay)
     for (let i = cur + 1; i < frames.length; i++) if (!isHidden(frames[i])) return i;
@@ -1235,6 +1343,9 @@
 
   function goTo(deck, frames, idx, updateHash) {
     if (idx < 0 || idx >= frames.length) return;
+    // Mount before toggling is-current so scaling, media, transitions and
+    // presenter previews observe the exact same DOM as an eager deck.
+    hydrateLazyWindow(deck, frames, idx, false);
     // Capture armed state BEFORE the arming block below: Magic Move must NOT
     // fire on the very first paint (same intent as the fs-reveal suppression).
     const wasArmed = deck.hasAttribute('data-nav-armed');

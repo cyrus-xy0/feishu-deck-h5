@@ -218,13 +218,6 @@ workers hand back fragments; the controller remains the sole `deck.json` writer.
   default layouts when no pack is selected.
 - Final delivery must be portable/self-contained; do not hand off a fragile
   repo-linked HTML file.
-- For `deck-open` / repo-linked local preview, serve from the repository root
-  (the directory containing both `runs/` and `skills/`), never from the run
-  directory. Open `http://127.0.0.1:<port>/runs/<run>/index.html`; verify the
-  page plus its shared `skills/feishu-deck-h5/assets/*.css` and `*.js` requests
-  return HTTP 200. A text-only page means those shared resources are 404 because
-  the server root is wrong; restart the server from the repository root instead
-  of editing or rerendering the deck.
 - Local deck runtime assets must use portable relative references. `http(s)://`,
   protocol-relative, `file://`, OS-absolute, and custom-scheme static asset refs
   are a hard `R-LOCAL-ASSET-REF` validation error; materialize them under

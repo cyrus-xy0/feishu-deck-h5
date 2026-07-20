@@ -15,11 +15,14 @@
 """
 import argparse
 import hashlib
+import html as html_lib
 import json
 import os
 import re
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 HERE = Path(__file__).resolve().parent
 AUDITS_JS = HERE / "audits.js"
@@ -267,6 +270,7 @@ BYTE_RULE_META = {
     "R-PROVENANCE":     {"coverage": "conditional", "signal": "bytes"},  # runs/ + sibling deck.json only — render-deck stamp present + deck.json hash matches (F-266)
     "R-DOM":            {"coverage": "universal", "signal": "bytes"},   # over-close byte half (under-close/struct DOM half in audits.js)
     "R-SELF-CONTAINED": {"coverage": "universal", "signal": "bytes"},
+    "R-LOCAL-ASSET-REF": {"coverage": "universal", "signal": "bytes"},
     "R-KEY":            {"coverage": "universal", "signal": "bytes"},   # no-browser path (DOM half in audits.js)
     "R-ESC-HTML":       {"coverage": "universal", "signal": "bytes"},
     "R02":              {"coverage": "universal", "signal": "bytes"},
@@ -427,6 +431,189 @@ def audit_self_contained_bytes(html):
                 "(a head/page <style> silently vanishes on re-render and is left "
                 "behind on lift). See SKILL.md \"LIFTING A SLIDE FROM ANOTHER DECK\" / "
                 "LIFT-ARCHITECTURE-2026-05-30.md. [advisory · non-blocking until L7]",
+        })
+    return findings
+
+
+# R-LOCAL-ASSET-REF source tools. This rule intentionally lives in the runner:
+# the raw attribute/CSS bytes are the authored contract, while a browser resolves
+# relative refs into file:// URLs and may already start a slow remote request
+# before a DOM audit can explain the cold-start hang.
+_LOCAL_ASSET_URL_RE = re.compile(
+    r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)]*))\s*\)", re.I)
+_LOCAL_ASSET_IMPORT_RE = re.compile(
+    r"@import\s+(?:url\(\s*)?(?:['\"]([^'\"]+)['\"]|([^\s;)]+))", re.I)
+_LOCAL_ASSET_WINDOWS_RE = re.compile(r"^[A-Za-z]:[/\\]")
+_LOCAL_ASSET_ATTRS = {
+    "src", "poster", "background", "data-src", "data-original", "data-full",
+    "xlink:href",
+}
+_LOCAL_ASSET_HREF_TAGS = {"link", "image", "use"}
+
+
+def _clean_local_asset_ref(value):
+    return html_lib.unescape(str(value or "").strip().strip("\"'"))
+
+
+def _css_local_asset_refs(text):
+    refs = [
+        _clean_local_asset_ref(single or double or bare)
+        for single, double, bare in _LOCAL_ASSET_URL_RE.findall(text or "")
+    ]
+    refs.extend(
+        _clean_local_asset_ref(quoted or bare)
+        for quoted, bare in _LOCAL_ASSET_IMPORT_RE.findall(text or "")
+    )
+    return refs
+
+
+class _LocalAssetRefParser(HTMLParser):
+    """Collect runtime-loading refs, deliberately excluding ordinary <a href>."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.references = []
+        self.stylesheets = []
+        self._style_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        self._record(tag, attrs)
+        if str(tag or "").lower() == "style":
+            self._style_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        self._record(tag, attrs)
+
+    def handle_endtag(self, tag):
+        if str(tag or "").lower() == "style" and self._style_depth:
+            self._style_depth -= 1
+
+    def handle_data(self, data):
+        if self._style_depth:
+            self.references.extend((ref, "inline <style>")
+                                   for ref in _css_local_asset_refs(data))
+
+    def _record(self, tag, attrs):
+        lowered = str(tag or "").lower().split("}")[-1]
+        values = {str(k or "").lower(): str(v or "") for k, v in attrs}
+        for attr in _LOCAL_ASSET_ATTRS:
+            value = values.get(attr)
+            if value:
+                self.references.append((_clean_local_asset_ref(value),
+                                        f"<{lowered} {attr}>"))
+        href = values.get("href")
+        if href and lowered in _LOCAL_ASSET_HREF_TAGS:
+            clean = _clean_local_asset_ref(href)
+            self.references.append((clean, f"<{lowered} href>"))
+            if lowered == "link" and "stylesheet" in values.get("rel", "").lower():
+                self.stylesheets.append(clean)
+        if lowered == "object" and values.get("data"):
+            self.references.append((_clean_local_asset_ref(values["data"]),
+                                    "<object data>"))
+        if values.get("srcset"):
+            for item in values["srcset"].split(","):
+                ref = _clean_local_asset_ref(item.strip().split()[0] if item.strip() else "")
+                if ref:
+                    self.references.append((ref, f"<{lowered} srcset>"))
+        if values.get("style"):
+            self.references.extend((ref, f"<{lowered} style>")
+                                   for ref in _css_local_asset_refs(values["style"]))
+
+
+def _local_asset_ref_problem(reference):
+    """Return remote/absolute reason, or None for portable relative/embedded refs."""
+    ref = _clean_local_asset_ref(reference)
+    if not ref or ref.startswith(("#", "data:", "blob:")):
+        return None
+    if ref.startswith("//"):
+        return "remote protocol-relative URL"
+    if _LOCAL_ASSET_WINDOWS_RE.match(ref):
+        return "Windows absolute path"
+    parsed = urlparse(ref)
+    scheme = parsed.scheme.lower()
+    if scheme in {"http", "https"}:
+        return "remote URL"
+    if scheme in {"file", "vscode", "x-apple-ql-id"}:
+        return f"local {scheme}:// URL"
+    if scheme:
+        return f"absolute/custom scheme {scheme}:"
+    path_text = unquote(parsed.path or ref)
+    if path_text.startswith(("/", "\\")):
+        return "absolute filesystem/root path"
+    return None
+
+
+def audit_local_asset_refs_bytes(html, base_dir):
+    """R-LOCAL-ASSET-REF(error)— local decks load assets through relative refs.
+
+    Checks HTML runtime-loading attributes, inline CSS, and recursively linked
+    local stylesheets. Ordinary navigation anchors are not assets and stay legal.
+    Remote iframe src keeps its existing R-IFRAME-REMOTE policy/explicit opt-out;
+    a file:// or root-absolute iframe is still rejected here.
+    """
+    parser = _LocalAssetRefParser()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except Exception:  # malformed HTML is owned by R-DOC-INTEGRITY / R-DOM
+        pass
+
+    refs = list(parser.references)
+    queue = []
+    base_dir = Path(base_dir)
+    for href in parser.stylesheets:
+        if _local_asset_ref_problem(href):
+            continue
+        clean = href.split("?", 1)[0].split("#", 1)[0]
+        if clean and not urlparse(clean).scheme:
+            queue.append((base_dir / unquote(clean)).resolve())
+
+    seen_css = set()
+    while queue:
+        css_path = queue.pop(0)
+        if css_path in seen_css or not css_path.is_file():
+            continue
+        seen_css.add(css_path)
+        try:
+            css_text = css_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for ref in _css_local_asset_refs(css_text):
+            refs.append((ref, f"stylesheet {css_path.name}"))
+            if _local_asset_ref_problem(ref):
+                continue
+            clean = ref.split("?", 1)[0].split("#", 1)[0]
+            if clean and Path(unquote(clean)).suffix.lower() == ".css":
+                queue.append((css_path.parent / unquote(clean)).resolve())
+
+    findings = []
+    seen = set()
+    for ref, context in refs:
+        problem = _local_asset_ref_problem(ref)
+        if not problem:
+            continue
+        # Remote iframes are intentional live documents, governed separately by
+        # R-IFRAME-REMOTE + data-allow-remote-iframe. Static assets never get that
+        # escape hatch because they can and must be materialized locally.
+        if context == "<iframe src>" and problem in {
+                "remote URL", "remote protocol-relative URL"}:
+            continue
+        fingerprint = (problem, ref)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        findings.append({
+            "rule": "R-LOCAL-ASSET-REF", "severity": "error", "slide_idx": 0,
+            "reference": ref[:240], "context": context, "kind": problem,
+            "message":
+                f"local deck loads a runtime asset through {problem}: "
+                f"{context} -> {ref[:160]}. A file:// deck must not depend on "
+                "remote or machine-absolute asset locations: cold open waits on "
+                "DNS/TLS/disk-specific paths, offline presentation breaks, and the "
+                "generated HTML stops being portable. Materialize the resource "
+                "under assets/ or input/, store that relative path in deck.json, "
+                "then re-render. Ordinary <a href> navigation is not scanned; "
+                "intentional online iframes remain governed by R-IFRAME-REMOTE.",
         })
     return findings
 
@@ -1046,7 +1233,8 @@ def audit_provenance_bytes(html, base_dir):
 def runner_source_byte_findings(html, base_dir):
     """跑【两条路径都要】的 runner 层源字节/文件系统检查,合并成统一 findings(同 schema)。
     与 audits.js 规则同列表、同字段 → 报告层无需区分来源。顺序:R-DOC-INTEGRITY →
-    R-BAKED-DOM → R-DOM(div over-close balance)→ R-SELF-CONTAINED → R-PROVENANCE →
+    R-BAKED-DOM → R-DOM(div over-close balance)→ R-SELF-CONTAINED →
+    R-LOCAL-ASSET-REF → R-PROVENANCE →
     perf(纯 cosmetic)。R-PROVENANCE(F-266)是【条件】byte 规则:只在 index.html 在
     runs/ 下且同目录有 deck.json 时才查(其余豁免),验 render-deck 盖的出身章 + deck.json
     哈希;它在两条路径都跑,补 CC hook 在非 CC 环境的缺位(模型无关的 Gate-1 强制)。
@@ -1067,6 +1255,7 @@ def runner_source_byte_findings(html, base_dir):
     out.extend(audit_baked_runtime_dom_bytes(html))   # R-BAKED-DOM:烤死的活 DOM(两路径都跑)
     out.extend(audit_dom_balance_bytes(html))   # R-DOM invariant-3:over-close(两路径都跑)
     out.extend(audit_self_contained_bytes(html))
+    out.extend(audit_local_asset_refs_bytes(html, base_dir))
     out.extend(audit_provenance_bytes(html, base_dir))  # R-PROVENANCE:Gate-1 盖章(F-266,两路径都跑;runs/+sibling deck.json 才查)
     out.extend(audit_perf_bytes(_inline_linked_text(html, base_dir)))
     return out

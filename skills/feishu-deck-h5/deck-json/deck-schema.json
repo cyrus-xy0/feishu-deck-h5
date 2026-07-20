@@ -137,6 +137,11 @@
           "default": false,
           "description": "OPT-IN · Hide the thin top present-mode reading-progress keyline (.deck-progress, a 3px brand-gradient bar) deck-wide, WITHOUT needing the per-URL #clean / #kiosk hash (those also hide the bottom controls + nav hints). Renderer emits data-hide-progress on the deck root; CSS hides only the progress bar (controls/hints stay). Use for formal client/exec decks where that top gradient line reads as an unwanted top border. Default false."
         },
+        "lazy_frames": {
+          "type": "boolean",
+          "default": false,
+          "description": "OPT-IN · Progressive slide-body mounting for large decks. The renderer keeps page 1 eager for the pre-JS fallback and parks pages 2..N in inert <template data-fs-lazy-slide> payloads. In present mode the runtime mounts the requested page plus its adjacent/visible neighbors, then mounts later pages on demand; scroll mode and browser edit mode mount every page. This delays non-current images, iframes, per-slide CSS and layout work without changing navigation or the DeckJSON source. Default false so existing deck markup and runtime behavior stay byte-for-byte unchanged."
+        },
         "motion_engine": {
           "enum": ["css", "gsap"],
           "default": "css",

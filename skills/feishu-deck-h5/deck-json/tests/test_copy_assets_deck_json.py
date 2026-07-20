@@ -114,6 +114,32 @@ class CopyAssetsDeckJsonTest(unittest.TestCase):
         self.assertNotIn("missing-from-text", manifest)
         self.assertNotIn("</", manifest)
 
+    def test_deck_local_asset_with_spaces_is_kept_and_not_framework(self):
+        asset = self.output / "assets" / "imported-root" / "assets" / "clientlogo" / "DAZZLE FASHION.png"
+        asset.parent.mkdir(parents=True)
+        asset.write_bytes(b"logo")
+        index = self.output / "index.html"
+        index.write_text(
+            "<!doctype html><html><body>"
+            '<div style="background-image:url(\'./assets/imported-root/assets/clientlogo/DAZZLE FASHION.png\')"></div>'
+            "</body></html>",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [sys.executable, str(COPY_ASSETS), str(self.output), "--shared=copy"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(asset.is_file())
+        manifest = (self.output / "assets-manifest.yaml").read_text(encoding="utf-8")
+        entry = "  - assets/imported-root/assets/clientlogo/DAZZLE FASHION.png"
+        self.assertIn(entry, manifest)
+        self.assertLess(manifest.index("deck-local:"), manifest.index(entry))
+        self.assertNotIn("framework:\n" + entry, manifest)
+
 
     def _run_prune_case(self, bg_attr: str, kept: str):
         """Build output/ with input/<kept> referenced ONLY via `bg_attr` and an

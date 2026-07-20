@@ -29,14 +29,36 @@ from pathlib import Path
 from typing import Any
 
 
-REPO = Path(__file__).resolve().parents[2]
+SKILL_ROOT = Path(__file__).resolve().parents[2]
+
+
+def find_project_root(skill_root: Path) -> Path:
+    """Return the checkout root when running from a source checkout."""
+    resolved_skill = skill_root.resolve()
+    for parent in (resolved_skill, *resolved_skill.parents):
+        try:
+            if (
+                (parent / "skills" / "feishu-deck-h5").resolve() == resolved_skill
+                and (parent / "runs").is_dir()
+            ):
+                return parent
+        except OSError:
+            continue
+    return resolved_skill
+
+
+REPO = find_project_root(SKILL_ROOT)
 RUNS = REPO / "runs"
-DEFAULT_SLIDE_LIBRARY_ROOT = REPO.parents[1] / "tmp/feishu-slide-library"
-LEGACY_SLIDE_LIBRARY_ROOT = REPO / "tmp/feishu-slide-library"
+if REPO == SKILL_ROOT:
+    DEFAULT_SLIDE_LIBRARY_ROOT = SKILL_ROOT.parents[1] / "tmp/feishu-slide-library"
+    LEGACY_SLIDE_LIBRARY_ROOT = SKILL_ROOT / "tmp/feishu-slide-library"
+else:
+    DEFAULT_SLIDE_LIBRARY_ROOT = REPO / "tmp/feishu-slide-library"
+    LEGACY_SLIDE_LIBRARY_ROOT = SKILL_ROOT / "tmp/feishu-slide-library"
 SLIDE_LIBRARY_REPO = "https://github.com/FuQiang/feishu-slide-library.git"
-CHECK_ONLY = REPO / "assets/check-only.py"
-COPY_ASSETS = REPO / "assets/copy-assets.py"
-PACKAGE_INGEST = REPO / "assets/package-ingest.sh"
+CHECK_ONLY = SKILL_ROOT / "assets/check-only.py"
+COPY_ASSETS = SKILL_ROOT / "assets/copy-assets.py"
+PACKAGE_INGEST = SKILL_ROOT / "assets/package-ingest.sh"
 UNREWRITTEN_FRAMEWORK_REFS = (
     'href="assets/feishu-deck.css"',
     "href='assets/feishu-deck.css'",
@@ -54,7 +76,7 @@ UNREWRITTEN_FRAMEWORK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-sys.path.insert(0, str(REPO / "server"))
+sys.path.insert(0, str(SKILL_ROOT / "server"))
 import slide_library  # noqa: E402
 
 
@@ -286,7 +308,7 @@ def child_env(library_root: Path | None = None) -> dict[str, str]:
     python_bin = str(Path(sys.executable).resolve().parent)
     current_path = env.get("PATH", "")
     env["PATH"] = python_bin + (os.pathsep + current_path if current_path else "")
-    env.setdefault("FEISHU_DECK_H5_SKILL_DIR", str(REPO))
+    env.setdefault("FEISHU_DECK_H5_SKILL_DIR", str(SKILL_ROOT))
     if library_root:
         env.setdefault("FEISHU_SLIDE_LIBRARY_ROOT", str(library_root))
     return env
