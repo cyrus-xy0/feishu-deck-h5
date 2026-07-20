@@ -103,6 +103,20 @@
       "chromium_launch": true,
       "siblings": []
     },
+    "miaoda-publish": {
+      "extends": "core",
+      "files": [
+        "subskills/miaoda-publisher/SKILL.md",
+        "subskills/miaoda-publisher/publish.py",
+        "assets/copy-assets.py",
+        "assets/verify-portable.py",
+        "assets/shoot-page.py"
+      ],
+      "commands": ["lark-cli"],
+      "python_modules": [],
+      "chromium_launch": false,
+      "siblings": []
+    },
     "import": {
       "extends": "core",
       "files": ["subskills/importer/SKILL.md", "subskills/importer/ingest.py"],

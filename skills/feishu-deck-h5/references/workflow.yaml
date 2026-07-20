@@ -86,6 +86,13 @@
       "gate": "PRESENTATION_CHECKPOINT",
       "references": []
     },
+    "MIAODA_PUBLISH": {
+      "family": "DELIVERY",
+      "owner": "subskills/miaoda-publisher/SKILL.md",
+      "trigger": "Publish a confirmed HTML artifact to an independent Miaoda HTML app and refresh the shared Miaoda navigation app",
+      "gate": "MIAODA_PUBLISH",
+      "references": []
+    },
     "PUBLISH": {
       "family": "DELIVERY",
       "owner": "subskills/publisher/SKILL.md",

@@ -4,8 +4,8 @@ description: |
   总控 skill for Feishu / Lark-style HTML decks. Use for 飞书风格 PPT, Lark deck,
   汇报材料,客户提案,H5/16:9 网页演示,HTML deck generation/editing/validation,
   source parsing, PPTX Template Design System extraction, Magic Page publishing,
-  slide-library importing, and review, repair, optimization, packaging, or
-  maintenance of this skill repository.
+  independent Miaoda app + catalog publishing, slide-library importing, and
+  review, repair, optimization, packaging, or maintenance of this skill repository.
   Generation is DeckJSON/render-deck first and normally raw-first.
 ---
 
@@ -44,6 +44,9 @@ python3 assets/skill-contract.py route <MODE>
 Important routing guards:
 
 - 妙笔 / Miaobi / Magic Page / MagicBook / html-box → `PUBLISH`, never Miaoda.
+- 妙搭 / Miaoda / Spark HTML app / aiforce.cloud → `MIAODA_PUBLISH`, never
+  Magic Page. Each Deck owns an independent app_id; the navigation app is only
+  an index and never replaces per-Deck access control.
 - 入库 / submit / archive / slide library → `IMPORT`, never Magic publish.
 - Review, repair, performance work, packaging, install, tests, or changes to this
   repository/skill → `MAINTENANCE`.
@@ -74,6 +77,7 @@ Important routing guards:
    - local handoff or presentation checkpoint → whole deck;
    - library ingest → resource-only package/candidate gate; whole-deck visual review is optional unless explicitly requested;
    - Magic Page publish → publisher resource/reference integrity gate;
+   - Miaoda publish → one portable Deck directory per app plus independent ACL and catalog refresh;
    - repository maintenance → targeted tests, then consolidated repository tests.
 5. **Template activation is explicit.** PPTX Template extraction produces a
    partial `draft` pack and review preview. Missing roles are legal but must be
@@ -163,6 +167,8 @@ The authoritative owner for every mode is in `references/workflow.yaml`.
 - Editor: existing-deck edits, reskin, lift/swap, imported HTML recovery.
 - Translator: parity-safe localization.
 - Publisher: confirmed Magic Page artifact only.
+- Miaoda Publisher: confirmed HTML to an independent Deck app, then refresh the
+  separate navigation app.
 - Importer: confirmed slide-library ingest only.
 - Simulator: post-validation rehearsal only.
 - Controller: `PUBLISH_RECOVERY`, `MAINTENANCE`, integration, and final verification.
@@ -233,7 +239,8 @@ Before writes, run the profile matching the requested capability:
 bash assets/preflight.sh --profile generate
 ```
 
-Profiles: `core`, `generate`, `edit`, `pptx`, `template`, `publish`, `import`. Use
+Profiles: `core`, `generate`, `edit`, `pptx`, `template`, `publish`,
+`miaoda-publish`, `import`. Use
 `--json` when a caller needs a machine-readable final status. If preflight prints
 `PREFLIGHT BOOTSTRAPPED`, switch to the printed writable workspace and run the
 same profile once more there. Any non-zero exit blocks the requested capability.

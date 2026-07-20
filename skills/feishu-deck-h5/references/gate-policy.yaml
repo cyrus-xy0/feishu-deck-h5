@@ -30,6 +30,12 @@
       "blocking": true,
       "requires_whole_deck_visual_gate": false
     },
+    "MIAODA_PUBLISH": {
+      "command": "subskills/miaoda-publisher/publish.py <index.html>",
+      "scope": "one independent deck app plus catalog manifest and navigation app refresh",
+      "blocking": true,
+      "requires_whole_deck_visual_gate": false
+    },
     "PUBLISH_RECOVERY": {
       "command": "python3 assets/skill-contract.py validate && python3 -m pytest -q tests/test_magic_page_assets.py tests/test_magic_asset_faas.py tests/test_magic_iframe_faas.py tests/test_magic_page_preflight.py tests/test_publish_preflight_integration.py tests/test_publish_self_check.py",
       "scope": "publisher code touched by the current delivery blocker plus one live or dry-run artifact replay",

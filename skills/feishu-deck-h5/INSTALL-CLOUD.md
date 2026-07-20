@@ -43,6 +43,7 @@ bash assets/preflight.sh --profile edit
 bash assets/preflight.sh --profile pptx
 bash assets/preflight.sh --profile template
 bash assets/preflight.sh --profile publish
+bash assets/preflight.sh --profile miaoda-publish
 bash assets/preflight.sh --profile import
 ```
 
@@ -64,6 +65,8 @@ Profiles are defined in `references/dependency-policy.yaml` and checked by
   same probed Python runtime, and `assets/extract_template.py`; extraction itself
   does not require Chromium.
 - `publish`: publisher, Node uploader, and Chromium self-check.
+- `miaoda-publish`: independent Miaoda HTML apps plus the shared navigation app;
+  requires `lark-cli`.
 - `import`: importer, `gh`, and Chromium quality gate.
 
 A missing capability returns non-zero. PPTX parsing must not report success when

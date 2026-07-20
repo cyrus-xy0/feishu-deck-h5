@@ -30,7 +30,7 @@ def active_docs() -> list[Path]:
 def test_machine_contracts_validate() -> None:
     contract = load_module("skill_contract", ROOT / "assets" / "skill-contract.py")
     result = contract.validate()
-    assert result == {"ok": True, "modes": 15, "formats": 4, "gates": 10, "profiles": 7}
+    assert result == {"ok": True, "modes": 16, "formats": 4, "gates": 11, "profiles": 8}
     packet = contract.route_packet("MAINTENANCE")
     assert "python3 -m pytest" in packet["gate_contract"]["command"]
     assert "unittest" not in packet["gate_contract"]["command"]
@@ -131,11 +131,20 @@ def test_dependency_profiles_are_complete_and_checkable(tmp_path: Path, monkeypa
     checker = load_module("check_profile", ROOT / "assets" / "check-profile.py")
     policy = checker.load_policy()
     assert set(policy["profiles"]) == {
-        "core", "generate", "edit", "pptx", "template", "publish", "import",
+        "core", "generate", "edit", "pptx", "template", "publish",
+        "miaoda-publish", "import",
     }
     core_files = set(checker.merged_profile("core", policy)["files"])
     assert {"deck-json/render-deck.py", "deck-json/deck-cli.py", "deck-json/deck-schema.json"} <= core_files
     assert {"assets/audits.js", "assets/skill-contract.py"} <= core_files
+    miaoda_files = set(checker.merged_profile("miaoda-publish", policy)["files"])
+    assert {
+        "subskills/miaoda-publisher/SKILL.md",
+        "subskills/miaoda-publisher/publish.py",
+        "assets/copy-assets.py",
+        "assets/verify-portable.py",
+        "assets/shoot-page.py",
+    } <= miaoda_files
     assert checker.check("core")["ok"]
     fake_python = tmp_path / "pptx-python"
     fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")

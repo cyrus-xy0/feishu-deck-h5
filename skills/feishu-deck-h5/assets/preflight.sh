@@ -2,7 +2,7 @@
 # feishu-deck-h5 · preflight check
 # Verifies a local mount is present and writable before any skill action.
 #
-# Usage: bash assets/preflight.sh [--profile core|generate|edit|pptx|publish|import|template] [--json]
+# Usage: bash assets/preflight.sh [--profile core|generate|edit|pptx|publish|miaoda-publish|import|template] [--json]
 #
 # Exit codes:
 #   0  OK — running from a writable mount OR successfully bootstrapped a
@@ -46,7 +46,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --json) JSON_OUTPUT=1 ;;
     -h|--help)
-      echo "usage: preflight.sh [--profile core|generate|edit|pptx|publish|import|template] [--json]"
+      echo "usage: preflight.sh [--profile core|generate|edit|pptx|publish|miaoda-publish|import|template] [--json]"
       exit 0
       ;;
     *) echo "PREFLIGHT FAIL · exit 64 · unknown option: $1"; exit 64 ;;
@@ -54,7 +54,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 case "$PROFILE" in
-  core|generate|edit|pptx|publish|import|template) ;;
+  core|generate|edit|pptx|publish|miaoda-publish|import|template) ;;
   *) echo "PREFLIGHT FAIL · exit 64 · unknown profile: $PROFILE"; exit 64 ;;
 esac
 

@@ -27,12 +27,14 @@ auto-snapshot handles live iframes itself.) Never hand-roll a
 Usage
 -----
     python3 assets/shoot-page.py <index.html> <page> [--out PATH]
-        [--allow-external] [--wait MS] [--cap S] [--scale {1,2}]
+        [--allow-external] [--hide-ui] [--wait MS] [--cap S] [--scale {1,2}]
 
     page               1-based page number (= URL #N = frame_index)
-    --out PATH         output PNG (default /tmp/shoot-p<N>.png)
+    --out PATH         output image; PNG/JPEG inferred from extension
+                       (default /tmp/shoot-p<N>.png)
     --allow-external   let http(s) through — for shooting the live embed
                        itself; expect slow + non-deterministic pixels
+    --hide-ui          hide deck navigation chrome for clean cover thumbnails
     --wait MS          floor settle wait after navigation (default 2500); an
                        adaptive animation-settle waits for fs-reveal to finish on
                        top, so entrance staggers aren't captured mid-flight.
@@ -65,6 +67,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--allow-external", action="store_true",
                     help="do NOT block http(s) — slow, non-deterministic")
+    ap.add_argument("--hide-ui", action="store_true",
+                    help="hide deck navigation chrome for clean cover thumbnails")
     ap.add_argument("--wait", type=int, default=2500,
                     help="floor settle wait in ms after navigation (default 2500; "
                          "an adaptive animation-settle runs on top — raise to "
@@ -133,6 +137,8 @@ def main(argv=None) -> int:
                     pg.route(re.compile(r"^https?://"), lambda r: r.abort())
                 pg.goto(f"file://{html}#{n}", wait_until="domcontentloaded",
                         timeout=15000)
+                if args.hide_ui:
+                    pg.add_style_tag(content=".deck-ui{display:none!important}")
                 pg.wait_for_timeout(args.wait)
                 # Adaptive entrance-settle: wait until no CSS animation is still
                 # running so fs-reveal staggers aren't captured mid-flight.
