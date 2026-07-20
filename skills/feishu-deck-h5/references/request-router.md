@@ -29,6 +29,7 @@ changes, update the manifest first and run `python3 assets/skill-contract.py val
 | `RESKIN` | Apply Feishu chrome to foreign HTML while preserving its design | `subskills/editor/SKILL.md` | `INTERMEDIATE_EDIT` |
 | `LIFT+SWAP` | Reuse pages or layout from another deck and swap content | `subskills/editor/SKILL.md` | `INTERMEDIATE_EDIT` |
 | `TRANSLATE` | Translate or localize an existing deck | `subskills/translator/SKILL.md` | `INTERMEDIATE_EDIT` |
+| `RUNTIME_UPGRADE` | Explicitly upgrade an existing source-backed deck to the current trusted runtime | `subskills/runtime-upgrader/SKILL.md` | `RUNTIME_UPGRADE` |
 | `PARSE` | Normalize source files and extract structured material | `subskills/parser/SKILL.md` | `SOURCE_PARSE` |
 | `TEMPLATE_EXTRACT` | Extract a supplied PPTX into a reviewable, reusable Template Pack | `subskills/template/SKILL.md` | `TEMPLATE_PACK` |
 | `IMPORT` | Quality-gate and ingest a confirmed deck into the slide library | `subskills/importer/SKILL.md` | `LIBRARY_INGEST` |
@@ -326,6 +327,27 @@ Edit copy / layout of an existing deck inside its own run directory; `deck.json`
 open a new run. A beyond-default design on an edited page still passes the design
 gate, but the work is an edit of the existing artifact. `RESKIN`, `LIFT+SWAP`, and
 `EDIT_IMPORTED_HTML` are the specialized EDIT-family modes documented above.
+
+### RUNTIME_UPGRADE
+
+Trigger only when the user explicitly asks to upgrade an existing Deck's runtime
+to the current/latest controlled runtime. Publishing, republishing, uploading, or
+asking whether a Deck is fast does not imply this mode: `PUBLISH` and
+`MIAODA_PUBLISH` preserve the confirmed artifact's runtime.
+
+The source must have a valid `deck.json`; never replace runtime files in an
+HTML-only artifact. Run exactly:
+
+```bash
+python3 subskills/runtime-upgrader/upgrade.py --deck-json <deck.json> --to current
+```
+
+`current` resolves once to a fixed trusted commit. The upgrader automatically
+applies every migration required by that runtime, renders and gates a whole-deck
+candidate in a new run, and leaves the source run unchanged; performance
+migrations are not a separate switch. It never pulls code or publishes. `READY`
+means the candidate passed the `RUNTIME_UPGRADE` gate; it does not mean
+`PUBLISHED`.
 
 ### TRANSLATE / PARSE / IMPORT / SIMULATE / MIAODA_PUBLISH / PUBLISH / PUBLISH_RECOVERY / MAINTENANCE
 

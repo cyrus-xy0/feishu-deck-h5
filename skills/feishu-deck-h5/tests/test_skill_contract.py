@@ -30,7 +30,7 @@ def active_docs() -> list[Path]:
 def test_machine_contracts_validate() -> None:
     contract = load_module("skill_contract", ROOT / "assets" / "skill-contract.py")
     result = contract.validate()
-    assert result == {"ok": True, "modes": 16, "formats": 4, "gates": 11, "profiles": 8}
+    assert result == {"ok": True, "modes": 17, "formats": 4, "gates": 12, "profiles": 9}
     packet = contract.route_packet("MAINTENANCE")
     assert "python3 -m pytest" in packet["gate_contract"]["command"]
     assert "unittest" not in packet["gate_contract"]["command"]
@@ -38,6 +38,14 @@ def test_machine_contracts_validate() -> None:
     assert recovery["gate_contract"]["requires_repository_release_gate"] is False
     assert "tests/test_publish_self_check.py" in recovery["gate_contract"]["command"]
     assert "deck-json/tests" not in recovery["gate_contract"]["command"]
+    upgrade = contract.route_packet("RUNTIME_UPGRADE")
+    assert upgrade["family"] == "MIGRATION"
+    assert upgrade["owner"] == "subskills/runtime-upgrader/SKILL.md"
+    assert upgrade["gate"] == "RUNTIME_UPGRADE"
+    assert upgrade["gate_contract"]["blocking"] is True
+    assert upgrade["gate_contract"]["scope"] == "source-backed whole-deck candidate in a new run"
+    assert upgrade["gate_contract"]["artifact_state_on_pass"] == "READY"
+    assert upgrade["gate_contract"]["ready_is_published"] is False
 
 
 def test_execution_policy_closes_passed_authoring_and_bounds_delivery() -> None:
@@ -131,8 +139,8 @@ def test_dependency_profiles_are_complete_and_checkable(tmp_path: Path, monkeypa
     checker = load_module("check_profile", ROOT / "assets" / "check-profile.py")
     policy = checker.load_policy()
     assert set(policy["profiles"]) == {
-        "core", "generate", "edit", "pptx", "template", "publish",
-        "miaoda-publish", "import",
+        "core", "generate", "edit", "runtime-upgrade", "pptx", "template",
+        "publish", "miaoda-publish", "import",
     }
     core_files = set(checker.merged_profile("core", policy)["files"])
     assert {"deck-json/render-deck.py", "deck-json/deck-cli.py", "deck-json/deck-schema.json"} <= core_files
@@ -145,6 +153,19 @@ def test_dependency_profiles_are_complete_and_checkable(tmp_path: Path, monkeypa
         "assets/verify-portable.py",
         "assets/shoot-page.py",
     } <= miaoda_files
+    upgrade_files = set(checker.merged_profile("runtime-upgrade", policy)["files"])
+    assert {
+        "subskills/runtime-upgrader/SKILL.md",
+        "subskills/runtime-upgrader/upgrade.py",
+        "runtime/runtime-migrations.json",
+        "runtime/runtime-files.json",
+        "assets/runtime-lock.py",
+        "assets/copy-assets.py",
+        "assets/verify-portable.py",
+        "deck-json/deck-cli.py",
+        "deck-json/sync-index-to-deck.py",
+        "deck-json/render-deck.py",
+    } <= upgrade_files
     assert checker.check("core")["ok"]
     fake_python = tmp_path / "pptx-python"
     fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -203,6 +224,34 @@ def test_cloud_install_matches_runtime_contract() -> None:
     assert "visual-audit.js" not in text
     assert "dependency-policy.yaml" in text
     assert "--profile pptx" in text
+    assert "--profile runtime-upgrade" in text
+
+
+def test_runtime_upgrade_is_explicit_and_publish_never_upgrades() -> None:
+    workflow = json.loads(
+        (ROOT / "references" / "workflow.yaml").read_text(encoding="utf-8")
+    )
+    router = (ROOT / "references" / "request-router.md").read_text(encoding="utf-8")
+    controller = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+    upgrade = workflow["modes"]["RUNTIME_UPGRADE"]
+    assert upgrade["family"] == "MIGRATION"
+    assert upgrade["owner"] == "subskills/runtime-upgrader/SKILL.md"
+    assert "Explicitly upgrade" in upgrade["trigger"]
+    for mode in ("PUBLISH", "MIAODA_PUBLISH"):
+        spec = workflow["modes"][mode]
+        assert "runtime-upgrader" not in json.dumps(spec)
+        assert "upgrade" not in spec["trigger"].lower()
+
+    command = (
+        "python3 subskills/runtime-upgrader/upgrade.py "
+        "--deck-json <deck.json> --to current"
+    )
+    assert command in router
+    normalized_router = " ".join(router.split())
+    assert "does not mean `PUBLISHED`" in normalized_router
+    assert "migrations are not a separate switch" in router
+    assert "never upgrade its runtime implicitly" in controller
 
 
 def test_common_raw_edit_context_budget() -> None:

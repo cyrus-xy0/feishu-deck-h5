@@ -24,6 +24,14 @@
       "scope": "whole deck",
       "blocking": true
     },
+    "RUNTIME_UPGRADE": {
+      "command": "python3 subskills/runtime-upgrader/upgrade.py --deck-json <deck.json> --to current",
+      "scope": "source-backed whole-deck candidate in a new run",
+      "blocking": true,
+      "requires_whole_deck_visual_gate": true,
+      "artifact_state_on_pass": "READY",
+      "ready_is_published": false
+    },
     "MAGIC_PUBLISH": {
       "command": "subskills/publisher/publish.py <index.html>",
       "scope": "publish artifact resources and references",

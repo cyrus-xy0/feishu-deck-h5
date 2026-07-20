@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "migrations": [
+    {
+      "id": "lazy-frames-v1",
+      "required": true,
+      "operation": "deck-json-set",
+      "path": "deck.lazy_frames",
+      "value": true,
+      "when": {
+        "min_active_slides": 2
+      }
+    }
+  ]
+}

@@ -58,6 +58,13 @@
       "gate": "INTERMEDIATE_EDIT",
       "references": ["references/translation.md"]
     },
+    "RUNTIME_UPGRADE": {
+      "family": "MIGRATION",
+      "owner": "subskills/runtime-upgrader/SKILL.md",
+      "trigger": "Explicitly upgrade an existing source-backed deck to the current trusted runtime",
+      "gate": "RUNTIME_UPGRADE",
+      "references": ["references/dependency-policy.yaml"]
+    },
     "PARSE": {
       "family": "INGEST_SOURCE",
       "owner": "subskills/parser/SKILL.md",

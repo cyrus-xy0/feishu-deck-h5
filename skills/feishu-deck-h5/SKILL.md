@@ -5,7 +5,8 @@ description: |
   汇报材料,客户提案,H5/16:9 网页演示,HTML deck generation/editing/validation,
   source parsing, PPTX Template Design System extraction, Magic Page publishing,
   independent Miaoda app + catalog publishing, slide-library importing, and
-  review, repair, optimization, packaging, or maintenance of this skill repository.
+  runtime migration, review, repair, optimization, packaging, or maintenance of
+  this skill repository.
   Generation is DeckJSON/render-deck first and normally raw-first.
 ---
 
@@ -47,9 +48,12 @@ Important routing guards:
 - 妙搭 / Miaoda / Spark HTML app / aiforce.cloud → `MIAODA_PUBLISH`, never
   Magic Page. Each Deck owns an independent app_id; the navigation app is only
   an index and never replaces per-Deck access control.
+- Only an explicit request to upgrade an existing Deck's runtime routes to
+  `RUNTIME_UPGRADE`. `PUBLISH` and `MIAODA_PUBLISH` preserve the confirmed
+  artifact and never upgrade its runtime implicitly.
 - 入库 / submit / archive / slide library → `IMPORT`, never Magic publish.
-- Review, repair, performance work, packaging, install, tests, or changes to this
-  repository/skill → `MAINTENANCE`.
+- Repository review, repair, performance work, packaging, install, tests, or
+  changes to this repository/skill → `MAINTENANCE`.
 - A publisher/runtime defect discovered while delivering one already-confirmed
   Magic artifact → `PUBLISH_RECOVERY` first. It may run only publisher-focused
   tests plus one artifact replay; the repository-wide release gate remains a
@@ -75,6 +79,8 @@ Important routing guards:
    `references/gate-policy.yaml`:
    - intermediate edit → scoped render/audit/screenshot;
    - local handoff or presentation checkpoint → whole deck;
+   - runtime upgrade → source-backed whole-deck candidate in a new run; `READY`
+     is not `PUBLISHED`;
    - library ingest → resource-only package/candidate gate; whole-deck visual review is optional unless explicitly requested;
    - Magic Page publish → publisher resource/reference integrity gate;
    - Miaoda publish → one portable Deck directory per app plus independent ACL and catalog refresh;
@@ -166,6 +172,9 @@ The authoritative owner for every mode is in `references/workflow.yaml`.
 - Validator: scoped or delivery validation.
 - Editor: existing-deck edits, reskin, lift/swap, imported HTML recovery.
 - Translator: parity-safe localization.
+- Runtime Upgrader: source-backed migration to one fixed trusted runtime
+  revision, including every migration required by that runtime; performance
+  migrations are not a separate toggle.
 - Publisher: confirmed Magic Page artifact only.
 - Miaoda Publisher: confirmed HTML to an independent Deck app, then refresh the
   separate navigation app.
@@ -176,7 +185,8 @@ The authoritative owner for every mode is in `references/workflow.yaml`.
 For a new/re-authored deck: Parser when sources exist → Designer → Renderer →
 Validator at the appropriate checkpoint. Pure import follows the conversion
 manifest and skips Designer. Existing decks route directly to the owning edit,
-translation, validation, publish, import, or simulation subskill.
+translation, validation, explicit runtime upgrade, publish, import, or simulation
+subskill.
 
 For a reusable PPTX template: Parser → Template → `TEMPLATE_PACK` gate → user
 review/approval. Generation uses the pack only after approval; extraction and
@@ -205,6 +215,10 @@ workers hand back fragments; the controller remains the sole `deck.json` writer.
 ## 7. Shared artifact contracts
 
 - Runs live under `runs/<timestamp>-<slug>/`; announce the absolute path once.
+- Runtime upgrade is source-backed only: require a valid `deck.json`, resolve
+  `current` once to a fixed trusted commit, apply its required migrations, and
+  write a new run. Never mutate the source run, pull code, or publish; `READY`
+  means only that the whole-deck candidate passed its gate.
 - Inputs live in `input/`; parser output in `input/runtime-library/`; design and
   render outputs in `output/`.
 - `deck.json` is source of truth; `index.html`, `slide-index.json`, notes,
@@ -239,8 +253,8 @@ Before writes, run the profile matching the requested capability:
 bash assets/preflight.sh --profile generate
 ```
 
-Profiles: `core`, `generate`, `edit`, `pptx`, `template`, `publish`,
-`miaoda-publish`, `import`. Use
+Profiles: `core`, `generate`, `edit`, `runtime-upgrade`, `pptx`, `template`,
+`publish`, `miaoda-publish`, `import`. Use
 `--json` when a caller needs a machine-readable final status. If preflight prints
 `PREFLIGHT BOOTSTRAPPED`, switch to the printed writable workspace and run the
 same profile once more there. Any non-zero exit blocks the requested capability.

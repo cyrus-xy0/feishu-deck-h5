@@ -12,9 +12,9 @@ All profiles require:
 - Python 3.10 or newer
 - a writable persistent directory, or a writable bootstrap destination
 
-Generation, editing, PPTX conversion, publishing, and library import also require
-Playwright plus a working Chromium launch. Installing only the Python package is
-not sufficient:
+Generation, editing, runtime upgrade, PPTX conversion, publishing, and library
+import also require Playwright plus a working Chromium launch. Installing only
+the Python package is not sufficient:
 
 ```bash
 python3 -m pip install playwright
@@ -40,6 +40,7 @@ Run preflight with the profile you intend to use:
 bash assets/preflight.sh --profile core
 bash assets/preflight.sh --profile generate
 bash assets/preflight.sh --profile edit
+bash assets/preflight.sh --profile runtime-upgrade
 bash assets/preflight.sh --profile pptx
 bash assets/preflight.sh --profile template
 bash assets/preflight.sh --profile publish
@@ -59,6 +60,13 @@ Profiles are defined in `references/dependency-policy.yaml` and checked by
 - `core`: static repository/DeckJSON tooling; no browser promise.
 - `generate`: renderer/validator plus a successful Chromium launch.
 - `edit`: generation requirements plus Editor.
+- `runtime-upgrade`: generation requirements plus the Runtime Upgrader,
+  `runtime/runtime-migrations.json`, the controlled runtime file manifest,
+  runtime lock, asset copier, portability checker, Deck CLI, and renderer. It
+  accepts only a source-backed `deck.json`, resolves `current` to one fixed
+  trusted commit, applies that runtime's required migrations, and writes a new
+  run. It never pulls code or publishes; `READY` is only a whole-deck candidate
+  state.
 - `pptx`: generation requirements plus sibling `pptx-to-deck`, a probed Python
   runtime with `python-pptx` + `lxml`, and `assets/build_pptx.py`.
 - `template`: Template Pack schemas/runtime plus sibling `pptx-to-deck`, the

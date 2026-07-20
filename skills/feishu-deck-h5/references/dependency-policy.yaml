@@ -49,6 +49,25 @@
       "chromium_launch": true,
       "siblings": []
     },
+    "runtime-upgrade": {
+      "extends": "generate",
+      "files": [
+        "subskills/runtime-upgrader/SKILL.md",
+        "subskills/runtime-upgrader/upgrade.py",
+        "runtime/runtime-migrations.json",
+        "runtime/runtime-files.json",
+        "assets/runtime-lock.py",
+        "assets/copy-assets.py",
+        "assets/verify-portable.py",
+        "deck-json/deck-cli.py",
+        "deck-json/sync-index-to-deck.py",
+        "deck-json/render-deck.py"
+      ],
+      "commands": [],
+      "python_modules": [],
+      "chromium_launch": true,
+      "siblings": []
+    },
     "pptx": {
       "extends": "generate",
       "files": ["subskills/parser/SKILL.md", "subskills/parser/parse.py"],
